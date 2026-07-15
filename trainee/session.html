@@ -6,7 +6,13 @@
 <title>검증 세션 · IZ-Get</title>
 <link rel="stylesheet" href="../shared/iz-tokens.css">
 <style>
-  body { min-height: 100vh; display: flex; flex-direction: column; }
+  /* D186 (ported from popixoxipop-collab/Code_reviewer_with_feedback docs/lab/):
+     min-height:100vh only sets a floor -- a tall codepanel grows body past the
+     viewport, so .split's flex:1 never resolves to a bounded height and the whole
+     PAGE scrolls instead of each panel independently. height:100dvh (falls back
+     to the vh line above in older browsers) + overflow:hidden fixes it. */
+  html, body { height: 100vh; height: 100dvh; overflow: hidden; }
+  body { display: flex; flex-direction: column; }
   .sbar { height: 56px; background: var(--c-surface); border-bottom: 1px solid var(--c-border); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--sp-5); }
   .sbar .l { display: flex; align-items: center; gap: var(--sp-4); }
   .sbar .brand { display: flex; align-items: center; gap: var(--sp-2); font-weight: 700; font-size: var(--fs-base); }
