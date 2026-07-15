@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>검증 세션 · IZ-Get</title>
+<link rel="stylesheet" href="../shared/iz-tokens.css">
+<style>
+  body { min-height: 100vh; display: flex; flex-direction: column; }
+  .sbar { height: 56px; background: var(--c-surface); border-bottom: 1px solid var(--c-border); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--sp-5); }
+  .sbar .l { display: flex; align-items: center; gap: var(--sp-4); }
+  .sbar .brand { display: flex; align-items: center; gap: var(--sp-2); font-weight: 700; font-size: var(--fs-base); }
+  .sbar .brand .mk { width: 26px; height: 26px; border-radius: 7px; background: var(--c-primary); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; }
+  .sbar .ctx { font-size: var(--fs-sm); color: var(--c-text-2); border-left: 1px solid var(--c-border); padding-left: var(--sp-4); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sbar .mid { display: flex; align-items: center; gap: var(--sp-4); }
+  .prog { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+  .prog .dots { display: flex; gap: 5px; }
+  .prog .d { width: 22px; height: 6px; border-radius: 20px; background: #e0e3ea; }
+  .prog .d.done { background: var(--c-success); } .prog .d.now { background: var(--c-primary); }
+  .depth { display: flex; gap: 4px; }
+  .depth .lv { font-size: 11px; font-weight: 700; width: 24px; height: 24px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; background: #eef0f3; color: var(--c-text-3); }
+  .depth .lv.on { background: var(--c-primary); color: #fff; }
+  .depth .lv.done { background: var(--c-success-soft); color: var(--c-success); }
+  .timer { font-variant-numeric: tabular-nums; font-weight: 500; font-size: var(--fs-xs); color: var(--c-text-3); }
+  .timer.low { color: var(--c-warning); font-weight: 700; }
+  .exit { border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); border-radius: var(--r-md); padding: 6px 12px; font-size: var(--fs-xs); cursor: pointer; }
+
+  .modelbar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-5); background: var(--c-surface-2); border-bottom: 1px solid var(--c-border); flex-wrap: wrap; }
+  .modelbar .lbl { font-size: var(--fs-xs); color: var(--c-text-3); }
+  .modelbar .chip { font-size: 11px; padding: 3px 9px; border-radius: 20px; border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); cursor: pointer; }
+  .modelbar .chip.active { background: var(--c-primary); color: #fff; border-color: var(--c-primary); }
+  .modelbar.locked .chip { cursor: default; opacity: .6; }
+  .modelbar .note { font-size: 11px; color: var(--c-text-3); width: 100%; }
+
+  .split { display: flex; flex: 1; min-height: 0; }
+  .codepanel { flex: 0 0 44%; background: var(--c-code); color: var(--c-code-text); display: flex; flex-direction: column; overflow: hidden; }
+  .codepanel .ph { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--c-code-2); font-size: var(--fs-xs); color: #8b93ad; display: flex; justify-content: space-between; gap: var(--sp-2); }
+  .codepanel .ph b { color: #e2e6f2; }
+  .codetabs { display: flex; gap: 4px; padding: var(--sp-2) var(--sp-4) 0; flex-wrap: wrap; }
+  .codetabs button { font-size: 11px; padding: 3px 8px; border-radius: 4px 4px 0 0; border: 0; background: var(--c-code-2); color: #9aa2bd; cursor: pointer; }
+  .codetabs button.active { background: #3a4166; color: #e2e6f2; }
+  .codebody { flex: 1; overflow: auto; padding: var(--sp-4); font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.7; }
+  .codebody .ln { display: flex; gap: var(--sp-4); white-space: pre-wrap; word-break: break-all; }
+  .codebody .num { color: #565d78; user-select: none; width: 32px; text-align: right; flex: 0 0 auto; }
+  .req { padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--c-code-2); font-family: var(--font); font-size: var(--fs-xs); color: #9aa2bd; }
+  .req b { color: #c8cde0; }
+
+  .chat { flex: 1; display: flex; flex-direction: column; background: var(--c-surface); min-width: 0; }
+  .chatbody { flex: 1; overflow: auto; padding: var(--sp-5); display: flex; flex-direction: column; gap: var(--sp-4); }
+  .bubble { max-width: 88%; font-size: var(--fs-sm); line-height: 1.55; }
+  .bubble.q { align-self: flex-start; }
+  .bubble.q .who { font-size: var(--fs-xs); color: var(--c-text-3); margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .bubble.q .box { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: 4px 14px 14px 14px; padding: var(--sp-3) var(--sp-4); white-space: pre-wrap; }
+  .bubble.a { align-self: flex-end; }
+  .bubble.a .box { background: var(--c-primary); color: #fff; border-radius: 14px 4px 14px 14px; padding: var(--sp-3) var(--sp-4); white-space: pre-wrap; }
+  .bubble.sys { align-self: center; font-size: var(--fs-xs); color: var(--c-text-3); }
+  .composer { border-top: 1px solid var(--c-border); padding: var(--sp-3) var(--sp-4); display: flex; gap: var(--sp-2); align-items: flex-end; }
+  .ta { flex: 1; min-height: 44px; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); padding: var(--sp-3); font-size: var(--fs-sm); color: var(--c-text); background: #fff; font-family: var(--font); resize: vertical; }
+  .ta:disabled { color: var(--c-text-3); background: var(--c-surface-2); }
+  .send { background: var(--c-primary); color: #fff; border: 0; border-radius: var(--r-md); padding: 0 var(--sp-5); height: 44px; font-weight: 600; font-size: var(--fs-sm); cursor: pointer; }
+  .send:disabled { opacity: .5; cursor: default; }
+  .privacy { font-size: 11px; color: var(--c-text-3); padding: 0 var(--sp-4) var(--sp-3); }
+
+  .fallback { max-width: 480px; margin: var(--sp-8) auto; text-align: center; }
+  .fallback .cta { display: inline-block; background: var(--c-primary); color: #fff; border-radius: var(--r-md); padding: 10px 20px; font-weight: 600; margin-top: var(--sp-4); }
+</style>
+</head>
+<body>
+<div id="fallback" class="fallback hidden">
+  <h2>세션 정보를 찾을 수 없습니다</h2>
+  <p style="color:var(--c-text-2); margin-top:8px;">코드 제출 단계를 거치지 않고 이 페이지로 바로 들어왔거나, 브라우저 세션이 만료됐습니다.</p>
+  <a class="cta" href="submission.html">제출 단계로 돌아가기</a>
+</div>
+
+<div id="session-root" class="hidden" style="display:flex; flex-direction:column; flex:1; min-height:0;">
+  <div class="sbar">
+    <div class="l"><div class="brand"><span class="mk">◆</span>IZ-Get</div><div class="ctx" id="ctx-label">-</div></div>
+    <div class="mid">
+      <div class="prog"><span style="color:var(--c-text-3); font-size:12px;">질문</span><span class="dots" id="prog-dots"></span><b id="prog-count" style="font-size:13px;">-/-</b></div>
+      <div class="depth" id="depth-pills"></div>
+      <div class="timer" id="timer-label"></div>
+    </div>
+    <button class="exit" id="exit-btn">나가기</button>
+  </div>
+
+  <div class="modelbar" id="model-bar">
+    <span class="lbl">모델</span>
+    <span id="model-chips"></span>
+    <span class="note" id="model-note"></span>
+  </div>
+
+  <div class="split">
+    <div class="codepanel">
+      <div class="ph"><span><b id="code-filename">-</b></span><span>근거 코드</span></div>
+      <div class="codetabs" id="code-tabs"></div>
+      <div class="codebody" id="code-body">(코드 컨텍스트 없음)</div>
+      <div class="req"><b>관련 finding</b> · <span id="req-text"></span></div>
+    </div>
+    <div class="chat">
+      <div class="chatbody" id="chat-body"></div>
+      <div class="composer">
+        <textarea class="ta" id="answer-input" placeholder="답변을 입력하세요..." disabled></textarea>
+        <button class="send" id="send-btn" disabled>제출</button>
+      </div>
+      <div class="privacy">🔒 답변에 대한 평가·점수는 이 화면에 표시되지 않습니다. 세션 종료 후 결과 리포트에서 바로 확인할 수 있어요.</div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"
+  integrity="sha384-tVslJOEkg7nVRW3Y3/ReGX0NnonNrbcmt1R5qFbQXQdGa2chRkoJYHAjAsv3zoTq"
+  crossorigin="anonymous"></script>
+<script src="../shared/config.js"></script>
+<script src="../shared/llm.js"></script>
+<script src="../shared/db.js"></script>
+<script src="../shared/lab-core.js"></script>
+<script src="../shared/pyodide-shared.js"></script>
+<script src="../shared/traffic-rate.js"></script>
+<script src="../shared/session-state.js"></script>
+<script src="../shared/p03-engine.js"></script>
+<script>
+(function () {
+  const LEVEL_LABEL = { l1: "L1", l2: "L2", l3: "L3", reflection: "R" };
+
+  function renderCodeTabs(codeContexts, activeIdx, onSelect) {
+    const tabsEl = document.getElementById("code-tabs");
+    const filenameEl = document.getElementById("code-filename");
+    const bodyEl = document.getElementById("code-body");
+    if (!codeContexts.length) {
+      filenameEl.textContent = "(코드 컨텍스트 없음)";
+      tabsEl.innerHTML = "";
+      bodyEl.textContent = "(코드 컨텍스트 없음)";
+      return;
+    }
+    filenameEl.textContent = codeContexts.length > 1
+      ? `${codeContexts.length}개 파일 (전부 질문 생성에 포함됨 -- 탭은 화면 표시용)`
+      : codeContexts[0].path;
+    tabsEl.innerHTML = "";
+    if (codeContexts.length > 1) {
+      codeContexts.forEach((c, i) => {
+        const btn = document.createElement("button");
+        btn.textContent = c.path.split("/").pop();
+        btn.className = i === activeIdx ? "active" : "";
+        btn.addEventListener("click", () => onSelect(i));
+        tabsEl.appendChild(btn);
+      });
+    }
+    const content = codeContexts[activeIdx] ? codeContexts[activeIdx].content : "";
+    bodyEl.innerHTML = "";
+    (content || "(코드 컨텍스트 없음)").split("\n").forEach((line, i) => {
+      const ln = document.createElement("div");
+      ln.className = "ln";
+      const num = document.createElement("span"); num.className = "num"; num.textContent = String(i + 1);
+      const text = document.createElement("span"); text.textContent = line;
+      ln.appendChild(num); ln.appendChild(text);
+      bodyEl.appendChild(ln);
+    });
+  }
+
+  function appendBubble(kind, text, whoLabel) {
+    const chatBody = document.getElementById("chat-body");
+    const bubble = document.createElement("div");
+    bubble.className = `bubble ${kind}`;
+    if (whoLabel) {
+      const who = document.createElement("div"); who.className = "who"; who.textContent = whoLabel;
+      bubble.appendChild(who);
+    }
+    const box = document.createElement("div"); box.className = "box"; box.textContent = text;
+    bubble.appendChild(box);
+    chatBody.appendChild(bubble);
+    chatBody.scrollTop = chatBody.scrollHeight;
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    const submission = SessionState.loadSubmission();
+    if (!submission) {
+      document.getElementById("fallback").classList.remove("hidden");
+      return;
+    }
+    if (!LabConfig.get("nvidia-key") || !LabConfig.get("proxy-url")) {
+      document.getElementById("fallback").classList.remove("hidden");
+      document.querySelector("#fallback p").textContent = "NVIDIA 키/프록시 URL이 설정되지 않았습니다. 제출 단계의 연결 설정에서 입력해 주세요.";
+      return;
+    }
+    document.getElementById("session-root").classList.remove("hidden");
+
+    await LabApp.loadManifest();
+    document.getElementById("ctx-label").textContent = submission.finding.id || submission.finding.file || "finding";
+    document.getElementById("req-text").textContent = submission.finding.finding || "";
+
+    let activeCodeIdx = 0;
+    function rerenderCode() { renderCodeTabs(submission.codeContexts, activeCodeIdx, (i) => { activeCodeIdx = i; rerenderCode(); }); }
+    rerenderCode();
+
+    // Model selector: interactive until hooks.onRunStart() fires, then locked -- see
+    // p03-engine.js's file-header change #9. Defaults to the manifest's shared default
+    // model, same fallback the original renderInput() used.
+    let selectedModel = submission.model || (LabApp.getManifest().shared || {}).default_model;
+    const modelChipsEl = document.getElementById("model-chips");
+    const modelNoteEl = document.getElementById("model-note");
+    function renderModelChips() {
+      modelChipsEl.innerHTML = "";
+      LabApp.MODEL_CHOICES.forEach((m) => {
+        const chip = document.createElement("button");
+        chip.className = "chip" + (m.id === selectedModel ? " active" : "");
+        chip.textContent = m.label;
+        chip.type = "button";
+        chip.addEventListener("click", () => {
+          if (document.getElementById("model-bar").classList.contains("locked")) return;
+          selectedModel = m.id;
+          renderModelChips();
+        });
+        modelChipsEl.appendChild(chip);
+      });
+      const m = LabApp.MODEL_CHOICES.find((x) => x.id === selectedModel);
+      modelNoteEl.textContent = m ? m.note : "";
+    }
+    renderModelChips();
+
+    // Countdown display
+    const timerEl = document.getElementById("timer-label");
+    const countdown = P03Engine.createCountdownController((remainingMs, isOver) => {
+      if (remainingMs === null) { timerEl.textContent = ""; timerEl.classList.remove("low"); return; }
+      timerEl.textContent = `남은 ${LabApp.formatElapsed(remainingMs)}`;
+      timerEl.classList.toggle("low", isOver);
+    });
+
+    document.getElementById("exit-btn").addEventListener("click", () => {
+      if (confirm("세션을 나가면 지금까지의 답변은 저장되지 않습니다. 나가시겠습니까?")) {
+        window.location.href = "submission.html";
+      }
+    });
+
+    let pendingAnswerResolve = null;
+    const answerInput = document.getElementById("answer-input");
+    const sendBtn = document.getElementById("send-btn");
+    sendBtn.addEventListener("click", () => {
+      const val = answerInput.value.trim();
+      if (!val || !pendingAnswerResolve) return;
+      answerInput.disabled = true; sendBtn.disabled = true;
+      const resolve = pendingAnswerResolve;
+      pendingAnswerResolve = null;
+      resolve(val);
+    });
+
+    const hooks = {
+      onStatus(text, kind) {
+        if (kind === "error") appendBubble("sys", `오류: ${text}`);
+      },
+      onProgress(msg) {
+        console.log("[P03]", msg);
+      },
+      onRunStart() {
+        document.getElementById("model-bar").classList.add("locked");
+      },
+      onRunEnd() {},
+      onQuestion({ level, question, turnIndex, totalTurns }) {
+        document.getElementById("prog-count").textContent = `${turnIndex + 1}/${totalTurns}`;
+        const dotsEl = document.getElementById("prog-dots");
+        dotsEl.innerHTML = "";
+        for (let i = 0; i < totalTurns; i++) {
+          const d = document.createElement("i");
+          d.className = "d" + (i < turnIndex ? " done" : i === turnIndex ? " now" : "");
+          dotsEl.appendChild(d);
+        }
+        const depthEl = document.getElementById("depth-pills");
+        depthEl.innerHTML = "";
+        P03Engine.LEVELS.slice(0, totalTurns).forEach((lv, i) => {
+          const span = document.createElement("span");
+          span.className = "lv" + (i < turnIndex ? " done" : i === turnIndex ? " on" : "");
+          span.textContent = LEVEL_LABEL[lv];
+          depthEl.appendChild(span);
+        });
+        appendBubble("q", question, `◆ 검증 질문 · ${LEVEL_LABEL[level]}`);
+      },
+      getAnswer({ level, question }) {
+        answerInput.disabled = false; sendBtn.disabled = false;
+        answerInput.value = "";
+        answerInput.focus();
+        return new Promise((resolve) => { pendingAnswerResolve = resolve; });
+      },
+      onAnswerRecorded({ level, question, answer, classification }) {
+        appendBubble("a", answer);
+      },
+      countdown,
+    };
+
+    try {
+      const result = await P03Engine.run(
+        { finding: submission.finding, codeContexts: submission.codeContexts, model: selectedModel },
+        hooks
+      );
+      // Page-level enrichment for result.html's display only -- P03Engine.run()'s return
+      // contract itself is unchanged (no model/timestamp field), since the original
+      // renderResults() never showed these either (they were only ever visible via the
+      // live progress log / run-timer DOM, which doesn't exist on a separate results page).
+      const saved = SessionState.saveInterviewResult({ ...result, model: selectedModel, finishedAt: new Date().toISOString() });
+      if (!saved.ok) {
+        appendBubble("sys", `결과 저장 실패: ${saved.error.message} -- 새로고침하면 결과를 잃습니다.`);
+        return;
+      }
+      window.location.href = "result.html";
+    } catch (err) {
+      console.error(err);
+      appendBubble("sys", `세션이 오류로 종료됐습니다: ${err.message}`);
+    }
+  });
+})();
+</script>
+</body>
+</html>

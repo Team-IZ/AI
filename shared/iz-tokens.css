@@ -1,0 +1,57 @@
+/* Team-IZ/Frontend design tokens, ported verbatim from the 3 live screen-definition
+   pages (team-iz.github.io/Frontend/trainee/{submission,session,result}.html, gh-pages
+   branch) -- confirmed byte-identical across all 3 for every token in the union below.
+   Only the genuinely page-agnostic pieces live here: the :root tokens, the reset, and
+   the handful of components (.viewport/.chrome, .tapp/.ttop/.wrap) that are identical
+   in both submission.html and result.html. Everything else (submission's .step/.prog
+   checklist, session's .sbar/.prog turn-meter, result's .rcard/.grade) is page-specific
+   -- notably, submission.html's `.prog`/`.pstep` (an analysis-progress checklist) and
+   session.html's `.prog`/`.dots` (a turn-progress meter) are two DIFFERENT structures
+   under the SAME class name in the two original files, which only works because each
+   original page has its own independent <style> block. Merging them into one shared
+   file would silently break one or the other, so page-specific component CSS stays in
+   each page's own <style> block instead -- the same architecture the original site
+   itself uses (tokens shared by convention, components defined per page). */
+:root {
+  --c-bg: #f4f5f7; --c-surface: #ffffff; --c-surface-2: #fafbfc;
+  --c-border: #e2e5ea; --c-border-strong: #cfd4dc;
+  --c-text: #181b20; --c-text-2: #5a616b; --c-text-3: #8b929c;
+  --c-primary: #3a4db8; --c-primary-hover: #31429e; --c-primary-soft: #eef0fb;
+  --c-danger: #c0392b; --c-danger-soft: #fbeceb;
+  --c-warning: #b3771a; --c-warning-soft: #fbf3e6;
+  --c-success: #1f8a5b; --c-success-soft: #e8f5ee;
+  --c-info: #2f6bb0; --c-info-soft: #eaf2fa;
+  --c-code: #1e2233; --c-code-2: #2b3149; --c-code-text: #c8cde0;
+  --r-sm: 6px; --r-md: 10px; --r-lg: 14px; --r-xl: 18px;
+  --fs-xs: 12px; --fs-sm: 13px; --fs-base: 14px; --fs-lg: 16px; --fs-xl: 20px; --fs-2xl: 26px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-8: 48px;
+  --shadow-card: 0 1px 2px rgba(20,24,31,.05), 0 10px 34px rgba(20,24,31,.08);
+  --font: -apple-system,'Apple SD Gothic Neo',system-ui,'Segoe UI',sans-serif;
+  --mono: ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: var(--font); color: var(--c-text); background: var(--c-bg);
+  font-size: var(--fs-base); line-height: 1.5; -webkit-font-smoothing: antialiased;
+}
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; }
+.hidden { display: none !important; }
+
+/* fake-browser-window wrapper, identical in submission.html/result.html/session.html */
+.viewport { border: 1px solid var(--c-border-strong); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-card); background: #fff; }
+.chrome { height: 36px; background: #eceef1; border-bottom: 1px solid var(--c-border); display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-4); }
+.chrome .tl { display: flex; gap: 6px; } .chrome .tl i { width: 11px; height: 11px; border-radius: 50%; background: #cfd4dc; display: block; }
+.chrome .url { flex: 1; height: 22px; background: #fff; border: 1px solid var(--c-border); border-radius: 20px; font-size: var(--fs-xs); color: var(--c-text-3); display: flex; align-items: center; padding: 0 var(--sp-3); margin-left: var(--sp-3); max-width: 380px; }
+
+/* app header nav, identical in submission.html/result.html (session.html uses .sbar instead) */
+.tapp { background: var(--c-bg); min-height: 520px; }
+.ttop { height: 56px; background: var(--c-surface); border-bottom: 1px solid var(--c-border); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--sp-6); }
+.ttop .l { display: flex; align-items: center; gap: var(--sp-6); }
+.ttop .brand { display: flex; align-items: center; gap: var(--sp-2); font-weight: 700; font-size: var(--fs-base); }
+.ttop .brand .mk { width: 26px; height: 26px; border-radius: 7px; background: var(--c-primary); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; }
+.ttop .tnav { display: flex; gap: var(--sp-4); font-size: var(--fs-sm); } .ttop .tnav a { color: var(--c-text-2); } .ttop .tnav a.on { color: var(--c-text); font-weight: 600; }
+.ttop .r { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-sm); color: var(--c-text-2); }
+.ttop .r .who { text-align: right; line-height: 1.3; } .ttop .r .who .s { font-size: var(--fs-xs); color: var(--c-text-3); }
+.ttop .r .av { width: 32px; height: 32px; border-radius: 50%; background: var(--c-primary-soft); color: var(--c-primary); display: inline-flex; align-items: center; justify-content: center; font-weight: 600; }
+.wrap { max-width: 720px; margin: 0 auto; padding: var(--sp-8) var(--sp-5); }
