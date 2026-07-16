@@ -67,6 +67,18 @@
   .bubble.a { align-self: flex-end; }
   .bubble.a .box { background: var(--c-primary); color: #fff; border-radius: 14px 4px 14px 14px; padding: var(--sp-3) var(--sp-4); white-space: pre-wrap; }
   .bubble.sys { align-self: center; font-size: var(--fs-xs); color: var(--c-text-3); }
+  .bubble.typing { align-self: flex-start; }
+  .bubble.typing .box { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: 4px 14px 14px 14px; padding: var(--sp-3) var(--sp-4); display: flex; gap: 5px; align-items: center; }
+  .typing-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--c-text-3); opacity: .65; display: inline-block; }
+  @media (prefers-reduced-motion: no-preference) {
+    .typing-dot { animation: typingPulse 1s ease-in-out infinite; }
+    .typing-dot:nth-child(2) { animation-delay: .16s; }
+    .typing-dot:nth-child(3) { animation-delay: .32s; }
+  }
+  @keyframes typingPulse {
+    0%, 80%, 100% { opacity: .35; transform: translateY(0); }
+    40% { opacity: 1; transform: translateY(-3px); }
+  }
   .composer { border-top: 1px solid var(--c-border); padding: var(--sp-3) var(--sp-4); display: flex; gap: var(--sp-2); align-items: flex-end; }
   .ta { flex: 1; min-height: 44px; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); padding: var(--sp-3); font-size: var(--fs-sm); color: var(--c-text); background: #fff; font-family: var(--font); resize: vertical; }
   .ta:disabled { color: var(--c-text-3); background: var(--c-surface-2); }
@@ -205,6 +217,30 @@
     chatBody.scrollTop = chatBody.scrollHeight;
   }
 
+  function showTypingIndicator() {
+    if (document.getElementById("typing-indicator")) return;
+    const chatBody = document.getElementById("chat-body");
+    const bubble = document.createElement("div");
+    bubble.id = "typing-indicator";
+    bubble.className = "bubble typing";
+    const box = document.createElement("div");
+    box.className = "box";
+    box.setAttribute("aria-label", "질문 생성 중");
+    for (let i = 0; i < 3; i++) {
+      const dot = document.createElement("span");
+      dot.className = "typing-dot";
+      box.appendChild(dot);
+    }
+    bubble.appendChild(box);
+    chatBody.appendChild(bubble);
+    chatBody.scrollTop = chatBody.scrollHeight;
+  }
+
+  function removeTypingIndicator() {
+    const bubble = document.getElementById("typing-indicator");
+    if (bubble) bubble.remove();
+  }
+
   document.addEventListener("DOMContentLoaded", async () => {
     const submission = SessionState.loadSubmission();
     if (!submission) {
@@ -288,12 +324,14 @@
       },
       onProgress(msg) {
         console.log("[P03]", msg);
+        if (/질문 생성|재생성/.test(msg)) showTypingIndicator();
       },
       onRunStart() {
         document.getElementById("model-bar").classList.add("locked");
       },
       onRunEnd() {},
       onQuestion({ level, question, turnIndex, totalTurns }) {
+        removeTypingIndicator();
         document.getElementById("prog-count").textContent = `${turnIndex + 1}/${totalTurns}`;
         const dotsEl = document.getElementById("prog-dots");
         dotsEl.innerHTML = "";
