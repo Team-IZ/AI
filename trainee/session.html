@@ -6,11 +6,18 @@
 <title>검증 세션 · IZ-Get</title>
 <link rel="stylesheet" href="../shared/iz-tokens.css">
 <style>
-  /* D186 (ported from popixoxipop-collab/Code_reviewer_with_feedback docs/lab/):
-     min-height:100vh only sets a floor -- a tall codepanel grows body past the
-     viewport, so .split's flex:1 never resolves to a bounded height and the whole
-     PAGE scrolls instead of each panel independently. height:100dvh (falls back
-     to the vh line above in older browsers) + overflow:hidden fixes it. */
+  /* D186: WHY -- body previously used min-height:100vh, which only sets a floor, not a
+     ceiling. A tall codepanel (long file) made body grow past the viewport, so .split's
+     flex:1 never resolved to a bounded pixel height -- .codebody/.chatbody's
+     overflow:auto never kicked in, the whole PAGE scrolled instead, and the composer
+     (last in DOM order) ended up wherever the tall code panel happened to end.
+     height:100dvh (dynamic viewport height, falls back fine in older browsers that
+     ignore the unknown value and keep the vh line above) + overflow:hidden makes body
+     itself a hard ceiling, so .split's flex:1 gets a real pixel value and each panel's
+     own overflow:auto takes over independently. COST: nothing lost -- the outer page
+     never needed to scroll as a whole; only the two panels did. EXIT: if a future layout
+     genuinely needs the page taller than the viewport, drop overflow:hidden here and
+     give #session-root its own height:100vh instead. */
   html, body { height: 100vh; height: 100dvh; overflow: hidden; }
   body { display: flex; flex-direction: column; }
   .sbar { height: 56px; background: var(--c-surface); border-bottom: 1px solid var(--c-border); display: flex; align-items: center; justify-content: space-between; padding: 0 var(--sp-5); }
@@ -67,6 +74,22 @@
   .send:disabled { opacity: .5; cursor: default; }
   .privacy { font-size: 11px; color: var(--c-text-3); padding: 0 var(--sp-4) var(--sp-3); }
 
+  /* D187: WHY -- P03Engine.run() locks the model at hooks.onRunStart() and previously
+     that fired the instant the page finished loading (D178's "one click, no extra
+     confirm" auto-run, re-expressed as "auto-run on page load"), so a teammate who
+     wanted a non-default model had no real window to pick one before real API calls
+     (and their cost) started. Adding this gate doesn't reintroduce the confirm-click
+     D178 removed -- that click was for "confirm you want to start," a no-op decision
+     when nothing was left to choose; this one is for "confirm which of 11 models," a
+     real decision with real cost, which the auto-start design accidentally foreclosed.
+     COST: one extra click before the interview begins (was: zero after landing on
+     session.html). EXIT: to restore pure auto-start, call the same code this button's
+     click handler calls directly from DOMContentLoaded instead, and delete this gate. */
+  .start-gate { margin: auto; text-align: center; max-width: 420px; padding: var(--sp-6); }
+  .start-gate p { font-size: var(--fs-sm); color: var(--c-text-2); line-height: 1.6; margin-bottom: var(--sp-4); }
+  .start-btn { background: var(--c-primary); color: #fff; border: 0; border-radius: var(--r-md); padding: 12px 22px; font-size: var(--fs-base); font-weight: 600; cursor: pointer; }
+  .start-btn:hover { background: var(--c-primary-hover); }
+
   .fallback { max-width: 480px; margin: var(--sp-8) auto; text-align: center; }
   .fallback .cta { display: inline-block; background: var(--c-primary); color: #fff; border-radius: var(--r-md); padding: 10px 20px; font-weight: 600; margin-top: var(--sp-4); }
 </style>
@@ -103,7 +126,12 @@
       <div class="req"><b>관련 finding</b> · <span id="req-text"></span></div>
     </div>
     <div class="chat">
-      <div class="chatbody" id="chat-body"></div>
+      <div class="chatbody" id="chat-body">
+        <div class="start-gate" id="start-gate">
+          <p>위에서 모델을 확인하거나 바꾼 뒤 시작하세요. 시작하면 실제 NVIDIA API 호출이 발생하고, 모델은 더 이상 바꿀 수 없습니다.</p>
+          <button class="start-btn" id="start-btn" type="button">검증 시작 →</button>
+        </div>
+      </div>
       <div class="composer">
         <textarea class="ta" id="answer-input" placeholder="답변을 입력하세요..." disabled></textarea>
         <button class="send" id="send-btn" disabled>제출</button>
@@ -291,25 +319,30 @@
       countdown,
     };
 
-    try {
-      const result = await P03Engine.run(
-        { finding: submission.finding, codeContexts: submission.codeContexts, model: selectedModel },
-        hooks
-      );
-      // Page-level enrichment for result.html's display only -- P03Engine.run()'s return
-      // contract itself is unchanged (no model/timestamp field), since the original
-      // renderResults() never showed these either (they were only ever visible via the
-      // live progress log / run-timer DOM, which doesn't exist on a separate results page).
-      const saved = SessionState.saveInterviewResult({ ...result, model: selectedModel, finishedAt: new Date().toISOString() });
-      if (!saved.ok) {
-        appendBubble("sys", `결과 저장 실패: ${saved.error.message} -- 새로고침하면 결과를 잃습니다.`);
-        return;
+    // D187: run() only fires once the user explicitly clicks through the model-selection
+    // gate (see the .start-gate CSS comment) -- not automatically on page load anymore.
+    document.getElementById("start-btn").addEventListener("click", async () => {
+      document.getElementById("start-gate").remove();
+      try {
+        const result = await P03Engine.run(
+          { finding: submission.finding, codeContexts: submission.codeContexts, model: selectedModel },
+          hooks
+        );
+        // Page-level enrichment for result.html's display only -- P03Engine.run()'s return
+        // contract itself is unchanged (no model/timestamp field), since the original
+        // renderResults() never showed these either (they were only ever visible via the
+        // live progress log / run-timer DOM, which doesn't exist on a separate results page).
+        const saved = SessionState.saveInterviewResult({ ...result, model: selectedModel, finishedAt: new Date().toISOString() });
+        if (!saved.ok) {
+          appendBubble("sys", `결과 저장 실패: ${saved.error.message} -- 새로고침하면 결과를 잃습니다.`);
+          return;
+        }
+        window.location.href = "result.html";
+      } catch (err) {
+        console.error(err);
+        appendBubble("sys", `세션이 오류로 종료됐습니다: ${err.message}`);
       }
-      window.location.href = "result.html";
-    } catch (err) {
-      console.error(err);
-      appendBubble("sys", `세션이 오류로 종료됐습니다: ${err.message}`);
-    }
+    });
   });
 })();
 </script>
