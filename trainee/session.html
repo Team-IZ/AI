@@ -109,7 +109,7 @@
       <div class="depth" id="depth-pills"></div>
       <div class="timer" id="timer-label"></div>
     </div>
-    <button class="exit" id="exit-btn">나가기</button>
+    <button class="exit" id="exit-btn">← 뒤로가기</button>
   </div>
 
   <div class="modelbar" id="model-bar">
@@ -259,8 +259,13 @@
       timerEl.classList.toggle("low", isOver);
     });
 
+    // D2 (뒤로가기): 예전엔 이 버튼이 "나가기"였고 submission.html이 findings 목록을
+    // 복원 못 해서 실질적으로 전체 스캔을 날려버렸다(session-state.js D1 참고). 목록
+    // 자체는 이제 안전하게 복원되므로, 여기 경고는 "이번 인터뷰의 저장 안 된 진행
+    // 상황"(현재 턴 답변)만 정확히 가리키도록 문구를 좁혔다 — 과장된 경고로 사용자가
+    // 뒤로가기를 피하게 만들지 않기 위함.
     document.getElementById("exit-btn").addEventListener("click", () => {
-      if (confirm("세션을 나가면 지금까지의 답변은 저장되지 않습니다. 나가시겠습니까?")) {
+      if (confirm("지금 진행 중인 답변은 저장되지 않습니다. finding 목록으로 돌아가시겠습니까?")) {
         window.location.href = "submission.html";
       }
     });

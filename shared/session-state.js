@@ -15,6 +15,7 @@
 const SessionState = (() => {
   const SUBMISSION_KEY = "teamiz_p02_submission";
   const RESULT_KEY = "teamiz_p03_result";
+  const FINDINGS_KEY = "teamiz_p02_findings";
 
   function safeSet(key, value) {
     try {
@@ -60,6 +61,34 @@ const SessionState = (() => {
     return { finding: v.finding, codeContexts: Array.isArray(v.codeContexts) ? v.codeContexts : [], model: v.model || null };
   }
 
+  // D1 (뒤로가기): trainee feedback -- leaving session.html mid-interview navigated back
+  // to submission.html's blank upload form, discarding the whole P02 finding list and
+  // forcing a full re-scan just to check a *different* finding from the same run.
+  //   WHY: submission.html's scan results (`result`/`files`) only ever lived in a
+  //   click-handler closure, gone the instant the page unloads -- SUBMISSION_KEY above
+  //   only ever held the ONE finding the user already picked, not the list they picked
+  //   it from. The fix stores a small array of the SAME shape saveSubmission() already
+  //   uses per-finding (finding + already-trimmed codeContexts), computed once right
+  //   after the scan for every finding, not just the chosen one -- so returning to
+  //   submission.html can redraw the full list without ever touching `files` again.
+  //   COST: still deliberately excludes the full scanned `files` map (same reasoning as
+  //   SUBMISSION_KEY above), so this is bytes-proportional to finding count x
+  //   MAX_CONNECT_FILES, not to repo size -- acceptable, but a scan with many findings
+  //   costs more sessionStorage than saving just one ever did. Overwritten wholesale by
+  //   the next scan (no merge), so only the most recent run's findings are ever
+  //   "resumable" -- matches how SUBMISSION_KEY already behaves.
+  //   EXIT: if this ever needs to survive a browser restart (not just this tab's
+  //   session), swap sessionStorage for localStorage here -- the safeSet/safeGet shape
+  //   doesn't change, only which Storage object backs it.
+  function saveFindingsList(list) {
+    return safeSet(FINDINGS_KEY, list);
+  }
+
+  function loadFindingsList() {
+    const v = safeGet(FINDINGS_KEY);
+    return Array.isArray(v) ? v : null;
+  }
+
   // result: the object P03Engine.run() resolved with ({finding, verdict, turns,
   // transcript, grades, rubric_overridden}) -- saved as-is, already fully graded and
   // already saved to Supabase by the time session.html calls this (run() does both
@@ -74,5 +103,5 @@ const SessionState = (() => {
     return v;
   }
 
-  return { saveSubmission, saveSubmissionWithModel, loadSubmission, saveInterviewResult, loadInterviewResult };
+  return { saveSubmission, saveSubmissionWithModel, loadSubmission, saveFindingsList, loadFindingsList, saveInterviewResult, loadInterviewResult };
 })();

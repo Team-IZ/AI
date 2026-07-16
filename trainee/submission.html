@@ -235,7 +235,10 @@
     try {
       const { result, files } = await P02Engine.run(input, hooks);
       ["fetch", "pyodide", "scan", "save"].forEach((k) => progState(k, "done"));
-      renderFindings(result, files);
+      const basket = buildFindingsBasket(result, files);
+      const saved = SessionState.saveFindingsList(basket);
+      if (!saved.ok) console.error("findings list save failed (뒤로가기 restore won't work this run):", saved.error);
+      renderFindingsFromBasket(basket);
     } catch (err) {
       console.error(err);
       // hooks.onStatus already surfaced the message for the common validation-error case;
@@ -244,35 +247,51 @@
     }
   });
 
-  function renderFindings(result, files) {
-    const j = result.judgment;
+  // `files` (the full scanned source map) never survives a page navigation (see
+  // session-state.js D1) -- so every finding's connectable code context is resolved and
+  // trimmed to its final form *here*, once, while `files` is still in scope. The
+  // resulting basket is both what gets rendered now and what gets persisted for
+  // 뒤로가기 to restore later; nothing downstream (render, save, or a restored reload)
+  // ever needs `files` again.
+  function buildFindingsBasket(result, files) {
+    return result.judgment.findings.map((f) => {
+      const resolved = P02Engine.resolveConnectableFile(files, f);
+      return {
+        finding: f,
+        codeContexts: resolved ? resolved.allPaths.slice(0, P02Engine.MAX_CONNECT_FILES).map((p) => ({ path: p, content: files[p] })) : [],
+        viaText: resolved ? resolved.viaText : false,
+        totalPaths: resolved ? resolved.allPaths.length : 0,
+      };
+    });
+  }
+
+  function renderFindingsFromBasket(basket) {
     document.getElementById("step-findings").classList.remove("hidden");
-    document.getElementById("finding-count").textContent = j.findings.length;
+    document.getElementById("finding-count").textContent = basket.length;
     const list = document.getElementById("findings-list");
     list.innerHTML = "";
-    if (j.findings.length === 0) {
+    if (basket.length === 0) {
       list.innerHTML = `<div class="fcard"><div class="fnone">이번 실행에서는 finding이 나오지 않았습니다.</div></div>`;
       return;
     }
-    j.findings.forEach((f) => {
-      const resolved = P02Engine.resolveConnectableFile(files, f);
+    basket.forEach((item) => {
+      const f = item.finding;
       const card = document.createElement("div");
       card.className = "fcard";
       const idEl = document.createElement("div"); idEl.className = "fid"; idEl.textContent = `${f.id || ""} · ${f.priority || ""}`;
       const textEl = document.createElement("div"); textEl.className = "ftext"; textEl.textContent = f.finding || "";
       card.appendChild(idEl); card.appendChild(textEl);
-      if (!resolved) {
+      if (item.codeContexts.length === 0) {
         const none = document.createElement("div"); none.className = "fnone"; none.textContent = "코드 컨텍스트 없음 — 언급된 파일도 로드된 파일 중에 없어 인터뷰 연결 불가";
         card.appendChild(none);
       } else {
         const btn = document.createElement("button"); btn.className = "cta secondary-cta"; btn.style.width = "auto"; btn.textContent = "검증 세션 시작 →";
-        btn.addEventListener("click", () => startInterview(f, resolved, files));
+        btn.addEventListener("click", () => startInterview(item));
         card.appendChild(btn);
-        if (resolved.viaText) {
-          const shown = resolved.allPaths.slice(0, P02Engine.MAX_CONNECT_FILES);
-          const omitted = resolved.allPaths.length - shown.length;
+        if (item.viaText) {
+          const omitted = item.totalPaths - item.codeContexts.length;
           const note = document.createElement("div"); note.className = "fnote";
-          note.textContent = `finding에 언급된 파일 ${shown.length}개 코드 포함${omitted > 0 ? `, ${omitted}개는 길이 제한으로 제외` : ""}`;
+          note.textContent = `finding에 언급된 파일 ${item.codeContexts.length}개 코드 포함${omitted > 0 ? `, ${omitted}개는 길이 제한으로 제외` : ""}`;
           card.appendChild(note);
         }
       }
@@ -283,9 +302,8 @@
   // D178: one click, no separate confirm step -- matches the original connector's
   // auto-run decision, just re-expressed as "navigate straight to session.html" instead
   // of "call P03Runner.run() in the same page".
-  function startInterview(finding, resolved, files) {
-    const codeContexts = resolved.allPaths.slice(0, P02Engine.MAX_CONNECT_FILES).map((p) => ({ path: p, content: files[p] }));
-    const saved = SessionState.saveSubmission({ finding, codeContexts });
+  function startInterview(item) {
+    const saved = SessionState.saveSubmission({ finding: item.finding, codeContexts: item.codeContexts });
     if (!saved.ok) { showError(`세션 데이터 저장 실패: ${saved.error.message}`); return; }
     window.location.href = "session.html";
   }
@@ -308,6 +326,15 @@
       rememberBox.dispatchEvent(new Event("change"));
     }
     renderUserIndicator();
+
+    // 뒤로가기 restore: session.html (or result.html) navigating back here should show
+    // the same finding list the user left, not a blank upload form. The "코드 제출" step
+    // stays visible too (not hidden) -- submitting a new scan overwrites FINDINGS_KEY the
+    // normal way (see buildFindingsBasket/saveFindingsList above), so starting fresh
+    // still works exactly as before, this only adds a path that skips re-scanning when
+    // the user just wants a different finding from the same run.
+    const restored = SessionState.loadFindingsList();
+    if (restored) renderFindingsFromBasket(restored);
   });
 })();
 </script>
