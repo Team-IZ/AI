@@ -67,21 +67,46 @@ const LabDB = (() => {
   // existing call site. Added so a run that throws before ever reaching a success-shaped
   // maybeSaveRun() can still leave a row behind -- see LabApp.saveFailedRun() in app.js,
   // the actual place this gets used.
-  async function saveRun({ pipeline, model, input_meta, overrides, rubric_overridden, artifacts, started_at, finished_at, status, error }) {
+  //
+  // D193 (2026-07-16): `run_id` param added (optional, still additive -- every existing
+  // caller omits it and gets the exact insert-only behavior above, unchanged). When
+  // present, UPDATEs that runs row instead of inserting a new one -- the other half of
+  // this same run's lifecycle now starts with startRun() below and logs turns via
+  // logTurn() as they happen, so by the time saveRun() runs there's already a row to
+  // finish rather than create. See startRun()'s own comment for the full WHY/COST/EXIT --
+  // this function's change is the "finish" half of that same decision.
+  async function saveRun({ run_id, pipeline, model, input_meta, overrides, rubric_overridden, artifacts, started_at, finished_at, status, error }) {
     const c = await ensureClient();
-    const user = await currentMember();
-    const { data: run, error: runErr } = await c
-      .from("runs")
-      .insert({
-        member_id: user.id, pipeline, model, status: status || "done", error: error || null,
-        started_at: started_at || new Date().toISOString(),
-        finished_at: finished_at || new Date().toISOString(),
-        input_meta: input_meta || {}, overrides: overrides || {}, rubric_overridden: Boolean(rubric_overridden),
-        manifest_version: (LabApp.getManifest() || {}).manifest_version || null,
-      })
-      .select()
-      .single();
-    if (runErr) throw runErr;
+    let run;
+    if (run_id) {
+      const { data, error: updErr } = await c
+        .from("runs")
+        .update({
+          status: status || "done", error: error || null,
+          finished_at: finished_at || new Date().toISOString(),
+          rubric_overridden: Boolean(rubric_overridden),
+        })
+        .eq("id", run_id)
+        .select()
+        .single();
+      if (updErr) throw updErr;
+      run = data;
+    } else {
+      const user = await currentMember();
+      const { data, error: insErr } = await c
+        .from("runs")
+        .insert({
+          member_id: user.id, pipeline, model, status: status || "done", error: error || null,
+          started_at: started_at || new Date().toISOString(),
+          finished_at: finished_at || new Date().toISOString(),
+          input_meta: input_meta || {}, overrides: overrides || {}, rubric_overridden: Boolean(rubric_overridden),
+          manifest_version: (LabApp.getManifest() || {}).manifest_version || null,
+        })
+        .select()
+        .single();
+      if (insErr) throw insErr;
+      run = data;
+    }
 
     for (const a of artifacts || []) {
       const content = JSON.stringify(a.content);
@@ -94,6 +119,46 @@ const LabDB = (() => {
       if (artErr) throw artErr;
     }
     return run;
+  }
+
+  // D193 (2026-07-16): P03's turn loop used to keep every answered turn in a plain JS
+  // array and write it to `artifacts` only once, after the whole loop (all turns) plus
+  // grading finished (see p03-engine.js's old single maybeSaveRun() call). Any error
+  // partway through -- including turn 3 of 4 -- discarded every turn already answered,
+  // because the catch-block fallback (LabApp.saveFailedRun) hardcodes `artifacts: []`.
+  // Root-caused live: a team member's P03 run errored on NVIDIA auth; happened to be 0
+  // turns in so nothing was actually lost that time, but the structural risk is real for
+  // a multi-turn flow a human answers by hand.
+  //   WHY: `stage_events` already existed in the schema for exactly this (0 rows anywhere
+  //        before this change) and RLS already grants insert-own on it -- no new policy
+  //        needed, just start using the table.
+  //   COST: one extra DB round-trip per turn (max 4) plus one at session start -- text
+  //         payloads, not a real latency concern next to the LLM calls already in the loop.
+  //   EXIT: if `stage_events` gets a different primary use later, split into a dedicated
+  //         table; the read side (p03_progress_view) would just repoint its JOIN.
+  async function startRun({ pipeline, model, input_meta, overrides }) {
+    const c = await ensureClient();
+    const user = await currentMember();
+    const { data: run, error } = await c
+      .from("runs")
+      .insert({
+        member_id: user.id, pipeline, model, status: "running",
+        started_at: new Date().toISOString(),
+        input_meta: input_meta || {}, overrides: overrides || {},
+        manifest_version: (LabApp.getManifest() || {}).manifest_version || null,
+      })
+      .select()
+      .single();
+    if (error) throw error;
+    return run;
+  }
+
+  async function logTurn({ run_id, stage_id, seq, output, latency_ms }) {
+    const c = await ensureClient();
+    const { error } = await c.from("stage_events").insert({
+      run_id, stage_id, seq, output: output || {}, latency_ms: latency_ms ?? null,
+    });
+    if (error) throw error;
   }
 
   // D149 (2026-07-15): magic-link email sign-in (D-B/D147/D148's signInWithEmail) removed
@@ -143,5 +208,5 @@ const LabDB = (() => {
     if (error) throw error;
   }
 
-  return { isConfigured, ensureClient, currentMember, currentMemberOrNull, saveRun, signInWithGoogle, signOut };
+  return { isConfigured, ensureClient, currentMember, currentMemberOrNull, saveRun, startRun, logTurn, signInWithGoogle, signOut };
 })();

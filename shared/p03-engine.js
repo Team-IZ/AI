@@ -357,6 +357,10 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     hooks.onRunStart();
     const sessionTimeoutMinutes = LabApp.resolveParam("p03", "p03-6", "session_timeout_minutes") || 0;
     hooks.countdown.start(sessionTimeoutMinutes);
+    // D193: declared *outside* the try block on purpose -- the catch block below needs to
+    // read this too (to finish the same run row on failure), and a `let` declared inside
+    // try is out of scope inside its own catch.
+    let dbRun = null;
     try {
       hooks.onProgress(`모델: ${model}`);
       await ensureClassifiers((msg) => hooks.onProgress(msg));
@@ -377,6 +381,19 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       const maxTurns = LabApp.resolveParam("p03", "p03-6", "max_turns") || 4;
       const totalTurns = Math.min(LEVELS.length, maxTurns);
 
+      // D193 (2026-07-16): open the DB-side run row *before* the turn loop instead of
+      // only at the very end -- see db.js's startRun()/logTurn() comment for the full
+      // WHY/COST/EXIT. Failure here is non-fatal to the actual verification flow (same
+      // "DB 미설정" tone as maybeSaveRun below) -- a team member who can't reach Supabase
+      // for a moment should still be able to answer questions, just without persistence.
+      if (LabDB.isConfigured()) {
+        try {
+          dbRun = await LabDB.startRun({ pipeline: "p03", model, input_meta: { finding_id: finding.id }, overrides: {} });
+        } catch (e) {
+          hooks.onProgress(`DB 세션 시작 실패(턴별 저장 없이 진행): ${e.message}`);
+        }
+      }
+
       for (let i = 0; i < totalTurns; i++) {
         const level = LEVELS[i];
         const prevClassification = transcript.length ? transcript[transcript.length - 1].classification : null;
@@ -393,6 +410,16 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         const classification = await classifyAnswer(category, answer, level);
         transcript.push({ level, question, answer, classification });
         hooks.onAnswerRecorded({ level, question, answer, classification });
+        // D193: persist this turn immediately -- if a later turn fails, this one still
+        // survives in stage_events (see p03_progress_view). Failure here must not break
+        // the actual verification flow: the answer was already recorded in-memory above.
+        if (dbRun) {
+          try {
+            await LabDB.logTurn({ run_id: dbRun.id, stage_id: level, seq: i, output: { level, question, answer, classification } });
+          } catch (e) {
+            hooks.onProgress(`턴 저장 실패(진행은 계속됨): ${e.message}`);
+          }
+        }
         if (classification.verdict === "defended") { verdict = "defended"; break; }
       }
 
@@ -407,7 +434,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       hooks.countdown.stop();
       hooks.onStatus("완료", "done");
       const result = { finding, verdict, turns: transcript.length, transcript, grades, rubric_overridden };
-      await maybeSaveRun(result, startedAt, finishedAt, model, hooks);
+      await maybeSaveRun(result, startedAt, finishedAt, model, hooks, dbRun);
       return result;
     } catch (err) {
       hooks.onRunEnd(new Date() - startedAt);
@@ -415,19 +442,37 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       console.error(err);
       hooks.onStatus(`오류: ${err.message}`, "error");
       hooks.onProgress(`오류: ${err.message}`);
-      await LabApp.saveFailedRun("p03", model, err, startedAt, hooks.onProgress);
+      // D193: if a DB run row was already opened, finish (UPDATE) that same row instead
+      // of LabApp.saveFailedRun()'s fresh insert-with-artifacts:[] -- the whole point is
+      // that any turns already logged via logTurn() above must survive this failure.
+      // saveFailedRun() stays the fallback for the case dbRun was never obtained (DB not
+      // configured, or startRun() itself failed) -- unchanged behavior for that case, and
+      // unchanged entirely for P01/P02 which don't go through this function at all.
+      if (dbRun) {
+        try {
+          await LabDB.saveRun({ run_id: dbRun.id, status: "error", error: String((err && err.message) || err), finished_at: new Date().toISOString(), artifacts: [] });
+        } catch (saveErr) {
+          hooks.onProgress(`실패 기록 저장도 실패: ${saveErr.message}`);
+        }
+      } else {
+        await LabApp.saveFailedRun("p03", model, err, startedAt, hooks.onProgress);
+      }
       throw err;
     }
   }
 
   // Change #1: `model` param replaces the original's module-level selectedModel read.
-  async function maybeSaveRun(result, startedAt, finishedAt, model, hooks) {
+  // D193: `dbRun` param added (optional) -- when the caller already opened a run row via
+  // startRun(), pass its id through so saveRun() UPDATEs that same row instead of
+  // inserting a second one for the same session.
+  async function maybeSaveRun(result, startedAt, finishedAt, model, hooks, dbRun) {
     if (!LabDB.isConfigured()) {
       hooks.onProgress("Supabase 미설정 — 결과는 화면에만 표시됨");
       return;
     }
     try {
       await LabDB.saveRun({
+        run_id: dbRun ? dbRun.id : undefined,
         pipeline: "p03",
         model,
         input_meta: { finding_id: result.finding.id },
@@ -435,6 +480,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         rubric_overridden: result.rubric_overridden,
         artifacts: [{ kind: "transcript", content: result.transcript }, { kind: "grades", content: result.grades }],
         started_at: startedAt.toISOString(), finished_at: finishedAt.toISOString(),
+        status: "done",
       });
       hooks.onProgress(`결과가 팀 DB에 저장됨 (소요시간 ${LabApp.formatElapsed(finishedAt - startedAt)})`);
     } catch (err) {
