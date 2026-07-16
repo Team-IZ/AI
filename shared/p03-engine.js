@@ -215,7 +215,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     return { start, resume, pause, stop };
   }
 
-  function buildLevelPrompt(level, finding, codeContext, transcript, classification) {
+  function buildLevelPrompt(level, finding, codeContext, transcript, classification, extraBanned) {
     const codeBlock = codeContext ? `\n## 실제 코드\n\`\`\`\n${codeContext}\n\`\`\`\n` : "";
     const headerStage = LabApp.getStage("p03", "p03-1");
     const header = LabApp.fillTemplate(headerStage.shared_header, { finding_text: finding.finding || "", finding_file: finding.file || "", code_block: codeBlock });
@@ -225,19 +225,82 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     const transcriptText = transcript.map((t) => `[${t.level.toUpperCase()}] 질문: ${t.question}\n[${t.level.toUpperCase()}] 학생 답변: ${t.answer}`).join("\n");
     const verdictNote = { surface: "표면적(근거·구체성 부족)", partial: "부분적(일부 근거는 있으나 아직 충분히 깊지 않음)" }[classification.verdict] || classification.verdict;
     const stageId = { l2: "p03-2", l3: "p03-3", reflection: "p03-4" }[level];
-    return header + LabApp.fillTemplate(LabApp.resolveTemplate("p03", stageId, "level_template"), { transcript: transcriptText, verdict_note: verdictNote });
+    let prompt = header + LabApp.fillTemplate(LabApp.resolveTemplate("p03", stageId, "level_template"), { transcript: transcriptText, verdict_note: verdictNote });
+    // D190: only non-empty on a dedup-triggered retry within the SAME level (see
+    // generateQuestion) -- `transcript` above already carries prior LEVELS' questions via
+    // the "이미 물어본 질문"(D188) section, but a rejected same-level attempt never gets
+    // pushed to `transcript` (that only happens after the turn's answer comes back), so it
+    // has to be listed separately here.
+    if (extraBanned && extraBanned.length) {
+      prompt += `\n\n## 방금 생성했으나 반려된 질문 (이전 질문과 겹침 감지됨) — 이것과도 겹치면 안 됩니다\n` + extraBanned.map((q, i) => `${i + 1}. ${q}`).join("\n");
+    }
+    return prompt;
+  }
+
+  // D190: trainee가 이번 세션에서 목격한 재발(스크린샷) -- D188은 p03-2/3/4 프롬프트
+  // 문구만 고쳤는데, 이번엔 다른 finding(step-3.5-flash, load_api_keys)에서 L2==
+  // Reflection이 다시 byte-identical하게 나옴. 확률적 생성인 이상 프롬프트만으로는
+  // 특정 모델x특정 finding 조합의 재발을 완전히 막을 보장이 없다는 게 재실측 확인됨.
+  //   WHY: 코드 레벨 사후검사(생성 -> 유사도 체크 -> 필요시 재생성)가 유일한 결정론적
+  //   안전망 -- D188 보고서가 이미 제안했던 "defense-in-depth"를 이번 재발로 실측
+  //   정당화됨에 따라 적용. 임계값 0.5는 이 세션의 실측 데이터로 보정: 이번 재발
+  //   케이스(byte-identical) overlap=1.0, 같은 스크린샷의 정상 L2-vs-L3 쌍
+  //   overlap=0.20, D188의 기존 데이터(진짜중복=0.92, 정상=0.06~0.22)와도 일관됨 --
+  //   그 사이 넓은 안전마진.
+  //   COST: 중복 감지 시 재생성 API 호출 1~2회 추가(레이턴시+비용) -- 정상 케이스가
+  //   0.5를 넘지 않으므로 오탐으로 인한 불필요한 재시도는 거의 없을 것으로 예상(다만
+  //   실측 anchor point 4개뿐이라 완전한 보장은 아님, 재발 시 EXIT 참고). 재시도 다
+  //   소진해도 여전히 중복이면 마지막 결과를 그대로 반환(무한루프/세션 중단 방지가
+  //   완전 차단보다 우선) -- 이 경우 onProgress로 경고만 표시.
+  //   EXIT: 임계값(0.5)이나 재시도 횟수(2)가 실측과 안 맞으면 이 두 상수만 조정. 근본
+  //   원인은 여전히 모델의 지시 미준수이므로, 특정 모델이 계속 이 가드에 걸리면
+  //   D188처럼 프롬프트를 추가로 강화하거나 그 모델을 P03 기본값에서 내리는 게 근본
+  //   해법(이 가드는 보험이지 근본수정 대체가 아님).
+  const DEDUP_JACCARD_THRESHOLD = 0.5;
+  const DEDUP_MAX_RETRIES = 2;
+
+  function normalizeForDedup(s) {
+    return (s || "").replace(/\s+/g, " ").trim();
+  }
+
+  // 문자 3-gram Jaccard -- 한국어는 공백 기준 단어 토큰화가 조사/어미 때문에 불안정해서
+  // (형태소 분석기 없이는 "질문을"과 "질문이"가 다른 토큰이 됨), 단어 n-gram 대신 문자
+  // n-gram을 쓴다(CJK 텍스트 유사도 비교의 표준 관행).
+  function ngramJaccard(a, b, n = 3) {
+    const na = normalizeForDedup(a), nb = normalizeForDedup(b);
+    if (na.length < n || nb.length < n) return na === nb ? 1 : 0;
+    const gramsA = new Set(); for (let i = 0; i <= na.length - n; i++) gramsA.add(na.slice(i, i + n));
+    const gramsB = new Set(); for (let i = 0; i <= nb.length - n; i++) gramsB.add(nb.slice(i, i + n));
+    let intersection = 0;
+    for (const g of gramsA) if (gramsB.has(g)) intersection++;
+    const union = gramsA.size + gramsB.size - intersection;
+    return union === 0 ? 0 : intersection / union;
   }
 
   // Change #1: takes `model` explicitly (was module-level selectedModel fallback).
-  async function generateQuestion(level, finding, codeContext, transcript, classification, maxAttempts, model) {
+  // D190: adds `onProgress` (optional) to surface dedup-retry warnings the same way other
+  // unusual-but-handled conditions already do (e.g. the elevated-traffic warning in run()).
+  async function generateQuestion(level, finding, codeContext, transcript, classification, maxAttempts, model, onProgress) {
     // D182: falls through to the top-level toggle (model) -- p03-1 has no manifest `model`
     // param at all (never did), so this was already effectively "shared default only"
     // before; now it's "toggle" instead.
     const resolvedModel = LabApp.resolveParam("p03", "p03-1", "model") || model;
-    const prompt = buildLevelPrompt(level, finding, codeContext, transcript, classification);
     const tool = { name: "ask_question", description: "학생에게 던질 질문 하나를 생성한다.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } };
-    const result = await LabLLM.chatTool({ model: resolvedModel, messages: [{ role: "user", content: prompt }], tool, maxTokens: 2048, maxAttempts });
-    return result.question;
+    const priorQuestions = transcript.map((t) => t.question);
+    const rejected = [];
+    for (let attempt = 0; attempt <= DEDUP_MAX_RETRIES; attempt++) {
+      const prompt = buildLevelPrompt(level, finding, codeContext, transcript, classification, rejected);
+      const result = await LabLLM.chatTool({ model: resolvedModel, messages: [{ role: "user", content: prompt }], tool, maxTokens: 2048, maxAttempts });
+      const candidate = result.question;
+      const dupOf = priorQuestions.find((q) => ngramJaccard(candidate, q) >= DEDUP_JACCARD_THRESHOLD);
+      if (!dupOf) return candidate;
+      if (attempt === DEDUP_MAX_RETRIES) {
+        if (onProgress) onProgress(`⚠ ${level.toUpperCase()} 질문이 이전 질문과 유사해 보이지만 재생성 한도(${DEDUP_MAX_RETRIES}회) 소진 — 그대로 진행`);
+        return candidate;
+      }
+      if (onProgress) onProgress(`⚠ ${level.toUpperCase()} 질문이 이전 질문과 겹쳐 재생성 중 (${attempt + 1}/${DEDUP_MAX_RETRIES})...`);
+      rejected.push(candidate);
+    }
   }
 
   // Change #1: takes `model` explicitly (was module-level selectedModel fallback).
@@ -320,7 +383,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         const genAttemptInfo = await resolveMaxAttempts();
         if (genAttemptInfo.elevated) hooks.onProgress(`⚠ 현재 트래픽 ${genAttemptInfo.count}/${genAttemptInfo.threshold}${genAttemptInfo.scopeNote} -- 재시도 여유를 ${ELEVATED_MAX_ATTEMPTS}회로 늘려서 요청`);
         hooks.onProgress(`${level.toUpperCase()} 질문 생성 중...`);
-        const question = await generateQuestion(level, finding, codeContext, transcript, prevClassification, genAttemptInfo.maxAttempts, model);
+        const question = await generateQuestion(level, finding, codeContext, transcript, prevClassification, genAttemptInfo.maxAttempts, model, hooks.onProgress);
         hooks.onQuestion({ level, question, turnIndex: i, totalTurns });
         hooks.onProgress("답변 대기 중...");
         hooks.countdown.resume(); // D182: only start ticking once the human can actually see+answer this question
