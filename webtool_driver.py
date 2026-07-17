@@ -13,8 +13,9 @@ def apply_overrides(overrides_json):
     """overrides_json: {"two_tier_scan": {"SRC_EXTS": [...], ...}, "score_findings": {...}}"""
     import two_tier_scan
     import score_findings
+    import importance_rank  # D194: RANK_WEIGHT_QV/RANK_WEIGHT_RISK/RANK_WEIGHT_DI overrides
 
-    modules = {"two_tier_scan": two_tier_scan, "score_findings": score_findings}
+    modules = {"two_tier_scan": two_tier_scan, "score_findings": score_findings, "importance_rank": importance_rank}
     overrides = json.loads(overrides_json) if overrides_json else {}
     applied = []
     for module_name, params in overrides.items():

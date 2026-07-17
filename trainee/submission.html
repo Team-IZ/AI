@@ -278,7 +278,12 @@
       const f = item.finding;
       const card = document.createElement("div");
       card.className = "fcard";
-      const idEl = document.createElement("div"); idEl.className = "fid"; idEl.textContent = `${f.id || ""} · ${f.priority || ""}`;
+      const idEl = document.createElement("div"); idEl.className = "fid";
+      // D194: rank/rank_score come from judgment/importance_rank.py -- always present on a
+      // fresh scan (this page never shows historical Supabase-stored findings), so no
+      // fallback text needed here; f.rank != null guard is just cheap defensive style.
+      const rankBadge = f.rank != null ? `#${f.rank} (${f.rank_score}점) · ` : "";
+      idEl.textContent = `${rankBadge}${f.id || ""} · ${f.priority || ""}`;
       const textEl = document.createElement("div"); textEl.className = "ftext"; textEl.textContent = f.finding || "";
       card.appendChild(idEl); card.appendChild(textEl);
       if (item.codeContexts.length === 0) {

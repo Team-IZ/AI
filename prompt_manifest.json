@@ -150,6 +150,18 @@
             { "key": "DUPLICATE_DEFINITION_MIN_NAME_LEN", "type": "int", "default": 5 },
             { "key": "DIFFUSION_FAN_IN_THRESHOLD", "type": "int", "default": 2, "note": "웹 랩 구현 중 이름 없는 리터럴이었던 걸 발견해 named constant로 승격(score_findings.py), 동작 동일" }
           ]
+        },
+        {
+          "id": "p02-5",
+          "title": "중요도 랭킹",
+          "kind": "params",
+          "function": "apply_rank()",
+          "note": "D194: subrubric 원점수(버킷 아님) 가중합, idiom 강등 finding은 감산 대신 게이팅(상한 캡). 가중치는 아직 unmeasured-provisional(라벨 스프린트 전) — rank_weights.json이 실측 보정의 단일 진실 공급원.",
+          "params": [
+            { "key": "RANK_WEIGHT_QV", "type": "float", "default": 1.0, "note": "question_value 가중치" },
+            { "key": "RANK_WEIGHT_RISK", "type": "float", "default": 1.0, "note": "risk 가중치" },
+            { "key": "RANK_WEIGHT_DI", "type": "float", "default": 1.0, "note": "design_intent 가중치" }
+          ]
         }
       ]
     },
