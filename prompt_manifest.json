@@ -111,7 +111,10 @@
           "function": "find_src_files()",
           "params": [
             { "key": "SRC_EXTS", "type": "string_list", "default": [".ts", ".tsx", ".js", ".jsx", ".py", ".java", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".swift"] },
-            { "key": "SKIP_DIRS", "type": "string_list", "default": ["node_modules", ".git", "dist", "build", "__pycache__", ".venv", "venv", "static", "vendor", "vendored"] },
+            { "key": "SKIP_DIRS", "type": "string_list", "default": ["node_modules", ".git", "dist", "build", "__pycache__", ".venv", "venv", "static", "vendor", "vendored", "target", ".pytest_cache", ".mypy_cache", ".tox", ".eggs", ".next", ".nuxt", ".output", ".nitro", ".svelte-kit", ".turbo", ".parcel-cache", "coverage", "storybook-static", ".vs", "DerivedData"] },
+            { "key": "SKIP_DIR_PREFIXES", "type": "string_list", "default": ["cmake-build-"] },
+            { "key": "SKIP_DIR_SUFFIXES", "type": "string_list", "default": [".egg-info"] },
+            { "key": "GENERATED_FILENAME_RE", "type": "regex_readonly", "default": "\\.min\\.jsx?$|\\.[0-9a-f]{8,20}\\.jsx?$|\\.d\\.ts$" },
             { "key": "LOCAL_IMPORT_PREFIXES", "type": "string_list", "default": [".", "@/"] }
           ]
         },
