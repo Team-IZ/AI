@@ -1,3 +1,12 @@
+# ⚠️ 삭제 금지 (Phase 2까지) — 이 파일의 로직은 app/core/pipeline_runner.py로 이관됐지만,
+# 파일 자체는 아직 지울 수 없다. standalone 목업 프론트가 런타임에 이 파일을 fetch해
+# Pyodide 가상 파일시스템에 써넣기 때문이다: shared/p02-engine.js:302
+#   const driverRes = await fetch("../webtool_driver.py");
+# (다만 FastAPI 정적 서빙 하에서는 그 fetch가 이미 404라 목업 제출 흐름은 현재 비동작이다.)
+# Phase 2에서 submission.html을 FastAPI 분석 API 호출로 교체하고 Pyodide 경로를
+# 제거할 때, 이 파일과 shared/p02-engine.js의 fetch를 함께 없앤다.
+# 서버 코드에서는 이 파일을 import하지 말 것 — 정본은 app/core/pipeline_runner.py다.
+#
 # D-E (PLAN.md): the only new Python in this tool. Everything else it calls
 # (two_tier_scan.py, score_findings.py, and their judgment/*.py dependencies) is the
 # real, unmodified pipeline source, fetched at runtime from raw.githubusercontent.com
