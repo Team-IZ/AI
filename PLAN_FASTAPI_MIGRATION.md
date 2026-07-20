@@ -2,7 +2,38 @@
 
 > 작성일: 2026-07-20 (v2 — 세션 구조 확정 반영). 이 문서는 ai-dev 서브 에이전트가 작업 시 기준으로 삼는 계획서다.
 > 작업 브랜치: `feature/fastapi-migration`
-> 전제 지식: `AI/Readme.md`(현재 목업 구조), `../docs/docs_for_read/P02_코드분석_서비스플로우.md`, `P03_소크라틱_검증세션_서비스플로우.md`, `기능명세서.md`.
+> 전제 지식: `AI/README.md`(구조·실행법), `../docs/AI-Backend_API_명세서_v0.1.md`(내용은 v0.2, API 계약), `../docs/docs_for_read/P02_코드분석_서비스플로우.md`, `P03_소크라틱_검증세션_서비스플로우.md`, `기능명세서.md`.
+
+---
+
+## 현재 상태 (마지막 갱신: 2026-07-20)
+
+**이 문서가 AI 파트 진행 상황의 단일 기준이다.** 새 세션을 시작하면 여기부터 읽어라.
+
+### 완료
+
+| 항목 | 결과 |
+|---|---|
+| Phase 0 — 파이프라인 내재화 | 팀원 레포(`popixoxipop-collab/Code_reviewer_with_feedback`, main `9bea5fc`)의 분석 소스 41개를 `pipeline/`에 무수정 복사. Pyodide 런타임 fetch 의존 제거. 상세: `pipeline/VENDORED.md` |
+| Phase 1 — FastAPI 골격 | `app/`(api·core·storage 레이어), 듀얼 모드(APP_MODE), 공유 API 키 인증(B1), B6 운영 파라미터, 테스트 15건(14 passed·1 xfailed) |
+| API 명세 1차 확정 | `../docs/AI-Backend_API_명세서_v0.1.md` — B1~B7 결정 반영, 엔드포인트 9개 정의 |
+| 커밋·push | `feature/fastapi-migration` 브랜치에 3커밋(`dbb45c4` vendor / `899f9c9` skeleton / `c27eb90` docs) → `Team-IZ/AI` 원격 |
+
+### 진행 중 / 다음 할 일
+
+**Phase 2 — P02 분석 API + submission.html 연결** ← 다음 작업. 상세는 §3.
+
+### 알려진 문제 (Phase 2에서 해소 예정)
+
+1. **standalone 목업의 제출 흐름이 현재 비동작.** `trainee/`가 `/`에 마운트돼 `shared/p02-engine.js`의 `fetch("../webtool_driver.py")`가 404. 화면은 뜨지만 분석이 안 된다. `tests/test_app_modes.py`에 `strict=True` xfail로 고정해둠 — 상태가 바뀌면 테스트가 실패로 알린다. **일부러 안 고쳤다**: Phase 2에서 Pyodide 경로를 통째로 걷어내므로 지금 고치면 폐기될 코드다.
+2. **"미연결 페이지 안내 문구" 미이행.** §3 공통 원칙에 있으나 3개 페이지 어디에도 없다. Phase 2에 포함.
+3. **`storage/base.py`가 명세와 3곳 불일치** — `save_findings` 시그니처가 §3.2 응답 구조와 다름, `save_grades`가 `session_id` 기준(§5.1은 `score_run_id`), `ai_usage` 저장 경로 없음. Supabase 스키마가 미결이라 Phase 5까지 보류.
+
+### 브랜치 전략 (팀 결정)
+
+`feature/*` → (동작·테스트 완료 후) `main` → `main` 기준으로 `develop` 생성 → 이후 수정은 `develop`에서 테스트 → `main` 병합. **현재는 Phase·테스트가 끝나지 않아 `feature/fastapi-migration`에 머무는 단계**이며, `develop`은 아직 존재하지 않는다. 지금 단계에서 main으로 PR을 서두르지 말 것.
+
+---
 
 ## 0. 확정된 설계 결정 (2026-07-20)
 
