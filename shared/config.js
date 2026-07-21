@@ -9,15 +9,26 @@
 // client code. Teammates still enter their own NVIDIA key/PAT and sign in with their own
 // email for per-member attribution.
 const LabConfig = (() => {
-  const TEAM_SUPABASE_URL = "https://oziaeqcvrkrqkhwrybfj.supabase.co";
-  const TEAM_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96aWFlcWN2cmtycWtod3J5YmZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMDA4MTksImV4cCI6MjA5OTU3NjgxOX0.hBgzs0V7Nw3WLB8_zNuPDfluYrqOH2_Dto1weQF5iKo";
+  // D208: repointed to Team-IZ's own resources -- this branch no longer depends on
+  // popixoxipop-collab/Code_reviewer_with_feedback's shared Supabase project/Cloudflare
+  // Worker for either DB persistence or the NVIDIA proxy. See Readme.md's D208 note.
+  //   Supabase: reuses the `team-iz-curriculum-manager` project (ref tjmviobhxplucuwoibaj)
+  //   Team already created for a sibling tool -- this branch's runs/stage_events/artifacts/
+  //   presets tables + RLS policies were added to that SAME project (its existing
+  //   `members` table/policies/trigger were left untouched, only additive DDL was run).
+  const TEAM_SUPABASE_URL = "https://tjmviobhxplucuwoibaj.supabase.co";
+  const TEAM_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqbXZpb2JoeHBsdWN1d29pYmFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MDkzNDgsImV4cCI6MjEwMDE4NTM0OH0.rodmU-2ujq2ASsUtxPJyYMAPMGzHSPE-3nlIuNJYF8c";
 
   // Owner-deployed proxy (worker/nvidia-proxy.js), pre-filled as a default -- unlike the
   // Supabase values above this is NOT force-hardcoded: it's just a starting value in an
   // editable field, since SETUP.md's team-sharing note explicitly means for teammates to
   // be able to deploy and swap in their own proxy instead (a URL, not a credential, so
   // there's no reason to also lock this one down).
-  const DEFAULT_PROXY_URL = "https://nvidia-proxy.popixoxipop.workers.dev";
+  // D208: deployed as its own dedicated Worker (team-iz-code-qna-proxy, own KV namespace +
+  // queue) from the unmodified worker/nvidia-proxy.js -- distinct from both the original
+  // nvidia-proxy and the curriculum-manager task's team-iz-nvidia-proxy, so this tool never
+  // shares failure/rate-limit blast radius with either.
+  const DEFAULT_PROXY_URL = "https://team-iz-code-qna-proxy.popixoxipop.workers.dev";
 
   const FIELDS = ["nvidia-key", "proxy-url", "github-pat"];
   const SESSION_PREFIX = "lab_cfg_";

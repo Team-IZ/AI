@@ -32,6 +32,25 @@
 > ZIP 제출 → Pyodide 스캔 전 과정을 구동하면서 `raw.githubusercontent.com`/
 > `api.github.com`으로 나가는 요청이 0건임을 직접 확인했습니다(요청이 발생하면 실패하도록
 > 차단 설정한 상태로 테스트).
+>
+> **D208 후속 (같은 날, 원본 팀 인프라 의존성도 제거)**: 코드뿐 아니라 이 branch가 기대는
+> 백엔드 인프라(NVIDIA 프록시 Worker, Supabase DB)도 원본 팀(popixoxipop-collab) 소유였던
+> 걸 확인하고 Team-IZ 자체 자원으로 옮겼습니다.
+> - **Cloudflare Worker**: `worker/nvidia-proxy.js`(무수정)를 `team-iz-code-qna-proxy`라는
+>   새 이름으로, 전용 KV 네임스페이스(`team_iz_code_qna_nvidia_jobs`)+전용 큐
+>   (`team-iz-code-qna-jobs-queue`)로 독립 배포했습니다(`worker/wrangler.toml` 참고) —
+>   원본 `nvidia-proxy`나 커리큘럼 매니저 작업의 `team-iz-nvidia-proxy`와 자원을 전혀
+>   공유하지 않아, 한쪽 장애/설정 변경이 이쪽에 영향을 주지 않습니다. 배포 직후
+>   `x-nvidia-api-key` 헤더 없는 요청이 정상적으로 401을 반환하는 것으로 라이브 확인.
+> - **Supabase**: 커리큘럼 매니저 작업 때 이미 만들어둔 `team-iz-curriculum-manager`
+>   프로젝트(ref `tjmviobhxplucuwoibaj`)를 재사용하기로 결정(사용자 선택) — 이 프로젝트에
+>   이미 있던 `members` 테이블/정책/트리거는 그대로 두고, 이 branch가 필요로 하는
+>   `runs`/`stage_events`/`artifacts`/`presets` 테이블 + RLS 정책만 추가 적용(멱등,
+>   `supabase_schema.sql`과 동일 스키마). 적용 후 Management API로 5개 테이블 전부와
+>   정책 개수(runs 3, stage_events 2, artifacts 2, presets 3, members 2)를 직접 조회해
+>   확인.
+> - `shared/config.js`의 `TEAM_SUPABASE_URL`/`TEAM_SUPABASE_ANON_KEY`/`DEFAULT_PROXY_URL`
+>   세 값 모두 위 새 자원을 가리키도록 교체.
 
 이 브랜치는 [`popixoxipop-collab/Code_reviewer_with_feedback`](https://github.com/popixoxipop-collab/Code_reviewer_with_feedback)의 Pipeline Lab(`docs/lab/`)에서 실제로 동작 중인 **P02(코드 분석) → P03(소크라틱 검증 세션) → 결과 리포트** 기능을, Team-IZ/Frontend의 실제 화면정의(`team-iz.github.io/Frontend/`, `gh-pages` 브랜치)와 동일한 UI/UX로 다시 입힌 것입니다.
 
