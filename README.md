@@ -47,8 +47,8 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-> `run_standalone.ps1`은 `.venv`가 없으면 위 3줄을 알아서 수행한다. standalone만 돌릴 거면
-> 이 단계를 건너뛰고 바로 스크립트를 실행해도 된다.
+> `run_standalone.ps1`·`run_integrated.ps1`은 `.venv`가 없으면 위 3줄을 알아서 수행한다.
+> 스크립트로만 돌릴 거면 이 단계를 건너뛰고 바로 실행해도 된다.
 
 ### `.env` 준비
 
@@ -131,11 +131,34 @@ FastAPI는 **저장하지 않는다.** 확정 데이터는 전부 응답(또는 
 preflight 경로가 없다).
 
 ```powershell
-$env:APP_MODE = "integrated"
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+.\run_integrated.ps1
 ```
 
-개발 중 자동 리로드가 필요하면 `--reload`를 붙인다.
+`APP_MODE=integrated`를 설정하고 `127.0.0.1:8000`에서 uvicorn을 띄운다. `.venv`가 없으면
+`run_standalone.ps1`과 마찬가지로 알아서 만들고 의존성을 설치한다.
+
+| 파라미터 | 기본값 | 설명 |
+|---|---|---|
+| `-BindHost` | `127.0.0.1` | 바인딩 주소. **Spring이 다른 PC나 컨테이너에서 돈다면 루프백에는 접속할 수 없으므로 `-BindHost 0.0.0.0`으로 띄워야 한다** |
+| `-Port` | `8000` | 포트 |
+| `-Reload` | (off) | 개발 중 코드 수정 시 자동 재기동(`--reload`) |
+
+> ⚠️ **`$env:APP_MODE`는 그 터미널 세션에 계속 남는다.** PowerShell의 `$env:`는 프로세스 전역이라
+> `run_standalone.ps1`을 한 번 돌린 터미널에서는 스크립트가 끝난 뒤에도 `APP_MODE=standalone`이
+> 살아 있다. 그 상태로 `uvicorn`을 직접 띄우면 integrated를 의도했는데 standalone으로 떠서
+> 목업 제출 페이지가 그대로 보인다. `run_integrated.ps1`은 `APP_MODE`를 명시적으로
+> `integrated`로 덮어써서 이 사고를 막는다 — **직접 명령을 치지 말고 스크립트를 쓸 것.**
+
+기동 시 `.env` 상태를 점검해 경고한다(경고만 하고 기동은 계속한다). `.env`가 없으면 복사 안내를,
+`INTERNAL_API_KEY`가 비어 있으면 **인증이 비활성화돼 아무나 `/api/v1/*`를 호출할 수 있다**는 경고를
+출력한다. 키 값 자체는 비밀이라 출력하지 않고 설정 여부만 알린다.
+
+**정상 확인 방법:**
+
+- <http://127.0.0.1:8000/api/health> → `{"status":"ok","mode":"integrated","pipeline_loaded":true}`
+  - `mode`가 `integrated`인지 여기서 확인한다. 이 엔드포인트는 인증 면제다
+- <http://127.0.0.1:8000/docs> → Swagger UI. Backend 담당자의 실질적 진입점
+- `/`와 `/submission.html`은 **404가 정상이다.** integrated에서는 목업 프론트를 서빙하지 않는다
 
 ### Spring 없이 API 직접 두드리기
 
