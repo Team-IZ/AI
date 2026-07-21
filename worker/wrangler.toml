@@ -8,28 +8,29 @@
 # consumer limit) with no penalty for I/O wait time. The client polls for the result.
 #
 # Ported from popixoxipop-collab/Code_reviewer_with_feedback for standalone deployability
-# (docs/lab/curriculum-manager/README.md's 자체 배포 section). The `id` below is that
-# repo's own Cloudflare account's KV namespace -- NOT reachable from a different account.
-# Deploying this under Team-IZ's own Cloudflare account requires replacing it with the id
-# `wrangler kv namespace create NVIDIA_JOBS` prints, and the queue also needs creating
-# first (`wrangler queues create nvidia-jobs-queue`) since queues aren't auto-created from
-# this file. No NVIDIA API key secret is configured here -- the worker is stateless about
-# it, forwarding whatever `x-nvidia-api-key` header the caller sends (see
+# (docs/lab/curriculum-manager/README.md's 자체 배포 section), then deployed as its own
+# dedicated Worker (2026-07-21) -- `name`/kv id/queue name below are deliberately NOT the
+# same as that repo's ("nvidia-proxy"/"nvidia-jobs-queue"): both are account-scoped in
+# Cloudflare, and this is the SAME Cloudflare account (popixoxipop@gmail.com) as the
+# original, so reusing those names would have overwritten/collided with the shared team
+# worker Code_reviewer_with_feedback still depends on instead of creating a separate one.
+# No NVIDIA API key secret is configured here -- the worker is stateless about it,
+# forwarding whatever `x-nvidia-api-key` header the caller sends (see
 # nvidia-proxy.js:213-214), which is each user's own key typed into the page's settings
 # panel, never stored server-side.
-name = "nvidia-proxy"
+name = "team-iz-nvidia-proxy"
 main = "nvidia-proxy.js"
 compatibility_date = "2026-07-14"
 
 kv_namespaces = [
-  { binding = "NVIDIA_JOBS", id = "fee16da9fc2e428aa7b55ace0baf58d5" } # REPLACE for a new Cloudflare account
+  { binding = "NVIDIA_JOBS", id = "8264aea6898c4d4ca60f1263b62d6a9b" }
 ]
 
 [[queues.producers]]
-queue = "nvidia-jobs-queue"
+queue = "team-iz-nvidia-jobs-queue"
 binding = "NVIDIA_JOBS_QUEUE"
 
 [[queues.consumers]]
-queue = "nvidia-jobs-queue"
+queue = "team-iz-nvidia-jobs-queue"
 max_batch_size = 1
 max_batch_timeout = 1
