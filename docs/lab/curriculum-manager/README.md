@@ -6,6 +6,14 @@ Team-IZ Frontend의 `manager/curriculum.html` 와이어프레임 UI를 따라 �
 Cloudflare Worker 프록시, DB 스키마)이 전부 포함되어 있어 **다른 저장소를 참고하지 않고도**
 이 폴더/이 저장소 안의 내용만으로 배포·유지보수가 가능합니다.
 
+## 배포 링크
+
+**https://team-iz.github.io/AI/lab/curriculum-manager/** (2026-07-21부터 라이브,
+`feat/pdf_analysis` 브랜치의 `/docs`를 GitHub Pages가 직접 서빙 — `develop`으로 머지된
+상태 아님). 인프라는 Team-IZ 전용으로 분리된 Supabase 프로젝트(`team-iz-curriculum-manager`)
++ Cloudflare Worker(`team-iz-nvidia-proxy`)를 씀. 로그인/DB 저장 기능만 Google OAuth
+클라이언트 등록이 남아 있고(아래 "자체 배포" 5번), 분석 자체는 지금 바로 동작함.
+
 ## 구성
 
 - `index.html` — 목록/등록/교안 구성/교안 연결 4탭. 교안 등록 탭에서 PDF를 올리면
@@ -42,15 +50,17 @@ python3 -m http.server 8000
 # http://localhost:8000/docs/lab/curriculum-manager/ 접속
 ```
 
-`config.js`에 Supabase 프로젝트/기본 NVIDIA 프록시 URL이 이미 채워져 있습니다(현재는
-popixoxipop-collab이 운영하는 공유 인프라 — 아래 "자체 배포" 전까지의 기본값). 실제로
-분석을 돌리려면 페이지 상단 "연결 설정"에 본인 NVIDIA API 키만 입력하면 됩니다(로그인은
-결과를 DB에 남기고 싶을 때만 필요, 없어도 분석 자체는 그대로 동작).
+`config.js`에 Supabase 프로젝트/기본 NVIDIA 프록시 URL이 이미 채워져 있습니다(Team-IZ
+전용으로 분리된 프로젝트/워커 — 아래 "자체 배포" 참고). 실제로 분석을 돌리려면 페이지
+상단 "연결 설정"에 본인 NVIDIA API 키만 입력하면 됩니다(로그인은 결과를 DB에 남기고
+싶을 때만 필요, 없어도 분석 자체는 그대로 동작).
 
-## 자체 배포 (Team-IZ 소유 인프라로 완전히 독립시키기)
+## 자체 배포 (이미 완료 — 아래는 실제로 한 것 + 재현 방법)
 
-지금 당장 안 해도 도구는 위 "빠른 실행"으로 정상 동작하지만, popixoxipop-collab 계정이
-관리하는 Supabase/Cloudflare에 의존하는 상태입니다. 완전히 독립시키려면:
+Supabase 프로젝트/Cloudflare Worker/GitHub Pages 전부 이미 배포되어 있습니다(위 "배포
+링크" 참고). 다만 셋 다 popixoxipop@gmail.com 개인 계정 위에 만들어진 것이라(Team-IZ
+소유 별도 클라우드 계정이 아직 없어서), 진짜 다른 계정으로 옮기고 싶을 때를 위해 아래에
+전체 재현 절차를 남겨둡니다:
 
 ### 1) Supabase 프로젝트
 
@@ -76,9 +86,16 @@ popixoxipop-collab이 운영하는 공유 인프라 — 아래 "자체 배포" �
 cd worker
 wrangler login
 wrangler kv namespace create NVIDIA_JOBS      # 출력된 id를 wrangler.toml에 반영
-wrangler queues create nvidia-jobs-queue      # 큐는 파일에서 자동 생성되지 않음, 먼저 생성 필요
+wrangler queues create <새-큐-이름>            # 큐는 파일에서 자동 생성되지 않음, 먼저 생성 필요
 wrangler deploy
 ```
+
+`wrangler.toml`의 `name`/큐 이름은 **다른 Cloudflare 계정으로 옮길 때만** 원래 값
+(`team-iz-nvidia-proxy`/`team-iz-nvidia-jobs-queue`)을 그대로 써도 됩니다. 같은 계정
+안에서 또 다른 인스턴스를 만드는 거라면(예: 스테이징용) 반드시 다른 이름을 써야 함 —
+Worker 이름도 Queue 이름도 계정 스코프라, 같은 이름을 다시 배포하면 새로 만드는 게
+아니라 기존 걸 덮어씁니다(2026-07-21에 이걸로 popixoxipop-collab의 원래 공유 워커를
+덮어쓸 뻔했다가 이름을 분리해서 피함).
 
 서버 쪽에 저장해야 할 NVIDIA API 키 secret은 없습니다 — 이 워커는 상태 없이 동작하며,
 호출자가 보낸 `x-nvidia-api-key` 헤더(각자 페이지에서 입력한 본인 키)를 그대로 NVIDIA로
@@ -92,16 +109,25 @@ wrangler deploy
 - `TEAM_SUPABASE_URL` / `TEAM_SUPABASE_ANON_KEY` → 새 Supabase 프로젝트 값
 - `DEFAULT_PROXY_URL` → 새로 배포한 Worker URL
 
-### 4) GitHub Pages로 실제 배포
+### 4) GitHub Pages 배포 (완료)
 
-이 저장소는 현재 GitHub Pages가 설정되어 있지 않고 기본 브랜치는 `develop`입니다(이
-브랜치가 아님) — 이 부분은 코드가 아니라 팀 차원의 저장소 설정 결정이 필요합니다:
-- 이 브랜치(`feat/pdf_analysis`)를 어느 브랜치(`develop`/`main`)에 언제 머지할지
-- GitHub 저장소 Settings → Pages에서 Pages를 어느 브랜치/폴더(`/docs`)로 서빙할지
+Settings → Pages에서 소스를 `feat/pdf_analysis` 브랜치의 `/docs`로 지정해 라이브
+(위 "배포 링크" 참고). `develop`이 아니라 이 브랜치를 직접 서빙하는 상태라, `develop`/
+`main`으로 나중에 머지하기로 하면 Pages 소스도 그쪽으로 다시 지정해야 링크가 계속
+유효합니다(머지 자체와는 독립적인 별도 설정이라 자동으로 안 따라감).
 
-Pages가 `/docs`를 서빙하도록 설정되면 이 도구는
-`https://team-iz.github.io/AI/lab/curriculum-manager/`(또는 실제 설정된 경로)로
-접근 가능해집니다.
+### 5) Google OAuth 클라이언트 (아직 안 됨 — 수동 단계 필요)
+
+로그인/DB 저장 기능에만 필요, 분석 자체는 이것 없이 지금 그대로 동작합니다. `gcloud`
+CLI로 자동화할 방법이 없습니다(관련 커맨드그룹 `gcloud iap oauth-brands`/
+`oauth-clients`는 IAP 전용이고 2026-03-19부로 완전히 shutdown됨 — 라이브 확인).
+Google Cloud Console에서 수동으로: APIs & Services → OAuth consent screen 설정 →
+Credentials → Create OAuth client ID → Web application → 승인된 리디렉션 URI에
+`https://<supabase-project-ref>.supabase.co/auth/v1/callback` 추가. 발급받은 Client
+ID/Secret을 Supabase Dashboard → Authentication → Providers → Google에 입력하고,
+Authentication → URL Configuration의 Redirect URLs에도 위 "배포 링크"의 정확한 경로
+(`https://team-iz.github.io/AI/lab/curriculum-manager/index.html`)를 추가해야
+로그인 후 리다이렉트가 정상 동작합니다.
 
 ## 이력
 
