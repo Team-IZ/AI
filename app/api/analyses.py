@@ -219,6 +219,11 @@ async def get_analysis(job_id: str) -> dict[str, Any]:
     입력: `job_id: str`(경로 파라미터).
     출력: `AnalysisJob.to_response()` 결과 — §3.2 형태의 dict(job_id/attempt_id/
     submission_id/status/failure_reason/result/ai_usage, 실패 시 error도 포함).
+    READY/PARTIAL이면 `result`에 다음도 포함된다(S1/M3·N1 — 코드 원문 무저장,
+    스냅샷 메타만 제공):
+    - `snapshot_id: str` — job_id와 별개로 발급한 UUID. Spring `code_snapshot` 키 대응.
+    - `snapshot_meta: dict` — `{content_hash(sha256 hex 64자), file_count, byte_count}`.
+      실제 분석에 쓰인(스코프 필터 적용 후 물리화된) 파일 집합 기준.
     에러: 404 `JOB_NOT_FOUND`(모르는 job_id — 서버 재시작으로 유실됐을 수도 있음, §1).
     """
     job = _store.get(job_id)

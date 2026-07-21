@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import shutil
 import time
@@ -43,6 +44,9 @@ class AnalysisJob:
     ai_usage: list[dict[str, Any]] = field(default_factory=list)
     workspace: Path | None = None
     created_at: float = field(default_factory=time.time)
+    # S1/M3·N1: 코드 원문 무저장 원칙은 유지하되, DB `code_snapshot`이 참조할
+    # 식별자만 발급한다. job_id와는 별개 UUID(N1 — 수집 완료 시점에 발급).
+    snapshot_id: str | None = None
 
     def to_response(self) -> dict[str, Any]:
         """§3.2 응답 본문."""
@@ -130,6 +134,11 @@ def run_analysis(
                 f"(지원 확장자: {', '.join(collect.SRC_EXTS)}, .ipynb는 코드 셀만 추출)",
             )
 
+        # 수집 완료 → snapshot_id 발급 (N1: job_id와 별개 UUID).
+        # M3: 원문은 workspace에만 두고 저장하지 않으므로, Spring의
+        # `code_snapshot` 행은 이 id + 아래 snapshot_meta(메타데이터)만으로 만든다.
+        job.snapshot_id = str(uuid.uuid4())
+
         # 2) 커밋 귀속 (OWN_COMMIT일 때만)
         applied_scope = extraction_scope
         scope_fallback = False
@@ -170,6 +179,11 @@ def run_analysis(
             raw["judgment"].get("findings", []), files
         )
         job.result = {
+            # S1/M3: 스냅샷은 DB 정의상 "분석 기준 코드"이므로, 메타(`snapshot_meta`)는
+            # 수집 원본 전체가 아니라 **실제로 파이프라인이 스캔한(물리화된) 파일 집합**
+            # (`files` — OWN_COMMIT 스코프 필터 적용 후) 기준으로 산출한다.
+            "snapshot_id": job.snapshot_id,
+            "snapshot_meta": _snapshot_meta(files),
             "applied_scope": applied_scope,
             "scope_fallback": scope_fallback,
             "fallback_reason": fallback_reason,
@@ -189,6 +203,34 @@ def run_analysis(
     except Exception as exc:  # 예기치 못한 내부 오류
         logger.exception("analysis job %s failed", job.job_id)
         _fail(job, "ANALYSIS_FAILED", str(exc), retryable=True)
+
+
+def _snapshot_meta(files: dict[str, str]) -> dict[str, Any]:
+    """분석 대상 파일 집합의 스냅샷 메타데이터 (S1/M3 — 원문 무저장 대응).
+
+    입력: `files` — 실제 분석에 쓰인(물리화된) 경로→내용 dict.
+    출력: `{"content_hash": str(sha256 hex 64자), "file_count": int, "byte_count": int}`.
+
+    `content_hash`는 (경로, 내용)을 경로 기준 정렬 후 순회하며 sha256에 넣어
+    **결정적으로** 산출한다 — 같은 제출물이면 항상 같은 해시가 나와야
+    DB `code_snapshot.content_hash`(원문 비저장 상태에서의 동일성 비교·무결성
+    검증)의 취지를 만족한다. 경로/내용 경계는 NUL 구분자로 분리해 서로 다른
+    분할이 같은 해시를 내는 것을 방지한다.
+    """
+    hasher = hashlib.sha256()
+    byte_count = 0
+    for rel_path, content in sorted(files.items()):
+        content_bytes = content.encode("utf-8")
+        byte_count += len(content_bytes)
+        hasher.update(rel_path.encode("utf-8"))
+        hasher.update(b"\x00")
+        hasher.update(content_bytes)
+        hasher.update(b"\x00")
+    return {
+        "content_hash": hasher.hexdigest(),
+        "file_count": len(files),
+        "byte_count": byte_count,
+    }
 
 
 def _fail(job: AnalysisJob, code: str, message: str, retryable: bool) -> None:

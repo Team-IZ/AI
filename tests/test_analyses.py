@@ -5,7 +5,9 @@
 """
 import io
 import json
+import re
 import subprocess
+import uuid
 import zipfile
 
 import pytest
@@ -139,6 +141,39 @@ def test_zip_submission_end_to_end(client):
     assert secret[0]["source_path"] == "src/danger.py"
     # 같은 파일의 서로 다른 finding이 같은 발췌 창을 공유해도 해시는 구분돼야 한다
     assert len({f["evidence_hash"] for f in findings}) == len(findings)
+
+
+# --- S1: snapshot_id / snapshot_meta (M3 무저장 + 메타 제공, N1 별도 UUID) -----
+
+
+def test_ready_result_contains_snapshot_id_and_meta(client):
+    """READY 응답의 result에 snapshot_id(UUID, job_id와 별개)와 snapshot_meta가 있다."""
+    job_id = _submit_zip(client, SAMPLE_REPO).json()["job_id"]
+    body = _await_job(client, job_id)
+    assert body["status"] == "READY"
+    result = body["result"]
+
+    snapshot_id = result["snapshot_id"]
+    assert snapshot_id
+    # UUID 형식 검증 (N1: 별도 발급 — job_id와 달라야 한다)
+    uuid.UUID(snapshot_id)
+    assert snapshot_id != job_id
+
+    meta = result["snapshot_meta"]
+    assert re.fullmatch(r"[0-9a-f]{64}", meta["content_hash"]), "sha256 hex 64자여야 한다"
+    assert meta["file_count"] > 0
+    assert meta["byte_count"] > 0
+
+
+def test_snapshot_content_hash_is_deterministic(client):
+    """같은 제출물이면 content_hash는 동일해야 하고(무결성 비교 취지),
+    snapshot_id는 발급 단위가 분석이므로 서로 달라야 한다."""
+    first = _await_job(client, _submit_zip(client, SAMPLE_REPO).json()["job_id"])
+    second = _await_job(client, _submit_zip(client, SAMPLE_REPO).json()["job_id"])
+    r1, r2 = first["result"], second["result"]
+    assert r1["snapshot_meta"]["content_hash"] == r2["snapshot_meta"]["content_hash"]
+    assert r1["snapshot_meta"] == r2["snapshot_meta"]
+    assert r1["snapshot_id"] != r2["snapshot_id"]
 
 
 def test_skipped_paths_are_not_analyzed(client):

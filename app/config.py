@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # 기본값은 OS 임시 디렉터리 하위. 대용량 ZIP 대비로 별도 볼륨 지정 가능.
     workspace_dir: Path = Path(tempfile.gettempdir()) / "bigproject-ai-workspace"
     # TTL 수치 자체는 명세에 확정값이 없다(§3.3은 "attempt 종료 또는 TTL"까지만 규정).
-    # 아래는 세션 시간 상한(time_limit_sec 예시 2400s)에 여유를 둔 잠정값 — 백엔드 협의 필요.
+    # 아래는 세션 시간 상한(time_limit_sec 예시 2400s)에 여유를 둔 잠정값 — B8 확정 대기.
     workspace_ttl_sec: int = 86400
 
     # Supabase (standalone 모드 전용; Phase 5에서 supabase_store가 사용)
