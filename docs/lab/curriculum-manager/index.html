@@ -153,6 +153,8 @@
   .run-status.error{color:var(--c-danger)}
   .run-status.done{color:var(--c-success)}
   .run-status.running{color:var(--c-primary)}
+  .run-status.cancelling{color:var(--c-warning)}
+  .btn.danger-outline{background:#fff;color:var(--c-danger);border:1px solid var(--c-danger)}
   .run-timer{font-size:var(--fs-xs);color:var(--c-text-3);font-family:var(--mono)}
   .progress-log{margin-top:10px;max-height:140px;overflow-y:auto;background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:var(--r-md);padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--c-text-2)}
   .model-toggle-group{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
@@ -196,11 +198,14 @@
         <div class="phead"><h2>교안 관리</h2></div>
         <div class="lhead">
           <div class="ttl">교안 목록 <span class="cnt" id="list-count">총 0개</span></div>
-          <button class="btn" data-nav="upload">+ 교안 등록</button>
+          <div style="display:flex;gap:var(--sp-2);">
+            <button class="btn" data-nav="upload">+ 교안 등록</button>
+            <button class="btn ghost" id="delete-mode-btn">− 교안 삭제</button>
+          </div>
         </div>
         <div class="card">
           <table class="dtbl">
-            <thead><tr><th>교안명</th><th>유닛</th><th>질문</th><th>그래프</th><th>추출 상태</th><th>분석 시각</th></tr></thead>
+            <thead><tr id="list-thead-row"><th>교안명</th><th>유닛</th><th>질문</th><th>그래프</th><th>추출 상태</th><th>분석 시각</th></tr></thead>
             <tbody id="list-tbody"><tr><td colspan="6" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr></tbody>
           </table>
         </div>
@@ -228,7 +233,7 @@
 
           <div class="fbar">
             <button class="btn" id="run-p01-btn">분석 실행</button>
-            <button class="btn ghost" data-nav="list">취소</button>
+            <button class="btn ghost" id="cancel-p01-btn">취소</button>
             <span id="status-p01" class="run-status"></span>
             <span id="timer-p01" class="run-timer"></span>
           </div>
@@ -288,6 +293,12 @@
 (function () {
   const state = { curricula: [], selectedId: null, nextId: 1 };
   let lastPdfName = "";
+  // Transient UI-only state -- deliberately NOT part of `state`/persistSession(): neither
+  // makes sense to resurrect after a refresh (deleteMode should always start off; a
+  // mid-flight run() promise can't be serialized and is simply gone after a reload
+  // anyway, an existing pre-D1 limitation this change doesn't touch).
+  let deleteMode = false;
+  let currentRunPromise = null;
 
   // A P01 run takes minutes (60s cooldown + refine loop + question-gen) and only lives in
   // this tab's JS memory -- a refresh used to silently wipe out an already-finished
@@ -377,6 +388,7 @@
   function route() {
     const h = (location.hash || "").slice(1) || "list";
     const id = PAGE[h] || "page-list";
+    if (id !== "page-list") deleteMode = false; // leaving the list always exits delete-mode
     document.querySelectorAll(".rpage").forEach((p) => p.classList.toggle("on", p.id === id));
     document.querySelectorAll(".tabs .t[data-nav]").forEach((t) => t.classList.toggle("on", t.dataset.nav === h));
     if (id === "page-list") renderListTab();
@@ -387,11 +399,61 @@
   window.addEventListener("hashchange", route);
 
   document.addEventListener("click", (e) => {
+    if (e.target.closest("#delete-mode-btn")) { toggleDeleteMode(); return; }
+    const delBtn = e.target.closest(".del-row-btn");
+    if (delBtn) { confirmAndDelete(delBtn.dataset.id); return; }
     const row = e.target.closest("#list-tbody tr[data-id]");
-    if (row) { state.selectedId = row.dataset.id; persistSession(); location.hash = "structure"; return; }
+    if (row && !deleteMode) { state.selectedId = row.dataset.id; persistSession(); location.hash = "structure"; return; }
     const nv = e.target.closest("[data-nav]");
     if (nv) { location.hash = nv.getAttribute("data-nav"); return; }
   });
+
+  // ---- 교안 삭제 ----
+  function toggleDeleteMode() {
+    deleteMode = !deleteMode;
+    renderListTab();
+  }
+
+  async function confirmAndDelete(id) {
+    const c = state.curricula.find((x) => x.id === id);
+    if (!c) return;
+    if (!confirm(`"${c.title}" 교안을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+    await deleteCurriculum(id);
+  }
+
+  // D2 (2026-07-21): optimistic local removal first (instant feedback, and the only
+  // step that applies at all for a run that only ever lived in sessionStorage -- never
+  // logged in, or DB not configured). If the id looks DB-backed, also try deleting the
+  // real row -- RLS only allows deleting your OWN runs ("pdf_analysis runs delete own",
+  // experiments/web_lab/pdf_analysis_schema.sql), so a teammate's entry (visible to
+  // everyone via the "read all" policy) would be blocked server-side. Supabase reports
+  // an RLS-blocked delete as a normal 0-rows-affected response, not an error -- checking
+  // `count` is the only way to notice that and roll the optimistic removal back instead
+  // of leaving the UI lying about what's actually still in the DB.
+  async function deleteCurriculum(id) {
+    const idx = state.curricula.findIndex((c) => c.id === id);
+    if (idx === -1) return;
+    const [removed] = state.curricula.splice(idx, 1);
+    if (state.selectedId === id) state.selectedId = null;
+    persistSession();
+    renderListTab();
+
+    const isDbId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+    if (!isDbId || !window.LabDB || !LabDB.isConfigured()) return;
+    try {
+      const user = await LabDB.currentMemberOrNull();
+      if (!user) throw new Error("로그인이 필요합니다");
+      const c = await LabDB.ensureClient();
+      const { error, count } = await c.from("runs").delete({ count: "exact" }).eq("id", id);
+      if (error) throw error;
+      if (!count) throw new Error("본인이 등록한 교안만 삭제할 수 있습니다");
+    } catch (err) {
+      state.curricula.splice(idx, 0, removed);
+      persistSession();
+      renderListTab();
+      alert(`삭제 실패: ${err.message}`);
+    }
+  }
 
   function showUploadError(msg) {
     const el = document.getElementById("upload-error");
@@ -402,9 +464,18 @@
   // ---- list tab ----
   function renderListTab() {
     document.getElementById("list-count").textContent = `총 ${state.curricula.length}개`;
+    const delModeBtn = document.getElementById("delete-mode-btn");
+    delModeBtn.textContent = deleteMode ? "완료" : "− 교안 삭제";
+    delModeBtn.classList.toggle("danger-outline", deleteMode);
+
+    const theadRow = document.getElementById("list-thead-row");
+    const baseHeaders = ["교안명", "유닛", "질문", "그래프", "추출 상태", "분석 시각"];
+    theadRow.innerHTML = baseHeaders.map((h) => `<th>${h}</th>`).join("") + (deleteMode ? `<th style="width:64px"></th>` : "");
+
     const tbody = document.getElementById("list-tbody");
+    const colspan = deleteMode ? 7 : 6;
     if (!state.curricula.length) {
-      tbody.innerHTML = `<tr><td colspan="6" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="${colspan}" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr>`;
       return;
     }
     tbody.innerHTML = state.curricula.map((c) => {
@@ -417,13 +488,17 @@
       const extractBadge = (r.failed_chunks && r.failed_chunks.length)
         ? `<span class="st na">청크 ${r.failed_chunks.length}개 실패</span>`
         : `<span class="st approved"><span class="dot"></span>완료</span>`;
-      return `<tr class="click" data-id="${LabApp.escapeHtml(c.id)}">
+      const delCell = deleteMode
+        ? `<td><button type="button" class="btn danger-outline del-row-btn" data-id="${LabApp.escapeHtml(c.id)}" style="padding:5px 10px;">삭제</button></td>`
+        : "";
+      return `<tr class="${deleteMode ? "" : "click"}" data-id="${LabApp.escapeHtml(c.id)}">
         <td class="name"><b>${LabApp.escapeHtml(c.title)}</b><div class="sub">${LabApp.escapeHtml(c.courseLabel || "")}</div></td>
         <td>${unitCount}개</td>
         <td>${qCount}개</td>
         <td>${graphBadge}</td>
         <td>${extractBadge}</td>
         <td class="date">${c.analyzedAt.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+        ${delCell}
       </tr>`;
     }).join("");
   }
@@ -538,12 +613,18 @@
     if (pdfInput) pdfInput.addEventListener("change", () => { if (pdfInput.files[0]) lastPdfName = pdfInput.files[0].name; });
     if (dz) dz.addEventListener("drop", (e) => { if (e.dataTransfer.files[0]) lastPdfName = e.dataTransfer.files[0].name; });
 
-    document.getElementById("run-p01-btn").addEventListener("click", async () => {
-      const btn = document.getElementById("run-p01-btn");
-      btn.disabled = true;
+    const runBtn = document.getElementById("run-p01-btn");
+    const cancelBtn = document.getElementById("cancel-p01-btn");
+
+    runBtn.addEventListener("click", async () => {
+      runBtn.disabled = true;
+      cancelBtn.disabled = false;
+      cancelBtn.textContent = "취소";
       showUploadError("");
+      window.LabAppShim.resetCancel();
+      currentRunPromise = P01Runner.run();
       try {
-        await P01Runner.run();
+        await currentRunPromise;
         const result = window.LabAppShim.takeP01Result();
         if (!result) {
           const st = window.LabAppShim.lastStatus();
@@ -567,9 +648,37 @@
         // now, so this supersedes the local temp `entry` above with the DB-backed list.
         // If not logged in, refreshFromDB() is a no-op and the local entry stands alone.
         refreshFromDB();
+      } catch (err) {
+        if (err && err.isCancelled) {
+          // D1: expected path -- user clicked 취소 while running. Whatever run() had
+          // built up (partial unit_map, in-flight fixGroup results, etc.) is thrown away
+          // along with the rejected promise; nothing here adds it to state.curricula or
+          // navigates anywhere, so a wrong/unwanted analysis never shows up in the list.
+          const statusEl = document.getElementById("status-p01");
+          statusEl.textContent = "취소됨";
+          statusEl.className = "run-status";
+        } else {
+          showUploadError(`교안 분석 실패: ${err.message}`);
+        }
       } finally {
-        btn.disabled = false;
+        currentRunPromise = null;
+        runBtn.disabled = false;
+        cancelBtn.disabled = false;
+        cancelBtn.textContent = "취소";
       }
+    });
+
+    // D1: idle (no run in flight) -- unchanged "뒤로가기" behavior. Mid-run -- actually
+    // stops the pipeline (see labapp-shim.js's checkCancelled()) instead of navigating,
+    // which would otherwise leave run() executing invisibly in the background.
+    cancelBtn.addEventListener("click", () => {
+      if (!currentRunPromise) { location.hash = "list"; return; }
+      window.LabAppShim.requestCancel();
+      cancelBtn.disabled = true;
+      cancelBtn.textContent = "취소 처리 중...";
+      const statusEl = document.getElementById("status-p01");
+      statusEl.textContent = "취소 처리 중... (진행 중인 요청이 끝나는 대로 정리됩니다)";
+      statusEl.className = "run-status cancelling";
     });
   }
 

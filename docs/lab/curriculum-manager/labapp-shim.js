@@ -31,10 +31,41 @@
   let capturedP01Result = null;
   let lastStatus = { text: "", kind: "" };
 
+  // D1 (2026-07-21): "취소" used to only ever navigate away (data-nav="list") while
+  // P01Runner.run() kept executing untouched in the background -- clicking it did NOT
+  // stop the pipeline. run() (p01-runner.js:514-820) has no AbortSignal/cancellation
+  // parameter anywhere and is a shared file this project deliberately never modifies, so
+  // real cancellation can't be added there. Instead: `LabApp.log`/`LabApp.setStatus` are
+  // the two members run() calls constantly (after every chunk-analysis wave, every
+  // refine iteration, every question-gen wave, and unconditionally right before both its
+  // success and failure exits -- confirmed by reading run() end-to-end) and are already
+  // owned by this shim. Making them throw a tagged error once cancellation is requested
+  // turns "the next progress update" into a cancellation checkpoint, with NO edit to
+  // p01-runner.js/llm.js needed.
+  //   COST: not instant -- a checkpoint only fires at the next log/setStatus call, so a
+  //     single long in-flight network wave (worst case: the refine parallel-fix stage,
+  //     which calls neither between firing its Promise.all and reading the results) can
+  //     delay the abort until that wave naturally finishes. index.html's click handler
+  //     adds a second, always-correct layer on top of this: it discards ANY result that
+  //     arrives after cancellation was requested, whether run() ended up throwing here or
+  //     (in that one gap) resolving normally -- so a wrong/unwanted analysis can never
+  //     get saved or shown even in the slow-checkpoint case.
+  //   EXIT: if real usage shows the parallel-fix-stage gap matters in practice, the next
+  //     step is a cancel-check inside fixGroup() itself (still shim/index.html-local,
+  //     p01-runner.js already isolates that closure per D174 Phase 3).
+  let cancelRequested = false;
+  function checkCancelled() {
+    if (!cancelRequested) return;
+    const e = new Error("사용자가 분석을 취소함");
+    e.isCancelled = true;
+    throw e;
+  }
+
   // Safe no-op when this page has no #log-<pipelineId> element (matches the original
   // app.js log()'s own `if (!el) return` guard) -- but if the page DOES provide one
   // (this page does, for p01), progress lines actually render there.
   function log(pipelineId, msg) {
+    checkCancelled();
     const el = document.getElementById(`log-${pipelineId}`);
     if (!el) return;
     el.classList.remove("hidden");
@@ -49,7 +80,14 @@
   // only way for the page to learn *why* takeP01Result() came back null after a failed
   // run. setStatus("...", "error") is always called in run()'s catch block right before
   // saveFailedRun(), so lastStatus is guaranteed set by the time run()'s promise settles.
+  // Also cancel-checked (see D1 above) -- run()'s success path always calls this with
+  // "완료" right before renderResults()/maybeSaveRun(), so this alone is enough to stop a
+  // cancelled run from ever reaching its own save call, even when nothing else caught it
+  // sooner. Throwing here also means the catch block's own setStatus("오류: ...") call
+  // throws too when still cancelled, which correctly skips saveFailedRun() -- a
+  // cancelled run shouldn't leave a "failed" row in the DB, and it now doesn't.
   function setStatus(pipelineId, text, kind) {
+    checkCancelled();
     lastStatus = { text, kind };
     const el = document.getElementById(`status-${pipelineId}`);
     if (!el) return;
@@ -145,6 +183,20 @@
     },
     lastStatus() {
       return lastStatus;
+    },
+    // Call once right before starting a new P01Runner.run() -- clears any leftover flag
+    // from a previous cancelled run so it can't immediately abort the new one too.
+    resetCancel() {
+      cancelRequested = false;
+    },
+    // Called by the upload tab's "취소" button while a run is in flight. Doesn't stop
+    // any already-in-flight network request, but guarantees run()'s promise will
+    // eventually reject via checkCancelled() above instead of quietly succeeding.
+    requestCancel() {
+      cancelRequested = true;
+    },
+    isCancelled() {
+      return cancelRequested;
     },
   };
 })();

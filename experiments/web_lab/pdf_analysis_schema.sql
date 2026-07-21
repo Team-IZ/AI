@@ -54,10 +54,24 @@ alter table pdf_analysis.artifacts enable row level security;
 create policy "pdf_analysis runs read all" on pdf_analysis.runs for select to authenticated using (true);
 create policy "pdf_analysis runs insert own" on pdf_analysis.runs for insert to authenticated with check (member_id = auth.uid());
 create policy "pdf_analysis runs update own" on pdf_analysis.runs for update to authenticated using (member_id = auth.uid());
+-- D2 (2026-07-21): added for the list tab's "− 교안 삭제" button. "own" only (not "read
+-- all"'s everyone-can-see shape) -- deleting a teammate's analysis out from under them
+-- needs to stay impossible even though everyone can view it. Client-side
+-- (curriculum-manager/index.html deleteCurriculum()) treats a 0-row-affected delete
+-- (this policy silently blocking someone else's row, not an error) as a failure and
+-- reverts its optimistic local removal.
+create policy "pdf_analysis runs delete own" on pdf_analysis.runs for delete to authenticated using (member_id = auth.uid());
 
 create policy "pdf_analysis artifacts read all" on pdf_analysis.artifacts for select to authenticated using (true);
 create policy "pdf_analysis artifacts insert own" on pdf_analysis.artifacts for insert to authenticated
   with check (exists (select 1 from pdf_analysis.runs where pdf_analysis.runs.id = run_id and pdf_analysis.runs.member_id = auth.uid()));
+-- D2: runs' `on delete cascade` FK only auto-removes artifacts rows without needing this
+-- policy too when the deleting role bypasses RLS (e.g. table owner) -- Supabase's
+-- `authenticated` role does not, so the cascade is itself subject to RLS on artifacts.
+-- Without this, deleting your own run could leave its artifacts rows orphaned instead of
+-- cascading.
+create policy "pdf_analysis artifacts delete own" on pdf_analysis.artifacts for delete to authenticated
+  using (exists (select 1 from pdf_analysis.runs where pdf_analysis.runs.id = run_id and pdf_analysis.runs.member_id = auth.uid()));
 
 -- PostgREST only serves schemas explicitly granted to anon/authenticated roles.
 grant usage on schema pdf_analysis to anon, authenticated;
