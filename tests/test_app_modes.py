@@ -56,6 +56,28 @@ def test_standalone_mode_serves_static_mockup(monkeypatch):
         assert client.get("/submission.html").status_code == 200
 
 
+def test_standalone_root_redirects_to_submission(monkeypatch):
+    """trainee/에 index.html이 없어 "/"가 404이던 문제 — 진입점으로 임시 리다이렉트."""
+    monkeypatch.setenv("APP_MODE", "standalone")
+    with TestClient(create_app()) as client:
+        res = client.get("/", follow_redirects=False)
+        assert res.status_code in (302, 307), res.status_code
+        assert res.headers["location"] == "/submission.html"
+        # 영구 리다이렉트는 브라우저가 캐시하므로 금지 (진입점 구조 미확정)
+        assert res.status_code not in (301, 308)
+
+        followed = client.get("/")
+        assert followed.status_code == 200
+
+
+def test_integrated_mode_has_no_root_redirect(monkeypatch):
+    """integrated는 목업을 서빙하지 않으므로 "/" 리다이렉트도 없어야 한다."""
+    monkeypatch.setenv("APP_MODE", "integrated")
+    with TestClient(create_app()) as client:
+        res = client.get("/", follow_redirects=False)
+        assert res.status_code == 404
+
+
 def test_pyodide_analysis_path_is_deleted():
     """Phase 2b: 두 구현 병존 금지(PLAN §3 공통 원칙).
 

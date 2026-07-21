@@ -12,6 +12,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.api import analyses, health
@@ -88,6 +89,13 @@ def create_app() -> FastAPI:
     # standalone: 목업 프론트 정적 서빙 (PLAN §1.5 모드 A).
     # 페이지 내부의 Pyodide·프록시 호출은 Phase 2~4에서 페이지별로 FastAPI API 호출로 교체·제거.
     if settings.app_mode == "standalone":
+        # trainee/에는 index.html이 없어 "/"가 404였다 — 목업 진입점으로 유도한다.
+        # 307(임시): 진입점 구조가 아직 확정이 아니라 브라우저에 영구 캐시시키면 안 된다.
+        # Starlette은 등록 순서대로 매칭하므로 아래 "/" 마운트보다 먼저 등록해야 한다.
+        @app.get("/", include_in_schema=False)
+        def _mockup_entrypoint() -> RedirectResponse:
+            return RedirectResponse(url="/submission.html", status_code=307)
+
         if SHARED_DIR.is_dir():
             app.mount("/shared", StaticFiles(directory=str(SHARED_DIR)), name="shared")
         if TRAINEE_DIR.is_dir():
