@@ -1,0 +1,11 @@
+{
+  "promotion_threshold": 3,
+  "suppressions": [
+    {
+      "trigger": "hardcoded_secret_pattern",
+      "matched_text": "API_KEY=\"saved-ais-key\"",
+      "status": "confirmed",
+      "confirmations": 3
+    }
+  ]
+}

@@ -34,12 +34,25 @@
 //
 // P02 has zero LLM calls (verified against cognition/two_tier_scan.py + judgment/*.py --
 // pure re/os/sys/json stdlib): no API key, no proxy, no external account needed for this
-// stage. Runs the REAL, unmodified pipeline source in-browser via Pyodide, fetched fresh
-// from raw.githubusercontent.com every run so it never drifts from the repo. The only new
+// stage. Runs the REAL, unmodified pipeline source in-browser via Pyodide. The only new
 // Python is webtool_driver.py, which just applies parameter overrides as module attribute
 // writes, then calls the real scan()/score().
+// D208: REPO_RAW_BASE used to be an absolute raw.githubusercontent.com URL pointing at
+// popixoxipop-collab/Code_reviewer_with_feedback's `main` branch -- every P02/P03 run
+// fetched this branch's own pipeline source live over the network, from a repo this team
+// doesn't own. Fixed by copying the actual cognition/judgment/feedback source this branch
+// needs into this repo (same relative layout the fetch list below already expects) and
+// pointing the base at a same-origin relative path instead.
+//   WHY: this repo's own maintainers can now update/patch that Python source directly
+//   (git blame/PR review works normally) without needing any access to, or even the
+//   continued existence of, the other team's repo -- true self-containment.
+//   COST: this branch's copy of cognition/judgment/feedback no longer auto-updates when
+//   the origin repo changes; a future upstream fix must be pulled over manually (same
+//   "update via diff" process documented in Readme.md's 이식 방법론).
+//   EXIT: to go back to always-fresh-from-origin, restore REPO_RAW_BASE to the absolute
+//   raw.githubusercontent.com URL and delete the local cognition/judgment/feedback copies.
 const P02Engine = (() => {
-  const REPO_RAW_BASE = "https://raw.githubusercontent.com/popixoxipop-collab/Code_reviewer_with_feedback/main/";
+  const REPO_RAW_BASE = "../";
   const PIPELINE_FILES = [
     "cognition/two_tier_scan.py",
     "judgment/score_findings.py",
@@ -317,7 +330,7 @@ const P02Engine = (() => {
 
   async function ensurePipelineSource(onProgress) {
     if (LabPyodide.isLoaded("p02")) return;
-    onProgress("파이프라인 원본 코드 로드 중 (raw.githubusercontent.com, repo 최신본)...");
+    onProgress("파이프라인 원본 코드 로드 중 (이 저장소 내 cognition/judgment 사본)...");
     await LabPyodide.loadFiles(pyodide, REPO_RAW_BASE, PIPELINE_FILES, "/lib", null);
     // Change #1: "webtool_driver.py" -> "../webtool_driver.py" -- this page lives in
     // trainee/, one level below the repo root the file actually sits at.

@@ -1,0 +1,14 @@
+{
+  "promotion_threshold": 3,
+  "patterns": [
+    {
+      "id": "already_global_store",
+      "regex": "저장소|localStorage",
+      "status": "candidate",
+      "confirmations": 1,
+      "sources": [
+        "cognition-isolation:authToken.js"
+      ]
+    }
+  ]
+}

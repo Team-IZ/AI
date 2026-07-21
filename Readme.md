@@ -19,6 +19,19 @@
 >   시도는 GitHub 도구 호출 없이는 질문 생성 불가), 중복 질문 재생성 시에도 이미 확보한
 >   근거를 재사용(재조회 없이), 중복 판정 시 "겹치는 이전 질문"을 직접 인용해 모델이
 >   비교하도록 개선, 저장소 정보 없음/실시간 확인 중 상태를 채팅 버블로 가시화.
+>
+> **D208 (2026-07-21, 이 브랜치 자체 변경)**: P02/P03가 매 실행마다
+> `raw.githubusercontent.com/popixoxipop-collab/Code_reviewer_with_feedback`에서 파이썬
+> 원본(`cognition/`, `judgment/`, `feedback/`)을 실시간으로 가져오던 구조를 제거했습니다.
+> 이제 그 31개 파일을 이 저장소(`feat/code_Q&A`)에 그대로 복사해두고,
+> `shared/p02-engine.js`/`shared/p03-engine.js`의 `REPO_RAW_BASE`를 절대 URL 대신
+> 상대경로(`"../"`)로 바꿔 이 저장소 자신에서 로드합니다 — 다른 팀 저장소가 사라지거나
+> private로 바뀌거나 브랜치가 정리돼도 이 브랜치는 영향받지 않습니다. 대신 원본이
+> `cognition/`/`judgment`/`feedback`을 고치면 이 사본은 자동으로 안 따라가므로, 필요하면
+> 아래 "이식 방법론"과 같은 방식으로 수동으로 다시 가져와야 합니다. Playwright로 실제
+> ZIP 제출 → Pyodide 스캔 전 과정을 구동하면서 `raw.githubusercontent.com`/
+> `api.github.com`으로 나가는 요청이 0건임을 직접 확인했습니다(요청이 발생하면 실패하도록
+> 차단 설정한 상태로 테스트).
 
 이 브랜치는 [`popixoxipop-collab/Code_reviewer_with_feedback`](https://github.com/popixoxipop-collab/Code_reviewer_with_feedback)의 Pipeline Lab(`docs/lab/`)에서 실제로 동작 중인 **P02(코드 분석) → P03(소크라틱 검증 세션) → 결과 리포트** 기능을, Team-IZ/Frontend의 실제 화면정의(`team-iz.github.io/Frontend/`, `gh-pages` 브랜치)와 동일한 UI/UX로 다시 입힌 것입니다.
 
@@ -54,6 +67,10 @@ shared/
   session-state.js    -- 페이지 간 sessionStorage 핸드오프(신규 코드, 원본엔 없음)
 prompt_manifest.json / webtool_driver.py  -- 원본에서 무수정 이식
 reference/            -- 이식 작업 중 대조용으로 둔 원본 p02-runner.js/p03-runner.js/app.js 사본
+cognition/ judgment/ feedback/  -- D208: P02/P03가 Pyodide로 실행하는 실제 파이썬 원본
+  (구조/판단 스캔, 5축 채점용 규칙, 격리 판정기, 자기수정 신호 등) 사본. 원본에서
+  무수정 이식이며, shared/p02-engine.js·p03-engine.js가 raw.githubusercontent.com 대신
+  이 저장소 자신에서(상대경로로) 읽어들입니다 -- 다른 팀 저장소에 대한 런타임 의존성 제거.
 ```
 
 ## 이식 방법론

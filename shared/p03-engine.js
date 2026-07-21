@@ -66,8 +66,15 @@
 // generation + grading are real NVIDIA calls (same manifest prompts as P01/P02). Answer
 // classification (surface/partial/defended) is NOT an LLM call -- it's the same
 // deterministic regex classifiers P02 already proved run fine in Pyodide.
+// D208: REPO_RAW_BASE (below) used to be an absolute raw.githubusercontent.com URL
+// pointing at popixoxipop-collab/Code_reviewer_with_feedback's `main` branch -- every P03
+// session fetched these classifier files live from a repo this team doesn't own. Fixed by
+// copying the actual judgment/feedback source into this repo (same relative layout
+// CLASSIFIER_FILES already expects) and pointing the base at a same-origin relative path
+// instead -- see shared/p02-engine.js's matching D208 comment for the full WHY/COST/EXIT
+// (identical reasoning, just the P03-side half of the same fix).
 const P03Engine = (() => {
-  const REPO_RAW_BASE = "https://raw.githubusercontent.com/popixoxipop-collab/Code_reviewer_with_feedback/main/";
+  const REPO_RAW_BASE = "../";
   const CLASSIFIER_FILES = [
     "judgment/isolation_classifier.py",
     "judgment/isolation_hook.py",
