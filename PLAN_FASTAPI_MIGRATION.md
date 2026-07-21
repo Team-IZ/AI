@@ -18,16 +18,21 @@
 | Phase 1 — FastAPI 골격 | `app/`(api·core·storage 레이어), 듀얼 모드(APP_MODE), 공유 API 키 인증(B1), B6 운영 파라미터, 테스트 15건(14 passed·1 xfailed) |
 | API 명세 1차 확정 | `../docs/AI-Backend_API_명세서_v0.1.md` — B1~B7 결정 반영, 엔드포인트 9개 정의 |
 | 커밋·push | `feature/fastapi-migration` 브랜치에 3커밋(`dbb45c4` vendor / `899f9c9` skeleton / `c27eb90` docs) → `Team-IZ/AI` 원격 |
+| Phase 2a — P02 분석 API | `POST /api/v1/analyses`(JSON/multipart 분기) + `GET /api/v1/analyses/{job_id}`, `app/core/`(collect·attribution·findings·analysis_job), 명세 §3.2 응답 구조 |
+| Phase 2b — submission.html 연결 | 목업 제출 페이지가 FastAPI 분석 API를 호출. 브라우저 Pyodide 경로(`shared/p02-engine.js`·`webtool_driver.py`) **삭제**. `session.html`·`result.html`에 미연결 배너 추가. 테스트 36 passed·1 skipped |
 
 ### 진행 중 / 다음 할 일
 
-**Phase 2 — P02 분석 API + submission.html 연결** ← 다음 작업. 상세는 §3.
+**Phase 3 — P03 세션 API + session.html 연결** ← 다음 작업. 상세는 §3.
 
-### 알려진 문제 (Phase 2에서 해소 예정)
+### 알려진 문제
 
-1. **standalone 목업의 제출 흐름이 현재 비동작.** `trainee/`가 `/`에 마운트돼 `shared/p02-engine.js`의 `fetch("../webtool_driver.py")`가 404. 화면은 뜨지만 분석이 안 된다. `tests/test_app_modes.py`에 `strict=True` xfail로 고정해둠 — 상태가 바뀌면 테스트가 실패로 알린다. **일부러 안 고쳤다**: Phase 2에서 Pyodide 경로를 통째로 걷어내므로 지금 고치면 폐기될 코드다.
-2. **"미연결 페이지 안내 문구" 미이행.** §3 공통 원칙에 있으나 3개 페이지 어디에도 없다. Phase 2에 포함.
+1. ~~standalone 목업의 제출 흐름 비동작~~ ✅ **해소(Phase 2b)**. Pyodide 경로를 삭제하고 FastAPI API 호출로 교체. `tests/test_app_modes.py::test_standalone_mockup_submission_flow_works`가 동작을 고정한다(기존 strict xfail은 삭제).
+2. ~~"미연결 페이지 안내 문구" 미이행~~ ✅ **해소(Phase 2b)**. `session.html`·`result.html` 상단에 `.phase-notice` 배너 추가(`shared/iz-tokens.css`).
 3. **`storage/base.py`가 명세와 3곳 불일치** — `save_findings` 시그니처가 §3.2 응답 구조와 다름, `save_grades`가 `session_id` 기준(§5.1은 `score_run_id`), `ai_usage` 저장 경로 없음. Supabase 스키마가 미결이라 Phase 5까지 보류.
+4. **분석 결과가 인메모리 job에만 있다.** standalone도 NullStore 폴백이라 서버 재시작 시 유실된다(Phase 5에서 supabase_store). 목업은 `sessionStorage`(`SessionState`)에 finding basket을 따로 들고 있어 뒤로가기 복원만 가능하다.
+5. **PARTIAL 상태의 정의가 백엔드 미확인.** 현재는 "OWN_COMMIT→TOTAL 폴백"에만 부여한다(§3.2에 조건이 열거돼 있지 않음).
+6. **목업에 `extraction_scope`/`commit_email` 입력 UI가 없다.** 페이지는 항상 `TOTAL`·`question_budget:4`로 보낸다. OWN_COMMIT 경로는 API·테스트로만 검증돼 있다.
 
 ### 브랜치 전략 (팀 결정)
 
@@ -127,7 +132,11 @@ app/
 > - 아직 연결 안 된 페이지는 "이 단계는 아직 미연결" 안내를 표시한다 — 반쯤 동작하며 조용히 이상해지는 것보다 낫다.
 > - 최종 통합 후에도 목업은 계속 살아 있다: `APP_MODE` 전환만으로 standalone/integrated를 오간다.
 
-### Phase 2 — P02 분석 API + submission.html 연결
+### Phase 2 — P02 분석 API + submission.html 연결 ✅ 완료(2026-07-20)
+> 2a: API·서비스 레이어. 2b: 목업 연결 + Pyodide 경로 삭제 + 미연결 배너.
+> 목업 폴링 주기는 명세 B6의 3초 대신 **1초** — B6의 3초는 "Spring이 네트워크 너머로 폴링"하는
+> 값이고, 목업은 같은 오리진·같은 프로세스의 인메모리 job을 폴링하며 실제 분석이 1~2초에
+> 끝나기 때문이다. **서버 코드 경로는 동일하다**(바뀌는 건 목업 페이지의 폴링 빈도뿐).
 - `POST /api/v1/analyses` (job 패턴, 202 + callback_url) / `GET /api/v1/analyses/{job_id}` — 명세서 §3 기준.
 - 파일 수집 규칙은 `p02-engine.js`의 로직(SRC_EXTS, SKIP_DIR_NAMES, .ipynb 셀 추출)을 Python으로 이관.
 - **공개 레포만 지원(B5)** — PAT 없음. ZIP은 무저장 multipart 중계(§3.3).

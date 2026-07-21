@@ -10,12 +10,13 @@
 import logging
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from app.api import health
-from app.config import Settings, get_settings
+from app.api import analyses, health
+from app.api.deps import require_internal_key
+from app.config import API_V1_PREFIX, Settings, get_settings
 from app.core import pipeline_runner
 from app.storage.base import ResultStore
 from app.storage.null_store import NullStore
@@ -76,6 +77,13 @@ def create_app() -> FastAPI:
     # 붙이지 않는다. Phase 2~4의 업무 라우터는 config.API_V1_PREFIX 아래에
     # dependencies=[Depends(require_internal_key)]와 함께 붙인다.
     app.include_router(health.router)
+
+    # 업무 라우터: B1 공유 API 키 인증을 라우터 단위로 일괄 적용한다.
+    app.include_router(
+        analyses.router,
+        prefix=API_V1_PREFIX,
+        dependencies=[Depends(require_internal_key)],
+    )
 
     # standalone: 목업 프론트 정적 서빙 (PLAN §1.5 모드 A).
     # 페이지 내부의 Pyodide·프록시 호출은 Phase 2~4에서 페이지별로 FastAPI API 호출로 교체·제거.

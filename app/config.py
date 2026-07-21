@@ -14,6 +14,17 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # (빈 라우터 파일은 만들지 않는다 — 실제 엔드포인트 구현 시 생성.)
 API_V1_PREFIX = "/api/v1"
 
+# --- 목업 전용 개발 키 (B1 후속) --------------------------------------------
+# standalone 목업 페이지가 `X-Internal-Key`로 보내는 **공개 상수**다. 비밀이 아니며
+# 소스·문서에 그대로 노출돼도 무방하다 — `app_mode == "standalone"`일 때만 통하고
+# integrated에서는 아예 조회되지 않기 때문이다(app/api/deps.py 참고).
+#
+# 환경변수로 덮어쓸 수 있게 만들지 않았다. 목업 페이지가 이 값을 하드코딩으로
+# 갖고 있어서(사용자에게 키를 입력시키지 않는다는 요구) 설정으로 흔들리면 목업이
+# 조용히 깨진다. 두 곳이 어긋나지 않는다는 것은 테스트로 고정한다
+# (tests/test_internal_auth.py::test_mockup_page_uses_the_dev_key_constant).
+STANDALONE_DEV_API_KEY = "iz-get-standalone-dev-key"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -26,10 +37,10 @@ class Settings(BaseSettings):
     app_mode: Literal["standalone", "integrated"] = "integrated"
 
     # --- B1(확정): Spring→FastAPI 서비스 간 인증 = 공유 API 키 ---
-    # Spring이 매 요청 헤더 `X-Internal-Key`에 실어 보내는 비밀 문자열.
-    # 빈 값이면 검증 비활성 — standalone 모드의 호출자는 목업 프론트라 공유 키가
-    # 없으므로 "키 미설정 = 비활성"이 자연스러운 기본값이다.
-    # integrated 배포에서는 반드시 설정해야 한다.
+    # **실제 통합용 키.** Spring이 매 요청 헤더 `X-Internal-Key`에 실어 보내는
+    # 비밀 문자열이며, 값은 아직 미정이라 기본은 빈 값이다.
+    # 빈 값이면 검증 비활성(현재 동작 유지) — 설정되면 integrated에서 강제된다.
+    # 목업이 쓰는 개발 키는 이것과 완전히 별개다(위 STANDALONE_DEV_API_KEY).
     internal_api_key: str = ""
 
     # NVIDIA LLM (Phase 3+에서 사용; Phase 1에서는 미사용)

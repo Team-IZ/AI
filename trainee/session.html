@@ -107,6 +107,13 @@
 </style>
 </head>
 <body>
+<!-- PLAN §3 공통 원칙: 아직 FastAPI에 연결되지 않은 페이지임을 명시한다.
+     Phase 3에서 세션 API(명세 §4)로 교체할 때 이 배너를 삭제한다. -->
+<div class="phase-notice" style="flex:0 0 auto;">
+  <b>이 단계는 아직 FastAPI에 연결되지 않았습니다 (Phase 3 예정)</b>
+  검증 세션 화면은 여전히 브라우저 Pyodide + 프록시 경유 LLM 호출(구 목업 경로)로 동작하며,
+  standalone 서버에서는 정상 동작하지 않습니다. 현재 FastAPI에 연결된 단계는 코드 제출·분석(P02)뿐입니다.
+</div>
 <div id="fallback" class="fallback hidden">
   <h2>세션 정보를 찾을 수 없습니다</h2>
   <p style="color:var(--c-text-2); margin-top:8px;">코드 제출 단계를 거치지 않고 이 페이지로 바로 들어왔거나, 브라우저 세션이 만료됐습니다.</p>
