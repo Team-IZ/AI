@@ -1,0 +1,553 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>코드 제출 · IZ-Get</title>
+<link rel="stylesheet" href="../shared/iz-tokens.css">
+<style>
+  .wrap { max-width: 680px; }
+  .settings { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-lg); margin-bottom: var(--sp-4); }
+  .settings > summary { list-style: none; cursor: pointer; padding: var(--sp-3) var(--sp-4); display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: 600; color: var(--c-text-2); }
+  .settings > summary::-webkit-details-marker { display: none; }
+  .settings > summary .gear { font-size: 15px; }
+  .settings[open] > summary { border-bottom: 1px solid var(--c-border); }
+  .settings .body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+  .settings .field label { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-2); margin-bottom: var(--sp-2); }
+  .settings .field input[type="text"], .settings .field input[type="password"] {
+    width: 100%; height: 38px; border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
+    padding: 0 var(--sp-3); font-size: var(--fs-sm); color: var(--c-text); background: #fff;
+  }
+  .settings .remember { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--c-text-2); }
+  .auth-status { font-size: var(--fs-xs); color: var(--c-text-3); }
+  .auth-status.ok { color: var(--c-success); }
+  .login-row { display: flex; align-items: center; gap: var(--sp-2); }
+  .login-btn, .logout-btn { border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); border-radius: var(--r-md); padding: 7px 12px; font-size: var(--fs-xs); cursor: pointer; }
+  .login-btn.hidden, .logout-btn.hidden { display: none; }
+  .login-status { font-size: var(--fs-xs); color: var(--c-text-3); }
+
+  .step { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-5); margin-bottom: var(--sp-4); }
+  .step .sh { display: flex; align-items: center; gap: var(--sp-2); font-weight: 700; margin-bottom: var(--sp-4); }
+  .step .sh .n { width: 22px; height: 22px; border-radius: 50%; background: var(--c-primary); color: #fff; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+  .row { display: flex; align-items: center; gap: var(--sp-2); }
+  .field { margin-bottom: var(--sp-3); }
+  .field label { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-2); margin-bottom: var(--sp-2); }
+  .input { width: 100%; height: 42px; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); padding: 0 var(--sp-3); font-size: var(--fs-sm); color: var(--c-text); background: #fff; }
+  .toggle { display: inline-flex; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); overflow: hidden; font-size: var(--fs-sm); margin-bottom: var(--sp-3); }
+  .toggle button { padding: 8px 16px; color: var(--c-text-2); background: #fff; border: 0; cursor: pointer; }
+  .toggle button.on { background: var(--c-primary); color: #fff; font-weight: 600; }
+  .ghost { border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); border-radius: var(--r-md); padding: 8px 12px; font-size: var(--fs-xs); cursor: pointer; }
+  .hint { font-size: var(--fs-xs); color: var(--c-text-3); margin-top: var(--sp-2); }
+  .cta { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 46px; background: var(--c-primary); color: #fff; border: 0; border-radius: var(--r-md); font-size: var(--fs-base); font-weight: 600; cursor: pointer; margin-top: var(--sp-2); }
+  .cta:disabled { opacity: .5; cursor: default; }
+  .cta.secondary-cta { background: var(--c-surface-2); color: var(--c-text); border: 1px solid var(--c-border-strong); height: 40px; margin-top: 0; }
+  .alertwarn { background: var(--c-danger-soft); border-radius: var(--r-md); padding: var(--sp-3); font-size: var(--fs-sm); color: var(--c-danger); margin-bottom: var(--sp-3); }
+  .dropzone { border: 1px dashed var(--c-border-strong); border-radius: var(--r-md); padding: var(--sp-6); text-align: center; font-size: var(--fs-sm); color: var(--c-text-2); cursor: pointer; background: var(--c-surface-2); }
+  .dropzone.drag-over { border-color: var(--c-primary); background: var(--c-primary-soft); }
+
+  .prog { display: flex; flex-direction: column; gap: var(--sp-3); }
+  .pstep { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-sm); }
+  .pstep .ic { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; flex: 0 0 auto; }
+  .pstep.done .ic { background: var(--c-success-soft); color: var(--c-success); }
+  .pstep.now .ic { background: var(--c-primary-soft); color: var(--c-primary); }
+  .pstep.wait .ic { background: #eef0f3; color: var(--c-text-3); }
+  .pstep.wait { color: var(--c-text-3); }
+  .pstep.error .ic { background: var(--c-danger-soft); color: var(--c-danger); }
+  .pstep .sub { font-size: var(--fs-xs); color: var(--c-text-3); }
+  .pstep.error .sub { color: var(--c-danger); }
+
+  .findings { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); }
+  .fcard { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-md); padding: var(--sp-4); }
+  .fcard .fid { font-family: var(--mono); font-size: var(--fs-xs); color: var(--c-text-3); margin-bottom: 4px; }
+  .fcard .ftext { font-size: var(--fs-sm); margin-bottom: var(--sp-2); }
+  .fcard .fnote { font-size: 11px; color: var(--c-text-3); }
+  .fcard .fnone { font-size: var(--fs-xs); color: var(--c-text-3); }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; }
+  .badge.warn { background: var(--c-warning-soft); color: var(--c-warning); }
+
+  /* 분석 범위 요약 (§3.2 applied_scope / scope_fallback / attribution) */
+  .scope-info { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-md); padding: var(--sp-3) var(--sp-4); margin-bottom: var(--sp-3); font-size: var(--fs-sm); }
+  .scope-info.fallback { background: var(--c-warning-soft); border-color: var(--c-warning); }
+  .scope-info .si-head { font-weight: 600; margin-bottom: 4px; }
+  .scope-info .si-sub { font-size: var(--fs-xs); color: var(--c-text-3); }
+  .scope-info.fallback .si-sub { color: var(--c-warning); }
+  .scope-info .si-files { font-family: var(--mono); font-size: 11px; color: var(--c-text-3); margin-top: 4px; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="tapp">
+  <div class="ttop">
+    <div class="l"><div class="brand"><span class="mk">◆</span>IZ-Get 검증 파이프랩</div><div class="tnav"><a class="on">코드 제출</a></div></div>
+    <div class="r"><span id="user-indicator">-</span></div>
+  </div>
+  <div class="wrap">
+    <details class="settings" id="settings-panel">
+      <summary><span class="gear">⚙</span> 연결 설정 <span class="auth-status" id="auth-status" style="margin-left:auto;"></span></summary>
+      <div class="body">
+        <div class="field"><label>NVIDIA API 키 (P03 검증 세션에서 사용)</label><input type="password" id="nvidia-key" placeholder="nvapi-..."></div>
+        <div class="field"><label>프록시 URL</label><input type="text" id="proxy-url"></div>
+        <div class="field"><label>GitHub PAT (현재 미사용 — 공개 저장소만 지원)</label><input type="password" id="github-pat" placeholder="ghp_..."></div>
+        <label class="remember"><input type="checkbox" id="remember-session" checked> 이 탭에서 기억하기(다음 페이지로 넘어갈 때 필요)</label>
+        <div class="login-row">
+          <button class="login-btn hidden" id="google-login-btn" type="button">Google로 로그인</button>
+          <button class="logout-btn hidden" id="logout-btn" type="button">로그아웃</button>
+          <span class="login-status" id="login-status"></span>
+        </div>
+      </div>
+    </details>
+
+    <div class="step" id="step-submit">
+      <div class="sh"><span class="n">1</span> 코드 제출</div>
+      <div class="toggle" id="method-toggle">
+        <button type="button" class="on" data-method="pat">GitHub URL</button>
+        <button type="button" data-method="zip">ZIP</button>
+      </div>
+
+      <div id="method-pat">
+        <div class="field"><label>저장소</label><input class="input" type="text" id="repo-input" placeholder="owner/repo 또는 https://github.com/owner/repo"></div>
+        <div class="field"><label>브랜치 (선택)</label><input class="input" type="text" id="branch-input" placeholder="비우면 기본 브랜치"></div>
+        <div class="hint">공개 저장소만 지원합니다(B5). 서버가 해당 저장소를 clone해 분석하며, PAT은 사용하지 않습니다.</div>
+      </div>
+      <div id="method-zip" class="hidden">
+        <div class="dropzone" id="dropzone">여기로 .zip 파일을 드래그하거나 클릭해서 선택</div>
+        <input type="file" id="zip-input" accept=".zip" class="hidden">
+        <div class="hint" id="zip-status"></div>
+      </div>
+
+      <!-- §3.1 extraction_scope. OWN_COMMIT은 "본인 기여분만 분석"(프리라이더 판별)
+           경로라 목업에서도 실제로 태워볼 수 있어야 한다. -->
+      <div class="field" style="margin-top: var(--sp-4);">
+        <label>추출 범위</label>
+        <div class="toggle" id="scope-toggle">
+          <button type="button" class="on" data-scope="TOTAL">전체 코드</button>
+          <button type="button" data-scope="OWN_COMMIT">본인 커밋 기여분</button>
+        </div>
+        <div id="commit-email-wrap" class="hidden">
+          <label>커밋 이메일</label>
+          <input class="input" type="text" id="commit-email-input" placeholder="git 커밋 author 이메일 (예: trainee@example.com)">
+          <div class="hint">
+            해당 이메일 명의의 커밋이 건드린 파일만 분석합니다(§3.1 <code>commit_email</code>, OWN_COMMIT일 때 필수).<br>
+            GitHub URL 제출은 clone한 <code>.git</code> 이력을 씁니다. ZIP 제출은 <code>.git</code> 폴더를 포함하거나
+            <code>commits.txt</code>·<code>changed_files.txt</code> export를 동봉해야 하며, 둘 다 없으면 전체 코드로 폴백됩니다(B5).
+          </div>
+        </div>
+      </div>
+
+      <div id="submit-error" class="hidden"></div>
+      <button class="cta" id="submit-btn">제출하기</button>
+    </div>
+
+    <div class="step hidden" id="step-progress">
+      <div class="sh"><span class="n" id="progress-n">✓</span> 분석 진행</div>
+      <div class="prog" id="prog-list">
+        <div class="pstep wait" data-key="submit"><span class="ic">•</span><div>분석 요청 전송<div class="sub"></div></div></div>
+        <div class="pstep wait" data-key="queue"><span class="ic">•</span><div>분석 접수 대기<div class="sub"></div></div></div>
+        <div class="pstep wait" data-key="scan"><span class="ic">•</span><div>구조/판단 스캔 실행<div class="sub"></div></div></div>
+        <div class="pstep wait" data-key="result"><span class="ic">•</span><div>결과 수신<div class="sub"></div></div></div>
+      </div>
+    </div>
+
+    <div class="step hidden" id="step-findings">
+      <div class="sh"><span class="n">✓</span> finding <span id="finding-count">0</span>건</div>
+      <div id="scope-summary" class="hidden"></div>
+      <div class="findings" id="findings-list"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Phase 2b: 브라우저 Pyodide 분석 경로(pyodide.js / jszip / pyodide-shared.js /
+     p02-engine.js)를 전부 제거했다. 이 페이지는 이제 FastAPI 분석 API(명세 §3)만
+     호출한다 — ZIP 해제·스캔은 서버가 한다. config.js/db.js는 연결 설정 패널과
+     로그인 표시에만 쓰이므로 그대로 둔다. -->
+<script src="../shared/config.js"></script>
+<script src="../shared/db.js"></script>
+<script src="../shared/session-state.js"></script>
+<script>
+(function () {
+  // --- FastAPI 분석 API (명세 §3) -------------------------------------------
+  // 이 페이지는 FastAPI가 standalone 모드에서 같은 오리진으로 서빙하므로 상대 경로다.
+  const API_BASE = "/api/v1";
+  // 명세 B6의 폴링 주기는 3초지만 그건 "Spring이 네트워크 너머로 폴링할 때"의 값이다.
+  // standalone 목업은 같은 프로세스의 인메모리 job을 같은 오리진에서 폴링하고,
+  // 실제 분석은 소규모 레포에서 1~2초에 끝난다 -- 3초면 대기의 대부분이 폴링 간격
+  // 자체가 된다. 서버 부하가 사실상 없는 로컬 목업이므로 1초로 줄인다.
+  // (서버 코드 경로는 동일하다. 바뀌는 건 이 페이지의 폴링 빈도뿐이다.)
+  const POLL_INTERVAL_MS = 1000;
+  // B6의 최대 대기(15분)는 그대로 따른다.
+  const POLL_TIMEOUT_MS = 15 * 60 * 1000;
+
+  // 목업 전용 개발 키(B1 후속). 비밀이 아니라 **공개 상수**이며, 서버가
+  // APP_MODE=standalone일 때만 받아준다 — integrated에서는 이 값이 아예 비교
+  // 대상이 아니라서 프로덕션 인증을 우회할 수 없다(app/api/deps.py).
+  // 그래서 사용자에게 키를 입력받지 않고 여기 하드코딩한다.
+  // 값은 app/config.py의 STANDALONE_DEV_API_KEY와 일치해야 하며,
+  // 어긋나지 않는다는 것은 tests/test_internal_auth.py가 고정한다.
+  const DEV_API_KEY = "iz-get-standalone-dev-key";
+  const AUTH_HEADERS = { "X-Internal-Key": DEV_API_KEY };
+
+  let currentMethod = "pat";
+  let currentScope = "TOTAL";
+  let zipFile = null;
+
+  document.getElementById("method-toggle").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-method]");
+    if (!btn) return;
+    currentMethod = btn.dataset.method;
+    document.querySelectorAll("#method-toggle button").forEach((b) => b.classList.toggle("on", b === btn));
+    document.getElementById("method-pat").classList.toggle("hidden", currentMethod !== "pat");
+    document.getElementById("method-zip").classList.toggle("hidden", currentMethod !== "zip");
+  });
+
+  // 추출 범위 토글. OWN_COMMIT일 때만 커밋 이메일 입력을 노출한다(§3.1 필수 조건).
+  document.getElementById("scope-toggle").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-scope]");
+    if (!btn) return;
+    currentScope = btn.dataset.scope;
+    document.querySelectorAll("#scope-toggle button").forEach((b) => b.classList.toggle("on", b === btn));
+    document.getElementById("commit-email-wrap").classList.toggle("hidden", currentScope !== "OWN_COMMIT");
+  });
+
+  const dropzone = document.getElementById("dropzone");
+  const zipInput = document.getElementById("zip-input");
+  const zipStatus = document.getElementById("zip-status");
+  dropzone.addEventListener("click", () => zipInput.click());
+  dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("drag-over"); });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag-over"));
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) handleZip(e.dataTransfer.files[0]);
+  });
+  zipInput.addEventListener("change", () => {
+    if (zipInput.files[0]) handleZip(zipInput.files[0]);
+  });
+
+  // Phase 2b: ZIP은 더 이상 브라우저에서 풀지 않는다. 명세 §3.3의 무저장 중계
+  // 스트리밍대로 파일을 그대로 multipart로 올리고, 해제·필터링은 서버가 한다.
+  function handleZip(file) {
+    zipFile = file;
+    const mb = (file.size / (1024 * 1024)).toFixed(1);
+    zipStatus.textContent = `선택됨: ${file.name} (${mb}MB) — 제출하면 서버가 해제·분석합니다.`;
+  }
+
+  function showError(msg) {
+    const el = document.getElementById("submit-error");
+    el.textContent = msg;
+    el.className = msg ? "alertwarn" : "hidden";
+  }
+
+  function progSub(key, text) {
+    const el = document.querySelector(`.pstep[data-key="${key}"] .sub`);
+    if (el) el.textContent = text;
+  }
+  const PROG_ICON = { done: "✓", now: "◔", wait: "•", error: "✕" };
+  function progState(key, state) {
+    const el = document.querySelector(`.pstep[data-key="${key}"]`);
+    if (!el) return;
+    el.className = `pstep ${state}`;
+    const ic = el.querySelector(".ic");
+    if (ic) ic.textContent = PROG_ICON[state] || "•";
+  }
+  // 서버 job 상태(§3.2)를 체크리스트 4단계에 매핑한다. 서버는 QUEUED/ANALYZING/
+  // READY/PARTIAL/FAILED만 알려주므로(중간 단계 progress 스트림 없음) 이게 표현
+  // 가능한 최대 해상도다.
+  function applyJobStatus(status) {
+    if (status === "QUEUED") {
+      progState("submit", "done"); progState("queue", "now"); progSub("queue", "서버가 분석 job을 접수했습니다.");
+    } else if (status === "ANALYZING") {
+      progState("submit", "done"); progState("queue", "done");
+      progState("scan", "now"); progSub("scan", "구조/판단 스캔 실행 중 (서버, 원본 파이프라인 코드)...");
+    } else if (status === "READY" || status === "PARTIAL") {
+      ["submit", "queue", "scan"].forEach((k) => progState(k, "done"));
+      progState("result", "done"); progSub("result", "분석 결과를 받았습니다.");
+    }
+  }
+
+  // §2 공통 에러 형식: {"detail": {"error": {code, message, retryable}}}
+  async function errorMessage(res) {
+    if (res.status === 401) {
+      // 목업은 개발 키를 보낸다. 그게 거부됐다면 서버가 standalone이 아니라는 뜻이다
+      // (개발 키는 standalone 전용 — app/api/deps.py).
+      return "인증에 막혔습니다. 이 목업은 standalone 전용 개발 키로 호출하므로 "
+        + "서버가 APP_MODE=standalone으로 떠 있어야 합니다 (.\\run_standalone.ps1). "
+        + "integrated 모드에서는 실제 INTERNAL_API_KEY가 필요합니다.";
+    }
+    try {
+      const body = await res.json();
+      const err = (body.detail && body.detail.error) || body.error;
+      if (err) return `${err.code}: ${err.message}`;
+      return `HTTP ${res.status}`;
+    } catch (e) {
+      return `HTTP ${res.status}`;
+    }
+  }
+
+  // "owner/repo" 축약형을 §3.1이 요구하는 전체 URL로 편다.
+  function normalizeRepoUrl(raw) {
+    const v = (raw || "").trim().replace(/\.git$/, "").replace(/\/+$/, "");
+    if (!v) return "";
+    if (/^https?:\/\//i.test(v)) return v;
+    return `https://github.com/${v.replace(/^\/+/, "")}`;
+  }
+
+  async function postAnalysis() {
+    const base = { extraction_scope: currentScope, question_budget: 4 };
+    if (currentScope === "OWN_COMMIT") {
+      const email = document.getElementById("commit-email-input").value.trim();
+      // 서버도 422로 막지만(§3.1), 왕복 없이 여기서 먼저 안내한다.
+      if (!email) throw new Error("본인 커밋 기여분을 분석하려면 커밋 이메일을 입력하세요.");
+      base.commit_email = email;
+    }
+    if (currentMethod === "pat") {
+      const repoUrl = normalizeRepoUrl(document.getElementById("repo-input").value);
+      if (!repoUrl) throw new Error("저장소 주소를 입력하세요.");
+      const branch = document.getElementById("branch-input").value.trim();
+      return fetch(`${API_BASE}/analyses`, {
+        method: "POST",
+        headers: { ...AUTH_HEADERS, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...base,
+          method: "GITHUB_URL",
+          source: { repo_url: repoUrl, branch: branch || null },
+        }),
+      });
+    }
+    if (!zipFile) throw new Error("ZIP 파일을 선택하세요.");
+    // §3.3: ZIP은 JSON 본문이 아니라 multipart로 중계한다 (폼 필드 payload + file).
+    const form = new FormData();
+    form.append("payload", JSON.stringify({ ...base, method: "ZIP_WITH_GITLOG" }));
+    form.append("file", zipFile, zipFile.name);
+    return fetch(`${API_BASE}/analyses`, { method: "POST", headers: AUTH_HEADERS, body: form });
+  }
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  async function pollJob(jobId) {
+    const deadline = Date.now() + POLL_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const res = await fetch(`${API_BASE}/analyses/${encodeURIComponent(jobId)}`, { headers: AUTH_HEADERS });
+      if (!res.ok) throw new Error(await errorMessage(res));
+      const body = await res.json();
+      applyJobStatus(body.status);
+      if (body.status === "READY" || body.status === "PARTIAL" || body.status === "FAILED") return body;
+      await sleep(POLL_INTERVAL_MS);
+    }
+    throw new Error(`분석이 ${POLL_TIMEOUT_MS / 60000}분 안에 끝나지 않았습니다.`);
+  }
+
+  document.getElementById("submit-btn").addEventListener("click", async () => {
+    showError("");
+    document.getElementById("step-progress").classList.remove("hidden");
+    document.getElementById("step-findings").classList.add("hidden");
+    document.getElementById("submit-btn").disabled = true;
+    document.querySelectorAll(".pstep").forEach((el) => { el.className = "pstep wait"; el.querySelector(".sub").textContent = ""; });
+
+    try {
+      progState("submit", "now");
+      progSub("submit", currentMethod === "zip" ? "ZIP 업로드 중..." : "분석 요청 전송 중...");
+      const res = await postAnalysis();
+      if (!res.ok) throw new Error(await errorMessage(res));
+      const accepted = await res.json();  // §3.1: 202 {job_id, status:"QUEUED"}
+      applyJobStatus(accepted.status || "QUEUED");
+
+      const body = await pollJob(accepted.job_id);
+      if (body.status === "FAILED") {
+        const err = body.error || {};
+        let msg = `${body.failure_reason || "FAILED"}: ${err.message || "분석에 실패했습니다."}`;
+        if (body.failure_reason === "ATTRIBUTION_REQUIRED") {
+          // MEAS-02A A-1: 커밋 로그는 있는데 그 이메일 명의의 커밋이 0건.
+          msg += " — 커밋 로그는 찾았지만 입력한 이메일 명의의 커밋이 없습니다."
+            + " 이메일을 확인하거나(git log의 author 이메일과 동일해야 합니다) 전체 코드로 제출하세요.";
+        }
+        throw new Error(msg);
+      }
+
+      // §3.2 applied_scope/scope_fallback/attribution을 화면에 남긴다 — 이게 없으면
+      // 사용자는 "본인 커밋만 분석됐는지"를 알 수 없다.
+      renderScopeSummary(body);
+
+      const basket = buildFindingsBasket(body);
+      const saved = SessionState.saveFindingsList(basket);
+      if (!saved.ok) console.error("findings list save failed (뒤로가기 restore won't work this run):", saved.error);
+      renderFindingsFromBasket(basket);
+    } catch (err) {
+      console.error(err);
+      showError(`오류: ${err.message}`);
+      const failing = document.querySelector(".pstep.now");
+      if (failing) { progState(failing.dataset.key, "error"); progSub(failing.dataset.key, err.message); }
+    } finally {
+      document.getElementById("submit-btn").disabled = false;
+    }
+  });
+
+  // §3.2 응답 finding을 화면·핸드오프가 쓰는 basket 형태로 옮긴다.
+  // 화면 구조는 그대로 두고 데이터 출처만 바뀌었다: 예전에는 브라우저가 들고 있던
+  // 전체 소스맵에서 코드 컨텍스트를 잘라냈지만, 이제는 서버가 code_context를
+  // 이미 잘라 보내준다(§3.3 파편 저장 원칙) -- 그래서 파일 연결 해석 로직이 여기서
+  // 사라지고, 서버가 고른 발췌 1건을 그대로 싣는다.
+  function buildFindingsBasket(body) {
+    const result = body.result || { findings: [] };
+    return (result.findings || []).map((f) => ({
+      finding: {
+        id: f.finding_id,
+        priority: f.priority,
+        finding: f.summary,
+        file: f.source_path,
+        line_start: f.line_start,
+        line_end: f.line_end,
+        evidence_hash: f.evidence_hash,
+      },
+      codeContexts: f.code_context ? [{ path: f.code_context.path, content: f.code_context.snippet }] : [],
+      viaText: false,
+      totalPaths: f.code_context ? 1 : 0,
+      // Phase 3의 세션 API가 어떤 분석 job의 어떤 finding인지 참조할 수 있게 함께 넘긴다.
+      jobId: body.job_id,
+      findingId: f.finding_id,
+    }));
+  }
+
+  // §3.2의 범위·귀속 정보를 사람이 읽을 수 있게 요약한다.
+  // 표시 대상: applied_scope(실제 적용된 범위), scope_fallback/fallback_reason
+  // (OWN_COMMIT→TOTAL 폴백, MEAS-02A A-2), attribution(귀속 커밋 수·검증 상태).
+  const FALLBACK_TEXT = {
+    NO_COMMIT_LOG: "커밋 이력을 찾지 못했습니다 (.git 폴더도 git log export도 없음)",
+    NO_ATTRIBUTED_SOURCE_FILES: "본인 커밋이 건드린 파일 중 분석 가능한 소스가 없었습니다",
+  };
+  const VERIFICATION_TEXT = {
+    VERIFIED: "VERIFIED — 서버가 .git 이력을 직접 파싱했습니다",
+    UNVERIFIED: "UNVERIFIED — 제출자가 만든 텍스트 export라 위변조를 검증할 수 없습니다",
+  };
+
+  function renderScopeSummary(body) {
+    const el = document.getElementById("scope-summary");
+    const result = body.result || {};
+    const scope = result.applied_scope || "TOTAL";
+    const fallback = result.scope_fallback === true;
+    el.className = fallback ? "scope-info fallback" : "scope-info";
+    el.innerHTML = "";
+
+    const head = document.createElement("div");
+    head.className = "si-head";
+    head.textContent = scope === "OWN_COMMIT"
+      ? "분석 범위: 본인 커밋 기여분 (OWN_COMMIT)"
+      : "분석 범위: 전체 코드 (TOTAL)";
+    el.appendChild(head);
+
+    if (fallback) {
+      const sub = document.createElement("div");
+      sub.className = "si-sub";
+      sub.textContent = `본인 커밋 기여분으로 요청했지만 전체 코드로 폴백했습니다 — `
+        + (FALLBACK_TEXT[result.fallback_reason] || result.fallback_reason || "사유 미상");
+      el.appendChild(sub);
+    }
+
+    const att = result.attribution;
+    if (att) {
+      const sub = document.createElement("div");
+      sub.className = "si-sub";
+      const files = att.attributed_files || [];
+      sub.textContent = `귀속 커밋 ${att.commit_count}건 · 변경 파일 ${files.length}개 · `
+        + (VERIFICATION_TEXT[att.verification_status] || att.verification_status || "검증 상태 미상");
+      el.appendChild(sub);
+      if (files.length) {
+        const list = document.createElement("div");
+        list.className = "si-files";
+        // 전부 나열하면 길어지므로 앞부분만 보여준다.
+        const shown = files.slice(0, 12);
+        list.textContent = shown.join(", ") + (files.length > shown.length ? ` 외 ${files.length - shown.length}개` : "");
+        el.appendChild(list);
+      }
+    }
+
+    if (result.commit_sha) {
+      const sub = document.createElement("div");
+      sub.className = "si-sub";
+      // §3.3: GITHUB_URL 제출의 재현·복원 기준점
+      sub.textContent = `분석 시점 커밋: ${result.commit_sha}`;
+      el.appendChild(sub);
+    }
+  }
+
+  function renderFindingsFromBasket(basket) {
+    document.getElementById("step-findings").classList.remove("hidden");
+    document.getElementById("finding-count").textContent = basket.length;
+    const list = document.getElementById("findings-list");
+    list.innerHTML = "";
+    if (basket.length === 0) {
+      list.innerHTML = `<div class="fcard"><div class="fnone">이번 실행에서는 finding이 나오지 않았습니다.</div></div>`;
+      return;
+    }
+    basket.forEach((item) => {
+      const f = item.finding;
+      const card = document.createElement("div");
+      card.className = "fcard";
+      const idEl = document.createElement("div"); idEl.className = "fid";
+      // D194: rank/rank_score come from judgment/importance_rank.py -- always present on a
+      // fresh scan (this page never shows historical Supabase-stored findings), so no
+      // fallback text needed here; f.rank != null guard is just cheap defensive style.
+      const rankBadge = f.rank != null ? `#${f.rank} (${f.rank_score}점) · ` : "";
+      idEl.textContent = `${rankBadge}${f.id || ""} · ${f.priority || ""}`;
+      const textEl = document.createElement("div"); textEl.className = "ftext"; textEl.textContent = f.finding || "";
+      card.appendChild(idEl); card.appendChild(textEl);
+      if (item.codeContexts.length === 0) {
+        const none = document.createElement("div"); none.className = "fnone"; none.textContent = "코드 컨텍스트 없음 — 언급된 파일도 로드된 파일 중에 없어 인터뷰 연결 불가";
+        card.appendChild(none);
+      } else {
+        const btn = document.createElement("button"); btn.className = "cta secondary-cta"; btn.style.width = "auto"; btn.textContent = "검증 세션 시작 →";
+        btn.addEventListener("click", () => startInterview(item));
+        card.appendChild(btn);
+        if (item.viaText) {
+          const omitted = item.totalPaths - item.codeContexts.length;
+          const note = document.createElement("div"); note.className = "fnote";
+          note.textContent = `finding에 언급된 파일 ${item.codeContexts.length}개 코드 포함${omitted > 0 ? `, ${omitted}개는 길이 제한으로 제외` : ""}`;
+          card.appendChild(note);
+        }
+      }
+      list.appendChild(card);
+    });
+  }
+
+  // D178: one click, no separate confirm step -- matches the original connector's
+  // auto-run decision, just re-expressed as "navigate straight to session.html" instead
+  // of "call P03Runner.run() in the same page".
+  function startInterview(item) {
+    const saved = SessionState.saveSubmission({ finding: item.finding, codeContexts: item.codeContexts });
+    if (!saved.ok) { showError(`세션 데이터 저장 실패: ${saved.error.message}`); return; }
+    window.location.href = "session.html";
+  }
+
+  async function renderUserIndicator() {
+    const el = document.getElementById("user-indicator");
+    const user = await LabDB.currentMemberOrNull();
+    el.textContent = user ? user.email : "미로그인";
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    // Phase 2b: LabApp.loadManifest() 호출을 제거했다. 파이프라인 파라미터
+    // 오버라이드는 브라우저 Pyodide 실행에만 필요했고 이제 서버가 담당한다.
+    // (부수 효과로 standalone에서 `../prompt_manifest.json`이 404라 이 await가
+    //  throw하며 아래 초기화가 통째로 중단되던 문제도 사라진다.)
+    document.getElementById("proxy-url").placeholder = "https://...";
+    // Trigger config.js's own persistIfRemembered() path (unmodified) so the
+    // default-checked "remember" box actually persists across the session.html
+    // navigation -- see shared/README notes. Only fires once, if nothing was already
+    // remembered from a prior visit this tab.
+    const rememberBox = document.getElementById("remember-session");
+    if (rememberBox && rememberBox.checked && !sessionStorage.getItem("lab_cfg_remember")) {
+      rememberBox.dispatchEvent(new Event("change"));
+    }
+    renderUserIndicator();
+
+    // 뒤로가기 restore: session.html (or result.html) navigating back here should show
+    // the same finding list the user left, not a blank upload form. The "코드 제출" step
+    // stays visible too (not hidden) -- submitting a new scan overwrites FINDINGS_KEY the
+    // normal way (see buildFindingsBasket/saveFindingsList above), so starting fresh
+    // still works exactly as before, this only adds a path that skips re-scanning when
+    // the user just wants a different finding from the same run.
+    const restored = SessionState.loadFindingsList();
+    if (restored) renderFindingsFromBasket(restored);
+  });
+})();
+</script>
+</body>
+</html>

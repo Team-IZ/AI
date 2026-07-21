@@ -1,21 +1,53 @@
-# Virtual Environment
-.venv/
-
 # Python
 __pycache__/
 *.py[cod]
-*.pyo
+*$py.class
+.Python
+.venv/
+venv/
+env/
+*.egg-info/
+.eggs/
+build/
+dist/
 
-# Environment variables
+# Env — .env.example만 커밋한다(값은 전부 비어 있어야 함)
 .env
+.env.*
+!.env.example
 
-# IDE
-.vscode/
-.idea/
+# 분석 작업공간 (명세 §3.3: 코드 원문 무저장)
+# 기본값은 OS 임시 디렉터리라 보통 여기 안 생기지만, WORKSPACE_DIR을 레포 안으로
+# 잡으면 clone된 레포·수백 MB ZIP이 통째로 스테이징된다. 방어용.
+workspace/
+uploads/
+*.zip
+
+# Test / runtime artifacts
+.pytest_cache/
+feedback_log.jsonl
+*.log
+
+# 린터·타입체커 캐시
+.ruff_cache/
+.mypy_cache/
+
+# 커버리지 산출물
+.coverage
+htmlcov/
+
+# 로컬 DB 파일 — Phase 5에서 standalone 저장 계층을 붙이면 생길 수 있다. 사전 방어.
+*.sqlite3
+*.db
 
 # OS
 .DS_Store
 Thumbs.db
 
-# AI Assistant
+# Editor
+.vscode/
+.idea/
+
+# Claude Code
+.claude/
 CLAUDE.md

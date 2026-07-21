@@ -1,0 +1,15 @@
+{
+  "promotion_threshold": 2,
+  "patterns": [
+    {
+      "id": "delegated_to_child",
+      "regex": "위임|컴포넌트.*충분",
+      "status": "confirmed",
+      "confirmations": 2,
+      "sources": [
+        "cognition-isolation:BookDetail.jsx",
+        "cognition-isolation:BookList.jsx"
+      ]
+    }
+  ]
+}

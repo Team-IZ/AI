@@ -1,0 +1,8 @@
+{
+  "weights": {
+    "question_value": 1.0,
+    "risk": 1.0,
+    "design_intent": 1.0
+  },
+  "provenance": "provisional-equal (D194) -- benchmarks/judgment_precision_labels.jsonl labeler sprint not yet run; see benchmarks/fit_rank_weights.py (Phase 2, not yet written) for how this gets recalibrated"
+}

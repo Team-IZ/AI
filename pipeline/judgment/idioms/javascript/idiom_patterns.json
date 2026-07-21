@@ -1,0 +1,17 @@
+{
+  "promotion_threshold": 3,
+  "patterns": [
+    {
+      "id": "react-context-global-state",
+      "description": "컴포넌트 6개 규모에서 Context는 React 관용 패턴, 진짜 설계판단 아님",
+      "status": "confirmed",
+      "confirmations": 9
+    },
+    {
+      "id": "react-query-custom-hook",
+      "description": "",
+      "status": "confirmed",
+      "confirmations": 18
+    }
+  ]
+}
