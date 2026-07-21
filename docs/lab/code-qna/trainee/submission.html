@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>코드 제출 · IZ-Get</title>
+<link rel="stylesheet" href="../shared/iz-tokens.css">
+<style>
+  .wrap { max-width: 680px; }
+  .settings { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-lg); margin-bottom: var(--sp-4); }
+  .settings > summary { list-style: none; cursor: pointer; padding: var(--sp-3) var(--sp-4); display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: 600; color: var(--c-text-2); }
+  .settings > summary::-webkit-details-marker { display: none; }
+  .settings > summary .gear { font-size: 15px; }
+  .settings[open] > summary { border-bottom: 1px solid var(--c-border); }
+  .settings .body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+  .settings .field label { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-2); margin-bottom: var(--sp-2); }
+  .settings .field input[type="text"], .settings .field input[type="password"] {
+    width: 100%; height: 38px; border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
+    padding: 0 var(--sp-3); font-size: var(--fs-sm); color: var(--c-text); background: #fff;
+  }
+  .settings .remember { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--c-text-2); }
+  .auth-status { font-size: var(--fs-xs); color: var(--c-text-3); }
+  .auth-status.ok { color: var(--c-success); }
+  .login-row { display: flex; align-items: center; gap: var(--sp-2); }
+  .login-btn, .logout-btn { border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); border-radius: var(--r-md); padding: 7px 12px; font-size: var(--fs-xs); cursor: pointer; }
+  .login-btn.hidden, .logout-btn.hidden { display: none; }
+  .login-status { font-size: var(--fs-xs); color: var(--c-text-3); }
+
+  .step { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-5); margin-bottom: var(--sp-4); }
+  .step .sh { display: flex; align-items: center; gap: var(--sp-2); font-weight: 700; margin-bottom: var(--sp-4); }
+  .step .sh .n { width: 22px; height: 22px; border-radius: 50%; background: var(--c-primary); color: #fff; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; }
+  .row { display: flex; align-items: center; gap: var(--sp-2); }
+  .field { margin-bottom: var(--sp-3); }
+  .field label { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-2); margin-bottom: var(--sp-2); }
+  .input { width: 100%; height: 42px; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); padding: 0 var(--sp-3); font-size: var(--fs-sm); color: var(--c-text); background: #fff; }
+  .toggle { display: inline-flex; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); overflow: hidden; font-size: var(--fs-sm); margin-bottom: var(--sp-3); }
+  .toggle button { padding: 8px 16px; color: var(--c-text-2); background: #fff; border: 0; cursor: pointer; }
+  .toggle button.on { background: var(--c-primary); color: #fff; font-weight: 600; }
+  .ghost { border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); border-radius: var(--r-md); padding: 8px 12px; font-size: var(--fs-xs); cursor: pointer; }
+  .hint { font-size: var(--fs-xs); color: var(--c-text-3); margin-top: var(--sp-2); }
+  .cta { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 46px; background: var(--c-primary); color: #fff; border: 0; border-radius: var(--r-md); font-size: var(--fs-base); font-weight: 600; cursor: pointer; margin-top: var(--sp-2); }
+  .cta:disabled { opacity: .5; cursor: default; }
+  .cta.secondary-cta { background: var(--c-surface-2); color: var(--c-text); border: 1px solid var(--c-border-strong); height: 40px; margin-top: 0; }
+  .alertwarn { background: var(--c-danger-soft); border-radius: var(--r-md); padding: var(--sp-3); font-size: var(--fs-sm); color: var(--c-danger); margin-bottom: var(--sp-3); }
+  .dropzone { border: 1px dashed var(--c-border-strong); border-radius: var(--r-md); padding: var(--sp-6); text-align: center; font-size: var(--fs-sm); color: var(--c-text-2); cursor: pointer; background: var(--c-surface-2); }
+  .dropzone.drag-over { border-color: var(--c-primary); background: var(--c-primary-soft); }
+
+  .prog { display: flex; flex-direction: column; gap: var(--sp-3); }
+  .pstep { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-sm); }
+  .pstep .ic { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; flex: 0 0 auto; }
+  .pstep.done .ic { background: var(--c-success-soft); color: var(--c-success); }
+  .pstep.now .ic { background: var(--c-primary-soft); color: var(--c-primary); }
+  .pstep.wait .ic { background: #eef0f3; color: var(--c-text-3); }
+  .pstep.wait { color: var(--c-text-3); }
+  .pstep.error .ic { background: var(--c-danger-soft); color: var(--c-danger); }
+  .pstep .sub { font-size: var(--fs-xs); color: var(--c-text-3); }
+  .pstep.error .sub { color: var(--c-danger); }
+
+  .findings { display: flex; flex-direction: column; gap: var(--sp-3); margin-top: var(--sp-3); }
+  .fcard { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-md); padding: var(--sp-4); }
+  .fcard .fid { font-family: var(--mono); font-size: var(--fs-xs); color: var(--c-text-3); margin-bottom: 4px; }
+  .fcard .ftext { font-size: var(--fs-sm); margin-bottom: var(--sp-2); }
+  .fcard .fnote { font-size: 11px; color: var(--c-text-3); }
+  .fcard .fnone { font-size: var(--fs-xs); color: var(--c-text-3); }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; }
+  .badge.warn { background: var(--c-warning-soft); color: var(--c-warning); }
+</style>
+</head>
+<body>
+<div class="tapp">
+  <div class="ttop">
+    <div class="l"><div class="brand"><span class="mk">◆</span>IZ-Get 검증 파이프랩</div><div class="tnav"><a class="on">코드 제출</a></div></div>
+    <div class="r"><span id="user-indicator">-</span></div>
+  </div>
+  <div class="wrap">
+    <details class="settings" id="settings-panel">
+      <summary><span class="gear">⚙</span> 연결 설정 <span class="auth-status" id="auth-status" style="margin-left:auto;"></span></summary>
+      <div class="body">
+        <div class="field"><label>NVIDIA API 키 (P03 검증 세션에서 사용)</label><input type="password" id="nvidia-key" placeholder="nvapi-..."></div>
+        <div class="field"><label>프록시 URL</label><input type="text" id="proxy-url"></div>
+        <div class="field"><label>GitHub PAT (비공개 저장소만 필요)</label><input type="password" id="github-pat" placeholder="ghp_..."></div>
+        <label class="remember"><input type="checkbox" id="remember-session" checked> 이 탭에서 기억하기(다음 페이지로 넘어갈 때 필요)</label>
+        <div class="login-row">
+          <button class="login-btn hidden" id="google-login-btn" type="button">Google로 로그인</button>
+          <button class="logout-btn hidden" id="logout-btn" type="button">로그아웃</button>
+          <span class="login-status" id="login-status"></span>
+        </div>
+      </div>
+    </details>
+
+    <div class="step" id="step-submit">
+      <div class="sh"><span class="n">1</span> 코드 제출</div>
+      <div class="toggle" id="method-toggle">
+        <button type="button" class="on" data-method="pat">GitHub URL</button>
+        <button type="button" data-method="zip">ZIP</button>
+      </div>
+
+      <div id="method-pat">
+        <div class="field"><label>저장소</label><input class="input" type="text" id="repo-input" placeholder="owner/repo 또는 https://github.com/owner/repo"></div>
+        <div class="field"><label>브랜치 (선택)</label><input class="input" type="text" id="branch-input" placeholder="비우면 기본 브랜치"></div>
+        <div class="hint">공개 저장소는 PAT 없이 동작합니다(GitHub API 비인증 60회/시간 제한). 비공개 저장소는 위 연결 설정에 PAT을 입력하세요.</div>
+      </div>
+      <div id="method-zip" class="hidden">
+        <div class="dropzone" id="dropzone">여기로 .zip 파일을 드래그하거나 클릭해서 선택</div>
+        <input type="file" id="zip-input" accept=".zip" class="hidden">
+        <div class="hint" id="zip-status"></div>
+      </div>
+
+      <div id="submit-error" class="hidden"></div>
+      <button class="cta" id="submit-btn">제출하기</button>
+    </div>
+
+    <div class="step hidden" id="step-progress">
+      <div class="sh"><span class="n" id="progress-n">✓</span> 분석 진행</div>
+      <div class="prog" id="prog-list">
+        <div class="pstep wait" data-key="fetch"><span class="ic">•</span><div>코드 가져오기<div class="sub"></div></div></div>
+        <div class="pstep wait" data-key="pyodide"><span class="ic">•</span><div>분석 엔진 준비<div class="sub"></div></div></div>
+        <div class="pstep wait" data-key="scan"><span class="ic">•</span><div>구조/판단 스캔 실행<div class="sub"></div></div></div>
+        <div class="pstep wait" data-key="save"><span class="ic">•</span><div>결과 저장<div class="sub"></div></div></div>
+      </div>
+    </div>
+
+    <div class="step hidden" id="step-findings">
+      <div class="sh"><span class="n">✓</span> finding <span id="finding-count">0</span>건</div>
+      <div class="findings" id="findings-list"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"
+  integrity="sha384-tVslJOEkg7nVRW3Y3/ReGX0NnonNrbcmt1R5qFbQXQdGa2chRkoJYHAjAsv3zoTq"
+  crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
+  integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
+  crossorigin="anonymous"></script>
+<script src="../shared/config.js"></script>
+<script src="../shared/db.js"></script>
+<script src="../shared/lab-core.js"></script>
+<script src="../shared/pyodide-shared.js"></script>
+<script src="../shared/session-state.js"></script>
+<script src="../shared/p02-engine.js"></script>
+<script>
+(function () {
+  let currentMethod = "pat";
+  let zipFiles = null;
+
+  document.getElementById("method-toggle").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-method]");
+    if (!btn) return;
+    currentMethod = btn.dataset.method;
+    document.querySelectorAll("#method-toggle button").forEach((b) => b.classList.toggle("on", b === btn));
+    document.getElementById("method-pat").classList.toggle("hidden", currentMethod !== "pat");
+    document.getElementById("method-zip").classList.toggle("hidden", currentMethod !== "zip");
+  });
+
+  const dropzone = document.getElementById("dropzone");
+  const zipInput = document.getElementById("zip-input");
+  const zipStatus = document.getElementById("zip-status");
+  dropzone.addEventListener("click", () => zipInput.click());
+  dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("drag-over"); });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag-over"));
+  dropzone.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("drag-over");
+    if (e.dataTransfer.files[0]) await handleZip(e.dataTransfer.files[0]);
+  });
+  zipInput.addEventListener("change", async () => {
+    if (zipInput.files[0]) await handleZip(zipInput.files[0]);
+  });
+
+  async function handleZip(file) {
+    zipStatus.textContent = `압축 해제 중: ${file.name}...`;
+    try {
+      const parsed = await P02Engine.parseZipFile(file);
+      zipFiles = parsed.files;
+      zipStatus.textContent = P02Engine.formatZipStatus(parsed, file.name);
+    } catch (err) {
+      zipStatus.textContent = `압축 해제 실패: ${err.message}`;
+      zipFiles = null;
+    }
+  }
+
+  function showError(msg) {
+    const el = document.getElementById("submit-error");
+    el.textContent = msg;
+    el.className = msg ? "alertwarn" : "hidden";
+  }
+
+  const PROG_LABELS = {
+    fetch: "코드 가져오기 중...",
+    pyodide: "분석 엔진(Pyodide) 준비 중...",
+    scan: "구조/판단 스캔 실행 중 (원본 파이프라인 코드, 수정 없음)...",
+    save: "결과 저장 중...",
+  };
+  function progSub(key, text) {
+    const el = document.querySelector(`.pstep[data-key="${key}"] .sub`);
+    if (el) el.textContent = text;
+  }
+  const PROG_ICON = { done: "✓", now: "◔", wait: "•", error: "✕" };
+  function progState(key, state) {
+    const el = document.querySelector(`.pstep[data-key="${key}"]`);
+    if (!el) return;
+    el.className = `pstep ${state}`;
+    const ic = el.querySelector(".ic");
+    if (ic) ic.textContent = PROG_ICON[state] || "•";
+  }
+  // P02Engine.run()'s onProgress messages aren't individually tagged by stage, so this
+  // maps the exact original message text (see p02-engine.js) to the closest checklist
+  // step -- best-effort labeling, not a structured stage API the engine provides.
+  function routeProgress(msg) {
+    if (/가져오는 중|파일 가져옴|발견,/.test(msg)) { progState("fetch", "now"); progSub("fetch", msg); }
+    else if (/Pyodide|파이썬 가상|파이프라인 원본/.test(msg)) { progState("pyodide", "now"); progSub("pyodide", msg); }
+    else if (/실행 중|finding.*산출/.test(msg)) { progState("scan", "now"); progSub("scan", msg); }
+    else if (/DB에 저장|Supabase|DB 저장/.test(msg)) { progState("save", "now"); progSub("save", msg); }
+  }
+
+  document.getElementById("submit-btn").addEventListener("click", async () => {
+    showError("");
+    const input = currentMethod === "pat"
+      ? { method: "pat", repoInput: document.getElementById("repo-input").value, branch: document.getElementById("branch-input").value }
+      : { method: "zip", zipFiles };
+
+    document.getElementById("step-progress").classList.remove("hidden");
+    document.getElementById("step-findings").classList.add("hidden");
+    document.getElementById("submit-btn").disabled = true;
+    document.querySelectorAll(".pstep").forEach((el) => { el.className = "pstep wait"; el.querySelector(".sub").textContent = ""; });
+
+    const hooks = {
+      onStatus(text, kind) { if (kind === "error") { showError(text); progState("scan", "error"); progSub("scan", text); } },
+      onProgress(msg) { routeProgress(msg); },
+      onRunStart() {},
+      onRunEnd() { document.getElementById("submit-btn").disabled = false; },
+    };
+
+    try {
+      const { result, files, repoRef } = await P02Engine.run(input, hooks);
+      ["fetch", "pyodide", "scan", "save"].forEach((k) => progState(k, "done"));
+      const basket = buildFindingsBasket(result, files);
+      const saved = SessionState.saveFindingsList(basket);
+      if (!saved.ok) console.error("findings list save failed (뒤로가기 restore won't work this run):", saved.error);
+      // D200: {owner, repo, branch} from a GitHub-URL scan (null for ZIP) -- own key, set
+      // once per scan, so P03 can later offer live fact-check tools against this repo.
+      SessionState.saveRepoContext(repoRef);
+      renderFindingsFromBasket(basket);
+    } catch (err) {
+      console.error(err);
+      // hooks.onStatus already surfaced the message for the common validation-error case;
+      // this also covers unexpected throws that never called onStatus.
+      if (!document.getElementById("submit-error").textContent) showError(`오류: ${err.message}`);
+    }
+  });
+
+  // `files` (the full scanned source map) never survives a page navigation (see
+  // session-state.js D1) -- so every finding's connectable code context is resolved and
+  // trimmed to its final form *here*, once, while `files` is still in scope. The
+  // resulting basket is both what gets rendered now and what gets persisted for
+  // 뒤로가기 to restore later; nothing downstream (render, save, or a restored reload)
+  // ever needs `files` again.
+  function buildFindingsBasket(result, files) {
+    return result.judgment.findings.map((f) => {
+      const resolved = P02Engine.resolveConnectableFile(files, f);
+      return {
+        finding: f,
+        codeContexts: resolved ? resolved.allPaths.slice(0, P02Engine.MAX_CONNECT_FILES).map((p) => ({ path: p, content: files[p] })) : [],
+        viaText: resolved ? resolved.viaText : false,
+        totalPaths: resolved ? resolved.allPaths.length : 0,
+      };
+    });
+  }
+
+  function renderFindingsFromBasket(basket) {
+    document.getElementById("step-findings").classList.remove("hidden");
+    document.getElementById("finding-count").textContent = basket.length;
+    const list = document.getElementById("findings-list");
+    list.innerHTML = "";
+    if (basket.length === 0) {
+      list.innerHTML = `<div class="fcard"><div class="fnone">이번 실행에서는 finding이 나오지 않았습니다.</div></div>`;
+      return;
+    }
+    basket.forEach((item) => {
+      const f = item.finding;
+      const card = document.createElement("div");
+      card.className = "fcard";
+      const idEl = document.createElement("div"); idEl.className = "fid";
+      // D194: rank/rank_score come from judgment/importance_rank.py -- always present on a
+      // fresh scan (this page never shows historical Supabase-stored findings), so no
+      // fallback text needed here; f.rank != null guard is just cheap defensive style.
+      const rankBadge = f.rank != null ? `#${f.rank} (${f.rank_score}점) · ` : "";
+      idEl.textContent = `${rankBadge}${f.id || ""} · ${f.priority || ""}`;
+      const textEl = document.createElement("div"); textEl.className = "ftext"; textEl.textContent = f.finding || "";
+      card.appendChild(idEl); card.appendChild(textEl);
+      if (item.codeContexts.length === 0) {
+        const none = document.createElement("div"); none.className = "fnone"; none.textContent = "코드 컨텍스트 없음 — 언급된 파일도 로드된 파일 중에 없어 인터뷰 연결 불가";
+        card.appendChild(none);
+      } else {
+        const btn = document.createElement("button"); btn.className = "cta secondary-cta"; btn.style.width = "auto"; btn.textContent = "검증 세션 시작 →";
+        btn.addEventListener("click", () => startInterview(item));
+        card.appendChild(btn);
+        if (item.viaText) {
+          const omitted = item.totalPaths - item.codeContexts.length;
+          const note = document.createElement("div"); note.className = "fnote";
+          note.textContent = `finding에 언급된 파일 ${item.codeContexts.length}개 코드 포함${omitted > 0 ? `, ${omitted}개는 길이 제한으로 제외` : ""}`;
+          card.appendChild(note);
+        }
+      }
+      list.appendChild(card);
+    });
+  }
+
+  // D178: one click, no separate confirm step -- matches the original connector's
+  // auto-run decision, just re-expressed as "navigate straight to session.html" instead
+  // of "call P03Runner.run() in the same page".
+  function startInterview(item) {
+    // D200: carries the scan's repoRef (null for ZIP) into the interview session so P03
+    // can offer live fact-check tools when a real GitHub repo is behind this finding.
+    const repoRef = SessionState.loadRepoContext();
+    const saved = SessionState.saveSubmission({ finding: item.finding, codeContexts: item.codeContexts, repoRef });
+    if (!saved.ok) { showError(`세션 데이터 저장 실패: ${saved.error.message}`); return; }
+    window.location.href = "session.html";
+  }
+
+  async function renderUserIndicator() {
+    const el = document.getElementById("user-indicator");
+    const user = await LabDB.currentMemberOrNull();
+    el.textContent = user ? user.email : "미로그인";
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    await LabApp.loadManifest();
+    document.getElementById("proxy-url").placeholder = "https://...";
+    // Trigger config.js's own persistIfRemembered() path (unmodified) so the
+    // default-checked "remember" box actually persists across the session.html
+    // navigation -- see shared/README notes. Only fires once, if nothing was already
+    // remembered from a prior visit this tab.
+    const rememberBox = document.getElementById("remember-session");
+    if (rememberBox && rememberBox.checked && !sessionStorage.getItem("lab_cfg_remember")) {
+      rememberBox.dispatchEvent(new Event("change"));
+    }
+    renderUserIndicator();
+
+    // 뒤로가기 restore: session.html (or result.html) navigating back here should show
+    // the same finding list the user left, not a blank upload form. The "코드 제출" step
+    // stays visible too (not hidden) -- submitting a new scan overwrites FINDINGS_KEY the
+    // normal way (see buildFindingsBasket/saveFindingsList above), so starting fresh
+    // still works exactly as before, this only adds a path that skips re-scanning when
+    // the user just wants a different finding from the same run.
+    const restored = SessionState.loadFindingsList();
+    if (restored) renderFindingsFromBasket(restored);
+  });
+})();
+</script>
+</body>
+</html>

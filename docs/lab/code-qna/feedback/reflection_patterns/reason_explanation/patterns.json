@@ -1,0 +1,11 @@
+{
+  "promotion_threshold": 3,
+  "patterns": [
+    {
+      "id": "so_connector",
+      "regex": "그래서",
+      "status": "confirmed",
+      "confirmations": 5
+    }
+  ]
+}
