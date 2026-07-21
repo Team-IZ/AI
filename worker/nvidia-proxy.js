@@ -81,6 +81,23 @@ const JOB_TTL_SECONDS = 3600; // 1 hour -- generous for an actively-polling clie
 // (4xx other than 429) is a real client-side error a retry can't fix.
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 524]);
 const MAX_ATTEMPTS = 3; // message.attempts is 1-indexed; this allows 2 retries
+// D209 (2026-07-21, security review finding "resource-bound-cap-bypass"): the
+// x-max-attempts override below only ever validated "positive integer", not an upper
+// bound -- any caller (this Worker is CORS-open, ALLOWED_ORIGIN="*") could send e.g.
+// x-max-attempts: 999999999 and bypass the MAX_ATTEMPTS resource cap entirely. Each
+// retry is a brand-new Cloudflare Queue consumer invocation (see D-I above), so this was
+// a real resource-exhaustion vector against the Worker owner's own Queue/KV quota, not
+// just a client burning their own NVIDIA budget.
+//   WHY: the only legitimate caller of this override in this codebase is P03's elevated-
+//   traffic path (docs/lab/p03-engine.js's ELEVATED_MAX_ATTEMPTS = 5) -- capping well
+//   above that (10) preserves every known real use case while closing the bypass.
+//   COST: a caller with a genuine need for >10 attempts (none exist today) would be
+//   silently clamped instead of erroring -- judged safer than rejecting the request
+//   outright, since a clamp still makes forward progress instead of failing a real job.
+//   EXIT: if a future caller legitimately needs a higher ceiling, raise
+//   MAX_ATTEMPTS_CEILING with a comment citing the new caller's own documented constant,
+//   the same way ELEVATED_MAX_ATTEMPTS is justified above.
+const MAX_ATTEMPTS_CEILING = 10;
 const RETRY_DELAY_SECONDS = 5; // brief gap before Cloudflare redelivers -- avoid hammering NVIDIA back-to-back
 // D159 (2026-07-15): 429 specifically means "you're being rate-limited, wait longer" --
 // a real 26-way parallel chunk-analysis burst (D156) hit this on a later, unrelated call
@@ -229,7 +246,10 @@ export default {
     // exactly as-is -- this is opt-in per request, not a global policy change.
     const maxAttemptsHeader = request.headers.get("x-max-attempts");
     const maxAttemptsOverride = maxAttemptsHeader ? parseInt(maxAttemptsHeader, 10) : NaN;
-    const maxAttempts = Number.isInteger(maxAttemptsOverride) && maxAttemptsOverride > 0 ? maxAttemptsOverride : undefined;
+    // D209: clamp to MAX_ATTEMPTS_CEILING -- see its own comment above for the WHY/COST/EXIT.
+    const maxAttempts = Number.isInteger(maxAttemptsOverride) && maxAttemptsOverride > 0
+      ? Math.min(maxAttemptsOverride, MAX_ATTEMPTS_CEILING)
+      : undefined;
 
     const jobId = crypto.randomUUID();
     await env.NVIDIA_JOBS.put(jobId, JSON.stringify({ status: "pending" }), { expirationTtl: JOB_TTL_SECONDS });
