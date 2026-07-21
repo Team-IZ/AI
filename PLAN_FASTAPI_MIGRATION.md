@@ -6,9 +6,10 @@
 
 ---
 
-## 현재 상태 (마지막 갱신: 2026-07-20)
+## 현재 상태 (마지막 갱신: 2026-07-21)
 
 **이 문서가 AI 파트 진행 상황의 단일 기준이다.** 새 세션을 시작하면 여기부터 읽어라.
+**현재 테스트: 47 passed · 1 skipped** (`./.venv/Scripts/python.exe -m pytest tests/ -q`). skip 1건은 네트워크에 의존하는 GitHub clone E2E다.
 
 ### 완료
 
@@ -19,11 +20,33 @@
 | API 명세 1차 확정 | `../docs/AI-Backend_API_명세서_v0.1.md` — B1~B7 결정 반영, 엔드포인트 9개 정의 |
 | 커밋·push | `feature/fastapi-migration` 브랜치에 3커밋(`dbb45c4` vendor / `899f9c9` skeleton / `c27eb90` docs) → `Team-IZ/AI` 원격 |
 | Phase 2a — P02 분석 API | `POST /api/v1/analyses`(JSON/multipart 분기) + `GET /api/v1/analyses/{job_id}`, `app/core/`(collect·attribution·findings·analysis_job), 명세 §3.2 응답 구조 |
-| Phase 2b — submission.html 연결 | 목업 제출 페이지가 FastAPI 분석 API를 호출. 브라우저 Pyodide 경로(`shared/p02-engine.js`·`webtool_driver.py`) **삭제**. `session.html`·`result.html`에 미연결 배너 추가. 테스트 36 passed·1 skipped |
+| Phase 2b — submission.html 연결 | 목업 제출 페이지가 FastAPI 분석 API를 호출. 브라우저 Pyodide 경로(`shared/p02-engine.js`·`webtool_driver.py`) **삭제**. `session.html`·`result.html`에 미연결 배너 추가(당시 테스트 36 passed·1 skipped) |
+| S1 — 코드 업로드 마무리 (`9c14049`) | 분석 결과에 `snapshot_id`(UUID, `job_id`와 별개)와 `snapshot_meta`(`content_hash` sha256 64자 / `file_count` / `byte_count`) 반환. 코드 원문 무저장 원칙(API 명세 §3.3)은 유지하고 메타만 제공해 Spring이 `code_snapshot` 행을 만들 수 있게 하는 설계. 메타는 **스코프 필터 적용 후 실제 분석된 파일 집합** 기준으로 산출 |
+| standalone 루트 리다이렉트 (`e18b6b3`) | `GET /`가 `/submission.html`로 307 임시 리다이렉트(`trainee/`에 `index.html`이 없어 404 나던 문제). OpenAPI 스키마 미노출, integrated 모드에는 미등록 |
+
+현재 구현된 엔드포인트는 `GET /api/health`, `POST /api/v1/analyses`, `GET /api/v1/analyses/{job_id}` 3개(+ 위 standalone 루트 리다이렉트)다.
+
+### 작업 단위 재분할 (S1~S4)
+
+기존 Phase 3/4/5 구분 위에 **서비스 흐름 단위(S1~S4) 재분할**이 도입됐다.
+
+```
+S1 코드 업로드(완료) → S2 중요도 분석 → S3 문답 → S4 결과보고서
+```
+
+| 단위 | 대응 | 상태 |
+|---|---|---|
+| S1 코드 업로드 | Phase 2 + `snapshot_id`/`snapshot_meta` 보강 | ✅ 완료 |
+| S2 중요도 분석 | (신규) `dp_id` 발급, `commit_attribution` 결손 필드(git log 확장), 중요도 산출부 격리 어댑터, `focus_areas` 실전달 | ← **다음 작업** |
+| S3 문답 | 기존 Phase 3(세션 API) — §3 | 대기 |
+| S4 결과보고서 | 기존 Phase 4(5축 후채점) — §3 | 대기 |
+| — | Phase 5(저장 계층·전체 E2E·계약 확정)는 그대로 유지 | 대기 |
+
+**실행 계획(단계별 DoD·엔드포인트·DB 컬럼 대응·테스트 계획)은 `../output_docs/FastAPI화_상세계획.md`가 기준이다.** 이 문서에 그 상세를 복제하지 않는다 — 이 문서는 Phase 단위 진행 상황과 AI 저장소 내부 맥락에 집중한다.
 
 ### 진행 중 / 다음 할 일
 
-**Phase 3 — P03 세션 API + session.html 연결** ← 다음 작업. 상세는 §3.
+**S2 — 중요도 분석 보강** ← 다음 작업. 상세는 `../output_docs/FastAPI화_상세계획.md` §4.
 
 ### 알려진 문제
 
@@ -36,7 +59,11 @@
 
 ### 브랜치 전략 (팀 결정)
 
-`feature/*` → (동작·테스트 완료 후) `main` → `main` 기준으로 `develop` 생성 → 이후 수정은 `develop`에서 테스트 → `main` 병합. **현재는 Phase·테스트가 끝나지 않아 `feature/fastapi-migration`에 머무는 단계**이며, `develop`은 아직 존재하지 않는다. 지금 단계에서 main으로 PR을 서두르지 말 것.
+팀 합의 순서는 `feature/*` → (동작·테스트 완료 후) `main` → `main` 기준으로 `develop` 생성 → 이후 수정은 `develop`에서 테스트 → `main` 병합이다.
+
+실제 경위는 이와 순서가 다르다: `feature/fastapi-migration`이 먼저 만들어졌고, `develop`은 2026-07-21에 뒤늦게 생성됐다(`e121ce7`). `develop`에는 임시 README와 `.gitignore`만 들어 있는 사실상 빈 브랜치다.
+
+**현재는 `feature/fastapi-migration`을 `develop`에 병합하려는 시점**이며, 이때 `develop`의 임시 README·`.gitignore` 대신 feature 쪽 버전을 채택한다는 방침이다.
 
 ---
 
@@ -132,7 +159,7 @@ app/
 > - 아직 연결 안 된 페이지는 "이 단계는 아직 미연결" 안내를 표시한다 — 반쯤 동작하며 조용히 이상해지는 것보다 낫다.
 > - 최종 통합 후에도 목업은 계속 살아 있다: `APP_MODE` 전환만으로 standalone/integrated를 오간다.
 
-### Phase 2 — P02 분석 API + submission.html 연결 ✅ 완료(2026-07-20)
+### Phase 2 (= S1) — P02 분석 API + submission.html 연결 ✅ 완료(2026-07-20, S1 보강 2026-07-21)
 > 2a: API·서비스 레이어. 2b: 목업 연결 + Pyodide 경로 삭제 + 미연결 배너.
 > 목업 폴링 주기는 명세 B6의 3초 대신 **1초** — B6의 3초는 "Spring이 네트워크 너머로 폴링"하는
 > 값이고, 목업은 같은 오리진·같은 프로세스의 인메모리 job을 폴링하며 실제 분석이 1~2초에
@@ -143,7 +170,7 @@ app/
 - 응답에 finding별 `code_context` 발췌·`commit_sha` 포함(§3.3 파편 저장 원칙).
 - **목업 연결**: `submission.html`이 이 API를 호출하도록 교체. Pyodide 부트스트랩·`webtool_driver.py` fetch 경로 제거(→ 이때 `webtool_driver.py` 파일도 삭제 가능해짐).
 
-### Phase 3 — P03 세션 API + session.html 연결 ★확정 구조 반영
+### Phase 3 (= S3) — P03 세션 API + session.html 연결 ★확정 구조 반영
 - `POST /api/v1/sessions`, `POST /api/v1/sessions/{id}/answers`, `GET /api/v1/sessions/{id}`, `POST /api/v1/sessions/{id}/restore` — 명세서 §4 기준.
 - **턴 규칙(확정): DP별 L1 → L2 → L3 depth 3단. Reflection 턴 없음.** 답변이 견고해도 최소 1회 L2 후속 질문(ENG 소크라틱 평가 계약).
 - **세션 중에는 채점하지 않는다.** 세션 중 LLM 역할은 질문 생성뿐.
@@ -151,7 +178,7 @@ app/
 - LLM 호출은 NVIDIA 직접(프록시 제거), 키 로테이션은 `nvidia_key_pool.py` 활용 검토.
 - **목업 연결**: `session.html`이 이 API를 호출하도록 교체. 브라우저 Pyodide 분류기·프록시 경로 제거.
 
-### Phase 4 — 후채점 API + result.html 연결 ★확정 구조 반영
+### Phase 4 (= S4) — 후채점 API + result.html 연결 ★확정 구조 반영
 - `POST /api/v1/gradings` (job) / `GET /api/v1/gradings/{job_id}` — 명세서 §5 기준.
 - **5축 채점은 세션 종료 후 transcript 전체 대상 1회.** 축별 1~5점·동일가중, 총 5~25점, 축별 인용 근거 + 모델·프롬프트·루브릭 버전 필수.
 - 목업의 per-답변 `grade_interview_answer`를 **transcript 단위 후채점**으로 교체 — 판정 로직이 목업과 달라지는 유일한 지점이므로 프롬프트·스키마 신규 설계 후 사용자 검토.

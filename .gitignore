@@ -28,6 +28,18 @@ uploads/
 feedback_log.jsonl
 *.log
 
+# 린터·타입체커 캐시
+.ruff_cache/
+.mypy_cache/
+
+# 커버리지 산출물
+.coverage
+htmlcov/
+
+# 로컬 DB 파일 — Phase 5에서 standalone 저장 계층을 붙이면 생길 수 있다. 사전 방어.
+*.sqlite3
+*.db
+
 # OS
 .DS_Store
 Thumbs.db

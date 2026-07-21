@@ -11,8 +11,9 @@ React (Frontend) ←REST→ Spring Boot (Backend) ←REST→ FastAPI (이 저장
 
 React는 FastAPI를 직접 호출하지 않는다. FastAPI의 호출자는 Spring뿐이다.
 
-> ⚠️ **현재 Phase 1(골격) 단계다.** 구현된 엔드포인트는 `GET /api/health` 하나뿐이고,
-> 목업 프론트는 아직 FastAPI와 연결돼 있지 않다. 자세한 내용은 아래 [현재 진행 상태](#현재-진행-상태)를 반드시 읽어라.
+> ⚠️ **전환 진행 중이다.** P02 분석 API와 `submission.html` 연결까지 동작하고, 문답 세션·후채점은
+> 아직 미구현이다. **"지금 뭐가 되고 뭐가 안 되나"는 아래 [현재 진행 상태](#현재-진행-상태) 한 곳에만
+> 적는다** — 이 README의 다른 절은 그 내용을 반복하지 않으니, 상태가 궁금하면 거기부터 읽어라.
 
 ---
 
@@ -21,10 +22,10 @@ React는 FastAPI를 직접 호출하지 않는다. FastAPI의 호출자는 Sprin
 | 경로 | 설명 |
 |---|---|
 | `app/` | FastAPI 애플리케이션. `api/`(라우터)·`core/`(파이프라인 호출 서비스 레이어)·`storage/`(저장소 어댑터) 3계층 |
-| `pipeline/` | 팀원 분석 레포에서 내재화(vendoring)한 분석 엔진 40개 파일. **수정 금지** — 목업이 E2E 검증한 기준 동작을 그대로 실행한다 |
+| `pipeline/` | 팀원 분석 레포에서 내재화(vendoring)한 분석 엔진 41개 파일. **수정 금지** — 목업이 E2E 검증한 기준 동작을 그대로 실행한다 |
 | `trainee/` | 목업 프론트 페이지 3종(`submission.html`·`session.html`·`result.html`). standalone 모드에서 FastAPI가 정적 서빙 |
 | `shared/` | 목업 프론트가 쓰는 공용 JS/CSS. P02 분석은 FastAPI로 옮겨졌고(Phase 2b), P03 세션(`p03-engine.js`)은 아직 브라우저 Pyodide 구버전 코드다 |
-| `reference/` | 이식 작업 중 대조용으로 둔 원본 러너 사본. 실행되지 않는 참고 자료 |
+| `reference/` | 이식 작업 중 대조용으로 둔 원본 러너 사본. 실행되지 않는 참고 자료. **아직 지우지 마라** — 문답 세션(S3) 이식 때 `p03-runner.js`를 대조 기준으로 쓴다 |
 | `tests/` | pytest 테스트 |
 | `docs/` | AI 파트 내부 문서 (목업 시절 이식 기록 등) |
 
@@ -103,13 +104,13 @@ Spring Boot 없이 AI 레포만으로 제출→분석→문답→후채점 흐�
 - <http://127.0.0.1:8000/api/health> → `{"status":"ok","mode":"standalone","pipeline_loaded":true}`
   - `pipeline_loaded: true`가 핵심이다. `pipeline/` 내재화 코드가 서버 CPython에서 import된다는 뜻
 - <http://127.0.0.1:8000/submission.html> → 제출 페이지가 뜬다
+  - 루트 `/`는 standalone에서만 `/submission.html`로 **307 리다이렉트**된다(`trainee/`에 `index.html`이
+    없어서 원래 404였다). 임시 리다이렉트라 브라우저에 영구 캐시되지 않고, OpenAPI 스키마에도 안 나온다
 
-> ⚠️ 루트 `/`는 **404**다. `trainee/`에 `index.html`이 없어서 그렇다.
-> 반드시 `/submission.html`로 직접 접속해라.
->
-> ✅ **Phase 2b부터 `submission.html`의 제출 흐름이 실제로 동작한다.** GitHub URL 또는 ZIP을
+> ✅ **`submission.html`의 제출 흐름은 실제로 동작한다.** GitHub URL 또는 ZIP을
 > 제출하면 페이지가 `POST /api/v1/analyses` → `GET /api/v1/analyses/{job_id}` 폴링으로
 > 서버 분석 결과를 받아 finding 목록을 그린다.
+> 아직 연결 안 된 페이지가 무엇인지는 [현재 진행 상태](#현재-진행-상태)를 보라.
 >
 > 제출 화면에서 **추출 범위(전체 코드 TOTAL / 본인 커밋 기여분 OWN_COMMIT)** 를 고를 수 있다.
 > `OWN_COMMIT`을 고르면 커밋 이메일 입력란이 나타난다(§3.1에서 필수). 결과 화면에는 실제 적용된
@@ -117,11 +118,6 @@ Spring Boot 없이 AI 레포만으로 제출→분석→문답→후채점 흐�
 > ZIP으로 `OWN_COMMIT`을 쓰려면 `.git` 폴더를 포함하거나 `commits.txt`·`changed_files.txt`
 > export를 동봉해야 한다(B5). 둘 다 없으면 `TOTAL`로 폴백하고, 해당 이메일 명의의 커밋이 0건이면
 > `ATTRIBUTION_REQUIRED`로 실패한다(MEAS-02A A-1).
->
-> ⚠️ 단 `session.html`(P03)·`result.html`(후채점)은 **아직 FastAPI에 연결되지 않았다**.
-> 두 페이지 상단에 그 사실을 알리는 배너가 떠 있다. finding 카드의 "검증 세션 시작 →"을
-> 누르면 구버전 Pyodide·프록시 경로가 도는 `session.html`로 이동하며, standalone에서는
-> 정상 동작하지 않는다. Phase 3·4의 작업이다.
 
 ### 모드 B — integrated (팀 통합)
 
@@ -192,14 +188,20 @@ curl -H "X-Internal-Key: iz-get-standalone-dev-key" \
 
 > `/api/v1/analyses`는 Phase 2a에서 구현됐다(§3.1/§3.2). 요청 스키마는 API 명세서 §3.1 기준이며
 > 확정 시 갱신한다. `OWN_COMMIT`으로 요청하려면 `extraction_scope`와 `commit_email`을 함께 보낸다.
+>
+> 완료 응답에는 `snapshot_id`(job_id와 별개로 발급하는 UUID)와 `snapshot_meta`
+> (`content_hash` sha256 64자 / `file_count` / `byte_count`)가 함께 들어간다(S1). 코드 원문은
+> 여전히 저장하지 않고(명세 §3.3), 메타만 넘겨 Spring이 `code_snapshot` 행을 만들 수 있게 하는 설계다.
 
 ### Swagger UI
 
 서버가 뜬 상태에서 <http://127.0.0.1:8000/docs> 로 접속하면 현재 구현된 엔드포인트를
 브라우저에서 바로 호출해볼 수 있다. 기계가 읽을 스펙은 `/openapi.json`이다.
 
-현재 `/openapi.json`의 `paths`에는 `/api/health` 하나만 들어 있다. Phase 2~4를 진행하며
-여기가 채워지므로, "지금 실제로 뭐가 구현됐나"를 확인하는 가장 빠른 방법이 `/docs`다.
+현재 `/openapi.json`의 `paths`에는 `/api/health`, `POST /api/v1/analyses`,
+`GET /api/v1/analyses/{job_id}` 3개가 들어 있다(standalone의 `GET /` 리다이렉트는 목업 편의용이라
+스키마에 노출하지 않는다). 세션(§4)·채점(§5)을 진행하며 여기가 채워지므로, "지금 실제로 뭐가
+구현됐나"를 확인하는 가장 빠른 방법이 `/docs`다.
 
 ---
 
@@ -210,13 +212,13 @@ $env:PYTHONIOENCODING = "utf-8"
 .\.venv\Scripts\python.exe -m pytest tests/ -v
 ```
 
-현재 결과: **36 passed, 1 skipped** (skip 1건은 네트워크 의존 GitHub clone 테스트).
+현재 결과: **47 passed, 1 skipped** (skip 1건은 네트워크 의존 GitHub clone 테스트).
 
 | 파일 | 검증 내용 |
 |---|---|
 | `tests/test_pipeline_smoke.py` | Pyodide 없이 서버 CPython에서 `two_tier_scan.scan()` → `score_findings.score()`가 샘플 코드 트리에 대해 에러 없이 완주하고 결과 JSON에 scan/judgment 구조가 있는지. finding 내용의 정확성 검증은 목표가 아니다. `/api/health`가 모드·파이프라인 상태를 보고하는지도 확인 |
 | `tests/test_app_modes.py` | 모드별 앱 조립 고정 — CORS는 standalone에만 붙는다, 목업 정적 서빙은 standalone에만 있다, 브라우저 Pyodide 경로가 삭제된 채로 유지된다, 목업 페이지의 정적 참조가 전부 실존한다, standalone 목업 제출 흐름(ZIP→job→폴링→finding)이 동작한다 |
-| `tests/test_analyses.py` | 분석 API(§3) — ZIP 제출 E2E, 수집 규칙(SKIP/확장자/.ipynb/zip slip), 커밋 귀속·폴백, 실패 코드, B1 인증 |
+| `tests/test_analyses.py` | 분석 API(§3) — ZIP 제출 E2E, 수집 규칙(SKIP/확장자/.ipynb/zip slip), 커밋 귀속·폴백, 실패 코드, B1 인증, 스냅샷 메타(`snapshot_id`·`content_hash` 결정성) |
 | `tests/test_internal_auth.py` | B1 공유 API 키 계약 — 키 누락/오류 시 401, 키 미설정 시 검증 비활성, `/api/health`는 양 모드 모두 인증 면제 |
 
 Phase 1의 xfail(`test_webtool_driver_fetch_path_is_not_served_yet`)은 **Phase 2b에서 삭제됐다** —
@@ -231,14 +233,23 @@ Phase 1의 xfail(`test_webtool_driver_fetch_path_is_not_served_yet`)은 **Phase 
 
 ## 현재 진행 상태
 
+**이 절이 진행 상태를 서술하는 유일한 곳이다.** 상세 계획·미결 사항은 아래
+[관련 문서](#관련-문서)의 계획서들을 보라 — 여기에 복제하지 않는다(중복이 곧 다음 모순의 원인이다).
+
 | Phase | 내용 | 상태 |
 |---|---|---|
-| Phase 0 | 팀원 분석 레포 내재화 (`pipeline/` 40개 파일) | ✅ 완료 |
+| Phase 0 | 팀원 분석 레포 내재화 (`pipeline/` 41개 파일) | ✅ 완료 |
 | Phase 1 | FastAPI 골격 — `app/` 3계층, 설정, `ResultStore` 인터페이스, health, 스모크 테스트 | ✅ 완료 |
-| Phase 2 | P02 분석 API + **`submission.html` 연결** | 예정 |
-| Phase 3 | P03 세션 API + **`session.html` 연결** | 예정 |
-| Phase 4 | 후채점 API + **`result.html` 연결** | 예정 |
+| Phase 2a | P02 분석 API (`POST /api/v1/analyses`, `GET /api/v1/analyses/{job_id}`) | ✅ 완료 |
+| Phase 2b | **`submission.html` 연결** — 브라우저 Pyodide 경로 삭제 | ✅ 완료 |
+| S1 | 코드 업로드 마무리 — `snapshot_id` + `snapshot_meta` 반환 | ✅ 완료 |
+| S2 | 중요도 분석 보강 (finding 품질·줄번호·POC 미결 해소) | 예정 |
+| S3 | P03 세션 API + **`session.html` 연결** | 예정 |
+| S4 | 5축 후채점 API + **`result.html` 연결** | 예정 |
 | Phase 5 | standalone 저장 계층(Supabase) + 전체 E2E + 계약 확정 | 예정 |
+
+> S1~S4는 계획서에서 Phase 2~4를 사용자 흐름(업로드→중요도 분석→문답→결과보고서) 단위로
+> 다시 쪼갠 이름이다. 대응 관계는 `../output_docs/AI파트_작업계획_및_인계.md` §2에 있다.
 
 ### 목업 페이지는 Phase 2~4에 걸쳐 순차 연결된다
 
@@ -255,30 +266,32 @@ Pyodide로 도는 동안 정작 통합에 쓸 서버 코드가 검증되지 않�
   이상해지는 것보다 낫다.
 - 최종 통합 후에도 목업은 계속 살아 있다. `APP_MODE` 전환만으로 standalone/integrated를 오간다.
 
-### 그래서 지금(Phase 1) 실제로 되는 것 / 안 되는 것
+### 그래서 지금 실제로 되는 것 / 안 되는 것
 
 **되는 것**
 
 - 양 모드로 서버 기동, `/api/health` 200 응답
 - 내재화한 분석 파이프라인이 Pyodide 없이 서버 CPython에서 scan→score 완주 (스모크 테스트로 검증)
 - `X-Internal-Key` 인증 계약
-- standalone에서 목업 페이지 3종이 HTTP 200으로 **서빙**됨
+- standalone에서 목업 페이지 3종이 HTTP 200으로 **서빙**되고, 루트 `/`는 `/submission.html`로 307 리다이렉트
 - **P02 분석 API(명세 §3) + `submission.html` 연결** — GitHub URL·ZIP 제출 → job 폴링 →
-  finding + `code_context` 렌더링까지 standalone에서 실제로 동작한다(Phase 2)
+  finding + `code_context` 렌더링까지 standalone에서 실제로 동작한다
+- 완료 응답의 `snapshot_id` + `snapshot_meta`(`content_hash`/`file_count`/`byte_count`) 반환(S1)
 
 **안 되는 것 (솔직하게)**
 
 - **`session.html`(P03 문답)·`result.html`(결과 리포트)은 아직 FastAPI와 연결돼 있지 않다.**
-  두 페이지 상단에 미연결 배너가 뜬다. Phase 3~4의 작업이다.
+  두 페이지 상단에 미연결 배너가 뜬다. S3~S4의 작업이다.
 - 분석 결과에서 "검증 세션 시작 →"을 누르면 이동은 되지만 세션은 구버전 브라우저 경로라
   standalone에서 돌지 않는다.
 - `/api/v1/*` 업무 엔드포인트는 분석(§3) 2개뿐이다. 세션(§4)·채점(§5)은 미구현.
+- 중요도 분석 보강(S2)은 미착수 — finding 줄번호·`type`·`evidence_hash` 등 임의 구현 지점이 남아 있다.
 - B3 완료 콜백(`callback_url`)은 값을 받아 보관만 하고 전송은 미구현이다.
 - Supabase 저장은 미구현. standalone에서도 NullStore로 폴백한다(기동 시 경고 출력).
   즉 분석 결과는 서버 인메모리 job에만 있고 프로세스를 재시작하면 사라진다.
 
 > `app/main.py` 등 일부 코드 주석은 목업 연결 시점을 "Phase 5"로 적고 있는데, 이는 계획서 §3의
-> Phase 2~4 공통 원칙(나중에 확정)보다 먼저 작성된 것이다. **계획서가 최신이자 기준**이다.
+> Phase 2~4 공통 원칙보다 먼저 작성된 것이다. **계획서가 최신이자 기준**이다.
 
 ---
 
@@ -286,7 +299,9 @@ Pyodide로 도는 동안 정작 통합에 쓸 서버 코드가 검증되지 않�
 
 | 문서 | 내용 |
 |---|---|
-| [`PLAN_FASTAPI_MIGRATION.md`](./PLAN_FASTAPI_MIGRATION.md) | FastAPI 전환 계획서. 확정된 설계 결정(§0), 운영 모드(§1.5), Phase별 작업(§3), 미결 사항(§5) |
+| [`PLAN_FASTAPI_MIGRATION.md`](./PLAN_FASTAPI_MIGRATION.md) | **진행 상황의 단일 기준.** FastAPI 전환 계획서 — 현재 상태, 확정된 설계 결정(§0), 운영 모드(§1.5), Phase별 작업(§3), 미결 사항(§5) |
+| [`../output_docs/FastAPI화_상세계획.md`](../output_docs/FastAPI화_상세계획.md) | S1~S4 단계별 실행 계획(무엇을 어떤 순서로 구현하는지)과 선결 결정 사항 |
+| [`../output_docs/AI파트_작업계획_및_인계.md`](../output_docs/AI파트_작업계획_및_인계.md) | 인계·현황 문서. 실측 상태 요약, S1~S4 로드맵(§2), 임의 구현/미결 지점 목록(POC-*) |
 | [`../docs/AI-Backend_API_명세서_v0.1.md`](../docs/AI-Backend_API_명세서_v0.1.md) | AI↔Backend API 명세서 (**내용은 v0.2**, 파일명만 v0.1). 엔드포인트 스키마·B1~B8 협의 결정 |
 | [`pipeline/VENDORED.md`](./pipeline/VENDORED.md) | 분석 파이프라인 내재화 기록 — 출처 레포·커밋 SHA·복사 파일 목록·디렉터리 구조 주의사항 |
 | [`docs/MOCKUP_PORTING_HISTORY.md`](./docs/MOCKUP_PORTING_HISTORY.md) | 전환 이전 목업(Pyodide) 시절의 이식 방법론·E2E 검증 내역·알려진 동작 차이 (이력 보존) |
