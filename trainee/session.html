@@ -53,8 +53,11 @@
   .codetabs button { font-size: 11px; padding: 3px 8px; border-radius: 4px 4px 0 0; border: 0; background: var(--c-code-2); color: #9aa2bd; cursor: pointer; }
   .codetabs button.active { background: #3a4166; color: #e2e6f2; }
   .codebody { flex: 1; overflow: auto; padding: var(--sp-4); font-family: var(--mono); font-size: var(--fs-xs); line-height: 1.7; }
-  .codebody .ln { display: flex; gap: var(--sp-4); white-space: pre-wrap; word-break: break-all; }
-  .codebody .num { color: #565d78; user-select: none; width: 32px; text-align: right; flex: 0 0 auto; }
+  /* D198: 좌우 스크롤 지원 -- 이전엔 white-space:pre-wrap+word-break:break-all로 긴 줄을
+     강제로 줄바꿈해서 가로 스크롤이 발생할 여지 자체가 없었다. white-space:pre로 줄바꿈을
+     끄면 .codebody의 overflow:auto가 실제로 가로 스크롤바를 만든다. */
+  .codebody .ln { display: flex; gap: var(--sp-4); white-space: pre; }
+  .codebody .num { color: #565d78; user-select: none; width: 32px; text-align: right; flex: 0 0 auto; position: sticky; left: 0; background: var(--c-code); }
   .req { padding: var(--sp-3) var(--sp-4); border-top: 1px solid var(--c-code-2); font-family: var(--font); font-size: var(--fs-xs); color: #9aa2bd; }
   .req b { color: #c8cde0; }
 
@@ -85,6 +88,35 @@
   .send { background: var(--c-primary); color: #fff; border: 0; border-radius: var(--r-md); padding: 0 var(--sp-5); height: 44px; font-weight: 600; font-size: var(--fs-sm); cursor: pointer; }
   .send:disabled { opacity: .5; cursor: default; }
   .privacy { font-size: 11px; color: var(--c-text-3); padding: 0 var(--sp-4) var(--sp-3); }
+
+  /* D201: 제출 확인 팝업 -- WHY: 답변 제출은 되돌릴 수 없는 액션(제출 즉시 LLM 채점
+     파이프라인으로 들어감)인데 Enter 한 번으로 바로 제출되게 만들어서(D198) 실수 제출
+     위험이 커짐 -- 확인 단계를 하나 끼워 넣되, 취소 시 answerInput은 건드리지 않아
+     이어서 수정 가능해야 함(핵심 요구사항). COST: 제출마다 클릭 1회 추가. EXIT: 다시
+     즉시 제출로 되돌리려면 submitAnswer()가 showSubmitConfirm() 대신 doSubmit()을
+     직접 부르게만 바꾸면 됨. */
+  .confirm-overlay { position: fixed; inset: 0; background: rgba(20, 22, 30, .45); display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .confirm-overlay.hidden { display: none; }
+  .confirm-box { background: #fff; border-radius: var(--r-lg); padding: var(--sp-6) var(--sp-5); max-width: 360px; width: 90%; box-shadow: 0 12px 32px rgba(20,22,30,.18); text-align: center; }
+  .confirm-box p { font-size: var(--fs-base); font-weight: 600; color: var(--c-text); margin-bottom: var(--sp-5); }
+  .confirm-actions { display: flex; gap: var(--sp-3); }
+  .confirm-btn { flex: 1; height: 42px; border-radius: var(--r-md); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+  .confirm-btn.cancel { background: #fff; border: 1px solid var(--c-border-strong); color: var(--c-text-2); }
+  .confirm-btn.proceed { background: var(--c-primary); border: 0; color: #fff; }
+  .confirm-btn.proceed:hover { background: var(--c-primary-hover); }
+
+  /* D203: 채점/리포트 생성 중 오버레이 -- WHY: 마지막 턴 제출 후 5축 채점(gradeAnswer,
+     실제 LLM 호출이라 수초~수십초 소요) -> result.html 이동 사이에 화면상 아무 표시가
+     없었다(onProgress의 타이핑 인디케이터는 "질문 생성|재생성" 패턴만 매칭 -- "채점"은
+     안 걸림). 다음 화면으로 정말 넘어가고 있다는 걸 직관적으로 보여주기 위해 스피너
+     오버레이 추가. COST: 이 구간에서 다른 조작(뒤로가기 등) 불가 인상을 줌 -- 실제로도
+     이 시점엔 답변 제출이 끝나 되돌릴 액션이 없으므로 의도된 동작. EXIT: 다시 없애려면
+     onProgress의 이 매칭 블록만 제거. */
+  .grading-box { display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); }
+  .grading-box p { margin-bottom: 0; }
+  .spinner { width: 36px; height: 36px; border: 3px solid var(--c-border); border-top-color: var(--c-primary); border-radius: 50%; }
+  @media (prefers-reduced-motion: no-preference) { .spinner { animation: spin .8s linear infinite; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
   /* D187: WHY -- P03Engine.run() locks the model at hooks.onRunStart() and previously
      that fired the instant the page finished loading (D178's "one click, no extra
@@ -145,11 +177,28 @@
         </div>
       </div>
       <div class="composer">
-        <textarea class="ta" id="answer-input" placeholder="답변을 입력하세요..." disabled></textarea>
+        <textarea class="ta" id="answer-input" placeholder="답변을 입력하세요... (Enter 제출 / Shift+Enter 줄바꿈)" disabled></textarea>
         <button class="send" id="send-btn" disabled>제출</button>
       </div>
       <div class="privacy">🔒 답변에 대한 평가·점수는 이 화면에 표시되지 않습니다. 세션 종료 후 결과 리포트에서 바로 확인할 수 있어요.</div>
     </div>
+  </div>
+</div>
+
+<div id="submit-confirm-overlay" class="confirm-overlay hidden">
+  <div class="confirm-box">
+    <p>정말 제출하시겠습니까?</p>
+    <div class="confirm-actions">
+      <button class="confirm-btn cancel" id="confirm-cancel-btn" type="button">취소</button>
+      <button class="confirm-btn proceed" id="confirm-proceed-btn" type="button">진행</button>
+    </div>
+  </div>
+</div>
+
+<div id="grading-overlay" class="confirm-overlay hidden">
+  <div class="confirm-box grading-box">
+    <div class="spinner"></div>
+    <p id="grading-overlay-text">5축 채점 및 리포트 생성 중...</p>
   </div>
 </div>
 
@@ -163,6 +212,9 @@
 <script src="../shared/pyodide-shared.js"></script>
 <script src="../shared/traffic-rate.js"></script>
 <script src="../shared/session-state.js"></script>
+<!-- D200: P03's live fact-check tools reuse P02Engine.githubRateLimitError -- loading this
+     is side-effect-free (Pyodide/DOM only touched by explicitly-called functions). -->
+<script src="../shared/p02-engine.js"></script>
 <script src="../shared/p03-engine.js"></script>
 <script>
 (function () {
@@ -309,13 +361,48 @@
     let pendingAnswerResolve = null;
     const answerInput = document.getElementById("answer-input");
     const sendBtn = document.getElementById("send-btn");
-    sendBtn.addEventListener("click", () => {
+    const confirmOverlay = document.getElementById("submit-confirm-overlay");
+    const confirmCancelBtn = document.getElementById("confirm-cancel-btn");
+    const confirmProceedBtn = document.getElementById("confirm-proceed-btn");
+
+    // D201: 제출 버튼/Enter는 곧바로 제출하지 않고 확인 팝업을 먼저 띄운다. "취소"는
+    // answerInput/pendingAnswerResolve를 전혀 건드리지 않으므로 그 자리에서 바로 이어서
+    // 수정 가능 -- 실제 제출(doSubmit)은 "진행" 클릭 시점에만 일어난다.
+    function submitAnswer() {
       const val = answerInput.value.trim();
       if (!val || !pendingAnswerResolve) return;
+      if (!confirmOverlay.classList.contains("hidden")) return; // 이미 팝업 떠있으면 중복 오픈 방지
+      confirmOverlay.classList.remove("hidden");
+      confirmProceedBtn.focus();
+    }
+    function doSubmit() {
+      confirmOverlay.classList.add("hidden");
+      const val = answerInput.value.trim();
+      if (!val || !pendingAnswerResolve) return; // 팝업 떠있는 동안 상태가 바뀐 경우 방어
       answerInput.disabled = true; sendBtn.disabled = true;
       const resolve = pendingAnswerResolve;
       pendingAnswerResolve = null;
       resolve(val);
+    }
+    function cancelSubmit() {
+      confirmOverlay.classList.add("hidden");
+      answerInput.focus();
+    }
+    confirmProceedBtn.addEventListener("click", doSubmit);
+    confirmCancelBtn.addEventListener("click", cancelSubmit);
+    confirmOverlay.addEventListener("click", (e) => { if (e.target === confirmOverlay) cancelSubmit(); });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !confirmOverlay.classList.contains("hidden")) cancelSubmit();
+    });
+
+    sendBtn.addEventListener("click", submitAnswer);
+    // D198: Enter 제출 / Shift+Enter 줄바꿈. e.isComposing으로 한글 등 IME 조합 중
+    // Enter(조합 확정용)를 답변 제출로 오인하지 않도록 함.
+    answerInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        submitAnswer();
+      }
     });
 
     const hooks = {
@@ -325,6 +412,24 @@
       onProgress(msg) {
         console.log("[P03]", msg);
         if (/질문 생성|재생성/.test(msg)) showTypingIndicator();
+        // D199: dedup-retry / elevated-traffic warnings were only ever console.log'd --
+        // invisible to a trainee not watching devtools, even when the guard actually did
+        // fire and retry. "⚠" already marks exactly these "you should know about this"
+        // messages elsewhere in the engine (same prefix convention), so surface them here.
+        if (msg.startsWith("⚠")) appendBubble("sys", msg);
+        // D204/D205: real GitHub fact-check calls (llm.js's chatToolLoop, "⚙ list_files/
+        // read_file 호출 중...") were console-only too, even though this is now a mandatory,
+        // load-bearing part of every L2+ question. Surface it the same way so the trainee
+        // can see "a real repo check is happening right now", not just infer it after the
+        // fact from a file:line citation in the question text.
+        if (msg.startsWith("⚙")) appendBubble("sys", msg);
+        // D203: "5축 채점 중..." (p03-engine.js run()) is the one onProgress message that
+        // marks "answering is done, moving on to the next task" -- show a full spinner
+        // overlay so this transition reads as "working", not "frozen".
+        if (/채점/.test(msg)) {
+          document.getElementById("grading-overlay-text").textContent = msg;
+          document.getElementById("grading-overlay").classList.remove("hidden");
+        }
       },
       onRunStart() {
         document.getElementById("model-bar").classList.add("locked");
@@ -368,7 +473,7 @@
       document.getElementById("start-gate").remove();
       try {
         const result = await P03Engine.run(
-          { finding: submission.finding, codeContexts: submission.codeContexts, model: selectedModel },
+          { finding: submission.finding, codeContexts: submission.codeContexts, model: selectedModel, repoRef: submission.repoRef },
           hooks
         );
         // Page-level enrichment for result.html's display only -- P03Engine.run()'s return
@@ -377,11 +482,13 @@
         // live progress log / run-timer DOM, which doesn't exist on a separate results page).
         const saved = SessionState.saveInterviewResult({ ...result, model: selectedModel, finishedAt: new Date().toISOString() });
         if (!saved.ok) {
+          document.getElementById("grading-overlay").classList.add("hidden"); // D203: don't leave the spinner stuck when we're NOT navigating away
           appendBubble("sys", `결과 저장 실패: ${saved.error.message} -- 새로고침하면 결과를 잃습니다.`);
           return;
         }
         window.location.href = "result.html";
       } catch (err) {
+        document.getElementById("grading-overlay").classList.add("hidden"); // D203: same -- a failed run must not leave the overlay covering the error bubble below
         console.error(err);
         appendBubble("sys", `세션이 오류로 종료됐습니다: ${err.message}`);
       }

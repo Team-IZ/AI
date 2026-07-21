@@ -1,4 +1,24 @@
-# Team-IZ 스타일 검증 파이프라인 (`feature/verification-ui`)
+# Team-IZ 스타일 검증 파이프라인 (`feat/code_Q&A`)
+
+> D207 (2026-07-21): `feature/verification-ui`(D176~D184 스냅샷)를 원본 D206 상태로 최신화한
+> 브랜치입니다. `feature/verification-ui`는 그 시점 그대로 별도 유지되며 이 브랜치가 대체하지
+> 않습니다 — 최신 상태가 필요하면 이 브랜치(`feat/code_Q&A`)를 보세요.
+>
+> D185~D206 사이 반영된 주요 변경(전부 아래 "이식 방법론"과 동일한 diff-기반 재적용으로 반영됨):
+> - **D197**: P03 채점이 "루브릭 전체를 마지막 한 턴만 보고 채점"하던 버그 수정 — 실제
+>   진행된 레벨(`transcript`)에 매핑된 축만 채점하고, 도달하지 못한 축은 "미검증"으로 표시.
+> - **D198**: 근거 코드 패널 좌우 스크롤, 답변 Enter 제출, 결과 리포트 "문답 원문 보기".
+> - **D199**: 중복 질문 탐지에 overlap coefficient 보강(짧은 질문이 긴 질문의 완전
+>   부분집합인 경우까지 탐지) + 턴별 누적 판정(verdict_note)을 매 질문 생성에 반영.
+> - **D200**: L2/L3/Reflection 후속 질문 생성에 실시간 GitHub `list_files`/`read_file` 도구
+>   접근 추가 — 학생 답변을 저장된 스니펫이 아니라 실제 최신 코드로 재확인 후 질문.
+> - **D201/D202**: 답변 제출 확인 팝업(취소 시 이어서 수정 가능), 결과 리포트의 문답
+>   원문을 실시간 채팅 버블 스타일로 재사용 + 토글 강조.
+> - **D203**: 마지막 턴 제출 후 채점/리포트 생성 중임을 보여주는 스피너 오버레이.
+> - **D204~D206**: D200의 실시간 재확인이 확률적으로 스킵되던 문제를 구조적으로 강제(첫
+>   시도는 GitHub 도구 호출 없이는 질문 생성 불가), 중복 질문 재생성 시에도 이미 확보한
+>   근거를 재사용(재조회 없이), 중복 판정 시 "겹치는 이전 질문"을 직접 인용해 모델이
+>   비교하도록 개선, 저장소 정보 없음/실시간 확인 중 상태를 채팅 버블로 가시화.
 
 이 브랜치는 [`popixoxipop-collab/Code_reviewer_with_feedback`](https://github.com/popixoxipop-collab/Code_reviewer_with_feedback)의 Pipeline Lab(`docs/lab/`)에서 실제로 동작 중인 **P02(코드 분석) → P03(소크라틱 검증 세션) → 결과 리포트** 기능을, Team-IZ/Frontend의 실제 화면정의(`team-iz.github.io/Frontend/`, `gh-pages` 브랜치)와 동일한 UI/UX로 다시 입힌 것입니다.
 
@@ -55,6 +75,7 @@ P03Engine.run({ finding, codeContexts, model }, {
 - **실제 E2E 실행**(Playwright + 실제 NVIDIA API 호출): ZIP 제출 → 실제 Pyodide 스캔 → finding 2건(direct-match 1건 + text-mention 1건, D179/D180 두 커넥터 경로 모두) → 검증 세션 자동 시작 → 4턴 전부 실제 질문 생성+답변 제출+실제 Pyodide 분류 → 5축 채점 → 결과 페이지 렌더링까지 전 과정 실제로 통과. GitHub URL 제출 경로도 별도로 확인(성공/실패 케이스 둘 다).
 - 이 과정에서 실제 버그 3건을 발견·수정: session.html에 Pyodide 스크립트 태그 누락(분류기가 Pyodide를 쓰는데 "재스캔 없음"이라는 이유로 빠뜨렸음), `.hidden` 유틸리티 클래스가 어느 CSS에도 정의되지 않아 시각적으로 안 숨겨짐, 진행 체크리스트 아이콘이 상태 전환 시 색상만 바뀌고 글리프(✓/◔/•)는 안 바뀜.
 - direct-navigation 폴백(세션 데이터 없이 session.html/result.html 직접 접근) 확인 완료.
+- **D207 최신화 검증**: 모든 `shared/*.js`/`reference/*.js` syntax check 통과. `trainee/session.html`+`trainee/result.html`을 대상으로 Playwright E2E 재실행(모킹된 NVIDIA 프록시+GitHub API, 실제 Pyodide 분류기) — 근거 코드 패널 좌우 스크롤(D198), Enter 제출 시 확인 팝업(D201), L2 질문 생성 시 실시간 `⚙ list_files 호출 중...` 버블 노출 및 근거 파일명 인용(D204/D205), 마지막 턴 이후 채점 스피너 오버레이(D203), 결과 리포트의 채팅 버블 문답 원문+턴수 배지(D202) 8개 항목 전부 확인.
 
 ## 범위 밖 (Team-IZ 원본엔 있지만 이 포트엔 없는 것)
 
@@ -76,4 +97,4 @@ P03Engine.run({ finding, codeContexts, model }, {
 
 ## 원본과의 관계
 
-원본 Pipeline Lab(`docs/lab/`)은 계속 `popixoxipop-collab/Code_reviewer_with_feedback`에서 유지보수됩니다. 이 브랜치는 그 시점(D176~D184)의 스냅샷을 Team-IZ 스타일로 재구성한 것으로, 원본이 이후 업데이트되어도 자동으로 동기화되지 않습니다.
+원본 Pipeline Lab(`docs/lab/`)은 계속 `popixoxipop-collab/Code_reviewer_with_feedback`에서 유지보수됩니다. 이 브랜치는 원본의 D206 시점(commit `10246f3`) 스냅샷을 Team-IZ 스타일로 재구성한 것으로, 원본이 이후 업데이트되어도 자동으로 동기화되지 않습니다 — 다시 최신화하려면 이 문서의 "이식 방법론"과 동일하게, 원본 저장소의 새 커밋 diff를 이 브랜치의 대응 파일에 재적용하면 됩니다.

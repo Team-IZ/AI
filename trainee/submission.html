@@ -233,11 +233,14 @@
     };
 
     try {
-      const { result, files } = await P02Engine.run(input, hooks);
+      const { result, files, repoRef } = await P02Engine.run(input, hooks);
       ["fetch", "pyodide", "scan", "save"].forEach((k) => progState(k, "done"));
       const basket = buildFindingsBasket(result, files);
       const saved = SessionState.saveFindingsList(basket);
       if (!saved.ok) console.error("findings list save failed (뒤로가기 restore won't work this run):", saved.error);
+      // D200: {owner, repo, branch} from a GitHub-URL scan (null for ZIP) -- own key, set
+      // once per scan, so P03 can later offer live fact-check tools against this repo.
+      SessionState.saveRepoContext(repoRef);
       renderFindingsFromBasket(basket);
     } catch (err) {
       console.error(err);
@@ -308,7 +311,10 @@
   // auto-run decision, just re-expressed as "navigate straight to session.html" instead
   // of "call P03Runner.run() in the same page".
   function startInterview(item) {
-    const saved = SessionState.saveSubmission({ finding: item.finding, codeContexts: item.codeContexts });
+    // D200: carries the scan's repoRef (null for ZIP) into the interview session so P03
+    // can offer live fact-check tools when a real GitHub repo is behind this finding.
+    const repoRef = SessionState.loadRepoContext();
+    const saved = SessionState.saveSubmission({ finding: item.finding, codeContexts: item.codeContexts, repoRef });
     if (!saved.ok) { showError(`세션 데이터 저장 실패: ${saved.error.message}`); return; }
     window.location.href = "session.html";
   }

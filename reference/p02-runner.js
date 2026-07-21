@@ -16,6 +16,8 @@ const P02Runner = (() => {
     "judgment/subrubric.py",
     "judgment/tier_b_hook.py",
     "judgment/subrubric_hook.py",
+    "judgment/importance_rank.py",
+    "judgment/rank_weights/rank_weights.json",
     "judgment/isolation_categories/role_separation/patterns.json",
     "judgment/isolation_categories/domain_irrelevance/patterns.json",
     "judgment/isolation_categories/alt_storage_or_scope/patterns.json",
@@ -31,7 +33,6 @@ const P02Runner = (() => {
     "judgment/idioms/javascript/idiom_patterns.json",
     "judgment/idioms/c/idiom_patterns.json",
   ];
-  const SKIP_DIR_NAMES = new Set(["node_modules", ".git", "dist", "build", "__pycache__", ".venv", "venv", "static", "vendor", "vendored"]);
   const SRC_EXTS = [".ts", ".tsx", ".js", ".jsx", ".py", ".java", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".swift"];
   // D181: cap on how many text-mentioned files (D180) get sent as code context for one
   // finding -- unmeasured/provisional, chosen against p03-1's own existing 4000-char total
@@ -45,8 +46,20 @@ const P02Runner = (() => {
   let currentMethod = "pat"; // "pat" | "zip"
   let zipFiles = null; // { relPath: content }
 
+  // D195-fix: these three used to be a hardcoded module-level SKIP_DIR_NAMES Set that
+  // silently fell out of sync with judgment/score_findings.py's SKIP_DIRS when D195
+  // widened it from 10 to 26 entries -- files under target/, .next/, .pytest_cache/ etc.
+  // still got downloaded here (and burned GitHub API rate limit on them, D192) even
+  // though Python discarded them right after. Resolving live from the manifest means the
+  // fetch step and the Python scan can never drift again, and a trainee's SKIP_DIRS edit
+  // in the p02-1 param panel now actually affects what gets downloaded.
   function isSkippedDir(relPath) {
-    return relPath.split("/").some((p) => SKIP_DIR_NAMES.has(p));
+    const skipDirs = new Set(LabApp.resolveParam("p02", "p02-1", "SKIP_DIRS") || []);
+    const prefixes = LabApp.resolveParam("p02", "p02-1", "SKIP_DIR_PREFIXES") || [];
+    const suffixes = LabApp.resolveParam("p02", "p02-1", "SKIP_DIR_SUFFIXES") || [];
+    return relPath.split("/").some(
+      (p) => skipDirs.has(p) || prefixes.some((pre) => p.startsWith(pre)) || suffixes.some((suf) => p.endsWith(suf))
+    );
   }
 
   // D164 (2026-07-15): Codex root-cause investigation (user-delegated) into a real "스캔
@@ -60,6 +73,14 @@ const P02Runner = (() => {
     if (isSkippedDir(relPath)) return true;
     const ext = "." + (relPath.split(".").pop() || "").toLowerCase();
     if (!SRC_EXTS.includes(ext)) return true;
+    // D195-fix: mirrors GENERATED_FILENAME_RE in two_tier_scan.py/score_findings.py --
+    // catches artifacts (contenthash bundles, .min.js, .d.ts) sitting outside any skip
+    // directory, matched against the basename only (same as Python's os.walk fnames).
+    const genRePattern = LabApp.resolveParam("p02", "p02-1", "GENERATED_FILENAME_RE");
+    if (genRePattern) {
+      const basename = relPath.split("/").pop() || "";
+      if (new RegExp(genRePattern, "i").test(basename)) return true;
+    }
     return false;
   }
 
@@ -262,18 +283,41 @@ const P02Runner = (() => {
     return { owner: parts[0], repo: parts[1] };
   }
 
+  // D192 (2026-07-16): real production incident (Supabase runs.error 실측) — 한 사용자가
+  // "파일 목록 조회 실패 (HTTP 403)"에 8분간 87회 재제출했고, 직후 같은 네트워크의 두 번째
+  // 사용자까지 같은 403을 맞음. 원인은 GitHub API 비인증 한도(IP당 60회/시간, 팀 공유망이면
+  // 전원이 공유): 이 함수는 repo 하나 스캔에 blob마다 1회씩 수십 회를 쓰므로 한도가 금방
+  // 소진되는데, 기존 메시지는 일반 403(없는 repo/권한 없음)과 구분이 안 돼 사용자가 재시도만
+  // 반복했다. 판별은 GitHub의 공식 신호인 x-ratelimit-remaining==0 헤더로만 한다 — 상태코드
+  // 403 단독으로는 권한 문제와 구분 불가. X-RateLimit-*는 Access-Control-Expose-Headers에
+  // 포함돼 브라우저 fetch에서 읽힘(실제 rate-limited 403으로 실측 확인, 2026-07-16).
+  // 재시도 로직은 일부러 안 넣음: 리셋 시각 전에는 몇 번을 다시 보내도 똑같이 실패한다
+  // (87연속 실측). 헤더가 없거나 remaining>0이면 null을 반환해 기존 메시지를 그대로 쓴다.
+  // EXIT: PAT 사용자가 5,000회 한도까지 소진하는 사례가 관측되면 그때 배치 크기를 재검토.
+  function githubRateLimitError(res, pat) {
+    if (!res.headers || res.headers.get("x-ratelimit-remaining") !== "0") return null;
+    const resetTs = Number(res.headers.get("x-ratelimit-reset"));
+    const resetStr = Number.isFinite(resetTs) && resetTs > 0
+      ? new Date(resetTs * 1000).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
+      : null;
+    const until = resetStr ? `${resetStr}까지는` : "한도가 리셋될 때까지(최대 1시간)";
+    return new Error(pat
+      ? `GitHub API 요청 한도 초과 (PAT 기준 5,000회/시간) — ${until} 재시도해도 계속 실패합니다`
+      : `GitHub API 요청 한도 초과 (비인증 IP당 60회/시간, 같은 네트워크 사용자끼리 공유) — ${until} 재시도해도 계속 실패합니다. GitHub PAT을 입력하면 한도가 5,000회/시간으로 늘어나 바로 해결됩니다`);
+  }
+
   async function fetchGithubRepo(owner, repo, branch, pat, onProgress) {
     const headers = { accept: "application/vnd.github+json" };
     if (pat) headers.authorization = `Bearer ${pat}`;
 
     if (!branch) {
       const infoRes = await fetch(`https://api.github.com/repos/${owner}/${repo}`, { headers });
-      if (!infoRes.ok) throw new Error(`repo 조회 실패 (HTTP ${infoRes.status}) — 이름/권한 확인`);
+      if (!infoRes.ok) throw (githubRateLimitError(infoRes, pat) || new Error(`repo 조회 실패 (HTTP ${infoRes.status}) — 이름/권한 확인`));
       branch = (await infoRes.json()).default_branch;
     }
 
     const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`, { headers });
-    if (!treeRes.ok) throw new Error(`파일 목록 조회 실패 (HTTP ${treeRes.status})`);
+    if (!treeRes.ok) throw (githubRateLimitError(treeRes, pat) || new Error(`파일 목록 조회 실패 (HTTP ${treeRes.status})`));
     const tree = await treeRes.json();
     if (tree.truncated) onProgress("경고: repo가 커서 GitHub API가 파일 목록을 일부만 반환함");
 
@@ -303,6 +347,11 @@ const P02Runner = (() => {
               }
             } catch (e) { /* binary content, skip */ }
           }
+        } else {
+          // D192: rate-limit이면 즉시 중단 — 조용히 파일만 빠진 "성공"을 만들지 않는다.
+          // 그 외 비정상 응답은 기존대로 해당 파일만 건너뜀.
+          const rlErr = githubRateLimitError(blobRes, pat);
+          if (rlErr) throw rlErr;
         }
         done += 1;
         if (done % 5 === 0 || done === blobs.length) onProgress(`${done}/${blobs.length} 파일 가져옴`);
@@ -350,8 +399,8 @@ shutil.rmtree("/target", ignore_errors=True)
   function collectOverrides() {
     const manifest = LabApp.getManifest();
     const stages = manifest.pipelines.p02.stages;
-    const overrides = { two_tier_scan: {}, score_findings: {} };
-    const moduleForStage = { "p02-1": "two_tier_scan", "p02-2": "two_tier_scan", "p02-3": "two_tier_scan", "p02-4": "score_findings" };
+    const overrides = { two_tier_scan: {}, score_findings: {}, importance_rank: {} };
+    const moduleForStage = { "p02-1": "two_tier_scan", "p02-2": "two_tier_scan", "p02-3": "two_tier_scan", "p02-4": "score_findings", "p02-5": "importance_rank" };
     for (const stage of stages) {
       const ov = LabApp.getOverride("p02", stage.id);
       if (ov && ov.params) {
@@ -450,8 +499,11 @@ _result = webtool_driver.run_scan("/target", overrides_json)
       } else {
         connectHtml = `<button class="secondary" data-interview-idx="${idx}" style="margin-top:8px; font-size:0.72rem;">인터뷰 시작 →</button>`;
       }
+      // D194: rank/rank_score from judgment/importance_rank.py -- always present on a fresh
+      // scan (this is same-session run_scan() output, never historical Supabase data).
+      const rankBadge = f.rank != null ? `#${f.rank} (${f.rank_score}점) · ` : "";
       html += `<div class="finding-card">
-        <div class="fid">${LabApp.escapeHtml(f.id)} · priority: ${LabApp.escapeHtml(f.priority || "")}</div>
+        <div class="fid">${LabApp.escapeHtml(rankBadge)}${LabApp.escapeHtml(f.id)} · priority: ${LabApp.escapeHtml(f.priority || "")}</div>
         <div>${LabApp.escapeHtml(f.finding || "")}</div>
         ${connectHtml}
       </div>`;

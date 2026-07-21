@@ -349,7 +349,10 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     if (el) { el.textContent = ""; el.classList.remove("p03-countdown-over"); }
   }
 
-  function buildLevelPrompt(level, finding, codeContext, transcript, classification) {
+  // D199 (mirrors p03-engine.js): `classification` param dropped -- verdict_note is now
+  // the full turn-by-turn trail (buildVerdictTrail(transcript)), not just the immediately
+  // preceding turn's verdict.
+  function buildLevelPrompt(level, finding, codeContext, transcript, extraBanned) {
     const codeBlock = codeContext ? `\n## 실제 코드\n\`\`\`\n${codeContext}\n\`\`\`\n` : "";
     const headerStage = LabApp.getStage("p03", "p03-1");
     const header = LabApp.fillTemplate(headerStage.shared_header, { finding_text: finding.finding || "", finding_file: finding.file || "", code_block: codeBlock });
@@ -357,46 +360,182 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     if (level === "l1") return header + LabApp.resolveTemplate("p03", "p03-1", "level_template");
 
     const transcriptText = transcript.map((t) => `[${t.level.toUpperCase()}] 질문: ${t.question}\n[${t.level.toUpperCase()}] 학생 답변: ${t.answer}`).join("\n");
-    const verdictNote = { surface: "표면적(근거·구체성 부족)", partial: "부분적(일부 근거는 있으나 아직 충분히 깊지 않음)" }[classification.verdict] || classification.verdict;
+    const verdictNote = buildVerdictTrail(transcript);
     const stageId = { l2: "p03-2", l3: "p03-3", reflection: "p03-4" }[level];
-    return header + LabApp.fillTemplate(LabApp.resolveTemplate("p03", stageId, "level_template"), { transcript: transcriptText, verdict_note: verdictNote });
+    let prompt = header + LabApp.fillTemplate(LabApp.resolveTemplate("p03", stageId, "level_template"), { transcript: transcriptText, verdict_note: verdictNote });
+    // D190 (see p03-engine.js for the full WHY/COST/EXIT -- same fix, mirrored here):
+    // only non-empty on a dedup-triggered retry within the SAME level, since a rejected
+    // same-level attempt never makes it into `transcript` (that only happens after the
+    // turn's answer comes back).
+    if (extraBanned && extraBanned.length) {
+      prompt += `\n\n## 방금 생성했으나 반려된 질문 (이전 질문과 겹침 감지됨) — 이것과도 겹치면 안 됩니다\n` + extraBanned.map((q, i) => `${i + 1}. ${q}`).join("\n");
+    }
+    return prompt;
   }
 
-  async function generateQuestion(level, finding, codeContext, transcript, classification, maxAttempts) {
+  // D190: see p03-engine.js's generateQuestion for the full WHY/COST/EXIT -- this is the
+  // same near-duplicate regeneration guard, mirrored here so the original single-page tool
+  // (this file) doesn't silently keep the bug the trainee/ pages already fixed.
+  const DEDUP_JACCARD_THRESHOLD = 0.5;
+  const DEDUP_MAX_RETRIES = 2;
+
+  function normalizeForDedup(s) {
+    return (s || "").replace(/\s+/g, " ").trim();
+  }
+
+  function ngramJaccard(a, b, n = 3) {
+    const na = normalizeForDedup(a), nb = normalizeForDedup(b);
+    if (na.length < n || nb.length < n) return na === nb ? 1 : 0;
+    const gramsA = new Set(); for (let i = 0; i <= na.length - n; i++) gramsA.add(na.slice(i, i + n));
+    const gramsB = new Set(); for (let i = 0; i <= nb.length - n; i++) gramsB.add(nb.slice(i, i + n));
+    let intersection = 0;
+    for (const g of gramsA) if (gramsB.has(g)) intersection++;
+    const union = gramsA.size + gramsB.size - intersection;
+    return union === 0 ? 0 : intersection / union;
+  }
+
+  // D199 (mirrors p03-engine.js -- see its comment for the full measured WHY/COST/EXIT):
+  // union-based Jaccard dilutes toward 0 when a duplicate question is a shorter, near-total
+  // subset of a longer prior one (a real trainee session hit exactly this: Jaccard=0.4556,
+  // just under the 0.5 threshold, for a pair where the shorter question was a literal
+  // substring of the longer one). Overlap coefficient (intersection/min instead of union)
+  // catches full-containment duplicates regardless of length asymmetry (measured 1.0 on
+  // that same pair). OVERLAP_COEFFICIENT_THRESHOLD=0.8 is unmeasured/provisional beyond
+  // that one anchor point -- deliberately conservative to avoid false-positiving on
+  // legitimately different follow-up questions that happen to share boilerplate phrasing.
+  const OVERLAP_COEFFICIENT_THRESHOLD = 0.8;
+
+  function ngramOverlapCoefficient(a, b, n = 3) {
+    const na = normalizeForDedup(a), nb = normalizeForDedup(b);
+    if (na.length < n || nb.length < n) return na === nb ? 1 : 0;
+    const gramsA = new Set(); for (let i = 0; i <= na.length - n; i++) gramsA.add(na.slice(i, i + n));
+    const gramsB = new Set(); for (let i = 0; i <= nb.length - n; i++) gramsB.add(nb.slice(i, i + n));
+    let intersection = 0;
+    for (const g of gramsA) if (gramsB.has(g)) intersection++;
+    const minSize = Math.min(gramsA.size, gramsB.size);
+    return minSize === 0 ? 0 : intersection / minSize;
+  }
+
+  function isDuplicateQuestion(candidate, prior) {
+    return ngramJaccard(candidate, prior) >= DEDUP_JACCARD_THRESHOLD
+      || ngramOverlapCoefficient(candidate, prior) >= OVERLAP_COEFFICIENT_THRESHOLD;
+  }
+
+  // D199 (mirrors p03-engine.js): derives the cumulative verdict trail directly from
+  // `transcript` (every turn's level + classification.verdict so far), replacing the old
+  // single "last turn only" classification param that used to be threaded through
+  // generateQuestion()/buildLevelPrompt() separately.
+  function buildVerdictTrail(transcript) {
+    const LABEL = { surface: "표면적(근거·구체성 부족)", partial: "부분적(일부 근거는 있으나 아직 충분히 깊지 않음)", defended: "방어됨" };
+    return transcript.map((t) => `${t.level.toUpperCase()}=${LABEL[t.classification.verdict] || t.classification.verdict}`).join(", ");
+  }
+
+  // D199: dropped the separate `classification` param -- see buildVerdictTrail() above.
+  async function generateQuestion(level, finding, codeContext, transcript, maxAttempts) {
     // D182: falls through to the top-level toggle (selectedModel) now, same precedence as
     // P01's model resolution -- p03-1 has no manifest `model` param at all (never did), so
     // this was already effectively "shared default only" before; now it's "toggle" instead.
     const model = LabApp.resolveParam("p03", "p03-1", "model") || selectedModel;
-    const prompt = buildLevelPrompt(level, finding, codeContext, transcript, classification);
     const tool = { name: "ask_question", description: "학생에게 던질 질문 하나를 생성한다.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } };
-    const result = await LabLLM.chatTool({ model, messages: [{ role: "user", content: prompt }], tool, maxTokens: 2048, maxAttempts });
-    return result.question;
+    const priorQuestions = transcript.map((t) => t.question);
+    const rejected = [];
+    for (let attempt = 0; attempt <= DEDUP_MAX_RETRIES; attempt++) {
+      const prompt = buildLevelPrompt(level, finding, codeContext, transcript, rejected);
+      const result = await LabLLM.chatTool({ model, messages: [{ role: "user", content: prompt }], tool, maxTokens: 2048, maxAttempts });
+      const candidate = result.question;
+      const dupOf = priorQuestions.find((q) => isDuplicateQuestion(candidate, q));
+      if (!dupOf) return candidate;
+      if (attempt === DEDUP_MAX_RETRIES) {
+        LabApp.log("p03", `⚠ ${level.toUpperCase()} 질문이 이전 질문과 유사해 보이지만 재생성 한도(${DEDUP_MAX_RETRIES}회) 소진 — 그대로 진행`);
+        return candidate;
+      }
+      LabApp.log("p03", `⚠ ${level.toUpperCase()} 질문이 이전 질문과 겹쳐 재생성 중 (${attempt + 1}/${DEDUP_MAX_RETRIES})...`);
+      rejected.push(candidate);
+    }
   }
 
-  async function gradeAnswer(finding, question, answer, maxAttempts) {
+  // D197 (mirrors p03-engine.js): fixes "grading only sees the single turn the loop
+  // happened to stop on" -- gradeAnswer() used to take (question, answer) for just
+  // transcript[transcript.length-1] and score ALL 5 rubric axes off that one exchange,
+  // even when most axes' questions were never asked (early `defended` break) or when the
+  // real grade-worthy answers were earlier turns the LLM never saw (a late "모르겠습니다"
+  // zeroed out everything). See p03-engine.js's D197 comment for the full WHY/COST/EXIT --
+  // this file mirrors that fix exactly (uses prompt_manifest.json's shared p03-7 stage +
+  // its new axis_level_map, so both consumers of that stage stay in sync).
+  function testedLevelsOf(transcript) {
+    return new Set(transcript.map((t) => t.level));
+  }
+
+  function gradableAxes(axisLevelMap, axes, testedLevels) {
+    return axes.filter((axis) => {
+      const levels = axisLevelMap[axis];
+      if (!levels || !levels.length) return true;
+      return levels.some((lvl) => testedLevels.has(lvl));
+    });
+  }
+
+  function buildTranscriptBlock(transcript) {
+    return transcript.map((t) => `[${t.level.toUpperCase()}] 질문: ${t.question}\n[${t.level.toUpperCase()}] 학생 답변: ${t.answer}`).join("\n\n");
+  }
+
+  function buildAxisGuidanceBlock(axisLevelMap, axes, gradable, testedLevels) {
+    const levelsLabel = (axis) => (axisLevelMap[axis] || []).map((l) => l.toUpperCase()).join("/") || "전체";
+    let block = `이번 세션에서 진행된 레벨: ${[...testedLevels].map((l) => l.toUpperCase()).join(", ")}.\n`;
+    block += `아래 축은 실제로 진행된 레벨의 턴을 근거로 채점 대상입니다:\n${gradable.map((a) => `- ${a}: 근거 턴 = ${levelsLabel(a)}`).join("\n")}`;
+    const untested = axes.filter((a) => !gradable.includes(a));
+    if (untested.length) {
+      block += `\n\n다음 축은 이 세션에서 해당 레벨까지 도달하지 않아 채점 대상에서 제외됩니다 (코드로 고정 처리됨, 응답에 포함하지 마세요): ${untested.join(", ")}`;
+    }
+    return block;
+  }
+
+  function notTestedEvidence(axis, axisLevelMap) {
+    const levelsLabel = (axisLevelMap[axis] || []).map((l) => l.toUpperCase()).join("/");
+    return `이 세션은 ${levelsLabel} 레벨까지 진행되지 않아 채점하지 않았습니다 (조기 방어 성공했거나, 세션이 그 전에 종료됨).`;
+  }
+
+  // D197: takes the full `transcript` instead of a single (question, answer) pair.
+  async function gradeAnswer(finding, transcript, maxAttempts) {
     const stage = LabApp.getStage("p03", "p03-7");
-    const rubric = (LabApp.getOverride("p03", "p03-7") || {}).rubric || stage.rubric;
-    const rubricOverridden = Boolean((LabApp.getOverride("p03", "p03-7") || {}).rubric_overridden);
+    const override = LabApp.getOverride("p03", "p03-7") || {};
+    const rubric = override.rubric || stage.rubric;
+    const rubricOverridden = Boolean(override.rubric_overridden);
+    const axisLevelMap = override.axis_level_map || stage.axis_level_map || {};
+    const axes = Object.keys(rubric);
+    const testedLevels = testedLevelsOf(transcript);
+    const gradable = gradableAxes(axisLevelMap, axes, testedLevels);
+
     let rubricBlock = "";
-    for (const [axis, levels] of Object.entries(rubric)) {
-      rubricBlock += `### ${axis}\n`;
+    for (const axis of gradable) {
+      const levels = rubric[axis];
+      rubricBlock += `### ${axis} (근거 턴: ${(axisLevelMap[axis] || []).map((l) => l.toUpperCase()).join("/") || "전체"})\n`;
       for (const score of ["5", "4", "3", "2", "1"]) rubricBlock += `  ${score}점: ${levels[score]}\n`;
     }
     const userMsg = LabApp.fillTemplate(LabApp.resolveTemplate("p03", "p03-7", "user_template"), {
-      rubric_block: rubricBlock, finding_text: finding.finding || "", finding_file: finding.file || "", question, answer,
+      rubric_block: rubricBlock,
+      axis_guidance_block: buildAxisGuidanceBlock(axisLevelMap, axes, gradable, testedLevels),
+      finding_text: finding.finding || "", finding_file: finding.file || "",
+      transcript_block: buildTranscriptBlock(transcript),
     });
-    const axes = Object.keys(rubric);
     const tool = {
       name: "grade_interview_answer",
-      description: "학생 답변을 FR-04-01 5축 루브릭으로 채점한다.",
-      input_schema: { type: "object", properties: Object.fromEntries(axes.map((a) => [a, { type: "object", properties: { score: { type: "integer" }, evidence: { type: "string" } }, required: ["score", "evidence"] }])), required: axes },
+      description: "학생 답변을 FR-04-01 5축 루브릭으로 채점한다 (이번 세션에서 실제로 진행된 레벨에 해당하는 축만).",
+      input_schema: { type: "object", properties: Object.fromEntries(gradable.map((a) => [a, { type: "object", properties: { score: { type: "integer" }, evidence: { type: "string" } }, required: ["score", "evidence"] }])), required: gradable },
     };
     // D182: p03-7's manifest `model` param was removed (see prompt_manifest.json) so this
     // falls through to the top-level toggle -- previously the manifest's fixed default would
     // have won here every time via resolveParam's precedence, making a toggle pointless
     // (same lesson D154 already applied to P01's stage-level model param).
     const model = LabApp.resolveParam("p03", "p03-7", "model") || selectedModel;
-    const grades = await LabLLM.chatTool({ model, messages: [{ role: "user", content: userMsg }], tool, maxTokens: 2048, maxAttempts });
+    const llmGrades = gradable.length
+      ? await LabLLM.chatTool({ model, messages: [{ role: "user", content: userMsg }], tool, maxTokens: 2048, maxAttempts })
+      : {};
+    const grades = {};
+    for (const axis of axes) {
+      grades[axis] = gradable.includes(axis)
+        ? { ...llmGrades[axis], tested: true }
+        : { score: null, evidence: notTestedEvidence(axis, axisLevelMap), tested: false };
+    }
     return { grades, rubric_overridden: rubricOverridden };
   }
 
@@ -418,6 +557,14 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     LabApp.startTimer(pipelineId);
     const sessionTimeoutMinutes = LabApp.resolveParam("p03", "p03-6", "session_timeout_minutes") || 0;
     initCountdown(sessionTimeoutMinutes);
+    // D193: declared *outside* the try block on purpose -- see p03-engine.js's identical
+    // comment (a `let` inside try isn't visible in that try's own catch).
+    let dbRun = null;
+    // D196 (2026-07-17): reassigned once the abandon guard is armed inside the try below.
+    // Declared out here for the same reason as dbRun -- the catch block must be able to
+    // disarm it before writing the run's real "error" status. See p03-engine.js's
+    // identical comment and db.js's armAbandonBeacon for the full WHY/COST/EXIT.
+    let disarmAbandon = () => {};
     try {
       LabApp.log(pipelineId, `모델: ${selectedModel}`);
       await ensureClassifiers((msg) => LabApp.log(pipelineId, msg));
@@ -443,13 +590,44 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       const maxTurns = LabApp.resolveParam("p03", "p03-6", "max_turns") || 4;
       const totalTurns = Math.min(LEVELS.length, maxTurns);
 
+      // D193 (2026-07-16): open the DB-side run row *before* the turn loop instead of
+      // only at the very end -- see db.js's startRun()/logTurn() comment for the full
+      // WHY/COST/EXIT. Failure here is non-fatal -- same "DB 미설정" tone as
+      // maybeSaveRun below.
+      if (LabDB.isConfigured()) {
+        try {
+          dbRun = await LabDB.startRun({ pipeline: "p03", model: selectedModel, input_meta: { finding_id: selectedFinding.id }, overrides: {} });
+        } catch (e) {
+          LabApp.log(pipelineId, `DB 세션 시작 실패(턴별 저장 없이 진행): ${e.message}`);
+        }
+      }
+
+      // D196 (2026-07-17): while the trainee is still answering, a tab close should finalize
+      // this run as "abandoned" instead of leaving it stranded at "running" (see db.js
+      // armAbandonBeacon for the full WHY/COST/EXIT). Scoped to `pagehide` ONLY -- not
+      // visibilitychange -- because switching tabs to look something up must not count as
+      // abandonment. Disarmed the instant we begin finalizing (loop done, or error) so it can
+      // never race or overwrite the real done/error status written below. Identical to
+      // p03-engine.js's block.
+      if (dbRun) {
+        try {
+          const sendAbandon = await LabDB.armAbandonBeacon(dbRun.id);
+          const onPageHide = () => { sendAbandon(); };
+          window.addEventListener("pagehide", onPageHide);
+          disarmAbandon = () => { window.removeEventListener("pagehide", onPageHide); };
+        } catch (e) {
+          LabApp.log(pipelineId, `이탈 감지 설정 실패(턴 저장은 정상 동작): ${e.message}`);
+        }
+      }
+
       for (let i = 0; i < totalTurns; i++) {
         const level = LEVELS[i];
         document.getElementById("p03-progress").textContent = `질문 ${i + 1}/${totalTurns}`;
-        const prevClassification = transcript.length ? transcript[transcript.length - 1].classification : null;
         const genAttempts = await resolveMaxAttempts(pipelineId);
         LabApp.log(pipelineId, `${level.toUpperCase()} 질문 생성 중...`);
-        const question = await generateQuestion(level, selectedFinding, codeContext, transcript, prevClassification, genAttempts);
+        // D199 (mirrors p03-engine.js): transcript already carries every turn's
+        // classification -- generateQuestion() derives the cumulative verdict trail from it.
+        const question = await generateQuestion(level, selectedFinding, codeContext, transcript, genAttempts);
         appendTranscriptEntry(level, question, null);
         LabApp.log(pipelineId, "답변 대기 중...");
         resumeCountdown(); // D182: only start ticking once the human can actually see+answer this question
@@ -459,13 +637,26 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         const classification = await classifyAnswer(category, answer, level);
         transcript.push({ level, question, answer, classification });
         appendTranscriptEntry(level, question, answer);
+        // D193: persist this turn immediately -- see p03-engine.js's identical comment.
+        if (dbRun) {
+          try {
+            await LabDB.logTurn({ run_id: dbRun.id, stage_id: level, seq: i, output: { level, question, answer, classification } });
+          } catch (e) {
+            LabApp.log(pipelineId, `턴 저장 실패(진행은 계속됨): ${e.message}`);
+          }
+        }
         if (classification.verdict === "defended") { verdict = "defended"; break; }
       }
 
+      // D196: answering is complete -- from here the run finalizes (grading -> done). Stop
+      // treating a tab close as abandonment; closing during the brief grading window reverts
+      // to the prior "row stays running" behavior, which is fine since the trainee already
+      // finished every answer. maybeSaveRun() below writes the real "done" status.
+      disarmAbandon();
       LabApp.log(pipelineId, "5축 채점 중...");
-      const last = transcript[transcript.length - 1];
       const gradeAttempts = await resolveMaxAttempts(pipelineId);
-      const { grades, rubric_overridden } = await gradeAnswer(selectedFinding, last.question, last.answer, gradeAttempts);
+      // D197 (mirrors p03-engine.js): full transcript, not just the last turn.
+      const { grades, rubric_overridden } = await gradeAnswer(selectedFinding, transcript, gradeAttempts);
 
       const finishedAt = new Date();
       LabApp.stopTimer(pipelineId);
@@ -473,14 +664,29 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       LabApp.setStatus(pipelineId, "완료", "done");
       const result = { finding: selectedFinding, verdict, turns: transcript.length, transcript, grades, rubric_overridden };
       renderResults(result); // D184: shown immediately now, no separate "리포트 보기" click required -- see the module-level comment on why
-      await maybeSaveRun(result, startedAt, finishedAt);
+      await maybeSaveRun(result, startedAt, finishedAt, dbRun);
     } catch (err) {
       LabApp.stopTimer(pipelineId);
       stopCountdown();
       console.error(err);
       LabApp.setStatus(pipelineId, `오류: ${err.message}`, "error");
       LabApp.log(pipelineId, `오류: ${err.message}`);
-      await LabApp.saveFailedRun("p03", selectedModel, err, startedAt); // D182: record what was actually selected, not the shared default
+      // D196: this run is finalizing as "error" -- disarm the abandon guard first so a
+      // pagehide during error handling can't overwrite that with "abandoned".
+      disarmAbandon();
+      // D193: finish (UPDATE) the already-opened run row when one exists, so turns
+      // already logged via logTurn() above survive -- see p03-engine.js's identical
+      // comment for the full reasoning. Falls back to the original fresh-insert path
+      // when dbRun was never obtained.
+      if (dbRun) {
+        try {
+          await LabDB.saveRun({ run_id: dbRun.id, status: "error", error: String((err && err.message) || err), finished_at: new Date().toISOString(), artifacts: [] });
+        } catch (saveErr) {
+          LabApp.log(pipelineId, `실패 기록 저장도 실패: ${saveErr.message}`);
+        }
+      } else {
+        await LabApp.saveFailedRun("p03", selectedModel, err, startedAt); // D182: record what was actually selected, not the shared default
+      }
     }
   }
 
@@ -488,20 +694,25 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     let html = `<p>verdict: <b>${LabApp.escapeHtml(result.verdict)}</b> · ${result.turns}턴${result.rubric_overridden ? ' · <span style="color:var(--status-blocked);">rubric_overridden</span>' : ""}</p>`;
     html += `<div class="param-grid">`;
     for (const [axis, g] of Object.entries(result.grades)) {
-      html += `<div class="finding-card"><div class="fid">${LabApp.escapeHtml(axis)}: ${LabApp.escapeHtml(String(g.score))}점</div><div>${LabApp.escapeHtml(g.evidence || "")}</div></div>`;
+      // D197: legacy rows without a `tested` field (pre-fix runs) are treated as tested.
+      const scoreLabel = g.tested === false ? "미검증" : `${g.score}점`;
+      html += `<div class="finding-card"><div class="fid">${LabApp.escapeHtml(axis)}: ${LabApp.escapeHtml(scoreLabel)}</div><div>${LabApp.escapeHtml(g.evidence || "")}</div></div>`;
     }
     html += `</div>`;
     html += LabApp.jsonResultBlock("원본 JSON", result, "p03-result.json");
     LabApp.showResults(html);
   }
 
-  async function maybeSaveRun(result, startedAt, finishedAt) {
+  // D193: `dbRun` param added (optional) -- see p03-engine.js's identical comment on its
+  // maybeSaveRun for the reasoning.
+  async function maybeSaveRun(result, startedAt, finishedAt, dbRun) {
     if (!LabDB.isConfigured()) {
       LabApp.log("p03", "Supabase 미설정 — 결과는 화면에만 표시됨");
       return;
     }
     try {
       await LabDB.saveRun({
+        run_id: dbRun ? dbRun.id : undefined,
         pipeline: "p03",
         model: selectedModel, // D182: was always the shared default regardless of what actually ran
         input_meta: { finding_id: result.finding.id },
@@ -509,6 +720,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         rubric_overridden: result.rubric_overridden,
         artifacts: [{ kind: "transcript", content: result.transcript }, { kind: "grades", content: result.grades }],
         started_at: startedAt.toISOString(), finished_at: finishedAt.toISOString(),
+        status: "done",
       });
       LabApp.log("p03", `결과가 팀 DB에 저장됨 (소요시간 ${LabApp.formatElapsed(finishedAt - startedAt)})`);
     } catch (err) {

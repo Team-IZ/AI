@@ -16,6 +16,10 @@ const SessionState = (() => {
   const SUBMISSION_KEY = "teamiz_p02_submission";
   const RESULT_KEY = "teamiz_p03_result";
   const FINDINGS_KEY = "teamiz_p02_findings";
+  // D200: {owner, repo, branch} from a GitHub-URL P02 scan, or null for ZIP uploads / no
+  // scan yet. Own key (not folded into SUBMISSION_KEY/FINDINGS_KEY) because it's set once
+  // per SCAN, not per finding -- every finding from the same scan shares the same repo.
+  const REPO_KEY = "teamiz_p02_repo_context";
 
   function safeSet(key, value) {
     try {
@@ -39,26 +43,45 @@ const SessionState = (() => {
 
   // finding: the P02 finding object as-is. codeContexts: [{path, content}], already
   // resolved+capped by P02Engine.resolveConnectableFile/MAX_CONNECT_FILES -- never the
-  // full files map.
-  function saveSubmission({ finding, codeContexts }) {
-    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: null });
+  // full files map. repoRef (D200): optional {owner, repo, branch}, null for ZIP uploads.
+  function saveSubmission({ finding, codeContexts, repoRef }) {
+    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: null, repoRef: repoRef || null });
   }
 
   // Optional 3rd field so submission.html can also hand session.html the model chosen in
   // its own connection-settings panel, if the page wires it that way; session.html falls
   // back to the manifest default itself if this is absent (same fallback the original
   // renderInput() did before selecting a model).
-  function saveSubmissionWithModel({ finding, codeContexts, model }) {
-    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: model || null });
+  function saveSubmissionWithModel({ finding, codeContexts, model, repoRef }) {
+    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: model || null, repoRef: repoRef || null });
   }
 
-  // Returns { finding, codeContexts, model } or null if nothing valid was saved (direct
-  // navigation to session.html, expired/cleared sessionStorage, or a malformed value) --
-  // the page must fall back to a "제출 단계로 돌아가세요" state in that case, not crash.
+  // Returns { finding, codeContexts, model, repoRef } or null if nothing valid was saved
+  // (direct navigation to session.html, expired/cleared sessionStorage, or a malformed
+  // value) -- the page must fall back to a "제출 단계로 돌아가세요" state in that case, not
+  // crash. D200: repoRef defaults to null for rows saved before this field existed (no
+  // migration needed -- `v.repoRef` is simply `undefined` on those, falls through below).
   function loadSubmission() {
     const v = safeGet(SUBMISSION_KEY);
     if (!v || typeof v !== "object" || !v.finding) return null;
-    return { finding: v.finding, codeContexts: Array.isArray(v.codeContexts) ? v.codeContexts : [], model: v.model || null };
+    return {
+      finding: v.finding,
+      codeContexts: Array.isArray(v.codeContexts) ? v.codeContexts : [],
+      model: v.model || null,
+      repoRef: (v.repoRef && v.repoRef.owner && v.repoRef.repo) ? v.repoRef : null,
+    };
+  }
+
+  // D200: set once per scan (submission.html, right after P02Engine.run() resolves) --
+  // its own key so it survives 뒤로가기 (D1) independent of FINDINGS_KEY/SUBMISSION_KEY.
+  function saveRepoContext(repoRef) {
+    return safeSet(REPO_KEY, repoRef || null);
+  }
+
+  function loadRepoContext() {
+    const v = safeGet(REPO_KEY);
+    if (!v || typeof v !== "object" || !v.owner || !v.repo) return null;
+    return { owner: v.owner, repo: v.repo, branch: v.branch || null };
   }
 
   // D1 (뒤로가기): trainee feedback -- leaving session.html mid-interview navigated back
@@ -103,5 +126,5 @@ const SessionState = (() => {
     return v;
   }
 
-  return { saveSubmission, saveSubmissionWithModel, loadSubmission, saveFindingsList, loadFindingsList, saveInterviewResult, loadInterviewResult };
+  return { saveSubmission, saveSubmissionWithModel, loadSubmission, saveFindingsList, loadFindingsList, saveInterviewResult, loadInterviewResult, saveRepoContext, loadRepoContext };
 })();

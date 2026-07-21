@@ -23,10 +23,11 @@
           "kind": "prompt",
           "function": "analyse_chunk()",
           "system": "You are a precise curriculum-analysis extractor. Output strict JSON only.",
-          "user_template": "KT AIVLE School {course_label} curriculum PDF page range: {chunk_range}.\n\nReturn ONLY valid JSON with this exact shape:\n{{\n  \"chunk_range\": \"{chunk_range}\",\n  \"units\": [{{\"unit_id\": \"01\", \"unit_title\": \"Overview\", \"source_pages\": [1, 2]}}],\n  \"concepts\": [\n    {{\n      \"name\": \"short concept name\",\n      \"kind\": \"concept|code_example|caution\",\n      \"summary\": \"one sentence grounded in the slides\",\n      \"source_pages\": [1],\n      \"evidence\": \"short paraphrase of the page evidence\"\n    }}\n  ]\n}}\n\nRules:\n- Every concept must have at least one concrete page number from {chunk_start}..{chunk_end}.\n- Do not invent content outside the given pages.\n- If a page is just title/table-of-contents, preserve it only if it affects unit mapping.\n\nPDF text:\n{chunk_text}",
+          "user_template": "KT AIVLE School {course_label} curriculum PDF page range: {chunk_range}.\n\nReturn ONLY valid JSON with this exact shape:\n{{\n  \"chunk_range\": \"{chunk_range}\",\n  \"units\": [{{\"unit_id\": \"02\", \"unit_title\": \"<specific topic on these pages, e.g. Variables and Data Types>\", \"source_pages\": [4, 5]}}],\n  \"concepts\": [\n    {{\n      \"name\": \"short concept name\",\n      \"kind\": \"concept|code_example|caution\",\n      \"unit_id\": \"<must match one of the unit_id values in units above>\",\n      \"summary\": \"one sentence grounded in the slides\",\n      \"source_pages\": [1],\n      \"evidence\": \"short paraphrase of the page evidence\"\n    }}\n  ]\n}}\n\nRules:\n- unit_title must name the actual topic on these pages (e.g. \"Variables and Data Types\", \"Loops\", \"Exception Handling\") -- never a generic label like \"Overview\", \"Introduction\", or \"Chapter N\" unless these exact pages are a title/table-of-contents slide with no substantive teaching content.\n- If this chunk covers more than one distinct topic, list each as its own entry in units, and set each concept's unit_id to whichever unit it actually belongs to.\n- Every concept's unit_id must exactly match one of the unit_id values listed in units above.\n- Every concept must have at least one concrete page number from {chunk_start}..{chunk_end}.\n- Do not invent content outside the given pages.\n- If a page is just title/table-of-contents, preserve it only if it affects unit mapping.\n\nPDF text:\n{chunk_text}",
           "required_placeholders": ["chunk_range", "chunk_text"],
           "optional_placeholders": ["course_label", "chunk_start", "chunk_end"],
           "truncation": { "chunk_text": 18000 },
+          "note": "D1/D2 (2026-07-21): concepts[].unit_id added + 'Overview' literal example replaced with a <placeholder> pattern. WHY: a real 251-page run had nearly every concept land in one giant 'Overview' unit (p.1-251) -- root-caused to (a) concepts had no unit_id so makeUnitMap() could only guess chunk.units[0] for multi-unit chunks, and (b) the old example's literal \"unit_id\":\"01\",\"unit_title\":\"Overview\" got echoed verbatim across many of the 26 independent chunk calls, so unrelated chunks collided under the same unit_id at merge time. COST: response schema changed -- only affects new runs, not past saved data. EXIT: if collisions persist even with unit_id present, escalate to a code-level fix (namespace unit_id by chunk at collection time) instead of further prompt tweaks.",
           "params": [
             { "key": "course_label", "type": "string", "default": "Java", "note": "D131: 프롬프트 프레이밍용, 다른 커리큘럼(LLMOps 등)에 재사용할 때 바꾼다" },
             { "key": "max_tokens", "type": "int", "default": 3600, "note": "D161: 1800이 실측으로 부족했음(D158) — 그 재시도가 성공한 값(2배)을 기본값으로 승격, 임의 숫자 아님" },
@@ -190,24 +191,27 @@
           "title": "질문 생성 (L2 — 트레이드오프 반례)",
           "kind": "prompt",
           "function": "_build_level_prompt(level='l2')",
-          "level_template": "## 이미 물어본 질문 — 아래를 반복하면 실패입니다\n{transcript}\n\n위에서 학생의 방금 답변이 {verdict_note}으로 판정됐습니다.\n\n지금은 2단계(트레이드오프 반례) 질문 차례입니다. 반드시 아래 규칙을 지키세요:\n1. 위 '이미 물어본 질문'과 주제·문장이 겹치는 질문은 절대 금지 — 표현만 바꾼 재질문도 금지입니다. 완전히 다른 각도여야 합니다.\n2. 앞선 질문은 '왜 이렇게 설계했는가'를 물었습니다. 이번엔 그 설계 판단이 깨지는 구체적 반례나 대안 설계를 당신이 먼저 제시하고, 학생이 그것과 비교/방어하도록 압박하세요.\n3. 방금 답변에서 부족했던 근거·구체성을 정확히 겨냥하세요.\n\n이 규칙을 지켜, 앞 질문과 겹치지 않는 새로운 반례 질문 하나만 생성하세요.",
-          "required_placeholders": ["transcript", "verdict_note"]
+          "level_template": "## 이미 물어본 질문 — 아래를 반복하면 실패입니다\n{transcript}\n\n지금까지의 턴별 판정: {verdict_note}\n\n지금은 2단계(트레이드오프 반례) 질문 차례입니다. 반드시 아래 규칙을 지키세요:\n1. 위 '이미 물어본 질문'과 주제·문장이 겹치는 질문은 절대 금지 — 표현만 바꾼 재질문도 금지입니다. 완전히 다른 각도여야 합니다.\n2. 앞선 질문은 '왜 이렇게 설계했는가'를 물었습니다. 이번엔 그 설계 판단이 깨지는 구체적 반례나 대안 설계를 당신이 먼저 제시하고, 학생이 그것과 비교/방어하도록 압박하세요.\n3. 방금 답변에서 부족했던 근거·구체성을 정확히 겨냥하세요.\n\n이 규칙을 지켜, 앞 질문과 겹치지 않는 새로운 반례 질문 하나만 생성하세요.",
+          "required_placeholders": ["transcript", "verdict_note"],
+          "fact_check_hint": "list_files/read_file 도구로 실제 저장소 파일을 열어 학생의 방금 답변이 실제 코드와 일치하는지 반드시 확인한 뒤 질문을 생성하세요. 확인한 근거는 질문 문장에 구체적 파일:라인으로 인용하세요 (예: 'handlers.ts:49-61을 보면 ~와 모순되는데')."
         },
         {
           "id": "p03-3",
           "title": "질문 생성 (L3 — 극단 시나리오)",
           "kind": "prompt",
           "function": "_build_level_prompt(level='l3')",
-          "level_template": "## 이미 물어본 질문 — 아래를 반복하면 실패입니다\n{transcript}\n\n트레이드오프 반례에도 학생 답변이 {verdict_note}으로 판정됐습니다. 이번엔 훨씬 더 극단적인 시나리오(예: 규모가 100배 커지거나, 악의적 공격자가 있거나, 완전히 다른 제약이 주어지는 상황)를 제시해서 이 설계 판단이 정말로 견고한지 시험하는 질문을 던지세요. 위 '이미 물어본 질문'과 겹치지 않는 새로운 질문이어야 합니다.",
-          "required_placeholders": ["transcript", "verdict_note"]
+          "level_template": "## 이미 물어본 질문 — 아래를 반복하면 실패입니다\n{transcript}\n\n지금까지의 턴별 판정: {verdict_note}\n\n트레이드오프 반례에도 학생이 방어하지 못했습니다. 이번엔 훨씬 더 극단적인 시나리오(예: 규모가 100배 커지거나, 악의적 공격자가 있거나, 완전히 다른 제약이 주어지는 상황)를 제시해서 이 설계 판단이 정말로 견고한지 시험하는 질문을 던지세요. 위 '이미 물어본 질문'과 겹치지 않는 새로운 질문이어야 합니다.",
+          "required_placeholders": ["transcript", "verdict_note"],
+          "fact_check_hint": "list_files/read_file 도구로 실제 저장소 파일을 열어 학생의 방금 답변이 실제 코드와 일치하는지 반드시 확인한 뒤 질문을 생성하세요. 확인한 근거는 질문 문장에 구체적 파일:라인으로 인용하세요 (예: 'handlers.ts:49-61을 보면 ~와 모순되는데')."
         },
         {
           "id": "p03-4",
           "title": "질문 생성 (Reflection)",
           "kind": "prompt",
           "function": "_build_level_prompt(level='reflection')",
-          "level_template": "## 이미 물어본 질문 — 아래를 반복하면 실패입니다\n{transcript}\n\n극단 시나리오에도 학생이 방어하지 못했습니다. 이제 학생이 스스로 오류를 인정하고 개선안을 생각해보도록 유도하는 질문을 던지세요 — 직접 정답을 알려주지 말고, 학생이 스스로 '이 부분은 이렇게 바꿨어야 했다'는 결론에 도달하도록 유도하는 확인 질문 하나만 던지세요. 위 '이미 물어본 질문'과 겹치지 않는 새로운 질문이어야 합니다.",
-          "required_placeholders": ["transcript"]
+          "level_template": "## 이미 물어본 질문 — 아래를 반복하면 실패입니다\n{transcript}\n\n지금까지의 턴별 판정: {verdict_note}\n\n극단 시나리오에도 학생이 방어하지 못했습니다. 이제 학생이 스스로 오류를 인정하고 개선안을 생각해보도록 유도하는 질문을 던지세요 — 직접 정답을 알려주지 말고, 학생이 스스로 '이 부분은 이렇게 바꿨어야 했다'는 결론에 도달하도록 유도하는 확인 질문 하나만 던지세요. 위 '이미 물어본 질문'과 겹치지 않는 새로운 질문이어야 합니다.",
+          "required_placeholders": ["transcript", "verdict_note"],
+          "fact_check_hint": "list_files/read_file 도구로 실제 저장소 파일을 열어 학생의 방금 답변이 실제 코드와 일치하는지 반드시 확인한 뒤 질문을 생성하세요. 확인한 근거는 질문 문장에 구체적 파일:라인으로 인용하세요 (예: 'handlers.ts:49-61을 보면 ~와 모순되는데')."
         },
         {
           "id": "p03-5",
@@ -235,11 +239,18 @@
           "title": "5축 채점",
           "kind": "prompt",
           "function": "build_grading_prompt() + _rubric_block()",
-          "user_template": "다음은 코드리뷰 인터뷰의 한 Decision Point에 대한 학생 답변이다. 아래 5축 루브릭의 레벨 설명을 근거로 삼아 답변을 채점하라. 루브릭에 없는 기준을 새로 만들지 말고, 반드시 아래 레벨 설명과 답변 내용을 직접 대조해서 근거를 남겨라. 답변이 질문과 무관하거나 텅 비어 있으면 해당 축은 1점을 주고 그 사실을 근거에 그대로 적어라.\n\n{rubric_block}\n\nfinding: {finding_text}\nfile: {finding_file}\n질문: {question}\n학생 답변: {answer}",
-          "required_placeholders": ["rubric_block", "finding_text", "question", "answer"],
+          "user_template": "다음은 코드리뷰 인터뷰에서 실제로 진행된 턴들의 전체 기록이다 (레벨별 목적: L1=설계 의도, L2=트레이드오프 반례, L3=극단 시나리오, REFLECTION=자기 수정). 아래 5축 루브릭의 레벨 설명을 근거로 삼아 채점하라. 각 축 제목 옆에 표시된 '근거 턴'에 해당하는 레벨의 턴만 그 축의 근거로 사용하고, 다른 레벨의 내용을 그 축의 근거로 삼지 마라. 루브릭에 없는 기준을 새로 만들지 말고, 반드시 레벨 설명과 답변 내용을 직접 대조해서 근거를 남겨라. 근거 턴에서 답변이 질문과 무관하거나 텅 비어 있으면 해당 축은 1점을 주고 그 사실을 근거에 그대로 적어라.\n\n{rubric_block}\n\n{axis_guidance_block}\n\nfinding: {finding_text}\nfile: {finding_file}\n\n## 진행된 턴 전체 기록\n{transcript_block}",
+          "required_placeholders": ["rubric_block", "axis_guidance_block", "finding_text", "transcript_block"],
           "optional_placeholders": ["finding_file"],
-          "note": "rubric_block은 아래 rubric 5축×5레벨 텍스트에서 렌더링됨. 편집 시 run 기록에 rubric_overridden=true로 표시되어, 다른 회차/팀원과의 비교가 자동으로는 섞이지 않게 함.",
+          "note": "rubric_block은 아래 rubric 5축×5레벨 텍스트에서, 이번 세션에 실제로 도달한 레벨(axis_level_map 기준)에 해당하는 축만 필터링되어 렌더링됨. axis_guidance_block은 어떤 축이 이번 세션에서 채점 대상인지/제외됐는지를 명시. 편집 시 run 기록에 rubric_overridden=true로 표시되어, 다른 회차/팀원과의 비교가 자동으로는 섞이지 않게 함.",
           "rubric_overridable": true,
+          "axis_level_map": {
+            "코드_이해": ["l1"],
+            "반례_대응": ["l2", "l3"],
+            "대안_비교": ["l2", "l3"],
+            "설계_논리": ["l1"],
+            "자기_수정": ["reflection"]
+          },
           "rubric": {
             "코드_이해": {
               "5": "구성 요소 간 관계와 데이터 흐름을 정확히 설명",

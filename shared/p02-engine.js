@@ -65,7 +65,6 @@ const P02Engine = (() => {
     "judgment/idioms/javascript/idiom_patterns.json",
     "judgment/idioms/c/idiom_patterns.json",
   ];
-  const SKIP_DIR_NAMES = new Set(["node_modules", ".git", "dist", "build", "__pycache__", ".venv", "venv", "static", "vendor", "vendored"]);
   const SRC_EXTS = [".ts", ".tsx", ".js", ".jsx", ".py", ".java", ".c", ".h", ".cpp", ".cc", ".cxx", ".hpp", ".swift"];
   // D181: cap on how many text-mentioned files (D180) get sent as code context for one
   // finding -- unmeasured/provisional, chosen against p03-1's own existing 4000-char total
@@ -77,8 +76,20 @@ const P02Engine = (() => {
 
   let pyodide = null;
 
+  // D195-fix: these three used to be a hardcoded module-level SKIP_DIR_NAMES Set that
+  // silently fell out of sync with judgment/score_findings.py's SKIP_DIRS when D195
+  // widened it from 10 to 26 entries -- files under target/, .next/, .pytest_cache/ etc.
+  // still got downloaded here (and burned GitHub API rate limit on them, D192) even
+  // though Python discarded them right after. Resolving live from the manifest means the
+  // fetch step and the Python scan can never drift again, and a trainee's SKIP_DIRS edit
+  // in the p02-1 param panel now actually affects what gets downloaded.
   function isSkippedDir(relPath) {
-    return relPath.split("/").some((p) => SKIP_DIR_NAMES.has(p));
+    const skipDirs = new Set(LabApp.resolveParam("p02", "p02-1", "SKIP_DIRS") || []);
+    const prefixes = LabApp.resolveParam("p02", "p02-1", "SKIP_DIR_PREFIXES") || [];
+    const suffixes = LabApp.resolveParam("p02", "p02-1", "SKIP_DIR_SUFFIXES") || [];
+    return relPath.split("/").some(
+      (p) => skipDirs.has(p) || prefixes.some((pre) => p.startsWith(pre)) || suffixes.some((suf) => p.endsWith(suf))
+    );
   }
 
   // D164: extension matching is case-insensitive (lowercased before the SRC_EXTS check) so
@@ -87,6 +98,14 @@ const P02Engine = (() => {
     if (isSkippedDir(relPath)) return true;
     const ext = "." + (relPath.split(".").pop() || "").toLowerCase();
     if (!SRC_EXTS.includes(ext)) return true;
+    // D195-fix: mirrors GENERATED_FILENAME_RE in two_tier_scan.py/score_findings.py --
+    // catches artifacts (contenthash bundles, .min.js, .d.ts) sitting outside any skip
+    // directory, matched against the basename only (same as Python's os.walk fnames).
+    const genRePattern = LabApp.resolveParam("p02", "p02-1", "GENERATED_FILENAME_RE");
+    if (genRePattern) {
+      const basename = relPath.split("/").pop() || "";
+      if (new RegExp(genRePattern, "i").test(basename)) return true;
+    }
     return false;
   }
 
@@ -285,7 +304,10 @@ const P02Engine = (() => {
         if (done % 5 === 0 || done === blobs.length) onProgress(`${done}/${blobs.length} 파일 가져옴`);
       }));
     }
-    return files;
+    // D200: also return the RESOLVED branch (was already computed above when the caller
+    // passed none, just never handed back) -- P03's live fact-check tools need to know
+    // exactly which branch was actually scanned, not re-guess/re-resolve it themselves.
+    return { files, branch };
   }
 
   async function ensurePyodide(onProgress) {
@@ -353,6 +375,9 @@ shutil.rmtree("/target", ignore_errors=True)
     hooks.onRunStart();
     try {
       let files;
+      // D200: null for ZIP uploads -- there is no repo identity to re-fetch against, and
+      // P03's fact-check tools must treat that as an undetectable no-op, not an error.
+      let repoRef = null;
       if (input.method === "pat") {
         const repoInput = input.repoInput || "";
         const branch = (input.branch || "").trim() || null;
@@ -360,7 +385,9 @@ shutil.rmtree("/target", ignore_errors=True)
         const { owner, repo } = parseRepoInput(repoInput);
         const pat = LabConfig.get("github-pat");
         hooks.onProgress(`${owner}/${repo} (${branch || "기본 브랜치"}) 가져오는 중...`);
-        files = await fetchGithubRepo(owner, repo, branch, pat, (msg) => hooks.onProgress(msg));
+        const fetched = await fetchGithubRepo(owner, repo, branch, pat, (msg) => hooks.onProgress(msg));
+        files = fetched.files;
+        repoRef = { owner, repo, branch: fetched.branch };
       } else {
         if (!input.zipFiles) throw new Error("ZIP 파일을 먼저 드롭하세요");
         files = input.zipFiles;
@@ -388,7 +415,7 @@ _result = webtool_driver.run_scan("/target", overrides_json)
       hooks.onStatus("완료", "done");
       hooks.onProgress(`finding ${result.judgment.findings.length}건 산출됨`);
       await maybeSaveRun(result, files, startedAt, finishedAt, input.method, hooks);
-      return { result, files };
+      return { result, files, repoRef };
     } catch (err) {
       hooks.onRunEnd(new Date() - startedAt);
       console.error(err);
@@ -425,6 +452,9 @@ _result = webtool_driver.run_scan("/target", overrides_json)
   return {
     resolveConnectableFile, findFileByBasename, findReferencedFiles,
     parseRepoInput, fetchGithubRepo, parseZipFile, formatZipStatus,
+    // D200: exported (logic unchanged) so P03's new live-fetch tools can reuse the exact
+    // same D192 rate-limit DETECTION instead of re-implementing/drifting from it.
+    githubRateLimitError,
     run, MAX_CONNECT_FILES, SRC_EXTS,
   };
 })();

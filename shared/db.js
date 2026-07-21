@@ -208,5 +208,52 @@ const LabDB = (() => {
     if (error) throw error;
   }
 
-  return { isConfigured, ensureClient, currentMember, currentMemberOrNull, saveRun, startRun, logTurn, signInWithGoogle, signOut };
+  // D196 (2026-07-17): arm a best-effort "abandoned" marker for an in-flight P03 run.
+  //   WHY: startRun() opens the runs row as "running" and logTurn() banks each answered turn,
+  //        but if the trainee just closes the tab mid-interview, neither the done-path
+  //        (maybeSaveRun) nor the error-path (saveRun status:"error") ever runs -- the row is
+  //        stranded at "running" forever, indistinguishable from a session still legitimately
+  //        open. This gives that exact case a terminal status that's queryable as abandonment,
+  //        while the answered turns already sit safely in stage_events (D193).
+  //   COST: delivery is NOT guaranteed. It fires from the page's pagehide via
+  //        fetch({keepalive:true}) -- navigator.sendBeacon can only POST, not PATCH, so it
+  //        can't do this UPDATE. A hard crash, an offline tab, or the browser killing the
+  //        request still leaves the row "running". Uses an access token captured at arm time,
+  //        so a session outliving the token (~1h default) would 401 the beacon. And it
+  //        requires runs.status to permit 'abandoned' -- confirmed live (2026-07-17, Supabase
+  //        Management API): status is a plain text column with no CHECK constraint, so this
+  //        is not actually a blocker.
+  //   EXIT: for guaranteed closure, replace this with a server-side reaper that sweeps runs
+  //        stuck at "running" past a TTL; this client beacon is the cheap ~90% version. To
+  //        disable entirely, stop calling armAbandonBeacon() from p03-engine.js/p03-runner.js
+  //        -- db.js then stays inert (nothing else references it).
+  async function armAbandonBeacon(run_id) {
+    const c = await ensureClient();
+    const { data } = await c.auth.getSession();
+    const accessToken = data && data.session ? data.session.access_token : null;
+    const url = LabConfig.get("supabase-url");
+    const anonKey = LabConfig.get("supabase-anon-key");
+    // The returned closure is synchronous and side-effect-only: safe to call from a pagehide
+    // handler (no await, no rejection allowed to escape into page teardown).
+    return function sendAbandon() {
+      if (!accessToken || !url || !anonKey) return;
+      try {
+        fetch(`${url}/rest/v1/runs?id=eq.${encodeURIComponent(run_id)}`, {
+          method: "PATCH",
+          keepalive: true,
+          headers: {
+            apikey: anonKey,
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+            Prefer: "return=minimal",
+          },
+          body: JSON.stringify({ status: "abandoned", finished_at: new Date().toISOString() }),
+        }).catch(() => {});
+      } catch (_) {
+        /* best-effort: never let this throw during page teardown */
+      }
+    };
+  }
+
+  return { isConfigured, ensureClient, currentMember, currentMemberOrNull, saveRun, startRun, logTurn, armAbandonBeacon, signInWithGoogle, signOut };
 })();
