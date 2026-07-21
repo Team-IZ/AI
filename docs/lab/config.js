@@ -4,19 +4,30 @@
 //
 // Supabase URL/anon key are the one exception: this is the team's single shared DB, not a
 // per-teammate secret, so they're hardcoded below instead of typed in every session. This
-// is safe specifically because Supabase's RLS policies (supabase_schema.sql) -- not anon
-// key secrecy -- are what actually protects the data; the anon key is meant to ship in
-// client code. Teammates still enter their own NVIDIA key/PAT and sign in with their own
-// email for per-member attribution.
+// is safe specifically because Supabase's RLS policies (members_schema.sql +
+// pdf_analysis_schema.sql) -- not anon key secrecy -- are what actually protects the
+// data; the anon key is meant to ship in client code. Teammates still enter their own
+// NVIDIA key/PAT and sign in with their own email for per-member attribution.
+//
+// *** THE 2 SWAP POINTS FOR AN INDEPENDENT TEAM-IZ DEPLOYMENT ***
+// TEAM_SUPABASE_URL/TEAM_SUPABASE_ANON_KEY + DEFAULT_PROXY_URL just below are currently
+// still pointed at popixoxipop-collab's own shared Supabase project/Cloudflare Worker
+// (this branch was ported from there -- see this folder's README.md history note). To
+// run this fully independently of that account: create your own Supabase project, apply
+// experiments/web_lab/members_schema.sql then pdf_analysis_schema.sql, add "pdf_analysis"
+// to the project's exposed PostgREST schemas, then replace the two constants below with
+// your new project's values (Project Settings -> API). Full steps: this folder's
+// README.md, "자체 배포" section.
 const LabConfig = (() => {
   const TEAM_SUPABASE_URL = "https://oziaeqcvrkrqkhwrybfj.supabase.co";
   const TEAM_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96aWFlcWN2cmtycWtod3J5YmZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMDA4MTksImV4cCI6MjA5OTU3NjgxOX0.hBgzs0V7Nw3WLB8_zNuPDfluYrqOH2_Dto1weQF5iKo";
 
-  // Owner-deployed proxy (worker/nvidia-proxy.js), pre-filled as a default -- unlike the
+  // Owner-deployed proxy (worker/nvidia-proxy.js, included in this repo -- see
+  // worker/wrangler.toml's own porting note), pre-filled as a default -- unlike the
   // Supabase values above this is NOT force-hardcoded: it's just a starting value in an
-  // editable field, since SETUP.md's team-sharing note explicitly means for teammates to
-  // be able to deploy and swap in their own proxy instead (a URL, not a credential, so
-  // there's no reason to also lock this one down).
+  // editable field, so anyone can type in their own deployed proxy's URL at runtime with
+  // no code change. Update this default once Team-IZ deploys its own worker so teammates
+  // don't have to paste a URL in every session.
   const DEFAULT_PROXY_URL = "https://nvidia-proxy.popixoxipop.workers.dev";
 
   const FIELDS = ["nvidia-key", "proxy-url", "github-pat"];

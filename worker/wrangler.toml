@@ -1,0 +1,35 @@
+# D-H (2026-07-14, README D143): async job-queue redesign. Cloudflare's free-tier edge
+# gives up after ~100-125s of silence on a single request/response, but NVIDIA build-tier
+# models normally take up to several minutes under load (see feedback/nvidia_client.py's
+# DEFAULT_TIMEOUT_S=600 and its D98 history) -- no client-facing request can survive that
+# wait no matter how it's coded. This decouples the two: the client's HTTP request returns
+# almost instantly with a job_id: the actual NVIDIA call happens in a Queue consumer
+# invocation, which gets up to 15 minutes wall-clock (Cloudflare's documented queue
+# consumer limit) with no penalty for I/O wait time. The client polls for the result.
+#
+# Ported from popixoxipop-collab/Code_reviewer_with_feedback for standalone deployability
+# (docs/lab/curriculum-manager/README.md's 자체 배포 section). The `id` below is that
+# repo's own Cloudflare account's KV namespace -- NOT reachable from a different account.
+# Deploying this under Team-IZ's own Cloudflare account requires replacing it with the id
+# `wrangler kv namespace create NVIDIA_JOBS` prints, and the queue also needs creating
+# first (`wrangler queues create nvidia-jobs-queue`) since queues aren't auto-created from
+# this file. No NVIDIA API key secret is configured here -- the worker is stateless about
+# it, forwarding whatever `x-nvidia-api-key` header the caller sends (see
+# nvidia-proxy.js:213-214), which is each user's own key typed into the page's settings
+# panel, never stored server-side.
+name = "nvidia-proxy"
+main = "nvidia-proxy.js"
+compatibility_date = "2026-07-14"
+
+kv_namespaces = [
+  { binding = "NVIDIA_JOBS", id = "fee16da9fc2e428aa7b55ace0baf58d5" } # REPLACE for a new Cloudflare account
+]
+
+[[queues.producers]]
+queue = "nvidia-jobs-queue"
+binding = "NVIDIA_JOBS_QUEUE"
+
+[[queues.consumers]]
+queue = "nvidia-jobs-queue"
+max_batch_size = 1
+max_batch_timeout = 1
