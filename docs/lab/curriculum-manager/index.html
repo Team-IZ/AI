@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>교안 관리 · Pipeline Lab</title>
+<style>
+  /* Token block copied verbatim from Team-IZ/Frontend's gh-pages manager/curriculum.html
+     :root{} (git-read directly, byte-for-byte) -- keeps this page visually on-brand
+     without depending on that repo at runtime. */
+  :root{
+    --c-bg:#f4f5f7; --c-surface:#ffffff; --c-surface-2:#fafbfc;
+    --c-border:#e2e5ea; --c-border-strong:#cfd4dc;
+    --c-text:#181b20; --c-text-2:#5a616b; --c-text-3:#8b929c;
+    --c-primary:#3a4db8; --c-primary-soft:#eef0fb;
+    --c-nav:#1e2436; --c-nav-2:#2a3147; --c-nav-text:#aeb4c6;
+    --c-danger:#c0392b; --c-danger-soft:#fbeceb;
+    --c-warning:#b3771a; --c-warning-soft:#fbf3e6;
+    --c-success:#1f8a5b; --c-success-soft:#e8f5ee;
+    --c-info:#2f6bb0; --c-info-soft:#eaf2fa;
+    --r-sm:6px; --r-md:10px; --r-lg:14px;
+    --fs-xs:12px; --fs-sm:13px; --fs-base:14px; --fs-lg:16px; --fs-xl:20px; --fs-2xl:26px;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px; --sp-8:48px;
+    --shadow-card:0 1px 2px rgba(20,24,31,.05),0 10px 34px rgba(20,24,31,.09);
+    --font:-apple-system,'Apple SD Gothic Neo',system-ui,'Segoe UI',sans-serif;
+    --mono:ui-monospace,Menlo,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);color:var(--c-text);background:var(--c-bg);font-size:var(--fs-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .hidden{display:none !important}
+
+  /* ===== shell (topbar/nav/content) -- Team-IZ curriculum.html's .app, minus the
+     .viewport/.chrome fake-browser-window wrapper (decorative only, meant for the
+     wireframe catalog presentation, not a real live page) ===== */
+  .app{display:flex;flex-direction:column;min-height:100vh}
+  .topbar{height:54px;background:var(--c-surface);border-bottom:1px solid var(--c-border);display:flex;align-items:center;justify-content:space-between;padding:0 var(--sp-5)}
+  .topbar .brand{display:flex;align-items:center;gap:var(--sp-2);font-weight:700;font-size:var(--fs-base)}
+  .topbar .brand .mk{width:26px;height:26px;border-radius:7px;background:var(--c-primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
+  .topbar .me{font-size:var(--fs-sm);color:var(--c-text-3)}
+  .body{display:flex;flex:1}
+  .nav{width:184px;background:var(--c-nav);padding:var(--sp-4) var(--sp-3);flex:0 0 184px}
+  .nav .item{display:flex;align-items:center;gap:var(--sp-2);padding:9px var(--sp-3);border-radius:var(--r-md);color:var(--c-nav-text);font-size:var(--fs-sm);margin-bottom:2px;text-decoration:none;cursor:pointer}
+  .nav .item.on{background:var(--c-nav-2);color:#fff;font-weight:600}
+  .nav .item .ic{width:15px;text-align:center;opacity:.85;font-size:12px}
+  .content{flex:1;background:var(--c-bg);padding:var(--sp-6);min-width:0;max-width:1180px}
+  .phead{margin-bottom:var(--sp-4)}
+  .phead h2{font-size:var(--fs-xl);letter-spacing:-.01em}
+  .phead .crumb{font-size:var(--fs-xs);color:var(--c-text-3);margin-bottom:2px}
+  .rpage{display:none}
+  .rpage.on{display:block}
+
+  .lhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-4)}
+  .lhead .ttl{font-size:var(--fs-lg);font-weight:700;display:flex;align-items:baseline;gap:var(--sp-2)}
+  .lhead .ttl .cnt{font-size:var(--fs-xs);font-weight:600;color:var(--c-text-3)}
+  .btn{border:0;border-radius:var(--r-md);background:var(--c-primary);color:#fff;font-weight:600;font-size:var(--fs-xs);cursor:pointer;padding:8px 13px}
+  .btn.ghost{background:#fff;color:var(--c-text-2);border:1px solid var(--c-border-strong)}
+  .btn:disabled{opacity:.5;cursor:default}
+
+  .card{background:#fff;border:1px solid var(--c-border);border-radius:var(--r-md);overflow:hidden}
+  .dtbl{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+  .dtbl th{text-align:left;padding:11px var(--sp-4);font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--c-text-3);background:var(--c-surface-2);border-bottom:1px solid var(--c-border);font-weight:600;white-space:nowrap}
+  .dtbl td{padding:12px var(--sp-4);border-bottom:1px solid var(--c-border);vertical-align:middle}
+  .dtbl tr:last-child td{border-bottom:0}
+  .dtbl tr.click{cursor:pointer}
+  .dtbl tr.click:hover{background:var(--c-surface-2)}
+  .dtbl .name b{font-weight:700}
+  .dtbl .name .sub{font-size:11px;color:var(--c-text-3);margin-top:2px}
+  .dtbl .ver{font-family:var(--mono);font-size:12px;color:var(--c-text-2)}
+  .dtbl .date{color:var(--c-text-3);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .pnone{font-size:11px;color:var(--c-text-3)}
+
+  .st{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;white-space:nowrap}
+  .st .dot{width:6px;height:6px;border-radius:50%;display:inline-block}
+  .st.approved{background:var(--c-success-soft);color:var(--c-success)} .st.approved .dot{background:var(--c-success)}
+  .st.failed{background:var(--c-danger-soft);color:var(--c-danger)} .st.failed .dot{background:var(--c-danger)}
+  .st.na{color:var(--c-text-3);font-weight:400}
+
+  .kw{display:inline-block;font-size:10px;color:var(--c-text-2);background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:20px;padding:1px 7px;margin:1px 2px}
+
+  /* 상태 ↔ case (Team-IZ curriculum.html의 .casewrap/.casebox 패턴) */
+  .casewrap{margin-top:var(--sp-5)}
+  .casebox{background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--r-md);padding:var(--sp-4) var(--sp-5)}
+  .casebox .ct{font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--c-text-3);margin-bottom:var(--sp-2)}
+  .casebox .cr{display:flex;gap:var(--sp-3);align-items:baseline;padding:7px 0;font-size:var(--fs-sm);border-top:1px solid var(--c-border)}
+  .casebox .cr:first-of-type{border-top:0}
+  .casebox .cr .pill{flex:0 0 auto;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px}
+  .casebox .cr .pill.hold{background:var(--c-warning-soft);color:var(--c-warning)}
+  .casebox .cr .cd{flex:1;color:var(--c-text-2)}
+  .casebox .cr .cd b{color:var(--c-text)}
+
+  /* 교안 상세 (구조/매핑 공통) */
+  .ctxbar{margin-bottom:var(--sp-3);padding-bottom:var(--sp-3);border-bottom:1px solid var(--c-border)}
+  .ctxbar .back{font-size:var(--fs-xs);color:var(--c-primary);cursor:pointer;margin-bottom:3px;display:inline-block}
+  .ctxbar .cname{font-size:var(--fs-lg);font-weight:700}
+  .ctxbar .cmeta{font-size:11px;color:var(--c-text-3);margin-top:3px}
+  .tabs{display:flex;gap:var(--sp-5);border-bottom:1px solid var(--c-border);margin-bottom:var(--sp-5)}
+  .tabs .t{padding:var(--sp-2) 0;font-size:var(--fs-sm);color:var(--c-text-2);border-bottom:2px solid transparent;margin-bottom:-1px;cursor:pointer}
+  .tabs .t.on{color:var(--c-primary);border-color:var(--c-primary);font-weight:600}
+  .qrow{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-3);flex-wrap:wrap}
+  .qbadge{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;background:#eef0f3;color:var(--c-text-2)}
+  .qbadge.ok{background:var(--c-success-soft);color:var(--c-success)}
+  .warnbar{font-size:12px;color:var(--c-warning);background:var(--c-warning-soft);border:1px solid #e6d3a8;border-radius:var(--r-md);padding:10px 14px;margin-bottom:var(--sp-4);line-height:1.6}
+  .fnote{font-size:12px;color:var(--c-info);background:var(--c-info-soft);border-radius:var(--r-md);padding:10px 14px;margin:0 0 var(--sp-4);line-height:1.6}
+
+  /* 교안 연결(매핑) -- 원래 curriculum.html은 "기술영역 태깅" UI지만, 이 페이지는 실제
+     그래프 파이프라인 출력을 보여주는 읽기 전용 탐색 화면으로 의미를 바꿔 재사용함
+     (레이아웃 클래스는 그대로: .maplayout/.ftlist/.recopane) */
+  .maplayout{display:flex;gap:var(--sp-4);align-items:flex-start;flex-wrap:wrap}
+  .ftlist{flex:0 0 240px;display:flex;flex-direction:column;gap:6px}
+  .ftitem{border:1px solid var(--c-border);border-radius:var(--r-md);padding:10px 12px;background:#fff;cursor:pointer}
+  .ftitem.on{border-color:var(--c-primary);background:var(--c-primary-soft)}
+  .ftitem .fn{font-size:var(--fs-sm);font-weight:700}
+  .ftitem .fs{font-size:10px;margin-top:3px;color:var(--c-text-3)}
+  .recopane{flex:1;min-width:280px;border:1px solid var(--c-border);border-radius:var(--r-md);padding:var(--sp-4) var(--sp-5);background:#fff}
+  .recohd{font-size:var(--fs-sm);color:var(--c-text-3);margin-bottom:var(--sp-3)}
+  .recogroup{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--c-text-3);margin:var(--sp-3) 0 6px}
+  .recogroup:first-child{margin-top:0}
+  .recocard{border:1px solid var(--c-border);border-radius:var(--r-md);padding:var(--sp-3) var(--sp-4);margin-bottom:var(--sp-3)}
+  .recocard .rmod{font-weight:700;display:flex;align-items:center;justify-content:space-between;gap:var(--sp-2)}
+  .recocard .rpg{font-size:11px;color:var(--c-text-3);font-family:var(--mono)}
+  .recocard .rsum{font-size:12px;color:var(--c-text-2);margin-top:4px;line-height:1.5}
+
+  /* 업로드 폼 */
+  .dropzone{border:2px dashed var(--c-border-strong);border-radius:var(--r-md);background:var(--c-surface-2);padding:var(--sp-6);text-align:center}
+  .dropzone.drag-over{border-color:var(--c-primary);background:var(--c-primary-soft)}
+  .dropzone .ic{font-size:26px;color:var(--c-text-3)}
+  .dropzone .t{font-size:var(--fs-sm);font-weight:600;margin:var(--sp-2) 0 2px}
+  .dropzone .s{font-size:11px;color:var(--c-text-3)}
+  .fld{margin-bottom:var(--sp-3)}
+  .fld .fl{font-size:var(--fs-xs);font-weight:600;color:var(--c-text-2);margin-bottom:5px;display:block}
+  .fld .fl .opt{color:var(--c-text-3);font-weight:400}
+  .fld .inp{border:1px solid var(--c-border-strong);border-radius:var(--r-md);padding:9px 12px;font-size:var(--fs-sm);color:var(--c-text);background:#fff;width:100%}
+  .fld .inp:focus{outline:none;border-color:var(--c-primary)}
+  .formwrap{max-width:620px;margin:0 auto}
+  .fbar{display:flex;gap:var(--sp-2);align-items:center;margin-top:var(--sp-5);padding-top:var(--sp-4);border-top:1px solid var(--c-border)}
+
+  /* 연결 설정 (trainee/submission.html과 동일 패턴 -- 같은 --c-* 변수라 그대로 호환) */
+  .settings{background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:var(--r-lg);margin-bottom:var(--sp-4)}
+  .settings > summary{list-style:none;cursor:pointer;padding:var(--sp-3) var(--sp-4);display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-sm);font-weight:600;color:var(--c-text-2)}
+  .settings > summary::-webkit-details-marker{display:none}
+  .settings[open] > summary{border-bottom:1px solid var(--c-border)}
+  .settings .body{padding:var(--sp-4);display:flex;flex-direction:column;gap:var(--sp-3)}
+  .auth-status{font-size:var(--fs-xs);color:var(--c-text-3);margin-left:auto}
+  .auth-status.ok{color:var(--c-success)}
+  .remember{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-xs);color:var(--c-text-2)}
+  .login-row{display:flex;align-items:center;gap:var(--sp-2)}
+  .login-btn,.logout-btn{border:1px solid var(--c-border-strong);background:#fff;color:var(--c-text-2);border-radius:var(--r-md);padding:7px 12px;font-size:var(--fs-xs);cursor:pointer}
+  .login-btn.hidden,.logout-btn.hidden{display:none}
+  .login-status{font-size:var(--fs-xs);color:var(--c-text-3)}
+
+  /* 실행 상태 / 모델 토글 / 로그 -- Team-IZ 원본엔 없는, 이 페이지 고유의 실행 UI */
+  .run-status{font-size:var(--fs-xs);color:var(--c-text-3)}
+  .run-status.error{color:var(--c-danger)}
+  .run-status.done{color:var(--c-success)}
+  .run-status.running{color:var(--c-primary)}
+  .run-timer{font-size:var(--fs-xs);color:var(--c-text-3);font-family:var(--mono)}
+  .progress-log{margin-top:10px;max-height:140px;overflow-y:auto;background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:var(--r-md);padding:8px 10px;font-family:var(--mono);font-size:11px;color:var(--c-text-2)}
+  .model-toggle-group{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+  .model-chip{border:1px solid var(--c-border-strong);background:#fff;color:var(--c-text-2);border-radius:20px;padding:5px 11px;font-size:11px;cursor:pointer}
+  .model-chip.active{background:var(--c-primary);color:#fff;border-color:var(--c-primary);font-weight:600}
+  .model-note{font-size:11px;color:var(--c-text-3);margin-top:6px}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand"><span class="mk">◆</span>IZ-Get · 교안 매니저</div>
+    <div class="me">Pipeline Lab 연동 목업 · P01 교안분석</div>
+  </div>
+  <div class="body">
+    <div class="nav">
+      <a class="item" href="dashboard.html"><span class="ic">▦</span>대시보드</a>
+      <a class="item on" href="index.html"><span class="ic">▧</span>교안</a>
+      <a class="item" href="projects.html"><span class="ic">▤</span>프로젝트</a>
+      <a class="item" href="report.html"><span class="ic">▥</span>리포트</a>
+    </div>
+    <div class="content">
+
+      <details class="settings" id="settings-panel">
+        <summary><span class="gear">⚙</span> 연결 설정 <span class="auth-status" id="auth-status"></span></summary>
+        <div class="body">
+          <div class="fld"><label class="fl">NVIDIA API 키 <span class="opt">· P01(교안 분석) 실행에 필요</span></label><input class="inp" type="password" id="nvidia-key" placeholder="nvapi-..."></div>
+          <div class="fld"><label class="fl">프록시 URL</label><input class="inp" type="text" id="proxy-url"></div>
+          <label class="remember"><input type="checkbox" id="remember-session" checked> 이 탭에서 기억하기</label>
+          <div class="login-row">
+            <button class="login-btn hidden" id="google-login-btn" type="button">Google로 로그인</button>
+            <button class="logout-btn hidden" id="logout-btn" type="button">로그아웃</button>
+            <span class="login-status" id="login-status"></span>
+          </div>
+          <div class="fnote" style="margin:0;">ℹ 로그인하면 완료된 교안 분석이 팀 DB에 저장되고, 새로고침·다른 기기·다른 팀원 화면에서도 이어서 볼 수 있습니다. 로그인 없이도 분석 자체는 그대로 실행되고, 이 브라우저 탭에서만 유지됩니다.</div>
+        </div>
+      </details>
+
+      <!-- ============ 목록 ============ -->
+      <div class="rpage on" id="page-list">
+        <div class="phead"><h2>교안 관리</h2></div>
+        <div class="lhead">
+          <div class="ttl">교안 목록 <span class="cnt" id="list-count">총 0개</span></div>
+          <button class="btn" data-nav="upload">+ 교안 등록</button>
+        </div>
+        <div class="card">
+          <table class="dtbl">
+            <thead><tr><th>교안명</th><th>유닛</th><th>질문</th><th>그래프</th><th>추출 상태</th><th>분석 시각</th></tr></thead>
+            <tbody id="list-tbody"><tr><td colspan="6" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr></tbody>
+          </table>
+        </div>
+        <div class="casewrap">
+          <div class="casebox">
+            <div class="ct">이 화면 · 실제 동작 참고</div>
+            <div class="cr"><span class="pill hold">부분 진행</span><span class="cd"><b>청크 분석 일부 실패</b> — 실패한 페이지 범위는 unit_map에서 제외되고, 성공한 청크만으로 계속 진행됩니다(교안 전체가 실패로 처리되지 않음).</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ============ 등록 ============ -->
+      <div class="rpage" id="page-upload">
+        <div class="phead"><div class="crumb"><span class="back" data-nav="list">← 교안 목록</span></div><h2>교안 등록</h2></div>
+        <div class="formwrap">
+          <div id="p01-input-container"></div>
+
+          <div class="fld" style="margin-top:var(--sp-4);">
+            <label class="fl">교안명 <span class="opt">· 선택, 비우면 파일명 사용</span></label>
+            <input class="inp" type="text" id="curriculum-title-input" placeholder="예: Kubernetes와 CICD">
+          </div>
+
+          <div id="upload-error" class="warnbar hidden"></div>
+          <div class="fnote">ℹ 실행하면 교안 분석(P01)이 바로 시작됩니다.</div>
+
+          <div class="fbar">
+            <button class="btn" id="run-p01-btn">분석 실행</button>
+            <button class="btn ghost" data-nav="list">취소</button>
+            <span id="status-p01" class="run-status"></span>
+            <span id="timer-p01" class="run-timer"></span>
+          </div>
+          <div id="log-p01" class="progress-log hidden"></div>
+        </div>
+      </div>
+
+      <!-- ============ 교안 구성 (핵심: 출처 페이지 범위 + 키워드) ============ -->
+      <div class="rpage" id="page-structure">
+        <div class="ctxbar">
+          <span class="back" data-nav="list">← 교안 목록</span>
+          <div class="cname" id="structure-title">—</div>
+          <div class="cmeta" id="structure-meta"></div>
+        </div>
+        <div class="tabs"><span class="t on" data-nav="structure">교안 구성</span><span class="t" data-nav="mapping">교안 연결</span></div>
+        <div class="qrow" id="structure-qrow"></div>
+        <div class="card">
+          <table class="dtbl">
+            <thead><tr><th>섹션</th><th style="width:120px">페이지</th><th>주요 개념(키워드)</th></tr></thead>
+            <tbody id="structure-tbody"><tr><td colspan="3" class="pnone">선택된 교안이 없습니다.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ 교안 연결(매핑) ============ -->
+      <div class="rpage" id="page-mapping">
+        <div class="ctxbar">
+          <span class="back" data-nav="list">← 교안 목록</span>
+          <div class="cname" id="mapping-title">—</div>
+          <div class="cmeta" id="mapping-meta"></div>
+        </div>
+        <div class="tabs"><span class="t" data-nav="structure">교안 구성</span><span class="t on" data-nav="mapping">교안 연결</span></div>
+        <div class="fnote">이 탭은 Team-IZ 원본의 "기술영역 태깅"(총괄이 직접 체크)과 달리, P01 그래프 파이프라인이 자동으로 만든 개념↔코드 예시/주의사항 연결을 보여주는 읽기 전용 탐색 화면입니다.</div>
+        <div class="maplayout">
+          <div class="ftlist" id="mapping-ftlist"><div class="pnone">선택된 교안이 없습니다.</div></div>
+          <div class="recopane" id="mapping-recopane"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"
+  integrity="sha384-tVslJOEkg7nVRW3Y3/ReGX0NnonNrbcmt1R5qFbQXQdGa2chRkoJYHAjAsv3zoTq"
+  crossorigin="anonymous"></script>
+<script src="../config.js"></script>
+<script src="../db.js"></script>
+<script src="../lab-core.js"></script>
+<script src="labapp-shim.js"></script>
+<script src="labdb-shim.js"></script>
+<script src="../llm.js"></script>
+<script src="../pyodide-shared.js"></script>
+<script src="../pdfjs-loader.js"></script>
+<script src="../p01-runner.js"></script>
+<script>
+(function () {
+  const state = { curricula: [], selectedId: null, nextId: 1 };
+  let lastPdfName = "";
+
+  // A P01 run takes minutes (60s cooldown + refine loop + question-gen) and only lives in
+  // this tab's JS memory -- a refresh used to silently wipe out an already-finished
+  // analysis (state.curricula started empty again every reload). sessionStorage (not
+  // localStorage) is enough to survive a refresh without also resurrecting stale runs
+  // days later in a fresh tab -- matches config.js's own choice for "remember this tab".
+  const SESSION_KEY = "iz-curriculum-manager:session";
+  function persistSession() {
+    try {
+      sessionStorage.setItem(SESSION_KEY, JSON.stringify({
+        curricula: state.curricula.map((c) => ({ ...c, analyzedAt: c.analyzedAt.toISOString() })),
+        selectedId: state.selectedId,
+        selectedUnitId: state.selectedUnitId,
+        nextId: state.nextId,
+      }));
+    } catch (err) {
+      console.warn("교안 세션 저장 실패(용량 초과 가능, 새로고침 시 유실됨):", err);
+    }
+  }
+  function restoreSession() {
+    try {
+      const raw = sessionStorage.getItem(SESSION_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      state.curricula = (parsed.curricula || []).map((c) => ({ ...c, analyzedAt: new Date(c.analyzedAt) }));
+      state.selectedId = parsed.selectedId || null;
+      state.selectedUnitId = parsed.selectedUnitId || null;
+      state.nextId = parsed.nextId || (state.curricula.length + 1);
+    } catch (err) {
+      console.warn("교안 세션 복원 실패:", err);
+    }
+  }
+
+  // p01-runner.js's own maybeSaveRun() (unmodified, called inside P01Runner.run()) already
+  // writes unit_map/graph/questions to the shared team DB whenever LabDB is configured
+  // (always true -- config.js hardcodes the team project) AND the user is logged in. RLS
+  // (experiments/web_lab/supabase_schema.sql: "runs read all"/"artifacts read all") lets
+  // any authenticated team member read every p01 run, not just their own -- so once logged
+  // in, this reconstructs state.curricula from the DB instead of just this tab's memory.
+  // Reassembles the shape P01Runner.run() itself builds (see its result literal) from the
+  // separate artifacts rows + input_meta columns saveRun() split them into.
+  function rowToEntry(row) {
+    const byKind = {};
+    for (const a of row.artifacts || []) byKind[a.kind] = a.content;
+    const meta = row.input_meta || {};
+    const failedCount = meta.failed_chunk_count || 0;
+    return {
+      id: row.id,
+      title: meta.source_filename ? String(meta.source_filename).replace(/\.pdf$/i, "") : `교안 (${String(row.id).slice(0, 8)})`,
+      result: {
+        unit_map: byKind.unit_map || {},
+        graph: byKind.graph || null,
+        graph_generated: Boolean(meta.graph_generated),
+        questions: byKind.questions || { questions: [] },
+        chunk_count: meta.chunk_count || 0,
+        extractor: meta.extractor || "pdfjs",
+        // Only the count is stored in input_meta (no failed_chunks artifact) -- synthesize
+        // placeholders so the existing render code's `.length` checks still work; nothing
+        // reads individual entries of this array for DB-sourced rows.
+        failed_chunks: Array.from({ length: failedCount }, () => ({})),
+      },
+      analyzedAt: new Date(row.started_at),
+    };
+  }
+
+  async function refreshFromDB() {
+    if (!window.LabDB || !LabDB.isConfigured()) return;
+    const user = await LabDB.currentMemberOrNull().catch(() => null);
+    if (!user) return;
+    try {
+      const c = await LabDB.ensureClient();
+      const { data, error } = await c
+        .from("runs").select("*, artifacts(kind, content, truncated)")
+        .eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50);
+      if (error) throw error;
+      state.curricula = (data || []).map(rowToEntry);
+      if (state.selectedId && !state.curricula.some((c) => c.id === state.selectedId)) state.selectedId = null;
+      persistSession();
+      route(); // re-render whichever tab is currently on screen with the DB-backed list
+    } catch (err) {
+      console.warn("DB에서 교안 목록 불러오기 실패(로컬 캐시 유지):", err);
+    }
+  }
+
+  // ---- hash routing (same PAGE table as Team-IZ curriculum.html) ----
+  const PAGE = { list: "page-list", upload: "page-upload", structure: "page-structure", mapping: "page-mapping" };
+  function route() {
+    const h = (location.hash || "").slice(1) || "list";
+    const id = PAGE[h] || "page-list";
+    document.querySelectorAll(".rpage").forEach((p) => p.classList.toggle("on", p.id === id));
+    document.querySelectorAll(".tabs .t[data-nav]").forEach((t) => t.classList.toggle("on", t.dataset.nav === h));
+    if (id === "page-list") renderListTab();
+    if (id === "page-structure") renderStructureTab();
+    if (id === "page-mapping") renderMappingTab();
+    window.scrollTo(0, 0);
+  }
+  window.addEventListener("hashchange", route);
+
+  document.addEventListener("click", (e) => {
+    const row = e.target.closest("#list-tbody tr[data-id]");
+    if (row) { state.selectedId = row.dataset.id; persistSession(); location.hash = "structure"; return; }
+    const nv = e.target.closest("[data-nav]");
+    if (nv) { location.hash = nv.getAttribute("data-nav"); return; }
+  });
+
+  function showUploadError(msg) {
+    const el = document.getElementById("upload-error");
+    el.textContent = msg;
+    el.classList.toggle("hidden", !msg);
+  }
+
+  // ---- list tab ----
+  function renderListTab() {
+    document.getElementById("list-count").textContent = `총 ${state.curricula.length}개`;
+    const tbody = document.getElementById("list-tbody");
+    if (!state.curricula.length) {
+      tbody.innerHTML = `<tr><td colspan="6" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = state.curricula.map((c) => {
+      const r = c.result;
+      const unitCount = Object.keys(r.unit_map || {}).length;
+      const qCount = (r.questions && r.questions.questions || []).length;
+      const graphBadge = r.graph_generated
+        ? `<span class="st approved"><span class="dot"></span>${r.graph.nodes.length}노드/${r.graph.links.length}관계</span>`
+        : `<span class="st failed"><span class="dot"></span>생성 실패</span>`;
+      const extractBadge = (r.failed_chunks && r.failed_chunks.length)
+        ? `<span class="st na">청크 ${r.failed_chunks.length}개 실패</span>`
+        : `<span class="st approved"><span class="dot"></span>완료</span>`;
+      return `<tr class="click" data-id="${LabApp.escapeHtml(c.id)}">
+        <td class="name"><b>${LabApp.escapeHtml(c.title)}</b><div class="sub">${LabApp.escapeHtml(c.courseLabel || "")}</div></td>
+        <td>${unitCount}개</td>
+        <td>${qCount}개</td>
+        <td>${graphBadge}</td>
+        <td>${extractBadge}</td>
+        <td class="date">${c.analyzedAt.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  // ---- structure tab: 핵심 요구사항 -- 섹션 | 페이지범위 | 키워드(개념) ----
+  function currentCurriculum() {
+    return state.curricula.find((c) => c.id === state.selectedId) || null;
+  }
+
+  function renderStructureTab() {
+    const c = currentCurriculum();
+    const tbody = document.getElementById("structure-tbody");
+    const qrow = document.getElementById("structure-qrow");
+    if (!c) {
+      document.getElementById("structure-title").textContent = "—";
+      document.getElementById("structure-meta").textContent = "";
+      qrow.innerHTML = "";
+      tbody.innerHTML = `<tr><td colspan="3" class="pnone">선택된 교안이 없습니다 — <span class="back" data-nav="list">목록으로</span></td></tr>`;
+      return;
+    }
+    const r = c.result;
+    document.getElementById("structure-title").textContent = c.title;
+    document.getElementById("structure-meta").textContent = `청크 ${r.chunk_count}개 · extractor: ${r.extractor}`;
+
+    const unitCount = Object.keys(r.unit_map || {}).length;
+    const qCount = (r.questions && r.questions.questions || []).length;
+    let qrowHtml = `<span class="qbadge ok">분석 완료</span><span class="qbadge">${unitCount}개 섹션 · 질문 ${qCount}개</span>`;
+    if (r.failed_chunks && r.failed_chunks.length) {
+      qrowHtml += `<span class="qbadge" style="color:var(--c-danger); background:var(--c-danger-soft);">청크 ${r.failed_chunks.length}개 실패(제외됨)</span>`;
+    }
+    qrow.innerHTML = qrowHtml;
+
+    const units = Object.entries(r.unit_map || {});
+    if (!units.length) {
+      tbody.innerHTML = `<tr><td colspan="3" class="pnone">추출된 섹션이 없습니다.</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = units.map(([unitId, unit]) => {
+      const pages = unit.source_pages || [];
+      const pageRange = pages.length ? `p.${Math.min(...pages)}–${Math.max(...pages)}` : "—";
+      const kw = (unit.concepts || []).map((cn) => `<span class="kw">${LabApp.escapeHtml(cn.name)}</span>`).join("");
+      return `<tr>
+        <td class="name"><b>${LabApp.escapeHtml(unit.unit_title || unitId)}</b></td>
+        <td class="ver">${pageRange}</td>
+        <td>${kw || '<span class="pnone">개념 없음</span>'}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  // ---- mapping tab: 그래프 파이프라인 산출물(개념/코드예시/주의사항 + 그래프 요약) ----
+  function renderMappingTab() {
+    const c = currentCurriculum();
+    const ftlist = document.getElementById("mapping-ftlist");
+    const recopane = document.getElementById("mapping-recopane");
+    if (!c) {
+      document.getElementById("mapping-title").textContent = "—";
+      document.getElementById("mapping-meta").textContent = "";
+      ftlist.innerHTML = `<div class="pnone">선택된 교안이 없습니다.</div>`;
+      recopane.innerHTML = "";
+      return;
+    }
+    const r = c.result;
+    document.getElementById("mapping-title").textContent = c.title;
+    document.getElementById("mapping-meta").textContent = r.graph_generated
+      ? `그래프 ${r.graph.nodes.length}노드 · ${r.graph.links.length}관계 생성됨`
+      : "그래프 생성 실패";
+
+    const units = Object.entries(r.unit_map || {});
+    if (!units.length) {
+      ftlist.innerHTML = `<div class="pnone">섹션이 없습니다.</div>`;
+      recopane.innerHTML = "";
+      return;
+    }
+    if (!state.selectedUnitId || !r.unit_map[state.selectedUnitId]) state.selectedUnitId = units[0][0];
+
+    ftlist.innerHTML = units.map(([unitId, unit]) => {
+      const n = (unit.concepts || []).length + (unit.code_examples || []).length + (unit.cautions || []).length;
+      return `<div class="ftitem${unitId === state.selectedUnitId ? " on" : ""}" data-unit="${LabApp.escapeHtml(unitId)}">
+        <div class="fn">${LabApp.escapeHtml(unit.unit_title || unitId)}</div>
+        <div class="fs">연결 항목 ${n}개</div>
+      </div>`;
+    }).join("");
+    ftlist.querySelectorAll(".ftitem").forEach((el) => {
+      el.addEventListener("click", () => { state.selectedUnitId = el.dataset.unit; persistSession(); renderMappingTab(); });
+    });
+
+    const unit = r.unit_map[state.selectedUnitId] || {};
+    function group(label, items) {
+      if (!items || !items.length) return "";
+      const cards = items.map((it) => {
+        const pages = it.source_pages || [];
+        const pg = pages.length ? `p.${Math.min(...pages)}–${Math.max(...pages)}` : "—";
+        return `<div class="recocard">
+          <div class="rmod">${LabApp.escapeHtml(it.name || "")}<span class="rpg">${pg}</span></div>
+          ${it.summary ? `<div class="rsum">${LabApp.escapeHtml(it.summary)}</div>` : ""}
+        </div>`;
+      }).join("");
+      return `<div class="recogroup">${label}</div>${cards}`;
+    }
+    recopane.innerHTML = `<div class="recohd"><b>${LabApp.escapeHtml(unit.unit_title || "")}</b> → 그래프의 teaches/shows_code/warns 관계로 연결된 항목</div>`
+      + (group("개념 (teaches)", unit.concepts) || `<div class="pnone">연결된 개념 없음</div>`)
+      + group("코드 예시 (shows_code)", unit.code_examples)
+      + group("주의사항 (warns)", unit.cautions);
+  }
+
+  // ---- P01 PDF upload + run ----
+  function wireP01Upload() {
+    const container = document.getElementById("p01-input-container");
+    P01Runner.renderInput(container);
+    const pdfInput = document.getElementById("p01-pdf-input");
+    const dz = document.getElementById("p01-dropzone");
+    if (pdfInput) pdfInput.addEventListener("change", () => { if (pdfInput.files[0]) lastPdfName = pdfInput.files[0].name; });
+    if (dz) dz.addEventListener("drop", (e) => { if (e.dataTransfer.files[0]) lastPdfName = e.dataTransfer.files[0].name; });
+
+    document.getElementById("run-p01-btn").addEventListener("click", async () => {
+      const btn = document.getElementById("run-p01-btn");
+      btn.disabled = true;
+      showUploadError("");
+      try {
+        await P01Runner.run();
+        const result = window.LabAppShim.takeP01Result();
+        if (!result) {
+          const st = window.LabAppShim.lastStatus();
+          showUploadError(`교안 분석 실패: ${st.text || "알 수 없는 오류"}`);
+          return;
+        }
+        const typedTitle = document.getElementById("curriculum-title-input").value.trim();
+        const entry = {
+          id: String(state.nextId++),
+          title: typedTitle || (lastPdfName ? lastPdfName.replace(/\.pdf$/i, "") : `교안 #${state.nextId - 1}`),
+          result,
+          analyzedAt: new Date(),
+        };
+        state.curricula.unshift(entry);
+        state.selectedId = entry.id;
+        state.selectedUnitId = null;
+        persistSession();
+        location.hash = "structure";
+        // p01-runner.js's own run() already awaited its internal maybeSaveRun() before
+        // resolving -- if logged in, the DB row (with its real UUID) already exists by
+        // now, so this supersedes the local temp `entry` above with the DB-backed list.
+        // If not logged in, refreshFromDB() is a no-op and the local entry stands alone.
+        refreshFromDB();
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
+
+  document.addEventListener("DOMContentLoaded", async () => {
+    restoreSession();
+    await LabApp.loadManifest();
+    wireP01Upload();
+    route();
+    refreshFromDB();
+  });
+})();
+</script>
+</body>
+</html>

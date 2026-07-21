@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>프로젝트 · IZ-Get 교안 매니저</title>
+<style>
+  :root{
+    --c-bg:#f4f5f7; --c-surface:#ffffff; --c-surface-2:#fafbfc;
+    --c-border:#e2e5ea; --c-border-strong:#cfd4dc;
+    --c-text:#181b20; --c-text-2:#5a616b; --c-text-3:#8b929c;
+    --c-primary:#3a4db8; --c-primary-hover:#31429e; --c-primary-soft:#eef0fb;
+    --c-nav:#1e2436; --c-nav-2:#2a3147; --c-nav-text:#aeb4c6;
+    --c-danger:#c0392b; --c-danger-soft:#fbeceb;
+    --c-warning:#b3771a; --c-warning-soft:#fbf3e6;
+    --c-success:#1f8a5b; --c-success-soft:#e8f5ee;
+    --c-info:#2f6bb0; --c-info-soft:#eaf2fa;
+    --r-sm:6px; --r-md:10px; --r-lg:14px;
+    --fs-xs:12px; --fs-sm:13px; --fs-base:14px; --fs-lg:16px; --fs-xl:20px; --fs-2xl:26px;
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:24px; --sp-6:32px; --sp-8:48px;
+    --shadow-card:0 1px 2px rgba(20,24,31,.05),0 10px 34px rgba(20,24,31,.09);
+    --font:-apple-system,'Apple SD Gothic Neo',system-ui,'Segoe UI',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:var(--font);color:var(--c-text);background:var(--c-bg);font-size:var(--fs-base);line-height:1.5;-webkit-font-smoothing:antialiased}
+  .page{max-width:1320px;margin:0 auto;padding:var(--sp-8) var(--sp-5)}
+  .doc-head{margin-bottom:var(--sp-6)}
+  .doc-head .id{display:inline-block;font-size:var(--fs-xs);font-weight:700;letter-spacing:.04em;color:var(--c-primary);background:var(--c-primary-soft);padding:3px 8px;border-radius:var(--r-sm)}
+  .doc-head h1{font-size:var(--fs-2xl);margin:var(--sp-3) 0 var(--sp-2);letter-spacing:-.01em}
+  .doc-head p{color:var(--c-text-2);font-size:var(--fs-sm);max-width:840px}
+  .sec-label{font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--c-text-3);margin:var(--sp-8) 0 var(--sp-3)}
+
+  .viewport{border:1px solid var(--c-border-strong);border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-card);background:#fff}
+  .chrome{height:36px;background:#eceef1;border-bottom:1px solid var(--c-border);display:flex;align-items:center;gap:var(--sp-2);padding:0 var(--sp-4)}
+  .chrome .tl{display:flex;gap:6px}.chrome .tl i{width:11px;height:11px;border-radius:50%;background:#cfd4dc;display:block}
+  .chrome .url{flex:1;height:22px;background:#fff;border:1px solid var(--c-border);border-radius:20px;font-size:var(--fs-xs);color:var(--c-text-3);display:flex;align-items:center;padding:0 var(--sp-3);margin-left:var(--sp-3);max-width:440px}
+
+  .app{display:flex;flex-direction:column;min-height:560px}
+  .topbar{height:54px;background:var(--c-surface);border-bottom:1px solid var(--c-border);display:flex;align-items:center;justify-content:space-between;padding:0 var(--sp-5)}
+  .topbar .left{display:flex;align-items:center;gap:var(--sp-4)}
+  .topbar .brand{display:flex;align-items:center;gap:var(--sp-2);font-weight:700;font-size:var(--fs-base)}
+  .topbar .brand .mk{width:26px;height:26px;border-radius:7px;background:var(--c-primary);color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:13px}
+  .cohortsel{display:flex;align-items:center;gap:var(--sp-2);border:1px solid var(--c-border-strong);border-radius:20px;padding:5px var(--sp-3);font-size:var(--fs-sm);color:var(--c-text);background:var(--c-surface-2)}
+  .cohortsel .k{color:var(--c-text-3);font-size:var(--fs-xs)}
+  .topbar .me{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-sm);color:var(--c-text-2)}
+  .topbar .me .av{width:28px;height:28px;border-radius:50%;background:var(--c-primary-soft);color:var(--c-primary);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600}
+  .body{display:flex;flex:1}
+  .nav{width:184px;background:var(--c-nav);padding:var(--sp-4) var(--sp-3);flex:0 0 184px}
+  .nav .item{display:flex;align-items:center;gap:var(--sp-2);padding:9px var(--sp-3);border-radius:var(--r-md);color:var(--c-nav-text);font-size:var(--fs-sm);margin-bottom:2px}
+  .nav .item.on{background:var(--c-nav-2);color:#fff;font-weight:600}
+  .nav .item .ic{width:15px;text-align:center;opacity:.85;font-size:12px}
+  .content{flex:1;background:var(--c-bg);padding:var(--sp-6)}
+  .phead{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:var(--sp-4)}
+  .phead h2{font-size:var(--fs-xl);letter-spacing:-.01em}
+  .phead .crumb{font-size:var(--fs-sm);color:var(--c-text-3);margin-bottom:var(--sp-1)}
+  .btn{border:0;border-radius:var(--r-md);background:var(--c-primary);color:#fff;font-weight:600;font-size:var(--fs-sm);cursor:pointer;padding:8px var(--sp-4)}
+  .btn.ghost{background:#fff;color:var(--c-text-2);border:1px solid var(--c-border-strong)}
+  .btn.sm{padding:6px var(--sp-3);font-size:var(--fs-xs)}
+  .fsbar{display:flex;align-items:center;gap:var(--sp-2);margin-bottom:var(--sp-3);flex-wrap:wrap}
+  .sel{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--c-border-strong);border-radius:var(--r-md);padding:6px var(--sp-3);font-size:var(--fs-xs);color:var(--c-text);background:#fff}
+  .sel .k{color:var(--c-text-3)}
+
+  .card{background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--r-md);overflow:hidden}
+  .tbl{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+  .tbl th,.tbl td{text-align:left;padding:10px var(--sp-4);border-bottom:1px solid var(--c-border)}
+  .tbl th{font-size:var(--fs-xs);text-transform:uppercase;letter-spacing:.03em;color:var(--c-text-3);font-weight:600;background:var(--c-surface-2)}
+  .tbl tr:last-child td{border-bottom:0}
+  .tbl tr.click:hover{background:var(--c-surface-2)}
+  .tbl .nm{font-weight:600}
+  .mono{font-family:ui-monospace,Menlo,monospace;font-size:var(--fs-xs);color:var(--c-text-2)}
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px}
+  .badge.ok{background:var(--c-success-soft);color:var(--c-success)}
+  .badge.off{background:#eef0f3;color:var(--c-text-3)}
+  .badge.warn{background:var(--c-warning-soft);color:var(--c-warning)}
+  .badge.info{background:var(--c-info-soft);color:var(--c-info)}
+  .badge.type{background:var(--c-primary-soft);color:var(--c-primary)}
+  .chev{color:var(--c-text-3)}
+  .link{color:var(--c-primary);font-size:var(--fs-xs);cursor:pointer}
+  .cbx{width:15px;height:15px;border:1.5px solid var(--c-border-strong);border-radius:4px;display:inline-block;vertical-align:-2px;flex:0 0 auto}
+  .cbx.on{background:var(--c-primary);border-color:var(--c-primary);position:relative}
+  .cbx.on::after{content:"✓";color:#fff;font-size:10px;position:absolute;top:-2px;left:2px}
+  .tbl td.chk,.tbl th.chk{width:38px}
+  .bulkbar{display:flex;align-items:center;gap:var(--sp-3);background:var(--c-primary-soft);border:1px solid var(--c-primary);border-radius:var(--r-md);padding:8px var(--sp-4);margin-bottom:var(--sp-3)}
+  .bulkbar .n{font-weight:700;color:var(--c-primary);font-size:var(--fs-sm)}
+  .bulkbar .ba{border:1px solid var(--c-primary);background:#fff;color:var(--c-primary);border-radius:var(--r-md);padding:5px 10px;font-size:var(--fs-xs);cursor:pointer}
+  .bulkbar .clear{margin-left:auto;color:var(--c-text-2);font-size:var(--fs-xs);cursor:pointer}
+  .poolact{margin-top:var(--sp-2);border-top:1px dashed var(--c-border-strong);padding-top:var(--sp-2)}
+  .poolact .mini{width:100%;border:1px solid var(--c-primary);background:#fff;color:var(--c-primary);border-radius:var(--r-md);padding:6px;font-size:var(--fs-xs);font-weight:600;cursor:pointer}
+  .acts{display:flex;gap:var(--sp-2)}
+
+  /* overview strip */
+  .ovstrip{display:flex;gap:var(--sp-6);background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--r-md);padding:var(--sp-4) var(--sp-5);margin-bottom:var(--sp-5);flex-wrap:wrap}
+  .ovstrip .k{font-size:var(--fs-xs);color:var(--c-text-3);margin-bottom:2px}
+  .ovstrip .v{font-size:var(--fs-sm);font-weight:600}
+
+  /* team builder */
+  .bhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:var(--sp-3)}
+  .bhead h3{font-size:var(--fs-base);font-weight:700}
+  .bhead h3 .c{color:var(--c-text-3);font-weight:400;font-size:var(--fs-sm);margin-left:6px}
+  .teams{display:flex;gap:var(--sp-4);flex-wrap:wrap;align-items:flex-start}
+  .teamcol{flex:0 0 230px;background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--r-md);padding:var(--sp-3)}
+  .teamcol.pool{background:var(--c-surface-2);border-style:dashed}
+  .teamcol h4{font-size:var(--fs-sm);font-weight:700;margin-bottom:var(--sp-2);display:flex;justify-content:space-between}
+  .teamcol h4 .cnt{color:var(--c-text-3);font-weight:400;font-size:var(--fs-xs)}
+  .repo{display:flex;align-items:center;gap:6px;background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:var(--r-sm);padding:5px 8px;font-size:11px;color:var(--c-text-2);margin-bottom:var(--sp-3)}
+  .teamcol.pool .repo{display:none}
+  .repo .g{color:var(--c-text-3)}
+  .chip{display:flex;align-items:center;gap:6px;background:var(--c-surface-2);border:1px solid var(--c-border);border-radius:20px;padding:4px 10px;font-size:var(--fs-xs);margin-bottom:6px}
+  .teamcol.pool .chip{background:#fff}
+  .chip .dot{width:6px;height:6px;border-radius:50%;background:var(--c-success)}
+  .chip .dot.w{background:var(--c-warning)}
+  .addteam{flex:0 0 230px;border:1px dashed var(--c-border-strong);border-radius:var(--r-md);display:flex;align-items:center;justify-content:center;color:var(--c-text-3);font-size:var(--fs-sm);min-height:80px}
+
+  .notes{margin-top:var(--sp-8);background:var(--c-surface);border:1px solid var(--c-border);border-radius:var(--r-lg);padding:var(--sp-5) var(--sp-6)}
+  .notes h3{font-size:var(--fs-lg);margin-bottom:var(--sp-1)}
+  .notes .grp{font-size:var(--fs-xs);font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--c-text-3);margin:var(--sp-5) 0 var(--sp-2)}
+  .notes .hint{font-size:var(--fs-sm);color:var(--c-text-2);margin-bottom:var(--sp-2)}
+  .tblwrap{overflow-x:auto}
+  .ntbl{width:100%;border-collapse:collapse;font-size:var(--fs-sm);min-width:520px}
+  .ntbl th,.ntbl td{text-align:left;padding:var(--sp-2) var(--sp-3);border-bottom:1px solid var(--c-border)}
+  .ntbl td:first-child{width:52px;color:var(--c-text-3)}
+  .pill{display:inline-block;font-size:11px;font-weight:600;padding:2px 7px;border-radius:20px}
+  .pill.danger{background:var(--c-danger-soft);color:var(--c-danger)}
+  .pill.warning{background:var(--c-warning-soft);color:var(--c-warning)}
+  .pill.info{background:var(--c-info-soft);color:var(--c-info)}
+  .foot{margin-top:var(--sp-5);font-size:var(--fs-xs);color:var(--c-text-3)}
+  .hidden{display:none !important}
+  .app{min-height:100vh}
+  .nav .item{text-decoration:none;cursor:pointer;width:100%;text-align:left;background:none;border:0;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <div class="brand"><span class="mk">◆</span>IZ-Get · 교안 매니저</div>
+    <div class="me">Team-IZ 정적 참고 화면 · 실제 데이터 연동 안 됨</div>
+  </div>
+  <div class="body">
+    <div class="nav">
+      <a class="item" href="dashboard.html"><span class="ic">▦</span>대시보드</a>
+      <a class="item" href="index.html"><span class="ic">▧</span>교안</a>
+      <a class="item on" href="projects.html"><span class="ic">▤</span>프로젝트</a>
+      <a class="item" href="report.html"><span class="ic">▥</span>리포트</a>
+    </div>
+    <div class="content">
+          <div class="phead"><div><div class="crumb">프로젝트 › 7기</div><h2>프로젝트</h2></div><button class="btn">+ 프로젝트 생성</button></div>
+          <div class="fsbar"><span class="sel"><span class="k">반</span> 전체 ▾</span><span class="sel"><span class="k">유형</span> 전체 ▾</span><span class="sel"><span class="k">상태</span> 전체 ▾</span></div>
+          <div class="card"><table class="tbl">
+            <thead><tr><th>프로젝트</th><th>유형</th><th>대상 반</th><th>기간</th><th>레포 연결</th><th>상태</th><th></th></tr></thead>
+            <tbody>
+              <tr class="click"><td class="nm">CLI 과제</td><td><span class="badge type">개인</span></td><td>A반</td><td>03.04 ~ 03.18</td><td>18 / 18</td><td><span class="badge ok">완료</span></td><td class="chev">›</td></tr>
+              <tr class="click"><td class="nm">API 서버</td><td><span class="badge type">팀</span></td><td>A반</td><td>03.20 ~ 04.10</td><td>4 / 4팀</td><td><span class="badge ok">진행</span></td><td class="chev">›</td></tr>
+              <tr class="click"><td class="nm">풀스택</td><td><span class="badge type">팀</span></td><td>전체</td><td>04.14 ~ 05.09</td><td><span class="badge warn">2 / 5팀</span></td><td><span class="badge off">준비</span></td><td class="chev">›</td></tr>
+            </tbody>
+          </table></div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
