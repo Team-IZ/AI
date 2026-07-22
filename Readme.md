@@ -51,6 +51,38 @@
 >   확인.
 > - `shared/config.js`의 `TEAM_SUPABASE_URL`/`TEAM_SUPABASE_ANON_KEY`/`DEFAULT_PROXY_URL`
 >   세 값 모두 위 새 자원을 가리키도록 교체.
+>
+> **D213 (2026-07-22, Supabase 다시 교체 + 알려진 리스크 수용)**: D208에서 고른
+> `team-iz-curriculum-manager`는 갓 만든 사실상 빈 프로젝트(멤버 2명)였음이 드러났습니다.
+> `code-reviewer-pipeline-lab`(원본 popixoxipop-collab repo 자신의 Supabase 프로젝트)에
+> 이 팀의 **실제** 사용 이력이 이미 있었습니다 — 실제 팀원 7명(사용자 확인,
+> 개발/테스트 계정 아님), p02 176건, p03 30건, 그리고 `team-iz-curriculum-manager`엔
+> 없던 편의 뷰(`p03_progress_view`, `p03_turns_view`, `runs_with_email` 등)까지. 두
+> 프로젝트 다 같은 Supabase organization(같은 계정) 소속이라 D208의 "다른 팀 소유
+> 인프라" 문제와는 결이 다릅니다 — `shared/config.js`의 `TEAM_SUPABASE_URL`/
+> `TEAM_SUPABASE_ANON_KEY`만 재교체.
+>
+> **알려진 리스크 (수용, 사용자 확정)**: 백그라운드 보안 리뷰가 두 가지를 지적했고 둘 다
+> 실측으로 확인된 진짜 리스크입니다 —
+>   1. **cross-tenant-signup**: `code-reviewer-pipeline-lab`의 `disable_signup=False`,
+>      도메인/allowlist 제한 없음 — code-qna URL을 아는 누구든 구글 로그인만으로
+>      `members` row가 자동 생성되고(`on_auth_user_created` 트리거) RLS `read all`
+>      정책으로 전체 이력을 읽을 수 있습니다. "우리 팀만 안다"는 사회적 합의일 뿐 실제
+>      접근 제어가 아닙니다.
+>   2. **trust-boundary/data-cotenancy**: 원본 Pipeline Lab 사용자와 code-qna 트레이니가
+>      이제 완전히 같은 테이블·같은 `read all` 정책을 공유 — 서로 다른 두 앱의 사용자
+>      데이터가 한 신뢰 경계 안에 섞입니다.
+>   사용자가 명시적으로 "감수" 결정(우선순위: 로그인 정상 작동 > 리스크 제거) — 이후
+>   더 강화하고 싶으면 Supabase Auth 설정에서 `disable_signup=true` + 이메일 도메인
+>   allowlist 추가를 고려(단, 이건 원본 Pipeline Lab의 가입 흐름도 함께 바뀌므로 그쪽과
+>   조율 필요).
+>   **로그인 리디렉트**: `uri_allow_list`에 `team-iz.github.io` 관련 항목이 원래
+>   없었는데, 확인 시점에 이미 `https://team-iz.github.io/AI/lab/**`가 추가돼 있었음
+>   (동시 진행 중인 curriculum-manager 작업이 넣어둔 것으로 보이며, code-qna 경로도
+>   함께 커버함) — 추가 조치 불필요, 라이브 값으로 직접 확인함.
+>   **EXIT**: 되돌리려면 이 D213 이전 상태(`team-iz-curriculum-manager`,
+>   ref `tjmviobhxplucuwoibaj`)로 `TEAM_SUPABASE_URL`/`TEAM_SUPABASE_ANON_KEY`만
+>   되돌리면 됨 — 그 프로젝트의 테이블/정책은 그대로 남아있어 즉시 재사용 가능.
 
 이 브랜치는 [`popixoxipop-collab/Code_reviewer_with_feedback`](https://github.com/popixoxipop-collab/Code_reviewer_with_feedback)의 Pipeline Lab(`docs/lab/`)에서 실제로 동작 중인 **P02(코드 분석) → P03(소크라틱 검증 세션) → 결과 리포트** 기능을, Team-IZ/Frontend의 실제 화면정의(`team-iz.github.io/Frontend/`, `gh-pages` 브랜치)와 동일한 UI/UX로 다시 입힌 것입니다.
 
@@ -129,7 +161,8 @@ P03Engine.run({ finding, codeContexts, model }, {
 ## 알려진 동작 차이 (의도적, 문서화됨)
 
 - **모델 실시간 전환 불가**: 원본은 인터뷰 도중에도 모델 선택을 바꾸면 다음 턴부터 적용됐지만, 이 포트는 세션 시작 시점에 모델이 고정됩니다(세션 시작 후 모델 선택기는 잠김). 드물게 쓰이는 동작이라 판단해 단순화했습니다 — `p03-engine.js`의 change #9 참고.
-- **Google 로그인 리디렉트**: Supabase 프로젝트의 OAuth allow-list가 원래 배포 도메인(`popixoxipop-collab.github.io/.../docs/lab/`) 기준으로 설정되어 있습니다. 이 브랜치를 새 도메인(예: `team-iz.github.io/AI/...`)에 배포하면, allow-list에 새 경로가 추가되기 전까지 Google 로그인이 실패할 수 있습니다(Supabase 대시보드 설정 필요 — 코드로 고칠 수 있는 부분이 아닙니다). NVIDIA 키 기반 P02/P03 실행 자체는 로그인과 무관하게 동작하며, 로그인이 안 되면 DB 저장만 건너뜁니다(화면 표시는 정상).
+- **Google 로그인 리디렉트**: D213 시점에 `code-reviewer-pipeline-lab`(현재 Supabase 대상)의 `uri_allow_list`에 `https://team-iz.github.io/AI/lab/**`가 이미 포함돼 있는 것을 확인했습니다 — 로그인은 정상 작동합니다. NVIDIA 키 기반 P02/P03 실행 자체는 로그인과 무관하게 동작하며, 로그인이 안 되면 DB 저장만 건너뜁니다(화면 표시는 정상).
+- **Supabase cross-tenant 리스크 (D213, 의도적으로 수용됨)**: `code-reviewer-pipeline-lab`은 가입 제한이 없고(`disable_signup=False`) RLS가 `read all`이라, code-qna URL을 아는 누구나 로그인 한 번으로 원본 Pipeline Lab 사용자 이력을 포함한 전체 데이터를 읽을 수 있습니다. 위 D213 노트 참고 — 강화하려면 Supabase Auth의 가입 제한 설정이 별도로 필요합니다.
 
 ## 원본과의 관계
 
