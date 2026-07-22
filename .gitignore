@@ -40,6 +40,10 @@ htmlcov/
 *.sqlite3
 *.db
 
+# 구 구현 참고용 로컬 사본 (FastAPI 재구축 중 모듈화 참고).
+# 이력에는 남아 있으므로 필요하면 `git show <commit>:app/...`로 꺼낸다.
+_legacy/
+
 # OS
 .DS_Store
 Thumbs.db

@@ -1,335 +1,221 @@
 # AI 서비스 (FastAPI)
 
-교육생이 제출한 코드를 정적 분석해 **Decision Point(finding)** 를 뽑고(P02), 그 지점을 두고
-**소크라틱 문답 세션**을 진행한 뒤(P03), 세션이 끝나면 전사(transcript) 전체를 대상으로
-**5축 루브릭 후채점**(코드이해·설계논리·대안비교·반례대응·자기수정, 축당 1~5점·총 5~25점)을
-수행하는 AI 서비스다. 채점은 세션 중이 아니라 **세션 종료 후 1회** 이루어진다.
+교육생이 제출한 코드를 분석해 **Decision Point**를 뽑고(P02), 그 지점을 두고 **소크라틱 문답 세션**을 진행한 뒤(P03), 세션이 끝나면 전사(transcript) 전체를 대상으로 **5축 루브릭 후채점**(코드이해·설계논리·대안비교·반례대응·자기수정, 축당 1~5점·총 5~25점)을 수행한다. 채점은 세션 중이 아니라 세션 종료 후 1회 이루어진다.
 
 ```
-React (Frontend) ←REST→ Spring Boot (Backend) ←REST→ FastAPI (이 저장소) ──→ NVIDIA LLM
+React(Frontend) ──▶ Spring Boot(Backend) ──▶ FastAPI(이 저장소) ──▶ NVIDIA LLM
+                          │
+                          └── DB (단일 소유자)
 ```
 
-React는 FastAPI를 직접 호출하지 않는다. FastAPI의 호출자는 Spring뿐이다.
+React는 FastAPI를 직접 호출하지 않는다. **FastAPI의 호출자는 Spring뿐이다.**
 
-> ⚠️ **전환 진행 중이다.** P02 분석 API와 `submission.html` 연결까지 동작하고, 문답 세션·후채점은
-> 아직 미구현이다. **"지금 뭐가 되고 뭐가 안 되나"는 아래 [현재 진행 상태](#현재-진행-상태) 한 곳에만
-> 적는다** — 이 README의 다른 절은 그 내용을 반복하지 않으니, 상태가 궁금하면 거기부터 읽어라.
+**FastAPI는 DB를 갖지 않는다.** 결과를 응답이나 콜백으로 돌려줄 뿐이고 저장은 전부 Spring이 한다. 코드 원문도 임시 작업공간에만 두고 TTL로 지운다.
+
+> **상태: 재구축 중.** 기존 구현은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났고, 지금은 빈 FastAPI 골격부터 다시 쌓는 중이다. 진행 상황은 `PLAN_FASTAPI_MIGRATION.md`.
 
 ---
 
-## 폴더 구조
+## 1. 이 저장소의 역할 분담
 
-| 경로 | 설명 |
-|---|---|
-| `app/` | FastAPI 애플리케이션. `api/`(라우터)·`core/`(파이프라인 호출 서비스 레이어)·`storage/`(저장소 어댑터) 3계층 |
-| `pipeline/` | 팀원 분석 레포에서 내재화(vendoring)한 분석 엔진 41개 파일. **수정 금지** — 목업이 E2E 검증한 기준 동작을 그대로 실행한다 |
-| `trainee/` | 목업 프론트 페이지 3종(`submission.html`·`session.html`·`result.html`). standalone 모드에서 FastAPI가 정적 서빙 |
-| `shared/` | 목업 프론트가 쓰는 공용 JS/CSS. P02 분석은 FastAPI로 옮겨졌고(Phase 2b), P03 세션(`p03-engine.js`)은 아직 브라우저 Pyodide 구버전 코드다 |
-| `reference/` | 이식 작업 중 대조용으로 둔 원본 러너 사본. 실행되지 않는 참고 자료. **아직 지우지 마라** — 문답 세션(S3) 이식 때 `p03-runner.js`를 대조 기준으로 쓴다 |
-| `tests/` | pytest 테스트 |
-| `docs/` | AI 파트 내부 문서 (목업 시절 이식 기록 등) |
+여기에는 성격이 다른 두 종류의 코드가 들어온다. 섞이면 유지보수가 무너지므로 경계를 먼저 이해할 것.
 
-`webtool_driver.py`와 `shared/p02-engine.js`는 **Phase 2b에서 삭제됐다** — `submission.html`이
-FastAPI 분석 API를 호출하게 되면서 브라우저 Pyodide 경로가 통째로 없어졌다(두 구현 병존 금지).
-로직은 `app/core/pipeline_runner.py`·`app/core/collect.py`·`app/core/findings.py`로 이관돼 있다.
-`prompt_manifest.json`은 P03 세션(`shared/p03-engine.js`)이 아직 런타임에 fetch하므로 남아 있다.
+| 구분 | 내용 | 담당 |
+|---|---|---|
+| **골격** | FastAPI 앱, HTTP 계약, 인증, job 수명주기, 에러 형식 | 이 브랜치 |
+| **엔진** | 코드 분석·문답·채점·교안 분석의 실제 알고리즘 | 팀원 PoC 브랜치에서 이식 |
+
+골격은 **엔진이 없어도 동작해야 한다.** 백엔드 팀원이 엔진 완성을 기다리지 않고 붙여볼 수 있어야 하기 때문이다. 그래서 모든 엔드포인트는 스텁 응답을 먼저 갖추고, 엔진은 나중에 꽂는다.
+
+### 팀원 PoC 브랜치
+
+| 브랜치 | 내용 | 형태 |
+|---|---|---|
+| `feat/code_Q&A` | 코드 업로드 → 분석 → 문답 → 보고서 | 분석부 Python, 문답부 JavaScript(`shared/p03-engine.js`) |
+| `feat/pdf_analysis` | 교안 PDF 분석 → 보고서에 "교안 어디를 복습하라" 표시 | Python 파이프라인 + JS 오케스트레이션 + 브라우저 pdf.js |
+
+두 브랜치 모두 **브라우저에서 도는 PoC**다. 임시 프론트엔드가 붙어 있고, LLM 호출은 Cloudflare Worker 프록시(`worker/nvidia-proxy.js`)를 거친다.
+
+> `feat/pdf_analysis`는 `feat/code_Q&A`의 내용을 `docs/lab/code-qna/` 아래에 통째로 품고 있다. 같은 파일이 경로만 다르게 두 브랜치에 존재하므로 병합 시 충돌한다.
+
+### 이식할 때 유의할 점
+
+- **JS는 설계 선택이 아니라 브라우저 제약의 결과다.** LLM 호출이 CORS·키 노출 때문에 프록시를 거쳐야 했고 UI가 얽혀 있어서 JS로 갔다. 서버에는 그 제약이 없으므로 **전부 Python으로 이식한다.** Node를 띄우지 않는다.
+- **프롬프트와 파라미터는 `prompt_manifest.json`이 계약이다.** p01(6단계)·p02(5단계)·p03(7단계)의 프롬프트·기본값이 선언적으로 들어 있고 팀원이 유지보수한다. 프롬프트만 바뀌면 이 파일만 다시 가져오면 되고, 제어 흐름이 바뀔 때만 코드를 손댄다.
+- **PDF 추출은 그대로 옮길 수 없다.** PoC는 브라우저 pdf.js를 쓴다. 서버에서는 다른 라이브러리로 바꿔야 하고 결과가 완전히 동일하지 않다.
 
 ---
 
-## 최초 설정
+## 2. 백엔드와의 계약
 
-Python 3.12 기준으로 검증했다.
+전체 명세는 `../docs/AI-Backend_API_명세서_v0.1.md`(내용은 v0.2). 아래는 요약이다.
 
-```powershell
-# AI/ 디렉터리에서
+| 그룹 | 메서드·경로 | 역할 | 방식 |
+|---|---|---|---|
+| 공통 | `GET /api/health` | 서비스 상태 | 동기 |
+| 분석 | `POST /api/v1/analyses` | 코드 분석 요청 (P02) | 비동기 job (202) |
+| 분석 | `GET /api/v1/analyses/{job_id}` | 분석 상태·결과 | 폴링 |
+| 세션 | `POST /api/v1/sessions` | 검증 세션 시작 → 첫 질문 | 동기 |
+| 세션 | `POST /api/v1/sessions/{id}/answers` | 답변 제출 → 다음 질문/종료 | 동기 (멱등키) |
+| 세션 | `GET /api/v1/sessions/{id}` | 세션 현재 상태 | 동기 |
+| 세션 | `POST /api/v1/sessions/{id}/restore` | 유실 세션 복원 | 동기 |
+| 채점 | `POST /api/v1/gradings` | transcript 5축 후채점 | 비동기 job (202) |
+| 채점 | `GET /api/v1/gradings/{job_id}` | 채점 상태·점수·근거 | 폴링 |
+
+### 동기와 비동기를 나누는 기준
+
+사람이 화면 앞에서 기다리면 동기, 아니면 job이다. 답변 제출은 학생이 대기하므로 동기여야 하고, 분석·채점은 수초~수분이 걸리므로 202를 주고 폴링시킨다.
+
+비동기 job은 생성 시 `202 Accepted` + `{"job_id": "...", "status": "QUEUED"}`를 반환한다. 요청에 `callback_url`이 있으면 완료·실패 시 그 주소로 결과를 `POST`하고, `GET` 폴링은 콜백 유실 대비 폴백으로 유지한다.
+
+### 인증
+
+Spring이 매 요청 헤더에 `X-Internal-Key`를 실어 보내는 공유 API 키 방식. `GET /api/health`만 면제(운영 모니터링용).
+
+### 미결 사항 — 스키마 작성 전에 팀 합의 필요
+
+백엔드 `origin/develop`의 관례와 기존 AI 명세가 세 곳에서 어긋난다.
+
+| 항목 | 백엔드 관례 | 기존 AI 명세 | 잠정 방침 |
+|---|---|---|---|
+| 경로 prefix | `/api/v0` | `/api/v1` | `/api/v1` 유지 — 별도 서비스라 Spring 내부 버전과 같을 이유 없음 |
+| 필드 표기 | camelCase | snake_case | **camelCase로 통일** — Spring 역직렬화 부담 제거 |
+| 에러 형식 | `{timestamp, status, error, message, path, fieldErrors}` | `{error:{code, message, retryable}}` | AI 형식 유지 — `retryable`이 Spring 재시도 판단에 필요 |
+
+응답 본문의 세부 구조(특히 `findings[]` 내부)는 팀원 PoC 결과에 따라 바뀐다. **엔드포인트·상태코드·최상위 필드까지만 고정하고 내부는 열어둔다.**
+
+---
+
+## 3. 코드 구조
+
+```
+app/
+├─ main.py          앱 조립. 라우터 등록만. 로직 없음
+├─ config.py        Settings — 환경변수
+├─ api/             HTTP 계층 — 백엔드가 보는 면
+│  ├─ deps.py         인증
+│  ├─ health.py
+│  ├─ analyses.py     P02        2개
+│  ├─ sessions.py     P03        4개
+│  └─ gradings.py     채점       2개
+├─ schemas/         계약의 실체 — 요청·응답 모델
+│  ├─ common.py       에러 형식, 공통 enum
+│  ├─ analysis.py
+│  ├─ session.py
+│  └─ grading.py
+└─ engines/         팀원 PoC가 들어오는 자리
+   ├─ base.py         계약(Protocol)
+   └─ stub.py         엔진 없을 때 고정 응답
+tests/
+```
+
+층은 셋뿐이다.
+
+| 층 | 존재 이유 | 금지 |
+|---|---|---|
+| `api/` | HTTP를 아는 유일한 곳 | 분석 로직 금지 |
+| `schemas/` | 계약을 한곳에서 읽게 | 동작 금지, 데이터 모양만 |
+| `engines/` | 팀원 코드 격리 | HTTP·pydantic 몰라야 함 |
+
+`services/` 층은 두지 않는다. 라우터 하나가 60줄을 넘으면 그때 뽑는다.
+
+### 엔진 소켓
+
+```python
+class AnalysisEngine(Protocol):
+    def run(self, source_dir: Path, options: dict) -> dict: ...
+```
+
+**엔진은 FastAPI를 모른다.** `dict`를 받아 `dict`를 준다. 이유가 둘이다.
+
+- 팀원 코드를 옮길 때 FastAPI 지식이 필요 없다. 순수 함수로 만들면 끝난다
+- 엔진을 CLI에서 단독 실행할 수 있어 디버깅이 쉽다
+
+`api/`가 결과 dict를 pydantic 모델로 감싸 응답한다. 그 변환이 유일한 접착점이다.
+
+### 스텁 전환
+
+```python
+engine_mode: Literal["stub", "real"] = "stub"
+```
+
+`stub`이면 스키마에 맞는 고정 응답을 돌려준다. 엔진이 하나도 없어도 9개 엔드포인트가 전부 살아 있고, 백엔드가 Swagger·Postman으로 계약을 검증할 수 있다.
+
+---
+
+## 4. 작업 방식
+
+### 쌓는 순서
+
+| # | 만드는 것 | 배우는 것 |
+|---|---|---|
+| 1 | `main.py` + `health.py` + `pytest.ini` | 앱 생성, `APIRouter` |
+| 2 | `config.py` + `deps.py` | `Settings`, `Depends`, `Header` |
+| 3 | `schemas/analysis.py` + `POST /analyses` 스텁 | pydantic 모델, 202, 422 |
+| 4 | `GET /analyses/{job_id}` 스텁 | 경로 파라미터, `response_model`, 404 |
+| 5 | `engines/base.py` + `stub.py` | Protocol, 의존성 주입 |
+| 6 | job 수명주기 | `BackgroundTasks`, 상태 전이 |
+| 7 | `sessions.py` 4개 스텁 | 세션 리소스 |
+| 8 | `gradings.py` 2개 스텁 | 9개 완성 |
+| 9 | 팀원 엔진 이식 | 실제 모듈화 |
+
+1~8은 엔진 없이 전부 가능하다. 8단계가 끝나면 백엔드가 붙일 수 있다.
+
+### 검증 방법
+
+**이 브랜치에서는 PoC를 만들지 않는다.** Swagger(`/docs`)와 Postman으로 API 통신만 확인한다.
+
+### 엔진 이식 절차
+
+1. 팀원 브랜치를 `git fetch` 후 해당 파일을 읽는다
+2. 프롬프트·파라미터는 `prompt_manifest.json`에서 가져온다
+3. 제어 흐름만 Python 순수 함수로 옮겨 `app/engines/`에 넣는다
+4. `engine_mode`를 `real`로 바꿔 스텁을 대체한다
+5. 계약이 바뀌었으면 `schemas/`와 명세서를 함께 고친다
+
+---
+
+## 5. 실행
+
+```bash
+# 최초 1회
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install --upgrade pip
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+
+# 개발 서버
+./.venv/Scripts/python.exe -m uvicorn app.main:app --reload
+
+# 테스트
+./.venv/Scripts/python.exe -m pytest -q
 ```
 
-> `run_standalone.ps1`·`run_integrated.ps1`은 `.venv`가 없으면 위 3줄을 알아서 수행한다.
-> 스크립트로만 돌릴 거면 이 단계를 건너뛰고 바로 실행해도 된다.
+Swagger UI: http://127.0.0.1:8000/docs
 
-### `.env` 준비
+> **워커는 1개로 유지한다.** job 저장소가 인메모리라 `--workers 2` 이상이면 job을 만든 프로세스와 조회하는 프로세스가 달라져 404가 난다. 스케일이 필요해지면 Redis나 DB로 옮긴다.
 
-```powershell
-Copy-Item .env.example .env
-```
+### 설정
 
-`.env`는 `.gitignore`에 등록돼 있다. 채워야 할 값:
-
-| 변수 | 설명 |
-|---|---|
-| `APP_MODE` | `standalone` 또는 `integrated`. 기본값 `integrated` |
-| `NVIDIA_API_KEY` | NVIDIA LLM API 키. Phase 3부터 필요 |
-| `INTERNAL_API_KEY` | Spring↔FastAPI **실제 통합용** 공유 API 키(B1 결정). Spring이 `X-Internal-Key` 헤더로 보낸다. 실제 값은 아직 미정이라 빈 값이 기본이고, **비워두면 키 검증이 비활성화**된다. integrated 배포에서는 반드시 설정할 것. 비밀 값이므로 커밋 금지 |
-| `SUPABASE_URL` / `SUPABASE_KEY` | standalone 전용. Supabase가 Spring 대역으로 확정 데이터를 저장한다. **Phase 5 범위라 아직 사용되지 않는다** |
-
-그 외 운영 파라미터(`LLM_TIMEOUT_SEC=600`, `ANSWER_TIMEOUT_SEC=120`, `CALLBACK_RETRY_MAX=3`,
-`WORKSPACE_TTL_SEC`, `CORS_ORIGINS`)는 `.env.example`에 기본값과 근거 주석이 함께 들어 있다.
-
-> 🔑 **NVIDIA API 키는 팀원 각자 자기 키를 쓴다. 절대 커밋하지 마라.**
-> `../docs/env.xlsx`에 평문 키가 있지만 그 값을 코드나 커밋으로 옮기지 마라.
-> `.env`만 사용하고, 키가 코드·로그·커밋에 남지 않게 한다.
+`.env.example`을 `.env`로 복사해 채운다. **`.env`는 절대 커밋하지 않는다.**
 
 ---
 
-## 실행 방법
-
-두 모드의 **엔드포인트와 요청/응답 스키마는 완전히 동일하다.** 다른 것은 "누가 호출하는가"와
-"확정 데이터를 어디에 저장하는가" 뿐이다. 통합 시점에 코드 변경 없이 `APP_MODE`만 바꿔
-전환되는 것이 이 설계의 합격 기준이다.
-
-### 모드 A — standalone (AI 파트 단독 테스트)
-
-```
-목업 프론트(trainee/) ←→ FastAPI ←→ Supabase (Spring 대역)
-                            └→ NVIDIA LLM
-```
-
-Spring Boot 없이 AI 레포만으로 제출→분석→문답→후채점 흐름을 테스트하는 모드다.
-최종 통합 이후에도 이 명령 하나로 계속 살아 있어야 한다.
-
-```powershell
-.\run_standalone.ps1
-```
-
-`APP_MODE=standalone`을 설정하고 `127.0.0.1:8000`에서 uvicorn을 띄운다.
-
-**정상 확인 방법:**
-
-- 콘솔에 `Uvicorn running on http://127.0.0.1:8000` 출력
-- 콘솔에 `standalone mode: supabase_store is not implemented yet (Phase 5); falling back to NullStore`
-  경고가 뜬다 — **정상이다.** Phase 5 전까지 저장 어댑터는 NullStore다
-- <http://127.0.0.1:8000/api/health> → `{"status":"ok","mode":"standalone","pipeline_loaded":true}`
-  - `pipeline_loaded: true`가 핵심이다. `pipeline/` 내재화 코드가 서버 CPython에서 import된다는 뜻
-- <http://127.0.0.1:8000/submission.html> → 제출 페이지가 뜬다
-  - 루트 `/`는 standalone에서만 `/submission.html`로 **307 리다이렉트**된다(`trainee/`에 `index.html`이
-    없어서 원래 404였다). 임시 리다이렉트라 브라우저에 영구 캐시되지 않고, OpenAPI 스키마에도 안 나온다
-
-> ✅ **`submission.html`의 제출 흐름은 실제로 동작한다.** GitHub URL 또는 ZIP을
-> 제출하면 페이지가 `POST /api/v1/analyses` → `GET /api/v1/analyses/{job_id}` 폴링으로
-> 서버 분석 결과를 받아 finding 목록을 그린다.
-> 아직 연결 안 된 페이지가 무엇인지는 [현재 진행 상태](#현재-진행-상태)를 보라.
->
-> 제출 화면에서 **추출 범위(전체 코드 TOTAL / 본인 커밋 기여분 OWN_COMMIT)** 를 고를 수 있다.
-> `OWN_COMMIT`을 고르면 커밋 이메일 입력란이 나타난다(§3.1에서 필수). 결과 화면에는 실제 적용된
-> 범위, `TOTAL` 폴백 여부와 사유, 귀속 커밋 수·검증 상태(VERIFIED/UNVERIFIED)가 함께 표시된다.
-> ZIP으로 `OWN_COMMIT`을 쓰려면 `.git` 폴더를 포함하거나 `commits.txt`·`changed_files.txt`
-> export를 동봉해야 한다(B5). 둘 다 없으면 `TOTAL`로 폴백하고, 해당 이메일 명의의 커밋이 0건이면
-> `ATTRIBUTION_REQUIRED`로 실패한다(MEAS-02A A-1).
-
-### 모드 B — integrated (팀 통합)
-
-```
-React ←→ Spring Boot ←→ FastAPI ──→ NVIDIA LLM
-```
-
-FastAPI는 **저장하지 않는다.** 확정 데이터는 전부 응답(또는 완료 콜백)으로 Spring에 반환하고,
-영속화·테넌트 격리·감사 로그는 Spring이 전담한다(DB 단일 소유자는 Spring).
-목업 프론트도 서빙하지 않고, CORS 미들웨어도 붙지 않는다(호출자가 Spring뿐이라 브라우저
-preflight 경로가 없다).
-
-```powershell
-.\run_integrated.ps1
-```
-
-`APP_MODE=integrated`를 설정하고 `127.0.0.1:8000`에서 uvicorn을 띄운다. `.venv`가 없으면
-`run_standalone.ps1`과 마찬가지로 알아서 만들고 의존성을 설치한다.
-
-| 파라미터 | 기본값 | 설명 |
-|---|---|---|
-| `-BindHost` | `127.0.0.1` | 바인딩 주소. **Spring이 다른 PC나 컨테이너에서 돈다면 루프백에는 접속할 수 없으므로 `-BindHost 0.0.0.0`으로 띄워야 한다** |
-| `-Port` | `8000` | 포트 |
-| `-Reload` | (off) | 개발 중 코드 수정 시 자동 재기동(`--reload`) |
-
-> ⚠️ **`$env:APP_MODE`는 그 터미널 세션에 계속 남는다.** PowerShell의 `$env:`는 프로세스 전역이라
-> `run_standalone.ps1`을 한 번 돌린 터미널에서는 스크립트가 끝난 뒤에도 `APP_MODE=standalone`이
-> 살아 있다. 그 상태로 `uvicorn`을 직접 띄우면 integrated를 의도했는데 standalone으로 떠서
-> 목업 제출 페이지가 그대로 보인다. `run_integrated.ps1`은 `APP_MODE`를 명시적으로
-> `integrated`로 덮어써서 이 사고를 막는다 — **직접 명령을 치지 말고 스크립트를 쓸 것.**
-
-기동 시 `.env` 상태를 점검해 경고한다(경고만 하고 기동은 계속한다). `.env`가 없으면 복사 안내를,
-`INTERNAL_API_KEY`가 비어 있으면 **인증이 비활성화돼 아무나 `/api/v1/*`를 호출할 수 있다**는 경고를
-출력한다. 키 값 자체는 비밀이라 출력하지 않고 설정 여부만 알린다.
-
-**정상 확인 방법:**
-
-- <http://127.0.0.1:8000/api/health> → `{"status":"ok","mode":"integrated","pipeline_loaded":true}`
-  - `mode`가 `integrated`인지 여기서 확인한다. 이 엔드포인트는 인증 면제다
-- <http://127.0.0.1:8000/docs> → Swagger UI. Backend 담당자의 실질적 진입점
-- `/`와 `/submission.html`은 **404가 정상이다.** integrated에서는 목업 프론트를 서빙하지 않는다
-
-### Spring 없이 API 직접 두드리기
-
-`/api/health`는 운영 모니터링용이라 **인증 면제**다. 키 설정 여부와 무관하게 200을 준다:
-
-```bash
-curl http://127.0.0.1:8000/api/health
-# {"status":"ok","mode":"integrated","pipeline_loaded":true}
-```
-
-### 두 개의 API 키 — 목업 개발 키 vs 실제 통합 키
-
-`X-Internal-Key`로 받아들이는 키는 **두 종류이고 유효 범위가 다르다.**
-
-| | `STANDALONE_DEV_API_KEY` (개발 키) | `INTERNAL_API_KEY` (실제 키) |
-|---|---|---|
-| 용도 | 목업 페이지(`trainee/`)가 자기 서버를 호출할 때 | Spring이 FastAPI를 호출할 때 |
-| 값 | `iz-get-standalone-dev-key` — **공개 상수**. `app/config.py`에 하드코딩 | **비밀**. 아직 미정이라 기본 빈 값. `.env`로 주입 |
-| 어디서 통하나 | `APP_MODE=standalone`**에서만** | 설정돼 있으면 두 모드 모두 |
-| integrated에서 | **항상 401로 거부** | 강제됨 |
-
-핵심은 **개발 키가 공개돼도 프로덕션 인증을 우회할 수 없다**는 점이고, 이것은 문서가 아니라
-코드로 보장된다 — `app/api/deps.py`가 개발 키를 `app_mode == "standalone"`일 때만 통과시키고,
-integrated에서는 *실제 키 설정 여부와 무관하게* 명시적으로 거부한다(`INTERNAL_API_KEY`가 비어
-검증이 비활성인 상태에서도 개발 키만은 통과시키지 않는다). 이 불변식은
-`tests/test_internal_auth.py`의 `test_dev_key_is_rejected_in_integrated_mode` 등이 고정한다.
-
-이 구조는 **standalone이 로컬 개발 도구 전용 모드**라는 전제 위에 성립한다. 목업 서빙·CORS·공개
-개발 키가 모두 그 전제에 묶여 있으므로 **standalone 서버를 외부에 노출하지 말 것.**
-
-덕분에 두 키는 공존할 수 있다 — `.env`에 실제 키를 채워둔 채로도 `run_standalone.ps1`의 목업은
-그대로 동작하고, 실제 통합 시에는 `INTERNAL_API_KEY`에 값만 채우면 된다. 목업은 개발 키를
-하드코딩해서 보내므로 **사용자가 키를 입력할 필요가 없다**(연결 설정 패널에 키 입력란도 없다).
-
-`/api/v1/*` 업무 엔드포인트는 `INTERNAL_API_KEY`가 설정돼 있으면 `X-Internal-Key` 헤더를 요구한다:
-
-```bash
-curl -H "X-Internal-Key: $INTERNAL_API_KEY" \
-     -H "Content-Type: application/json" \
-     -d '{"attempt_id":"...","method":"GITHUB_URL","source":{"repo_url":"..."}}' \
-     http://127.0.0.1:8000/api/v1/analyses
-```
-
-standalone에서 목업 없이 직접 두드릴 때는 개발 키를 쓰면 된다:
-
-```bash
-curl -H "X-Internal-Key: iz-get-standalone-dev-key" \
-     http://127.0.0.1:8000/api/v1/analyses/<job_id>
-```
-
-> `/api/v1/analyses`는 Phase 2a에서 구현됐다(§3.1/§3.2). 요청 스키마는 API 명세서 §3.1 기준이며
-> 확정 시 갱신한다. `OWN_COMMIT`으로 요청하려면 `extraction_scope`와 `commit_email`을 함께 보낸다.
->
-> 완료 응답에는 `snapshot_id`(job_id와 별개로 발급하는 UUID)와 `snapshot_meta`
-> (`content_hash` sha256 64자 / `file_count` / `byte_count`)가 함께 들어간다(S1). 코드 원문은
-> 여전히 저장하지 않고(명세 §3.3), 메타만 넘겨 Spring이 `code_snapshot` 행을 만들 수 있게 하는 설계다.
-
-### Swagger UI
-
-서버가 뜬 상태에서 <http://127.0.0.1:8000/docs> 로 접속하면 현재 구현된 엔드포인트를
-브라우저에서 바로 호출해볼 수 있다. 기계가 읽을 스펙은 `/openapi.json`이다.
-
-현재 `/openapi.json`의 `paths`에는 `/api/health`, `POST /api/v1/analyses`,
-`GET /api/v1/analyses/{job_id}` 3개가 들어 있다(standalone의 `GET /` 리다이렉트는 목업 편의용이라
-스키마에 노출하지 않는다). 세션(§4)·채점(§5)을 진행하며 여기가 채워지므로, "지금 실제로 뭐가
-구현됐나"를 확인하는 가장 빠른 방법이 `/docs`다.
-
----
-
-## 자동 테스트
-
-```powershell
-$env:PYTHONIOENCODING = "utf-8"
-.\.venv\Scripts\python.exe -m pytest tests/ -v
-```
-
-현재 결과: **47 passed, 1 skipped** (skip 1건은 네트워크 의존 GitHub clone 테스트).
-
-| 파일 | 검증 내용 |
-|---|---|
-| `tests/test_pipeline_smoke.py` | Pyodide 없이 서버 CPython에서 `two_tier_scan.scan()` → `score_findings.score()`가 샘플 코드 트리에 대해 에러 없이 완주하고 결과 JSON에 scan/judgment 구조가 있는지. finding 내용의 정확성 검증은 목표가 아니다. `/api/health`가 모드·파이프라인 상태를 보고하는지도 확인 |
-| `tests/test_app_modes.py` | 모드별 앱 조립 고정 — CORS는 standalone에만 붙는다, 목업 정적 서빙은 standalone에만 있다, 브라우저 Pyodide 경로가 삭제된 채로 유지된다, 목업 페이지의 정적 참조가 전부 실존한다, standalone 목업 제출 흐름(ZIP→job→폴링→finding)이 동작한다 |
-| `tests/test_analyses.py` | 분석 API(§3) — ZIP 제출 E2E, 수집 규칙(SKIP/확장자/.ipynb/zip slip), 커밋 귀속·폴백, 실패 코드, B1 인증, 스냅샷 메타(`snapshot_id`·`content_hash` 결정성) |
-| `tests/test_internal_auth.py` | B1 공유 API 키 계약 — 키 누락/오류 시 401, 키 미설정 시 검증 비활성, `/api/health`는 양 모드 모두 인증 면제 |
-
-Phase 1의 xfail(`test_webtool_driver_fetch_path_is_not_served_yet`)은 **Phase 2b에서 삭제됐다** —
-그 xfail이 고정하던 "목업 제출 흐름이 죽어 있다"는 상태 자체가 해소됐기 때문이다. 대신
-`test_standalone_mockup_submission_flow_works`가 그 자리에서 "흐름이 동작한다"를 고정한다.
-
-> 💡 **Windows 콘솔 인코딩 주의**: 테스트·서버 로그에 한글과 유니코드 기호가 섞여 있어
-> 기본 cp949 콘솔에서는 `UnicodeEncodeError`가 날 수 있다. 위처럼 `PYTHONIOENCODING=utf-8`을
-> 설정하면 안전하다. bash에서는 `PYTHONIOENCODING=utf-8 ./.venv/Scripts/python.exe -m pytest tests/ -v`.
-
----
-
-## 현재 진행 상태
-
-**이 절이 진행 상태를 서술하는 유일한 곳이다.** 상세 계획·미결 사항은 아래
-[관련 문서](#관련-문서)의 계획서들을 보라 — 여기에 복제하지 않는다(중복이 곧 다음 모순의 원인이다).
-
-| Phase | 내용 | 상태 |
-|---|---|---|
-| Phase 0 | 팀원 분석 레포 내재화 (`pipeline/` 41개 파일) | ✅ 완료 |
-| Phase 1 | FastAPI 골격 — `app/` 3계층, 설정, `ResultStore` 인터페이스, health, 스모크 테스트 | ✅ 완료 |
-| Phase 2a | P02 분석 API (`POST /api/v1/analyses`, `GET /api/v1/analyses/{job_id}`) | ✅ 완료 |
-| Phase 2b | **`submission.html` 연결** — 브라우저 Pyodide 경로 삭제 | ✅ 완료 |
-| S1 | 코드 업로드 마무리 — `snapshot_id` + `snapshot_meta` 반환 | ✅ 완료 |
-| S2 | 중요도 분석 보강 (finding 품질·줄번호·POC 미결 해소) | 예정 |
-| S3 | P03 세션 API + **`session.html` 연결** | 예정 |
-| S4 | 5축 후채점 API + **`result.html` 연결** | 예정 |
-| Phase 5 | standalone 저장 계층(Supabase) + 전체 E2E + 계약 확정 | 예정 |
-
-> S1~S4는 계획서에서 Phase 2~4를 사용자 흐름(업로드→중요도 분석→문답→결과보고서) 단위로
-> 다시 쪼갠 이름이다. 대응 관계는 `../output_docs/AI파트_작업계획_및_인계.md` §2에 있다.
-
-### 목업 페이지는 Phase 2~4에 걸쳐 순차 연결된다
-
-이게 이 프로젝트의 핵심 작업 원칙이다. 각 Phase는 **API 엔드포인트와 목업 페이지 연결을 함께**
-내놓는다. 목업 연결을 뒤로 몰면 그동안 standalone이 죽어 있고, 더 나쁘게는 목업이 브라우저
-Pyodide로 도는 동안 정작 통합에 쓸 서버 코드가 검증되지 않는다.
-
-목업이 FastAPI를 호출하게 만들어야 **"standalone으로 테스트한다 = 통합 시 Spring이 호출할
-바로 그 코드 경로를 테스트한다"** 가 성립한다.
-
-- 각 Phase 완료 시점에 `.\run_standalone.ps1` 하나로 그 시점까지의 기능을 실제 사용할 수 있어야 한다.
-- 연결이 끝난 페이지에서는 해당 Pyodide·프록시 코드를 **삭제**한다(두 구현 병존 금지).
-- 아직 연결 안 된 페이지는 "이 단계는 아직 미연결" 안내를 표시한다 — 반쯤 동작하며 조용히
-  이상해지는 것보다 낫다.
-- 최종 통합 후에도 목업은 계속 살아 있다. `APP_MODE` 전환만으로 standalone/integrated를 오간다.
-
-### 그래서 지금 실제로 되는 것 / 안 되는 것
-
-**되는 것**
-
-- 양 모드로 서버 기동, `/api/health` 200 응답
-- 내재화한 분석 파이프라인이 Pyodide 없이 서버 CPython에서 scan→score 완주 (스모크 테스트로 검증)
-- `X-Internal-Key` 인증 계약
-- standalone에서 목업 페이지 3종이 HTTP 200으로 **서빙**되고, 루트 `/`는 `/submission.html`로 307 리다이렉트
-- **P02 분석 API(명세 §3) + `submission.html` 연결** — GitHub URL·ZIP 제출 → job 폴링 →
-  finding + `code_context` 렌더링까지 standalone에서 실제로 동작한다
-- 완료 응답의 `snapshot_id` + `snapshot_meta`(`content_hash`/`file_count`/`byte_count`) 반환(S1)
-
-**안 되는 것 (솔직하게)**
-
-- **`session.html`(P03 문답)·`result.html`(결과 리포트)은 아직 FastAPI와 연결돼 있지 않다.**
-  두 페이지 상단에 미연결 배너가 뜬다. S3~S4의 작업이다.
-- 분석 결과에서 "검증 세션 시작 →"을 누르면 이동은 되지만 세션은 구버전 브라우저 경로라
-  standalone에서 돌지 않는다.
-- `/api/v1/*` 업무 엔드포인트는 분석(§3) 2개뿐이다. 세션(§4)·채점(§5)은 미구현.
-- 중요도 분석 보강(S2)은 미착수 — finding 줄번호·`type`·`evidence_hash` 등 임의 구현 지점이 남아 있다.
-- B3 완료 콜백(`callback_url`)은 값을 받아 보관만 하고 전송은 미구현이다.
-- Supabase 저장은 미구현. standalone에서도 NullStore로 폴백한다(기동 시 경고 출력).
-  즉 분석 결과는 서버 인메모리 job에만 있고 프로세스를 재시작하면 사라진다.
-
-> `app/main.py` 등 일부 코드 주석은 목업 연결 시점을 "Phase 5"로 적고 있는데, 이는 계획서 §3의
-> Phase 2~4 공통 원칙보다 먼저 작성된 것이다. **계획서가 최신이자 기준**이다.
-
----
-
-## 관련 문서
+## 6. 참고
 
 | 문서 | 내용 |
 |---|---|
-| [`PLAN_FASTAPI_MIGRATION.md`](./PLAN_FASTAPI_MIGRATION.md) | **진행 상황의 단일 기준.** FastAPI 전환 계획서 — 현재 상태, 확정된 설계 결정(§0), 운영 모드(§1.5), Phase별 작업(§3), 미결 사항(§5) |
-| [`../output_docs/FastAPI화_상세계획.md`](../output_docs/FastAPI화_상세계획.md) | S1~S4 단계별 실행 계획(무엇을 어떤 순서로 구현하는지)과 선결 결정 사항 |
-| [`../output_docs/AI파트_작업계획_및_인계.md`](../output_docs/AI파트_작업계획_및_인계.md) | 인계·현황 문서. 실측 상태 요약, S1~S4 로드맵(§2), 임의 구현/미결 지점 목록(POC-*) |
-| [`../docs/AI-Backend_API_명세서_v0.1.md`](../docs/AI-Backend_API_명세서_v0.1.md) | AI↔Backend API 명세서 (**내용은 v0.2**, 파일명만 v0.1). 엔드포인트 스키마·B1~B8 협의 결정 |
-| [`pipeline/VENDORED.md`](./pipeline/VENDORED.md) | 분석 파이프라인 내재화 기록 — 출처 레포·커밋 SHA·복사 파일 목록·디렉터리 구조 주의사항 |
-| [`docs/MOCKUP_PORTING_HISTORY.md`](./docs/MOCKUP_PORTING_HISTORY.md) | 전환 이전 목업(Pyodide) 시절의 이식 방법론·E2E 검증 내역·알려진 동작 차이 (이력 보존) |
+| `../docs/AI-Backend_API_명세서_v0.1.md` | AI↔Backend 전체 계약 |
+| `../docs/docs_for_read/` | 기획·요구사항 문서 Markdown 변환본 |
+| `../rule/개발/이슈 O/` | 커밋·PR 규칙, 협업 규칙 |
+| `PLAN_FASTAPI_MIGRATION.md` | 진행 상황 기록 |
 
-`../docs/docs_for_read/`에 기획 문서의 Markdown 변환본이 있다(`README.md`가 인덱스).
-단 이 문서들은 확정 스펙이 아니라 계속 바뀌는 기획 자료이므로, 실제 코드나 최근 결정과
-다르면 문서를 맹신하지 말고 확인 후 진행한다.
-</content>
+`../docs/`의 문서는 확정 스펙이 아니라 바뀔 수 있는 기획 자료다. 실제 코드나 최근 논의와 어긋나면 문서를 맹신하지 말고 확인 후 진행한다.
+
+`_legacy/`는 재구축 이전 구현의 로컬 사본이다. `.gitignore` 대상이라 커밋되지 않으며 모듈화 참고용으로만 둔다. 이력에는 남아 있으므로 `git show <commit>:app/...`로 꺼낼 수 있다.
+
+### 커밋 규칙
+
+```
+type: short description (#issue)
+```
+
+`feat` `fix` `refactor` `style` `docs` `chore` `remove` 중 하나. 동사원형 소문자로 시작, 마침표 없음, 50자 이내, 이슈 있으면 번호 필수. PR은 제목 `[feat] add login page UI`, 본문에 `closes #번호`, 1PR=1기능. 자세한 내용은 `../rule/개발/이슈 O/Git 커밋 & PR 가이드.docx`.
