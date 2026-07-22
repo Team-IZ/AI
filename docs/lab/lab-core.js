@@ -149,12 +149,24 @@ const LabApp = (() => {
   // Promoted to shared.default_model for both P01 and P03 on this evidence, not
   // speculation.
   const MODEL_CHOICES = [
+    // Mirrored from Code_reviewer_with_feedback main repo's D216-D218 (2026-07-22, see
+    // that repo's README for full detail -- not replayed here since this repo never went
+    // through the intermediate step-3.7-flash swap those cover). Summary: item-level
+    // before/after text diffing of real refine_snapshots runs (not just counts) showed
+    // step-3.5-flash's refine step drops distinct grounded concepts (e.g. "Kubernetes
+    // Definition", "CICD Definition") with nothing replacing them, while qwen3-next-80b
+    // was the only tested model whose refine changes were a genuine improvement (0 lost,
+    // 4 added, filling real gaps). Known accepted risk: qwen3-next-80b failed hard in
+    // real production the same day (HTTP 524, ~1hr, never finished) in a separate
+    // incident -- reliability is inconsistent day-to-day, chosen anyway with that risk
+    // named explicitly. Revert to step-3.5-flash (still listed below, tier "good") if
+    // 524s recur often in real usage here too.
+    { id: "qwen/qwen3-next-80b-a3b-instruct", label: "qwen3-next-80b", tier: "good",
+      note: "기본값(2026-07-22, 메인 repo D218 미러: refine이 콘텐츠를 깎지 않고 실제 빈 구멍을 채운 유일한 모델 -- item-level 정성 대조로 확인). P01-T1 실측 96% 성공(D120, 표본 50). ⚠ step-3.5-flash 대비 20-50배 느림, 같은 날 실사용에서 524로 1시간 실패 이력 있음(별도 세션 실행은 8/8 정상) -- 품질은 낫지만 가용성은 날마다 다를 수 있음." },
     { id: "stepfun-ai/step-3.5-flash", label: "step-3.5-flash", tier: "good",
-      note: "기본값(D183) · D120의 '0/50'은 구파이프라인 reasoning_content 버그로 확정(D-G 이론을 실측 확인) · 재검증: P03 tool_calls 1.5-3.9s 3/3, P01 JSON모드 4.1-5.3s 3/3(reasoning_content 경유, 폴백 정상 동작)." },
+      note: "메인 repo D218 미러(2026-07-22): 기본값을 qwen3-next-80b로 넘김(위 항목 참고) -- 이 모델은 빠르고 안정적이지만 refine 정성 대조에서 정의급 개념이 대체 없이 소실되는 게 확인됨. 속도/안정성이 급하면 여전히 이 모델. D120의 '0/50'은 구파이프라인 reasoning_content 버그로 확정 · 재검증: P03 tool_calls 1.5-3.9s 3/3, P01 JSON모드 4.1-5.3s 3/3(reasoning_content 경유, 폴백 정상 동작)." },
     { id: "mistralai/mistral-medium-3.5-128b", label: "mistral-medium-3.5", tier: "unverified",
       note: "P01 기준 미검증 · P03 종합 2위(0.749) · D183 부수측정: 동일 4000자 프롬프트 13.2-17.3s(qwen 대비 5-6배 빠름, qwen과의 상대비교로만 측정, 단독 신뢰도 검증은 아직 부족)." },
-    { id: "qwen/qwen3-next-80b-a3b-instruct", label: "qwen3-next-80b", tier: "unverified",
-      note: "P01-T1 실측 96% 성공(D120, 표본 50). D183: 동일 프롬프트에서 step-3.5-flash 대비 20-50배 느림(75.9-95.9s, 이전 회차엔 3회 중 1회 524도 있었음) -- 더는 기본값 아님, 느림/간헐적 524(D142/D144/D145 기존 이력)로 tier 재평가." },
     { id: "nvidia/nemotron-3-super-120b-a12b", label: "nemotron-3-super-120b", tier: "unverified",
       note: "P01 기준 미검증 · P03에서 범위 밖 점수 출력 결함 이력." },
     { id: "qwen/qwen3.5-122b-a10b", label: "qwen3.5-122b", tier: "unverified",
