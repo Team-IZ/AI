@@ -108,13 +108,21 @@ const LabDB = (() => {
       run = data;
     }
 
+    // D-jsontrunc (2026-07-22): this used to slice JSON.stringify(a.content) at a fixed
+    // 100000-char offset when over that length, then JSON.parse() the slice -- cutting a
+    // JSON string at an arbitrary character position almost always lands mid-token (mid
+    // string/number/array), producing invalid JSON that JSON.parse() always throws on.
+    // Root-caused live on curriculum-manager's docs/lab/db.js (this file's own origin --
+    // both were forked from the same original): a real 181-page curriculum's unit_map/
+    // graph artifacts routinely exceed 100000 chars, so those runs failed to save at all.
+    // The 100000 cap was never tied to an actual Postgres jsonb or PostgREST body-size
+    // limit (both comfortably hold multi-MB values) -- an unmeasured guess real content
+    // turned out to exceed. Nothing in code-qna reads `artifacts.truncated` either (grep-
+    // confirmed) -- removed the broken truncation attempt instead of picking a new
+    // arbitrary threshold. Same fix, same rationale as curriculum-manager's db.js.
     for (const a of artifacts || []) {
-      const content = JSON.stringify(a.content);
-      const truncated = content.length > 100000;
       const { error: artErr } = await c.from("artifacts").insert({
-        run_id: run.id, kind: a.kind,
-        content: JSON.parse(truncated ? content.slice(0, 100000) : content === "" ? "{}" : content || "{}"),
-        truncated,
+        run_id: run.id, kind: a.kind, content: a.content ?? {},
       });
       if (artErr) throw artErr;
     }
