@@ -241,6 +241,20 @@
       // D200: {owner, repo, branch} from a GitHub-URL scan (null for ZIP) -- own key, set
       // once per scan, so P03 can later offer live fact-check tools against this repo.
       SessionState.saveRepoContext(repoRef);
+      // D210: for a ZIP scan (no repoRef), persist the full parsed `files` map to
+      // IndexedDB so P03's fact-check tools have something to re-read after the page
+      // navigation to session.html -- GitHub-URL scans don't need this, P03 re-fetches
+      // live from GitHub instead. Best-effort: a save failure just means this session
+      // falls back to no ZIP fact-check (same as before D210), never blocks the scan
+      // result from being shown.
+      if (input.method === "zip") {
+        const zipSaved = await SessionState.saveZipFileMap(files);
+        if (!zipSaved.ok) console.error("ZIP file map save failed (no live fact-check this session):", zipSaved.error);
+      } else {
+        // D210: clear any stale map from an earlier ZIP scan in this same tab -- see
+        // SessionState.clearZipFileMap()'s comment for why this matters.
+        await SessionState.clearZipFileMap();
+      }
       renderFindingsFromBasket(basket);
     } catch (err) {
       console.error(err);
