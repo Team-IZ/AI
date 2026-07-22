@@ -1,15 +1,17 @@
 # AI 파트 FastAPI 전환 계획서 (ai-dev 서브 에이전트용)
 
 > 작성일: 2026-07-20 (v2 — 세션 구조 확정 반영). 이 문서는 ai-dev 서브 에이전트가 작업 시 기준으로 삼는 계획서다.
-> 작업 브랜치: `feature/fastapi-migration`
+> 작업 브랜치: `feature/fastapi-migration` (`origin/feature/fastapi-migration` 추적, 로컬이 2커밋 앞섬)
 > 전제 지식: `AI/README.md`(구조·실행법), `../docs/AI-Backend_API_명세서_v0.1.md`(내용은 v0.2, API 계약), `../docs/docs_for_read/P02_코드분석_서비스플로우.md`, `P03_소크라틱_검증세션_서비스플로우.md`, `기능명세서.md`.
 
 ---
 
-## 현재 상태 (마지막 갱신: 2026-07-21)
+## 현재 상태 (마지막 갱신: 2026-07-22)
 
 **이 문서가 AI 파트 진행 상황의 단일 기준이다.** 새 세션을 시작하면 여기부터 읽어라.
-**현재 테스트: 47 passed · 1 skipped** (`./.venv/Scripts/python.exe -m pytest tests/ -q`). skip 1건은 네트워크에 의존하는 GitHub clone E2E다.
+**마지막 확인 테스트: 47 passed · 1 skipped** (`./.venv/Scripts/python.exe -m pytest tests/ -q`). skip 1건은 네트워크에 의존하는 GitHub clone E2E다.
+
+> PC 이전(노트북 `C:\KT_aivle\big-project`, Python 3.12 → 현재 `D:\KT_AIVLE\BigProject\big-project`, Python 3.13)으로 `.venv`가 옛 경로를 가리켜 깨졌었다. **2026-07-22에 `C:\Python313` 기준으로 재생성 완료**, 47 passed·1 skipped 재확인. 다시 깨지면 `rm -rf .venv && /c/Python313/python -m venv .venv && ./.venv/Scripts/python.exe -m pip install -r requirements.txt`.
 
 ### 완료
 
@@ -22,6 +24,7 @@
 | Phase 2a — P02 분석 API | `POST /api/v1/analyses`(JSON/multipart 분기) + `GET /api/v1/analyses/{job_id}`, `app/core/`(collect·attribution·findings·analysis_job), 명세 §3.2 응답 구조 |
 | Phase 2b — submission.html 연결 | 목업 제출 페이지가 FastAPI 분석 API를 호출. 브라우저 Pyodide 경로(`shared/p02-engine.js`·`webtool_driver.py`) **삭제**. `session.html`·`result.html`에 미연결 배너 추가(당시 테스트 36 passed·1 skipped) |
 | S1 — 코드 업로드 마무리 (`9c14049`) | 분석 결과에 `snapshot_id`(UUID, `job_id`와 별개)와 `snapshot_meta`(`content_hash` sha256 64자 / `file_count` / `byte_count`) 반환. 코드 원문 무저장 원칙(API 명세 §3.3)은 유지하고 메타만 제공해 Spring이 `code_snapshot` 행을 만들 수 있게 하는 설계. 메타는 **스코프 필터 적용 후 실제 분석된 파일 집합** 기준으로 산출 |
+| `run_integrated.ps1` (`58d3e18`) | integrated 모드(백엔드 연동) 실행 스크립트 추가. 로컬 `feat/fastapi-migration`에만 있고 원격 미push |
 | standalone 루트 리다이렉트 (`e18b6b3`) | `GET /`가 `/submission.html`로 307 임시 리다이렉트(`trainee/`에 `index.html`이 없어 404 나던 문제). OpenAPI 스키마 미노출, integrated 모드에는 미등록 |
 
 현재 구현된 엔드포인트는 `GET /api/health`, `POST /api/v1/analyses`, `GET /api/v1/analyses/{job_id}` 3개(+ 위 standalone 루트 리다이렉트)다.
@@ -64,6 +67,11 @@ S1 코드 업로드(완료) → S2 중요도 분석 → S3 문답 → S4 결과�
 실제 경위는 이와 순서가 다르다: `feature/fastapi-migration`이 먼저 만들어졌고, `develop`은 2026-07-21에 뒤늦게 생성됐다(`e121ce7`). `develop`에는 임시 README와 `.gitignore`만 들어 있는 사실상 빈 브랜치다.
 
 **현재는 `feature/fastapi-migration`을 `develop`에 병합하려는 시점**이며, 이때 `develop`의 임시 README·`.gitignore` 대신 feature 쪽 버전을 채택한다는 방침이다.
+
+**로컬 브랜치 현황(2026-07-22, PC 이전 후 정리)**
+- 규칙과 어긋난 로컬 이름 `feat/fastapi-migration`을 협업 규칙(`../rule/개발/이슈 O/협업 규칙 요약.docx`, 네이밍 `feature/기능명`)에 맞춰 **`feature/fastapi-migration`으로 rename 완료**. 중복이던 구 로컬 `feature/fastapi-migration`(`578ef3f`)은 rename 대상의 조상이라 커밋 손실 없이 삭제.
+- 현재 `origin/feature/fastapi-migration` 추적, **로컬이 2커밋 앞섬**(`cc45f37` PR#1 머지, `58d3e18` run_integrated.ps1) — 아직 push 안 됨.
+- 원격(`Team-IZ/AI`)에 `feat/pdf_analysis`가 별도로 존재하나 이 작업과 무관.
 
 ---
 
