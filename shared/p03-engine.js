@@ -684,8 +684,20 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     // top-level toggle -- previously the manifest's fixed default would have won here
     // every time via resolveParam's precedence, making a toggle pointless.
     const resolvedModel = LabApp.resolveParam("p03", "p03-7", "model") || model;
+    // D218 (2026-07-22): 2048 was enough for step-3.5-flash (all output tokens go straight
+    // to the tool call), but for step-3.7-flash (D215 default) with reasoning_effort=low
+    // (D217), reasoning + this 5-axis tool call's output compete for the same max_tokens
+    // budget. Live-tested 2048 vs the real p03-7 grading shape: 3/6 reps hit
+    // finish_reason="length" mid-`evidence`-string, throwing a hard
+    // "Unterminated string in JSON" from chatTool's JSON.parse (this was a real user's
+    // session-ending error, not a hypothetical). 4096 measured 10/10 clean at the same
+    // shape/model/effort -- no truncation observed. Applied unconditionally (not just for
+    // step-3.7-flash) since a higher cap is harmless for models that finish well under it
+    // (step-3.5-flash measured 1200-1500 chars of output here, nowhere near either limit).
+    // Scoped to just this call (not every chatTool/chatToolLoop site) since the smaller
+    // ask_question tool call (1 field) never showed this failure in the same testing.
     const llmGrades = gradable.length
-      ? await LabLLM.chatTool({ model: resolvedModel, messages: [{ role: "user", content: userMsg }], tool, maxTokens: 2048, maxAttempts })
+      ? await LabLLM.chatTool({ model: resolvedModel, messages: [{ role: "user", content: userMsg }], tool, maxTokens: 4096, maxAttempts })
       : {};
     // D197: JS is the sole source of truth for axis eligibility -- merge LLM-scored
     // (gradable) axes with deterministic not-tested placeholders for the rest.
