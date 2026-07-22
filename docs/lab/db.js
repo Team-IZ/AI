@@ -108,13 +108,31 @@ const LabDB = (() => {
       run = data;
     }
 
+    // D-jsontrunc (2026-07-22): this used to slice JSON.stringify(a.content) at a fixed
+    // 100000-char offset when over that length, then JSON.parse() the slice -- cutting a
+    // JSON string at an arbitrary character position almost always lands mid-token (mid
+    // string/number/array), producing invalid JSON that JSON.parse() always throws on.
+    // Root-caused live: a real 181-page curriculum's unit_map/graph artifacts routinely
+    // exceed 100000 chars, so every one of those runs failed to save at all (the error
+    // aborted this whole for-loop, including artifacts before the oversized one that had
+    // already inserted fine). The 100000 cap itself was never tied to an actual Postgres
+    // jsonb or PostgREST body-size limit (both comfortably hold multi-MB values) -- it was
+    // an unmeasured guess that real documents turned out to exceed.
+    //   WHY: a truncated artifact was never safely usable downstream anyway (nothing reads
+    //     `artifacts.truncated` today -- confirmed by grep), so there's no real content-cap
+    //     need this was serving; removing it fixes the corruption without losing anything
+    //     that was actually being used.
+    //   COST: no more upper bound on a single artifact's size. If a future bug ever
+    //     produces a truly runaway result, the insert now fails with Supabase's own clear
+    //     size-limit error (still caught by maybeSaveRun's try/catch, still logged, still
+    //     non-fatal to the rest of the app) instead of silently mis-truncating -- a clearer
+    //     failure mode, not a worse one.
+    //   EXIT: if a real size problem shows up with real usage data, reintroduce a cap that
+    //     stores an always-valid placeholder object (e.g. {truncated:true, original_length})
+    //     instead of attempting to slice the JSON string itself.
     for (const a of artifacts || []) {
-      const content = JSON.stringify(a.content);
-      const truncated = content.length > 100000;
       const { error: artErr } = await c.from("artifacts").insert({
-        run_id: run.id, kind: a.kind,
-        content: JSON.parse(truncated ? content.slice(0, 100000) : content === "" ? "{}" : content || "{}"),
-        truncated,
+        run_id: run.id, kind: a.kind, content: a.content ?? {},
       });
       if (artErr) throw artErr;
     }
