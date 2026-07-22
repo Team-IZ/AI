@@ -624,8 +624,13 @@ const P01Runner = (() => {
 
       // D163: give NVIDIA-side congestion from the burst above a chance to clear before
       // firing the next (sequential, single) request -- see the constant's own comment.
-      LabApp.log(pipelineId, `NVIDIA 서버 부하 완화 대기 중 (${POST_CHUNK_COOLDOWN_MS / 1000}초 쿨다운)...`);
-      await new Promise((resolve) => setTimeout(resolve, POST_CHUNK_COOLDOWN_MS));
+      // D-skipRefine: that "next request" is specifically refine's p01-3 call below, so
+      // skip the wait too when opts.skipRefine means there won't be one -- otherwise this
+      // burns 60s protecting a request that was never going to happen.
+      if (!opts.skipRefine) {
+        LabApp.log(pipelineId, `NVIDIA 서버 부하 완화 대기 중 (${POST_CHUNK_COOLDOWN_MS / 1000}초 쿨다운)...`);
+        await new Promise((resolve) => setTimeout(resolve, POST_CHUNK_COOLDOWN_MS));
+      }
 
       // D172 (2026-07-15): the real pipeline (scripts/java_curriculum_nvidia_pipeline.py,
       // --refine-iters, default 2) runs a fixed count and never actually reads
@@ -660,86 +665,112 @@ const P01Runner = (() => {
       // one is logged and discarded, next round just re-audits the unchanged map (same as
       // D172's original behavior when no fix is attempted). fixLog (Phase 4) records every
       // attempt, applied or not, for the final result/DB.
-      const maxRefineIters = LabApp.resolveParam("p01", "p01-3", "refine_iters") || 5;
+      // D-skipRefine (2026-07-22): opts.skipRefine (default false/omitted) lets a caller
+      // stop right after chunk-analysis's unit_map is built, skipping the whole audit+fix
+      // loop below. Added for curriculum-manager alongside skipQuestionGen, after directly
+      // reading p01-3b's own note: "no real-pipeline equivalent -- refine_once() [the
+      // original CLI's function] does not modify unit_map". The auto-fix loop is a
+      // web-tool-only polish layer on top of what chunk-analysis's makeUnitMap() already
+      // produces, not something unit_map's basic validity depends on -- buildGraph()
+      // already treats `audits` as optional ((audits || []).forEach(...), confirmed by
+      // reading it) so an empty array here changes nothing about graph generation.
+      //   WHY: curriculum-manager only ever reads unit_map (never refine_audits/
+      //     refine_fixes), and real usage showed this loop can be expensive without
+      //     helping: a real 181-page document had all 4 auto-fix attempts rejected by
+      //     validateUnitMapGrounding (evidence dropped 20%+ each time, same unit group
+      //     every retry with nothing changed in between to make a retry more likely to
+      //     succeed), burning ~22 minutes for zero net effect on the final unit_map.
+      //   COST: loses refine's occasional genuine improvement too (a small clean test
+      //     document had 2 fixes actually applied and passed the checklist in 3 rounds) --
+      //     this option trades that upside away along with the downside.
+      //   EXIT: if curriculum-manager ever starts reading refine_audits/refine_fixes, or
+      //     large-document reliability improves (e.g. a future fix caps retries per unit
+      //     group instead of blindly repeating an already-rejected one), reconsider
+      //     defaulting this off instead of on for that caller.
       const audits = [];
       const fixLog = [];
-      let refineReady = false;
-      for (let i = 1; i <= maxRefineIters; i++) {
-        LabApp.log(pipelineId, `refine 반복 ${i}/${maxRefineIters}...`);
-        let audit;
-        try {
-          audit = await callPromptStage("p01-3", {
-            course_label: courseLabel, iteration: i, unit_map_json: JSON.stringify(unitMap).slice(0, 24000),
-          });
-          audits.push(audit);
-        } catch (err) {
-          LabApp.log(pipelineId, `refine ${i} 실패: ${err.message}`);
-          continue;
-        }
-        if (audit.checklist && audit.checklist.question_generation_ready === true) {
-          refineReady = true;
-          LabApp.log(pipelineId, `refine checklist 통과(question_generation_ready) — ${i}회 만에 종료`);
-          break;
-        }
-
-        const actionableIssues = (audit.issues || []).filter((iss) => ACTIONABLE_ISSUE_TYPES.has(iss.issue_type));
-        if (!actionableIssues.length) continue; // nothing this stage can safely act on
-        if (i >= maxRefineIters) continue; // no next audit round left to benefit from a fix
-
-        const affectedUnitIds = [...new Set(actionableIssues.flatMap((iss) => iss.affected_unit_ids || []))];
-        const groups = groupIssuesByUnits(actionableIssues);
-        const useFullMapContext = groups.length <= 1; // see groupIssuesByUnits' EXIT note
-        if (groups.length > 1) {
-          LabApp.log(pipelineId, `refine 이슈 ${actionableIssues.length}건을 독립 유닛그룹 ${groups.length}개로 나눠 병렬 수정 시도 (${groups.map((g) => g.unitIds.join("+") || "미상").join(", ")})...`);
-        } else {
-          LabApp.log(pipelineId, `refine 이슈 ${actionableIssues.length}건(유닛 ${affectedUnitIds.join(", ") || "미상"}) 자동 수정 시도...`);
-        }
-
-        // Closes over unitMap/courseLabel/chunkState/successfulPages/pipelineId --
-        // deliberately a local function (not top-level like groupIssuesByUnits/
-        // subsetUnitMap) since none of those make sense outside a single run().
-        async function fixGroup(group) {
-          const needsFullMap = useFullMapContext || !group.unitIds.length;
-          const scopedUnitIds = needsFullMap ? Object.keys(unitMap) : group.unitIds;
-          const scopedUnitMap = needsFullMap ? unitMap : subsetUnitMap(unitMap, group.unitIds);
-          const fixResult = await callPromptStage("p01-3b", {
-            course_label: courseLabel,
-            unit_map_json: JSON.stringify(scopedUnitMap).slice(0, 24000),
-            issues_json: JSON.stringify(group.issues).slice(0, 8000),
-            source_chunks_json: JSON.stringify(chunkResultsForUnits(scopedUnitIds, unitMap, chunkState)).slice(0, 16000),
-          });
-          const revised = normalizeUnitMap(fixResult.revised_unit_map || {});
-          const validation = validateUnitMapGrounding(revised, scopedUnitMap, successfulPages);
-          return { group, revised, validation, fixResult };
-        }
-
-        const results = await Promise.all(groups.map((g) => fixGroup(g).catch((err) => ({ group: g, error: err }))));
-        for (const r of results) {
-          const label = r.group.unitIds.join(",") || "미상";
-          if (r.error) {
-            fixLog.push({ iteration: i, applied: false, reason: r.error.message, changes: [], units: r.group.unitIds });
-            LabApp.log(pipelineId, `refine 수정 시도 실패(유닛 ${label}): ${r.error.message}`);
+      if (opts.skipRefine) {
+        LabApp.log(pipelineId, "refine 단계 건너뜀 (skipRefine)");
+      } else {
+        const maxRefineIters = LabApp.resolveParam("p01", "p01-3", "refine_iters") || 5;
+        let refineReady = false;
+        for (let i = 1; i <= maxRefineIters; i++) {
+          LabApp.log(pipelineId, `refine 반복 ${i}/${maxRefineIters}...`);
+          let audit;
+          try {
+            audit = await callPromptStage("p01-3", {
+              course_label: courseLabel, iteration: i, unit_map_json: JSON.stringify(unitMap).slice(0, 24000),
+            });
+            audits.push(audit);
+          } catch (err) {
+            LabApp.log(pipelineId, `refine ${i} 실패: ${err.message}`);
             continue;
           }
-          if (r.validation.ok) {
-            // revised_unit_map's prompt contract requires every unit it was SHOWN back
-            // (full map when needsFullMap, else just this group's units) -- a unit from
-            // this group missing in the response means the model merged/renamed it away,
-            // so drop the stale key before merging the rest in. Units outside this group
-            // are never touched here, which is exactly what makes the groups safe to run
-            // concurrently.
-            for (const oldId of r.group.unitIds) if (!(oldId in r.revised)) delete unitMap[oldId];
-            Object.assign(unitMap, r.revised);
-            fixLog.push({ iteration: i, applied: true, changes: r.fixResult.changes || [], unresolved_issues: r.fixResult.unresolved_issues || [], units: r.group.unitIds });
-            LabApp.log(pipelineId, `refine 수정 적용됨(유닛 ${label}): ${(r.fixResult.changes || []).length}건 (미해결 ${(r.fixResult.unresolved_issues || []).length}건)`);
+          if (audit.checklist && audit.checklist.question_generation_ready === true) {
+            refineReady = true;
+            LabApp.log(pipelineId, `refine checklist 통과(question_generation_ready) — ${i}회 만에 종료`);
+            break;
+          }
+
+          const actionableIssues = (audit.issues || []).filter((iss) => ACTIONABLE_ISSUE_TYPES.has(iss.issue_type));
+          if (!actionableIssues.length) continue; // nothing this stage can safely act on
+          if (i >= maxRefineIters) continue; // no next audit round left to benefit from a fix
+
+          const affectedUnitIds = [...new Set(actionableIssues.flatMap((iss) => iss.affected_unit_ids || []))];
+          const groups = groupIssuesByUnits(actionableIssues);
+          const useFullMapContext = groups.length <= 1; // see groupIssuesByUnits' EXIT note
+          if (groups.length > 1) {
+            LabApp.log(pipelineId, `refine 이슈 ${actionableIssues.length}건을 독립 유닛그룹 ${groups.length}개로 나눠 병렬 수정 시도 (${groups.map((g) => g.unitIds.join("+") || "미상").join(", ")})...`);
           } else {
-            fixLog.push({ iteration: i, applied: false, reason: r.validation.reason, changes: [], units: r.group.unitIds });
-            LabApp.log(pipelineId, `⚠ refine 수정 거부됨(유닛 ${label}, 근거 검증 실패): ${r.validation.reason}`);
+            LabApp.log(pipelineId, `refine 이슈 ${actionableIssues.length}건(유닛 ${affectedUnitIds.join(", ") || "미상"}) 자동 수정 시도...`);
+          }
+
+          // Closes over unitMap/courseLabel/chunkState/successfulPages/pipelineId --
+          // deliberately a local function (not top-level like groupIssuesByUnits/
+          // subsetUnitMap) since none of those make sense outside a single run().
+          async function fixGroup(group) {
+            const needsFullMap = useFullMapContext || !group.unitIds.length;
+            const scopedUnitIds = needsFullMap ? Object.keys(unitMap) : group.unitIds;
+            const scopedUnitMap = needsFullMap ? unitMap : subsetUnitMap(unitMap, group.unitIds);
+            const fixResult = await callPromptStage("p01-3b", {
+              course_label: courseLabel,
+              unit_map_json: JSON.stringify(scopedUnitMap).slice(0, 24000),
+              issues_json: JSON.stringify(group.issues).slice(0, 8000),
+              source_chunks_json: JSON.stringify(chunkResultsForUnits(scopedUnitIds, unitMap, chunkState)).slice(0, 16000),
+            });
+            const revised = normalizeUnitMap(fixResult.revised_unit_map || {});
+            const validation = validateUnitMapGrounding(revised, scopedUnitMap, successfulPages);
+            return { group, revised, validation, fixResult };
+          }
+
+          const results = await Promise.all(groups.map((g) => fixGroup(g).catch((err) => ({ group: g, error: err }))));
+          for (const r of results) {
+            const label = r.group.unitIds.join(",") || "미상";
+            if (r.error) {
+              fixLog.push({ iteration: i, applied: false, reason: r.error.message, changes: [], units: r.group.unitIds });
+              LabApp.log(pipelineId, `refine 수정 시도 실패(유닛 ${label}): ${r.error.message}`);
+              continue;
+            }
+            if (r.validation.ok) {
+              // revised_unit_map's prompt contract requires every unit it was SHOWN back
+              // (full map when needsFullMap, else just this group's units) -- a unit from
+              // this group missing in the response means the model merged/renamed it away,
+              // so drop the stale key before merging the rest in. Units outside this group
+              // are never touched here, which is exactly what makes the groups safe to run
+              // concurrently.
+              for (const oldId of r.group.unitIds) if (!(oldId in r.revised)) delete unitMap[oldId];
+              Object.assign(unitMap, r.revised);
+              fixLog.push({ iteration: i, applied: true, changes: r.fixResult.changes || [], unresolved_issues: r.fixResult.unresolved_issues || [], units: r.group.unitIds });
+              LabApp.log(pipelineId, `refine 수정 적용됨(유닛 ${label}): ${(r.fixResult.changes || []).length}건 (미해결 ${(r.fixResult.unresolved_issues || []).length}건)`);
+            } else {
+              fixLog.push({ iteration: i, applied: false, reason: r.validation.reason, changes: [], units: r.group.unitIds });
+              LabApp.log(pipelineId, `⚠ refine 수정 거부됨(유닛 ${label}, 근거 검증 실패): ${r.validation.reason}`);
+            }
           }
         }
-      }
-      if (!refineReady) {
-        LabApp.log(pipelineId, `⚠ refine 최대 반복(${maxRefineIters}) 도달 -- checklist 통과 못 함, 마지막 상태로 질문 생성 진행`);
+        if (!refineReady) {
+          LabApp.log(pipelineId, `⚠ refine 최대 반복(${maxRefineIters}) 도달 -- checklist 통과 못 함, 마지막 상태로 질문 생성 진행`);
+        }
       }
 
       // D173: graph_generated is a plain code-level fact (did buildGraph() run

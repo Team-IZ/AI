@@ -300,7 +300,8 @@
   let deleteMode = false;
   let currentRunPromise = null;
 
-  // A P01 run takes minutes (60s cooldown + refine loop + question-gen) and only lives in
+  // A P01 run takes minutes (mainly the chunk-analysis wave -- refine/question-gen are
+  // both skipped here, see skipRefine/skipQuestionGen below) and only lives in
   // this tab's JS memory -- a refresh used to silently wipe out an already-finished
   // analysis (state.curricula started empty again every reload). sessionStorage (not
   // localStorage) is enough to survive a refresh without also resurrecting stale runs
@@ -627,8 +628,13 @@
       window.LabAppShim.resetCancel();
       // D-skipQG: this tab's structure/mapping tables only ever read unit_map, never
       // questions -- skipping question-gen saves a whole per-unit LLM wave for output
-      // nothing here displays. See p01-runner.js's run(opts) for what this flag does.
-      currentRunPromise = P01Runner.run({ skipQuestionGen: true });
+      // nothing here displays.
+      // D-skipRefine: refine's auto-fix loop only polishes unit_map (p01-3b has no
+      // real-pipeline equivalent -- it's a web-tool-only addition); unit_map's basic
+      // validity already comes from chunk-analysis alone. Real large documents showed
+      // this loop can burn ~20+ minutes with every fix attempt rejected and zero net
+      // change to the final unit_map. See p01-runner.js's run(opts) for both flags.
+      currentRunPromise = P01Runner.run({ skipQuestionGen: true, skipRefine: true });
       try {
         await currentRunPromise;
         const result = window.LabAppShim.takeP01Result();
