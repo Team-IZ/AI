@@ -10,4 +10,5 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# 운영 모니터링용인 health는 인증 면제
 app.include_router(health.router)
