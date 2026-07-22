@@ -9,13 +9,14 @@ from typing import Literal
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 업무 API 공통 경로 접두사
-API_V1_PREFIX = "/api/v1"
+# 개발단계 시 0, 계약 안정시 v1
+API_V0_PREFIX = "/api/v0"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
-        env_file_encodinng="utf-8",
-        estra="ignore",
+        env_file_encoding="utf-8",
+        extra="ignore",
     )
     
     # 우선순위: 실제 환경변수 -> .env 파일 -> 아래 기본값
@@ -35,5 +36,6 @@ def get_settings() -> Settings:
     if settings.app_env == "production" and not settings.internal_api_key:
         raise RuntimeError(
             "production 환경에서 INTERNAL_API_KEY가 비어 있습니다. "
+            "인증이 비활성화된 채로 뜨는 것을 막기 위해 기동을 거부합니다."
         )
     return settings
