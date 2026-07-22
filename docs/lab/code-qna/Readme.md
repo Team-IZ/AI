@@ -80,9 +80,13 @@
 >   없었는데, 확인 시점에 이미 `https://team-iz.github.io/AI/lab/**`가 추가돼 있었음
 >   (동시 진행 중인 curriculum-manager 작업이 넣어둔 것으로 보이며, code-qna 경로도
 >   함께 커버함) — 추가 조치 불필요, 라이브 값으로 직접 확인함.
->   **EXIT**: 되돌리려면 이 D213 이전 상태(`team-iz-curriculum-manager`,
->   ref `tjmviobhxplucuwoibaj`)로 `TEAM_SUPABASE_URL`/`TEAM_SUPABASE_ANON_KEY`만
->   되돌리면 됨 — 그 프로젝트의 테이블/정책은 그대로 남아있어 즉시 재사용 가능.
+>   **EXIT (2026-07-22 수정)**: 원래는 "`team-iz-curriculum-manager`(ref
+>   `tjmviobhxplucuwoibaj`)로 `TEAM_SUPABASE_URL`/`TEAM_SUPABASE_ANON_KEY`만 되돌리면
+>   된다"고 적었으나, 그 프로젝트는 사용자가 **의도적으로 삭제**했습니다(Management API
+>   확인 — 프로젝트 목록에서 사라짐). 이 되돌리기 경로는 더 이상 존재하지 않습니다 —
+>   코드/설정 어디에도 그 프로젝트를 참조하는 부분은 없었음을 확인했으니(grep 검증)
+>   기능적으로 끊어진 건 없지만, 정말 되돌려야 한다면 `code-reviewer-pipeline-lab` 안에
+>   code-qna 전용 스키마를 새로 파거나 완전히 새 프로젝트를 만들어야 함.
 
 이 브랜치는 [`popixoxipop-collab/Code_reviewer_with_feedback`](https://github.com/popixoxipop-collab/Code_reviewer_with_feedback)의 Pipeline Lab(`docs/lab/`)에서 실제로 동작 중인 **P02(코드 분석) → P03(소크라틱 검증 세션) → 결과 리포트** 기능을, Team-IZ/Frontend의 실제 화면정의(`team-iz.github.io/Frontend/`, `gh-pages` 브랜치)와 동일한 UI/UX로 다시 입힌 것입니다.
 
