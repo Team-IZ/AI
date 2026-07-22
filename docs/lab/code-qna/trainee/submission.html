@@ -64,6 +64,20 @@
   .fcard .fnone { font-size: var(--fs-xs); color: var(--c-text-3); }
   .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; }
   .badge.warn { background: var(--c-warning-soft); color: var(--c-warning); }
+
+  /* D212: 이전 진행 상황 이어서 진행할지 확인하는 팝업 -- session.html의 D201
+     confirm-overlay/confirm-box/confirm-btn과 동일한 클래스 정의(이 페이지엔 그 CSS가
+     아직 없어서 옮겨옴). */
+  .confirm-overlay { position: fixed; inset: 0; background: rgba(20, 22, 30, .45); display: flex; align-items: center; justify-content: center; z-index: 50; }
+  .confirm-overlay.hidden { display: none; }
+  .confirm-box { background: #fff; border-radius: var(--r-lg); padding: var(--sp-6) var(--sp-5); max-width: 360px; width: 90%; box-shadow: 0 12px 32px rgba(20,22,30,.18); text-align: center; }
+  .confirm-box p { font-size: var(--fs-base); font-weight: 600; color: var(--c-text); margin-bottom: var(--sp-5); }
+  .confirm-box .sub { font-size: var(--fs-xs); font-weight: 400; color: var(--c-text-3); margin-top: -12px; margin-bottom: var(--sp-5); }
+  .confirm-actions { display: flex; gap: var(--sp-3); }
+  .confirm-btn { flex: 1; height: 42px; border-radius: var(--r-md); font-size: var(--fs-sm); font-weight: 600; cursor: pointer; }
+  .confirm-btn.cancel { background: #fff; border: 1px solid var(--c-border-strong); color: var(--c-text-2); }
+  .confirm-btn.proceed { background: var(--c-primary); border: 0; color: #fff; }
+  .confirm-btn.proceed:hover { background: var(--c-primary-hover); }
 </style>
 </head>
 <body>
@@ -123,6 +137,17 @@
     <div class="step hidden" id="step-findings">
       <div class="sh"><span class="n">✓</span> finding <span id="finding-count">0</span>건</div>
       <div class="findings" id="findings-list"></div>
+    </div>
+  </div>
+</div>
+
+<div id="resume-confirm-overlay" class="confirm-overlay hidden">
+  <div class="confirm-box">
+    <p id="resume-confirm-text">이전에 진행하던 인터뷰가 있습니다.</p>
+    <div class="sub" id="resume-confirm-sub"></div>
+    <div class="confirm-actions">
+      <button class="confirm-btn cancel" id="resume-restart-btn" type="button">새로 시작</button>
+      <button class="confirm-btn proceed" id="resume-continue-btn" type="button">이어서 진행</button>
     </div>
   </div>
 </div>
@@ -321,14 +346,63 @@
     });
   }
 
+  // D212: resumes an in-flight/abandoned/error'd P03 run for this exact finding, if the
+  // trainee (once logged in) chooses to -- resolves true (이어서 진행) or false (새로
+  // 시작), same Promise-wrapped-modal pattern session.html's D201 submit-confirm popup
+  // established, just implemented here since this page didn't have that overlay yet.
+  const RESUME_STATUS_LABEL = { running: "진행 중이던", abandoned: "중단된", error: "오류로 끝난" };
+  function confirmResume(existingRun) {
+    return new Promise((resolve) => {
+      const overlay = document.getElementById("resume-confirm-overlay");
+      const sub = document.getElementById("resume-confirm-sub");
+      sub.textContent = `${RESUME_STATUS_LABEL[existingRun.status] || existingRun.status} 인터뷰가 있습니다 (${new Date(existingRun.started_at).toLocaleString("ko-KR")} 시작).`;
+      overlay.classList.remove("hidden");
+      const continueBtn = document.getElementById("resume-continue-btn");
+      const restartBtn = document.getElementById("resume-restart-btn");
+      function cleanup(result) {
+        overlay.classList.add("hidden");
+        continueBtn.removeEventListener("click", onContinue);
+        restartBtn.removeEventListener("click", onRestart);
+        resolve(result);
+      }
+      function onContinue() { cleanup(true); }
+      function onRestart() { cleanup(false); }
+      continueBtn.addEventListener("click", onContinue);
+      restartBtn.addEventListener("click", onRestart);
+    });
+  }
+
   // D178: one click, no separate confirm step -- matches the original connector's
   // auto-run decision, just re-expressed as "navigate straight to session.html" instead
-  // of "call P03Runner.run() in the same page".
-  function startInterview(item) {
+  // of "call P03Runner.run() in the same page". D212: now async -- may pause on the
+  // resume-confirm popup above before actually navigating.
+  async function startInterview(item) {
     // D200: carries the scan's repoRef (null for ZIP) into the interview session so P03
     // can offer live fact-check tools when a real GitHub repo is behind this finding.
     const repoRef = SessionState.loadRepoContext();
-    const saved = SessionState.saveSubmission({ finding: item.finding, codeContexts: item.codeContexts, repoRef });
+
+    // D212: best-effort -- a signed-out trainee (findResumableRun() returns null, never
+    // throws for that case) or any network/RLS failure here must never block starting a
+    // fresh interview, only skip the resume offer.
+    let resume = null;
+    if (LabDB.isConfigured()) {
+      try {
+        const existingRun = await LabDB.findResumableRun({ pipeline: "p03", finding_id: item.finding.id });
+        if (existingRun) {
+          const wantsResume = await confirmResume(existingRun);
+          if (wantsResume) {
+            const transcript = await LabDB.loadRunTurns(existingRun.id);
+            resume = { runId: existingRun.id, transcript };
+          } else {
+            await LabDB.abandonRun(existingRun.id).catch(() => {});
+          }
+        }
+      } catch (e) {
+        console.error("이전 진행 상황 조회 실패 (새로 시작함):", e);
+      }
+    }
+
+    const saved = SessionState.saveSubmission({ finding: item.finding, codeContexts: item.codeContexts, repoRef, resume });
     if (!saved.ok) { showError(`세션 데이터 저장 실패: ${saved.error.message}`); return; }
     window.location.href = "session.html";
   }

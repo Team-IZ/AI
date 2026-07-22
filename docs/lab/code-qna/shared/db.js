@@ -161,6 +161,74 @@ const LabDB = (() => {
     if (error) throw error;
   }
 
+  // D212: user-directed enhancement -- D193's per-turn stage_events writes were already
+  // "save each Q&A pair as its own unit", but nothing ever read them back. A trainee
+  // closing the tab mid-interview (or a grading-step crash) left `runs` stuck at
+  // running/abandoned/error with the already-answered turns sitting safely in
+  // stage_events, but no way to continue from where they left off -- only a full restart.
+  //   WHY: `runs`/`stage_events` already have everything needed (input_meta.finding_id
+  //   identifies which finding a run was for, output already carries the exact
+  //   {level,question,answer,classification} shape p03-engine.js's own `transcript` array
+  //   items already are) -- no schema change, just new read queries.
+  //   COST: an extra round-trip before starting any P03 interview (only when logged in --
+  //   findResumableRun() below is a no-op null for a signed-out trainee, same as the rest
+  //   of LabDB when unauthenticated).
+  //   EXIT: if a finding_id ever isn't stable across rescans of the same repo (unverified
+  //   assumption -- score_findings.py's ids are believed deterministic per file+pattern,
+  //   not random per scan), resuming would just never match and fall through to a normal
+  //   fresh start -- no crash, just no resume offered.
+  //
+  // Returns the most recent NOT-done run for the current member against this exact
+  // finding, or null (nothing to resume, or not logged in -- currentMemberOrNull() never
+  // throws, unlike currentMember()). `status in (...)` deliberately excludes 'done' --
+  // that pipeline for this finding is already finished, nothing to continue.
+  async function findResumableRun({ pipeline, finding_id }) {
+    const c = await ensureClient();
+    const user = await currentMemberOrNull();
+    if (!user) return null;
+    const { data, error } = await c
+      .from("runs")
+      .select("id, status, started_at")
+      .eq("member_id", user.id)
+      .eq("pipeline", pipeline)
+      .contains("input_meta", { finding_id })
+      .in("status", ["running", "abandoned", "error"])
+      .order("started_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  }
+
+  // Reconstructs the exact `transcript` array shape p03-engine.js's run() builds turn by
+  // turn -- each stage_events.output is already {level,question,answer,classification},
+  // written verbatim by logTurn() above, so no reshaping needed here.
+  async function loadRunTurns(run_id) {
+    const c = await ensureClient();
+    const { data, error } = await c
+      .from("stage_events")
+      .select("output")
+      .eq("run_id", run_id)
+      .order("seq", { ascending: true });
+    if (error) throw error;
+    return (data || []).map((row) => row.output);
+  }
+
+  // Called when the trainee explicitly chooses "새로 시작" over a resumable run --
+  // finalizes the old row as 'abandoned' (same status D196's beacon already uses, not a
+  // new value) so it stops being offered as resumable and isn't left stuck at
+  // running/error forever. Best-effort from the caller's side: a failure here must not
+  // block starting the new interview (the old row just lingers, same as it would have
+  // without this function existing at all).
+  async function abandonRun(run_id) {
+    const c = await ensureClient();
+    const { error } = await c
+      .from("runs")
+      .update({ status: "abandoned", finished_at: new Date().toISOString() })
+      .eq("id", run_id);
+    if (error) throw error;
+  }
+
   // D149 (2026-07-15): magic-link email sign-in (D-B/D147/D148's signInWithEmail) removed
   // -- Google OAuth verified working end-to-end (D148) and is now the only login path.
   // Full-page redirect (signInWithOAuth's default), same PKCE flowType already set in
@@ -255,5 +323,8 @@ const LabDB = (() => {
     };
   }
 
-  return { isConfigured, ensureClient, currentMember, currentMemberOrNull, saveRun, startRun, logTurn, armAbandonBeacon, signInWithGoogle, signOut };
+  return {
+    isConfigured, ensureClient, currentMember, currentMemberOrNull, saveRun, startRun, logTurn, armAbandonBeacon,
+    signInWithGoogle, signOut, findResumableRun, loadRunTurns, abandonRun,
+  };
 })();
