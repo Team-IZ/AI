@@ -1,6 +1,6 @@
 """ 코드 분석 API(P02)의 요청 응답 스키마"""
-
-from typing import Literal
+from datetime import datetime
+from typing import Any, Literal
 
 from pydantic import Field, model_validator
 
@@ -45,3 +45,45 @@ class AnalysisAccepted(BaseSchema):
     
     job_id: str
     status: Literal["QUEUED"]
+    
+class SnapshotMeta(BaseSchema):
+    """ code_snapshot 테이블 대응. 코드 원문 저장하지 않고 메타만 주기 """
+    
+    content_hash: str = Field(description="sha256 hex 64자")
+    file_count: int
+    byte_count: int
+    
+class AnalysisResult(BaseSchema):
+    """분석이 성공했을 때의 결과 본문.
+
+    findings 각 항목의 내부 구조는 팀원 엔진 결과에 따라 바뀌므로
+    dict로 열어둔다(PLAN §3 C7). 최상위 필드만 계약으로 고정한다.
+    """
+
+    snapshot_id: str = Field(description="Spring code_snapshot 행의 키")
+    snapshot_meta: SnapshotMeta
+    applied_scope: Literal["TOTAL", "OWN_COMMIT"]
+    scope_fallback: bool = Field(description="요청 범위를 못 지켜 TOTAL로 물러났는지")
+    fallback_reason: str | None = None
+    commit_sha: str | None = None
+    findings: list[dict[str, Any]] = Field(default_factory=list)
+    question_count_planned: int = Field(description="계획된 질문 수. 유효 DP가 적으면 축소된다")
+    
+class AnalysisJobStatus(BaseSchema):
+    """GET /analyses/{jobId} 응답.
+
+    status 값은 DB analysis_job.status의 CHECK 제약과 같다(PLAN §3).
+    ANALYZING·READY는 다른 테이블의 값이라 여기 쓰면 Spring INSERT가 깨진다.
+    """
+
+    job_id: str
+    attempt_id: str | None = None
+    submission_id: str | None = None
+    status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
+    failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    result: AnalysisResult | None = Field(default=None, description="SUCCEEDED·PARTIAL일 때만")
+    # P02는 규칙 기반이라 LLM을 호출하지 않는다. 항상 빈 배열이며,
+    # 엔진에 LLM이 들어오면 그때 채워진다(PLAN §4).
+    ai_usage: list[dict[str, Any]] = Field(default_factory=list)

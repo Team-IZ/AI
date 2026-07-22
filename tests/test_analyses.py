@@ -139,3 +139,53 @@ def test_openapi_documents_both_content_types():
     assert "properties" in json_schema
     assert "method" in json_schema["properties"]
     assert "questionBudget" in json_schema["properties"]
+    
+def _create_job() -> str:
+    """POST로 job 하나 만들고 jobId를 돌려주는 도우미."""
+    response = client.post("/api/v0/analyses", json=VALID_BODY, headers=HEADERS)
+    return response.json()["jobId"]
+
+
+def test_returns_job_status_and_result():
+    """POST로 만든 job을 GET으로 조회 → 상태와 결과가 나온다."""
+    job_id = _create_job()
+
+    response = client.get(f"/api/v0/analyses/{job_id}", headers=HEADERS)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["jobId"] == job_id
+    assert body["status"] == "SUCCEEDED"
+    assert body["result"]["snapshotId"]
+    assert body["result"]["questionCountPlanned"] >= 0
+
+
+def test_status_uses_db_allowed_values():
+    """status는 analysis_job.status의 CHECK 제약 안에 있어야 한다.
+
+    ANALYZING·READY는 다른 테이블 값이다. 쓰면 Spring INSERT가 깨진다.
+    """
+    job_id = _create_job()
+
+    body = client.get(f"/api/v0/analyses/{job_id}", headers=HEADERS).json()
+
+    assert body["status"] in {"QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"}
+
+
+def test_ai_usage_is_empty_for_rule_based_analysis():
+    """P02는 LLM을 쓰지 않으므로 aiUsage는 항상 빈 배열이다."""
+    job_id = _create_job()
+
+    body = client.get(f"/api/v0/analyses/{job_id}", headers=HEADERS).json()
+
+    assert body["aiUsage"] == []
+
+
+def test_unknown_job_id_returns_404():
+    """모르는 jobId → 404 JOB_NOT_FOUND. 재시도해도 소용없으니 retryable=false."""
+    response = client.get("/api/v0/analyses/does-not-exist", headers=HEADERS)
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["error"] == "JOB_NOT_FOUND"
+    assert body["retryable"] is False

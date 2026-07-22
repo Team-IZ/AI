@@ -2,6 +2,7 @@
 import json
 import uuid
 from typing import Any
+from datetime import datetime, timezone
 
 # Request — 원시 요청 객체. Content-Type·본문·폼에 직접 접근할 수 있다.
 #           스키마 자동 바인딩을 포기하는 대신 분기를 제어한다.
@@ -12,7 +13,13 @@ from fastapi import APIRouter, Header, Request, status
 from pydantic import ValidationError
 
 from app.api.errors import ApiError, format_validation_message
-from app.schemas.analysis import AnalysisAccepted, AnalysisRequest
+from app.schemas.analysis import (
+    AnalysisAccepted,
+    AnalysisJobStatus,
+    AnalysisRequest,
+    AnalysisResult,
+    SnapshotMeta,
+)
 from app.schemas.common import ErrorResponse
 
 router = APIRouter(tags=["analyses"])
@@ -21,6 +28,59 @@ router = APIRouter(tags=["analyses"])
 # 같은 키로 다시 오면 새 job을 만들지 않고 처음 만든 id를 돌려줌
 # Redis 도입 시 교체하고 job 저장소와 합침.
 _job_id_by_idempotency_key: dict[str, str] = {}
+
+# job_id → 상태·결과. 6단계에서 app/jobs.py로 옮기고 실제 상태 전이를 붙인다.
+# ponytail: 인메모리 dict — 프로세스 재시작 시 유실. Redis 도입 시 함께 교체(PLAN §3)
+_jobs: dict[str, AnalysisJobStatus] = {}
+
+def _stub_result() -> AnalysisResult:
+    """스텁이 돌려주는 고정 결과.
+
+    백엔드가 파싱 코드를 짤 수 있도록 실제와 같은 모양을 준다.
+    엔진이 붙으면 5단계의 engines/stub.py가 이 자리를 대신한다.
+    """
+    return AnalysisResult(
+        snapshot_id="00000000-0000-0000-0000-000000000001",
+        snapshot_meta=SnapshotMeta(
+            content_hash="0" * 64,
+            file_count=3,
+            byte_count=1024,
+        ),
+        applied_scope="TOTAL",
+        scope_fallback=False,
+        fallback_reason=None,
+        commit_sha="0123456789abcdef0123456789abcdef01234567",
+        findings=[
+            {
+                "findingId": "tier-b-risk:app/main.py:hardcoded-secret",
+                "sourcePath": "app/main.py",
+                "lineStart": "12",
+                "lineEnd": "14",
+                "evidenceHash": "1" * 64,
+            }
+        ],
+        question_count_planned=1,
+    )
+
+
+def _create_job(body: AnalysisRequest) -> AnalysisJobStatus:
+    """job을 만들어 저장한다.
+
+    스텁이라 즉시 완료 상태로 만든다. 실제 상태 전이(QUEUED→RUNNING→SUCCEEDED)는
+    6단계에서 BackgroundTasks로 붙인다.
+    """
+    now = datetime.now(timezone.utc)
+    job = AnalysisJobStatus(
+        job_id=str(uuid.uuid4()),
+        attempt_id=body.attempt_id,
+        submission_id=body.submission_id,
+        status="SUCCEEDED",
+        started_at=now,
+        completed_at=now,
+        result=_stub_result(),
+    )
+    _jobs[job.job_id] = job
+    return job
 
 def _invalid(message: str) -> ApiError:
     return ApiError(status_code=422, error="INVALID_REQUEST", message=message)
@@ -135,8 +195,35 @@ async def create_analysis(
             job_id=_job_id_by_idempotency_key[idempotency_key], status="QUEUED"
         )
         
-    job_id = str(uuid.uuid4())
+    job = _create_job(body)
     if idempotency_key:
-        _job_id_by_idempotency_key[idempotency_key] = job_id
-    
-    return AnalysisAccepted(job_id=job_id, status="QUEUED")
+        _job_id_by_idempotency_key[idempotency_key] = job.job_id
+
+    # 202는 "접수했다"는 뜻이다. 실제 job이 이미 끝났는지는 별개이고,
+    # 호출자는 GET으로 상태를 확인한다.
+    return AnalysisAccepted(job_id=job.job_id, status="QUEUED")
+
+@router.get(
+    "/analyses/{job_id}",
+    response_model=AnalysisJobStatus,
+    summary="분석 상태·결과 조회 (P02)",
+    responses={404: {"model": ErrorResponse, "description": "모르는 job_id"}},
+)
+async def get_analysis(job_id: str) -> AnalysisJobStatus:
+    """분석 job의 현재 상태와 결과를 돌려준다.
+
+    경로의 {job_id}가 함수 파라미터 job_id로 자동 연결된다. 이름이 같아야 한다.
+
+    job 저장소가 인메모리라 프로세스가 재시작되면 404가 난다.
+    그때는 Spring이 분석을 다시 요청하면 된다(FastAPI는 상태의 소유자가 아니다).
+    """
+    job = _jobs.get(job_id)
+    if job is None:
+        raise ApiError(
+            status_code=404,
+            error="JOB_NOT_FOUND",
+            message=f"분석 job을 찾을 수 없습니다: {job_id}",
+            # 재시도해도 없는 건 없다. Spring은 재분석을 요청해야 한다.
+            retryable=False,
+        )
+    return job
