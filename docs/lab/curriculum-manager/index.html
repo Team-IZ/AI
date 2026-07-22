@@ -205,8 +205,8 @@
         </div>
         <div class="card">
           <table class="dtbl">
-            <thead><tr id="list-thead-row"><th>교안명</th><th>유닛</th><th>질문</th><th>그래프</th><th>추출 상태</th><th>분석 시각</th></tr></thead>
-            <tbody id="list-tbody"><tr><td colspan="6" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr></tbody>
+            <thead><tr id="list-thead-row"><th>교안명</th><th>유닛</th><th>그래프</th><th>추출 상태</th><th>분석 시각</th></tr></thead>
+            <tbody id="list-tbody"><tr><td colspan="5" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr></tbody>
           </table>
         </div>
         <div class="casewrap">
@@ -469,11 +469,11 @@
     delModeBtn.classList.toggle("danger-outline", deleteMode);
 
     const theadRow = document.getElementById("list-thead-row");
-    const baseHeaders = ["교안명", "유닛", "질문", "그래프", "추출 상태", "분석 시각"];
+    const baseHeaders = ["교안명", "유닛", "그래프", "추출 상태", "분석 시각"];
     theadRow.innerHTML = baseHeaders.map((h) => `<th>${h}</th>`).join("") + (deleteMode ? `<th style="width:64px"></th>` : "");
 
     const tbody = document.getElementById("list-tbody");
-    const colspan = deleteMode ? 7 : 6;
+    const colspan = deleteMode ? 6 : 5;
     if (!state.curricula.length) {
       tbody.innerHTML = `<tr><td colspan="${colspan}" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr>`;
       return;
@@ -481,7 +481,6 @@
     tbody.innerHTML = state.curricula.map((c) => {
       const r = c.result;
       const unitCount = Object.keys(r.unit_map || {}).length;
-      const qCount = (r.questions && r.questions.questions || []).length;
       const graphBadge = r.graph_generated
         ? `<span class="st approved"><span class="dot"></span>${r.graph.nodes.length}노드/${r.graph.links.length}관계</span>`
         : `<span class="st failed"><span class="dot"></span>생성 실패</span>`;
@@ -494,7 +493,6 @@
       return `<tr class="${deleteMode ? "" : "click"}" data-id="${LabApp.escapeHtml(c.id)}">
         <td class="name"><b>${LabApp.escapeHtml(c.title)}</b><div class="sub">${LabApp.escapeHtml(c.courseLabel || "")}</div></td>
         <td>${unitCount}개</td>
-        <td>${qCount}개</td>
         <td>${graphBadge}</td>
         <td>${extractBadge}</td>
         <td class="date">${c.analyzedAt.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
@@ -532,8 +530,7 @@
     document.getElementById("structure-meta").textContent = `청크 ${r.chunk_count}개 · extractor: ${r.extractor}`;
 
     const unitCount = Object.keys(r.unit_map || {}).length;
-    const qCount = (r.questions && r.questions.questions || []).length;
-    let qrowHtml = `<span class="qbadge ok">분석 완료</span><span class="qbadge">${unitCount}개 섹션 · 질문 ${qCount}개</span>`;
+    let qrowHtml = `<span class="qbadge ok">분석 완료</span><span class="qbadge">${unitCount}개 섹션</span>`;
     if (r.failed_chunks && r.failed_chunks.length) {
       qrowHtml += `<span class="qbadge" style="color:var(--c-danger); background:var(--c-danger-soft);">청크 ${r.failed_chunks.length}개 실패(제외됨)</span>`;
     }
@@ -628,7 +625,10 @@
       cancelBtn.textContent = "취소";
       showUploadError("");
       window.LabAppShim.resetCancel();
-      currentRunPromise = P01Runner.run();
+      // D-skipQG: this tab's structure/mapping tables only ever read unit_map, never
+      // questions -- skipping question-gen saves a whole per-unit LLM wave for output
+      // nothing here displays. See p01-runner.js's run(opts) for what this flag does.
+      currentRunPromise = P01Runner.run({ skipQuestionGen: true });
       try {
         await currentRunPromise;
         const result = window.LabAppShim.takeP01Result();

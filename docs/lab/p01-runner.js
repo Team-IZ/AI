@@ -511,7 +511,14 @@ const P01Runner = (() => {
     }
   }
 
-  async function run() {
+  // D-skipQG (2026-07-22): opts.skipQuestionGen (default false/omitted) lets a caller
+  // stop right after unit_map is finalized, skipping the per-unit question-generation
+  // wave entirely -- added for curriculum-manager, whose "구조" table only ever reads
+  // unit_map (never questions), so that whole LLM wave used to run and be thrown away
+  // unread. Every existing caller (the main P01 tab, any other page) passes no opts and
+  // is completely unaffected -- this option only ever REMOVES work, never changes what
+  // gets produced when it's left off.
+  async function run(opts = {}) {
     const pipelineId = "p01";
     LabApp.setStatus(pipelineId, "실행 중...", "running");
     const startedAt = new Date();
@@ -763,42 +770,47 @@ const P01Runner = (() => {
       // chunk loop's result-shape handling (chunk_range/error fields feeding
       // makeUnitMap) is different enough that sharing risked destabilizing already-
       // verified D168/D169 behavior for a same-day change.
-      const unitEntries = Object.entries(unitMap);
-      LabApp.log(pipelineId, `유닛 ${unitEntries.length}개별 질문 생성 시작: ${unitEntries.map(([id]) => id).join(", ")}`);
-      const unitQState = unitEntries.map(([unitId, unit]) => ({ unitId, unit, result: null, err: null, retryable: false }));
-      for (let round = 1; round <= MAX_RETRY_ROUNDS; round++) {
-        const targets = unitQState.filter((s) => !s.result && (round === 1 || s.retryable));
-        if (!targets.length) break;
-        if (round > 1) LabApp.log(pipelineId, `질문 생성 재시도 라운드 ${round}/${MAX_RETRY_ROUNDS} (${targets.length}개 유닛)`);
-        for (let i = 0; i < targets.length; i += CHUNK_CONCURRENCY) {
-          const wave = targets.slice(i, i + CHUNK_CONCURRENCY);
-          await Promise.all(wave.map(async (state) => {
-            const unitNodes = buildGraphNodes({ [state.unitId]: state.unit });
-            try {
-              const result = await callPromptStage("p01-4", {
-                course_label: courseLabel, graph_nodes_json: JSON.stringify(unitNodes).slice(0, 24000),
-              }, { maxAttempts: 1 });
-              state.result = result;
-              LabApp.log(pipelineId, `유닛 ${state.unitId} 질문 ${(result.questions || []).length}개 생성 완료`);
-            } catch (err) {
-              state.err = err;
-              state.retryable = !!err.retryable;
-              LabApp.log(pipelineId, `유닛 ${state.unitId} 질문 생성 실패${state.retryable ? " (다음 라운드에 재시도)" : ""}: ${err.message}`);
-            }
-          }));
+      let questions = { questions: [] };
+      if (opts.skipQuestionGen) {
+        LabApp.log(pipelineId, "질문 생성 단계 건너뜀 (skipQuestionGen)");
+      } else {
+        const unitEntries = Object.entries(unitMap);
+        LabApp.log(pipelineId, `유닛 ${unitEntries.length}개별 질문 생성 시작: ${unitEntries.map(([id]) => id).join(", ")}`);
+        const unitQState = unitEntries.map(([unitId, unit]) => ({ unitId, unit, result: null, err: null, retryable: false }));
+        for (let round = 1; round <= MAX_RETRY_ROUNDS; round++) {
+          const targets = unitQState.filter((s) => !s.result && (round === 1 || s.retryable));
+          if (!targets.length) break;
+          if (round > 1) LabApp.log(pipelineId, `질문 생성 재시도 라운드 ${round}/${MAX_RETRY_ROUNDS} (${targets.length}개 유닛)`);
+          for (let i = 0; i < targets.length; i += CHUNK_CONCURRENCY) {
+            const wave = targets.slice(i, i + CHUNK_CONCURRENCY);
+            await Promise.all(wave.map(async (state) => {
+              const unitNodes = buildGraphNodes({ [state.unitId]: state.unit });
+              try {
+                const result = await callPromptStage("p01-4", {
+                  course_label: courseLabel, graph_nodes_json: JSON.stringify(unitNodes).slice(0, 24000),
+                }, { maxAttempts: 1 });
+                state.result = result;
+                LabApp.log(pipelineId, `유닛 ${state.unitId} 질문 ${(result.questions || []).length}개 생성 완료`);
+              } catch (err) {
+                state.err = err;
+                state.retryable = !!err.retryable;
+                LabApp.log(pipelineId, `유닛 ${state.unitId} 질문 생성 실패${state.retryable ? " (다음 라운드에 재시도)" : ""}: ${err.message}`);
+              }
+            }));
+          }
+          const stillRetryable = unitQState.filter((s) => !s.result && s.retryable);
+          if (!stillRetryable.length) break;
+          if (round < MAX_RETRY_ROUNDS) {
+            LabApp.log(pipelineId, `${stillRetryable.length}개 유닛 질문 생성 재시도 대기 중 (${ROUND_RETRY_DELAY_MS / 1000}초)...`);
+            await new Promise((resolve) => setTimeout(resolve, ROUND_RETRY_DELAY_MS));
+          }
         }
-        const stillRetryable = unitQState.filter((s) => !s.result && s.retryable);
-        if (!stillRetryable.length) break;
-        if (round < MAX_RETRY_ROUNDS) {
-          LabApp.log(pipelineId, `${stillRetryable.length}개 유닛 질문 생성 재시도 대기 중 (${ROUND_RETRY_DELAY_MS / 1000}초)...`);
-          await new Promise((resolve) => setTimeout(resolve, ROUND_RETRY_DELAY_MS));
+        const failedUnits = unitQState.filter((s) => !s.result);
+        if (failedUnits.length) {
+          LabApp.log(pipelineId, `⚠ 유닛 ${failedUnits.length}개 질문 생성 실패 (${failedUnits.map((s) => s.unitId).join(", ")})`);
         }
+        questions = { questions: unitQState.flatMap((s) => (s.result && s.result.questions) || []) };
       }
-      const failedUnits = unitQState.filter((s) => !s.result);
-      if (failedUnits.length) {
-        LabApp.log(pipelineId, `⚠ 유닛 ${failedUnits.length}개 질문 생성 실패 (${failedUnits.map((s) => s.unitId).join(", ")})`);
-      }
-      const questions = { questions: unitQState.flatMap((s) => (s.result && s.result.questions) || []) };
 
       const finishedAt = new Date();
       LabApp.stopTimer(pipelineId);
