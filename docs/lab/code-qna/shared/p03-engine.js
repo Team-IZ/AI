@@ -66,15 +66,8 @@
 // generation + grading are real NVIDIA calls (same manifest prompts as P01/P02). Answer
 // classification (surface/partial/defended) is NOT an LLM call -- it's the same
 // deterministic regex classifiers P02 already proved run fine in Pyodide.
-// D208: REPO_RAW_BASE (below) used to be an absolute raw.githubusercontent.com URL
-// pointing at popixoxipop-collab/Code_reviewer_with_feedback's `main` branch -- every P03
-// session fetched these classifier files live from a repo this team doesn't own. Fixed by
-// copying the actual judgment/feedback source into this repo (same relative layout
-// CLASSIFIER_FILES already expects) and pointing the base at a same-origin relative path
-// instead -- see shared/p02-engine.js's matching D208 comment for the full WHY/COST/EXIT
-// (identical reasoning, just the P03-side half of the same fix).
 const P03Engine = (() => {
-  const REPO_RAW_BASE = "../";
+  const REPO_RAW_BASE = "https://raw.githubusercontent.com/popixoxipop-collab/Code_reviewer_with_feedback/main/";
   const CLASSIFIER_FILES = [
     "judgment/isolation_classifier.py",
     "judgment/isolation_hook.py",
@@ -360,19 +353,23 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
   }
 
   // D200: live fact-check tools for L2/L3/Reflection question generation -- gives the model
-  // real GitHub access to re-verify the trainee's last answer instead of only ever seeing a
+  // real access to re-verify the trainee's last answer instead of only ever seeing a
   // static snippet chosen once at session start. See run()'s D200 comment and llm.js's
-  // chatToolLoop() for the WHY/COST/EXIT of the overall mechanism; this block is just the
-  // GitHub-specific tool schemas + executors.
+  // chatToolLoop() for the WHY/COST/EXIT of the overall mechanism; this block covers both
+  // the GitHub-backed executors (toolListFiles/toolReadFile, below) and, since D210, the
+  // ZIP-upload-backed local equivalents (toolListFilesLocal/toolReadFileLocal) -- same two
+  // tool schemas serve either source, generateQuestion() picks which executors to wire up.
+  // D210: descriptions genericized from "저장소"/GitHub-specific wording to stay accurate
+  // for a ZIP-sourced session too (there's no GitHub tree/contents API involved there).
   const LIST_FILES_TOOL = {
     name: "list_files",
-    description: "저장소의 실제 파일 목록을 가져온다 (GitHub API git tree, 현재 브랜치 기준). 전달받은 코드 스니펫이 아니라 실제 저장소 구조를 확인할 때 사용.",
+    description: "제출된 코드의 실제 파일 목록을 가져온다(현재 브랜치 기준 GitHub 저장소이거나, 업로드된 ZIP). 전달받은 코드 스니펫이 아니라 실제 전체 구조를 확인할 때 사용.",
     input_schema: { type: "object", properties: {}, required: [] },
   };
   const READ_FILE_TOOL = {
     name: "read_file",
-    description: "저장소의 특정 파일 하나의 실제 최신 내용을 가져온다 (GitHub API contents). 학생 답변에서 언급된 구체적 파일/함수를 재확인할 때 사용. path는 list_files로 얻은 경로여야 한다.",
-    input_schema: { type: "object", properties: { path: { type: "string", description: "저장소 루트 기준 상대 경로" } }, required: ["path"] },
+    description: "제출된 코드 중 특정 파일 하나의 실제 최신 내용을 가져온다. 학생 답변에서 언급된 구체적 파일/함수를 재확인할 때 사용. path는 list_files로 얻은 경로여야 한다.",
+    input_schema: { type: "object", properties: { path: { type: "string", description: "저장소/ZIP 루트 기준 상대 경로" } }, required: ["path"] },
   };
   // v2 확장 지점: git_log(path) -- GET /repos/{owner}/{repo}/commits?path=...&sha={branch},
   // 같은 executors 패턴으로 추가 가능. 이번엔 같은 라운드 예산을 list_files/read_file과
@@ -407,6 +404,25 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     const data = await res.json();
     if (Array.isArray(data) || data.type !== "file" || !data.content) throw new Error(`read_file: ${path}는 파일이 아니거나 내용 없음`);
     const content = decodeURIComponent(escape(atob(data.content.replace(/\n/g, ""))));
+    return {
+      path,
+      content: content.length > READ_FILE_CHAR_CAP ? content.slice(0, READ_FILE_CHAR_CAP) + "\n...[생략]" : content,
+      truncated: content.length > READ_FILE_CHAR_CAP,
+    };
+  }
+
+  // D210: ZIP-upload equivalents of toolListFiles/toolReadFile above -- same return shapes,
+  // synchronous lookups against the fileMap already fully loaded in memory (no network
+  // call, no rate limit, no PAT) instead of live GitHub API requests. `fileMap` is the
+  // {path: content} object session-state.js's loadZipFileMap() resolved from IndexedDB.
+  function toolListFilesLocal(fileMap) {
+    const paths = Object.keys(fileMap);
+    return { paths: paths.slice(0, LIST_FILES_MAX_ENTRIES), truncated: paths.length > LIST_FILES_MAX_ENTRIES, total: paths.length };
+  }
+
+  function toolReadFileLocal(fileMap, path) {
+    const content = fileMap[path];
+    if (content === undefined) throw new Error(`read_file: ${path}는 이번 ZIP 업로드에 없는 경로`);
     return {
       path,
       content: content.length > READ_FILE_CHAR_CAP ? content.slice(0, READ_FILE_CHAR_CAP) + "\n...[생략]" : content,
@@ -464,7 +480,13 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
   // stores {candidate, dupOf} pairs -- both texts quoted verbatim, side by side, in both the
   // shared-messages retry note and buildLevelPrompt()'s extraBanned block -- showing the
   // overlap directly instead of only asserting it exists.
-  async function generateQuestion(level, finding, codeContext, transcript, maxAttempts, model, onProgress, repoRef) {
+  // D210: new trailing `zipFiles` ({path: content} from a ZIP scan, loaded via
+  // SessionState.loadZipFileMap(), or null) -- the fact-check tool-loop's second possible
+  // source alongside `repoRef`. Mutually exclusive in practice (a session comes from
+  // either a GitHub-URL scan or a ZIP upload, never both), but if somehow both are present
+  // `repoRef` wins (a live repo is strictly more authoritative than a point-in-time upload
+  // snapshot) -- see hasGithubRepo/hasZipMap below.
+  async function generateQuestion(level, finding, codeContext, transcript, maxAttempts, model, onProgress, repoRef, zipFiles) {
     // D182: falls through to the top-level toggle (model) -- p03-1 has no manifest `model`
     // param at all (never did), so this was already effectively "shared default only"
     // before; now it's "toggle" instead.
@@ -473,10 +495,20 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     const priorQuestions = transcript.map((t) => t.question);
     const rejected = [];
     const pat = LabConfig.get("github-pat");
-    const factCheckable = level !== "l1" && repoRef && repoRef.owner && repoRef.repo;
+    const hasGithubRepo = Boolean(repoRef && repoRef.owner && repoRef.repo);
+    const hasZipMap = Boolean(zipFiles && Object.keys(zipFiles).length);
+    // D210: fact-check tool executors, picked once per call based on whichever source is
+    // actually available -- generateQuestion()'s own retry/dedup loop below doesn't need
+    // to know which source it's using, just that `factCheckExecutors` exists or doesn't.
+    const factCheckExecutors = hasGithubRepo
+      ? { list_files: async () => toolListFiles(repoRef, pat), read_file: async (args) => toolReadFile(repoRef, pat, args.path) }
+      : hasZipMap
+        ? { list_files: async () => toolListFilesLocal(zipFiles), read_file: async (args) => toolReadFileLocal(zipFiles, args.path) }
+        : null;
+    const factCheckable = level !== "l1" && Boolean(factCheckExecutors);
 
     // D204: shared across every dedup attempt for THIS turn -- see comment above. `null`
-    // when fact-check was never possible to begin with (L1, or no repo identity).
+    // when fact-check was never possible to begin with (L1, or no repo identity/ZIP map).
     let messages = factCheckable
       ? [{ role: "user", content: buildLevelPrompt(level, finding, codeContext, transcript, [], true) }]
       : null;
@@ -491,10 +523,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
             model: resolvedModel,
             messages,
             tools: [LIST_FILES_TOOL, READ_FILE_TOOL, askQuestionTool],
-            executors: {
-              list_files: async () => toolListFiles(repoRef, pat),
-              read_file: async (args) => toolReadFile(repoRef, pat, args.path),
-            },
+            executors: factCheckExecutors,
             terminalToolName: "ask_question",
             maxRounds: FACT_CHECK_MAX_ROUNDS,
             // D204: only the FIRST attempt must actually touch GitHub -- retries reuse the
@@ -669,7 +698,10 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
   async function run(input, hooks) {
     // D200: repoRef ({owner,repo,branch} or null for ZIP uploads) enables the live
     // fact-check tool-loop in generateQuestion() -- see its D200 comment.
-    const { finding, codeContexts, model, repoRef } = input;
+    // D210: zipFiles ({path: content} loaded from IndexedDB via SessionState.loadZipFileMap(),
+    // or null) is the ZIP-upload equivalent -- see generateQuestion()'s D210 comment for how
+    // the two sources are picked between.
+    const { finding, codeContexts, model, repoRef, zipFiles } = input;
     if (!finding) {
       hooks.onStatus("먼저 finding을 불러오고 선택하세요", "error");
       throw new Error("먼저 finding을 불러오고 선택하세요");
@@ -706,15 +738,18 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       hooks.onProgress(codeContext
         ? `코드 컨텍스트 포함 (${codeContexts.length}개 파일, 총 ${codeContext.length}자)`
         : "코드 컨텍스트 없음 -- 질문이 파일 내용 없이 생성됨");
-      // D205: `repoRef` missing (ZIP upload, or a session scanned before D200 shipped) used
-      // to silently skip the whole fact-check mechanism with zero visible trace -- not even
-      // a console.log. Surfaced once per run, not per turn, via the same `⚠`-prefixed
-      // onProgress convention D199 already uses to promote console-only warnings into a
-      // trainee-visible chat bubble (session.html's existing `msg.startsWith("⚠")` handler
-      // needs no change). No message when repoRef IS present -- this is a "tell me when a
+      // D205: neither `repoRef` nor a ZIP file map (D210) available used to silently skip
+      // the whole fact-check mechanism with zero visible trace -- not even a console.log.
+      // Surfaced once per run, not per turn, via the same `⚠`-prefixed onProgress
+      // convention D199 already uses to promote console-only warnings into a trainee-
+      // visible chat bubble (session.html's existing `msg.startsWith("⚠")` handler needs
+      // no change). No message when either source IS present -- this is a "tell me when a
       // capability is silently absent" warning, not routine noise on the normal path.
-      if (!(repoRef && repoRef.owner && repoRef.repo)) {
-        hooks.onProgress("⚠ 저장소 식별 정보 없음(ZIP 업로드이거나 이전 버전에서 스캔한 세션) — 이번 인터뷰는 실시간 코드 재확인 없이 저장된 스니펫만으로 진행됩니다");
+      // D210: this branch is now genuinely rare -- it only fires when a session predates
+      // both D200 (repoRef) and D210 (zipFiles), or IndexedDB was unavailable for a ZIP
+      // scan (see session-state.js's saveZipFileMap()).
+      if (!(repoRef && repoRef.owner && repoRef.repo) && !(zipFiles && Object.keys(zipFiles).length)) {
+        hooks.onProgress("⚠ 저장소/파일 정보 없음(이전 버전에서 스캔했거나 파일 캐시 저장 실패) — 이번 인터뷰는 실시간 코드 재확인 없이 저장된 스니펫만으로 진행됩니다");
       }
 
       const transcript = [];
@@ -759,8 +794,9 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         hooks.onProgress(`${level.toUpperCase()} 질문 생성 중...`);
         // D199: transcript already carries every turn's classification -- generateQuestion()
         // derives the cumulative verdict trail from it directly, no separate param needed.
-        // D200: repoRef enables live fact-checking for L2/L3/Reflection (null/no-op for ZIP).
-        const question = await generateQuestion(level, finding, codeContext, transcript, genAttemptInfo.maxAttempts, model, hooks.onProgress, repoRef);
+        // D200: repoRef enables live fact-checking for L2/L3/Reflection. D210: zipFiles is
+        // the ZIP-upload equivalent -- generateQuestion() picks whichever source is present.
+        const question = await generateQuestion(level, finding, codeContext, transcript, genAttemptInfo.maxAttempts, model, hooks.onProgress, repoRef, zipFiles);
         hooks.onQuestion({ level, question, turnIndex: i, totalTurns });
         hooks.onProgress("답변 대기 중...");
         hooks.countdown.resume(); // D182: only start ticking once the human can actually see+answer this question

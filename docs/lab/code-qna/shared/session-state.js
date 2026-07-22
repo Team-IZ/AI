@@ -4,14 +4,33 @@
 // with module-level state (loadFindingFromP02/pendingCodeContexts in the original
 // p03-runner.js).
 //
-// Deliberately never stores the full scanned `files` map -- the original app avoided this
-// too, by keeping `files` only as an in-memory closure variable captured by a click
-// handler, never stringified. Only the already-trimmed pieces (finding + the resolved
-// codeContexts, capped at P02Engine.MAX_CONNECT_FILES; the completed interview result)
-// ever cross a page boundary here. sessionStorage's per-origin quota (~5-10MB) is tighter
-// than the original app's own 500,000-char inline-JSON safety cap (D162), and this
-// project has already been bitten twice by silent truncation (D153, D162) -- so a quota
-// failure here is surfaced, not swallowed.
+// Deliberately never stores the full scanned `files` map IN SESSIONSTORAGE -- the original
+// app avoided this too, by keeping `files` only as an in-memory closure variable captured
+// by a click handler, never stringified. Only the already-trimmed pieces (finding + the
+// resolved codeContexts, capped at P02Engine.MAX_CONNECT_FILES; the completed interview
+// result) ever cross a page boundary via sessionStorage here. sessionStorage's per-origin
+// quota (~5-10MB) is tighter than the original app's own 500,000-char inline-JSON safety
+// cap (D162), and this project has already been bitten twice by silent truncation (D153,
+// D162) -- so a quota failure here is surfaced, not swallowed.
+//
+// D210 (2026-07-22): the one exception -- saveZipFileMap()/loadZipFileMap() below DO
+// persist the full ZIP-parsed `files` map, but through IndexedDB, not sessionStorage.
+//   WHY: a ZIP upload has no GitHub identity, so P03's D200 live fact-check tool-loop
+//   (list_files/read_file) was a structural no-op for every ZIP-sourced session -- every
+//   L2+ follow-up only ever saw the static snippet captured at submission time, never
+//   re-verified. Trainees noticed and asked for parity with GitHub-sourced sessions. The
+//   ONLY way to give P03 something to browse/re-read after the submission.html->
+//   session.html page navigation is to persist the parsed files somewhere durable across
+//   that navigation -- sessionStorage is exactly what this file's own header just argued
+//   against for this size of payload, so IndexedDB (order-of-magnitude higher quota, no
+//   established quota-failure history in this codebase) is used instead.
+//   COST: a second, async storage mechanism in a module that was otherwise fully
+//   synchronous -- callers must await save/load. IndexedDB being unavailable (locked-down
+//   private-browsing contexts) degrades to "no ZIP fact-check this session", same
+//   observable behavior as before D210, not a new failure mode.
+//   EXIT: if IndexedDB proves unreliable in practice, fall back to a capped subset
+//   (e.g. P02Engine.LIST_FILES_MAX_ENTRIES-shaped) written into sessionStorage instead --
+//   bounded fidelity over no fact-check at all, rather than reverting to zero.
 const SessionState = (() => {
   const SUBMISSION_KEY = "teamiz_p02_submission";
   const RESULT_KEY = "teamiz_p03_result";
@@ -126,5 +145,85 @@ const SessionState = (() => {
     return v;
   }
 
-  return { saveSubmission, saveSubmissionWithModel, loadSubmission, saveFindingsList, loadFindingsList, saveInterviewResult, loadInterviewResult, saveRepoContext, loadRepoContext };
+  // D210: IndexedDB-backed persistence for a ZIP scan's full parsed `files` map -- see
+  // this file's D210 header comment for the full WHY/COST/EXIT. One well-known record
+  // ("current"), overwritten wholesale by each new ZIP scan (same "most recent run only"
+  // shape FINDINGS_KEY/SUBMISSION_KEY already use above) -- there is never more than one
+  // in-progress submission per tab, so no need to key by scan/session id.
+  const ZIP_DB_NAME = "teamiz_p02_zip_cache";
+  const ZIP_DB_STORE = "files";
+  const ZIP_DB_KEY = "current";
+
+  function openZipDb() {
+    return new Promise((resolve, reject) => {
+      if (typeof indexedDB === "undefined") { reject(new Error("IndexedDB 사용 불가")); return; }
+      const req = indexedDB.open(ZIP_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        if (!req.result.objectStoreNames.contains(ZIP_DB_STORE)) req.result.createObjectStore(ZIP_DB_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("IndexedDB 열기 실패"));
+    });
+  }
+
+  // Returns { ok: true } or { ok: false, error } -- same shape as safeSet() above, so
+  // callers handle both the same way (surface, don't swallow -- this file's own header
+  // principle for cross-page persistence failures).
+  async function saveZipFileMap(files) {
+    try {
+      const db = await openZipDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(ZIP_DB_STORE, "readwrite");
+        tx.objectStore(ZIP_DB_STORE).put(files, ZIP_DB_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error("IndexedDB 쓰기 실패"));
+      });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err };
+    }
+  }
+
+  // D210: called for a GitHub-URL scan so a STALE map from an earlier ZIP scan in the
+  // same tab can't leak into a later GitHub-sourced session (repoRef and zipFiles are
+  // mutually exclusive by submission method -- a lingering old record here would be
+  // wrong, not just redundant, if p03-engine.js is ever asked to pick between them).
+  // Best-effort/fire-and-forget from the caller's perspective -- a failed clear just
+  // leaves stale data that generateQuestion()'s repoRef-first precedence still overrides.
+  async function clearZipFileMap() {
+    try {
+      const db = await openZipDb();
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(ZIP_DB_STORE, "readwrite");
+        tx.objectStore(ZIP_DB_STORE).delete(ZIP_DB_KEY);
+        tx.oncomplete = () => resolve();
+        tx.onerror = () => reject(tx.error || new Error("IndexedDB 삭제 실패"));
+      });
+    } catch (err) {
+      // best-effort -- see comment above
+    }
+  }
+
+  // Returns the files map ({path: content}) or null (nothing saved, IndexedDB unavailable,
+  // or this session never came from a ZIP scan) -- null is the same "fact-check source
+  // unavailable" signal p03-engine.js already treats a null/absent repoRef as.
+  async function loadZipFileMap() {
+    try {
+      const db = await openZipDb();
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(ZIP_DB_STORE, "readonly");
+        const req = tx.objectStore(ZIP_DB_STORE).get(ZIP_DB_KEY);
+        req.onsuccess = () => resolve(req.result && typeof req.result === "object" ? req.result : null);
+        req.onerror = () => reject(req.error || new Error("IndexedDB 읽기 실패"));
+      });
+    } catch (err) {
+      return null;
+    }
+  }
+
+  return {
+    saveSubmission, saveSubmissionWithModel, loadSubmission, saveFindingsList, loadFindingsList,
+    saveInterviewResult, loadInterviewResult, saveRepoContext, loadRepoContext,
+    saveZipFileMap, loadZipFileMap, clearZipFileMap,
+  };
 })();
