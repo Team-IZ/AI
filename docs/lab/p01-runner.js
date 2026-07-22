@@ -689,12 +689,31 @@ const P01Runner = (() => {
       //     defaulting this off instead of on for that caller.
       const audits = [];
       const fixLog = [];
+      // D-refineSnapshot (2026-07-22): opts.captureRefineSnapshots (default false) records
+      // a deep-cloned unitMap after iteration 0 (the chunk-analysis baseline, before any
+      // refine) and after every refine iteration that actually runs -- lets a caller
+      // measure refine's real per-iteration effect (graph density, empty-unit count, etc.
+      // via buildGraph() on each snapshot) from ONE pipeline run instead of re-running
+      // chunk-analysis N times, which would confound the comparison with chunk-analysis's
+      // own run-to-run variability (each chunk is an independent, context-less LLM call).
+      // No effect on any existing caller: default off, and capturing is pure bookkeeping
+      // that never touches unitMap/control flow.
+      const refineSnapshots = [];
+      function snapshotRefineState(iteration) {
+        if (!opts.captureRefineSnapshots) return;
+        refineSnapshots.push({ iteration, unitMap: JSON.parse(JSON.stringify(unitMap)) });
+      }
+      snapshotRefineState(0);
       if (opts.skipRefine) {
         LabApp.log(pipelineId, "refine 단계 건너뜀 (skipRefine)");
       } else {
         const maxRefineIters = LabApp.resolveParam("p01", "p01-3", "refine_iters") || 5;
         let refineReady = false;
         for (let i = 1; i <= maxRefineIters; i++) {
+          // try/finally (not a plain statement after the loop body) so the snapshot is
+          // taken exactly once per iteration regardless of which of this loop's several
+          // continue/break exits was taken -- finally always runs before control leaves.
+          try {
           LabApp.log(pipelineId, `refine 반복 ${i}/${maxRefineIters}...`);
           let audit;
           try {
@@ -766,6 +785,9 @@ const P01Runner = (() => {
               fixLog.push({ iteration: i, applied: false, reason: r.validation.reason, changes: [], units: r.group.unitIds });
               LabApp.log(pipelineId, `⚠ refine 수정 거부됨(유닛 ${label}, 근거 검증 실패): ${r.validation.reason}`);
             }
+          }
+          } finally {
+            snapshotRefineState(i);
           }
         }
         if (!refineReady) {
@@ -850,6 +872,10 @@ const P01Runner = (() => {
         unit_map: unitMap, refine_audits: audits, refine_fixes: fixLog, questions, chunk_count: chunks.length, extractor: "pdfjs",
         failed_chunks: failedChunks.map((c) => ({ chunk_range: c.chunk_range, error: c.error })),
         graph, graph_generated: graphGenerated,
+        // Not persisted by maybeSaveRun() below (deliberately excluded from its artifacts
+        // list -- experiment-only data, empty [] for every normal caller since opts.
+        // captureRefineSnapshots defaults off).
+        refine_snapshots: refineSnapshots,
       };
       renderResults(result);
       await maybeSaveRun(result, startedAt, finishedAt);
