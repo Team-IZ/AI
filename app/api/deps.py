@@ -4,8 +4,9 @@ FastAPI에서 '의존성'은 엔드포인트 실행 전에 먼저 돌려서
 인증·검증 같은 공통 작업을 처리하는 함수
 """
 
-from fastapi import Header, HTTPException, status
+from fastapi import Header
 
+from app.api.errors import ApiError
 from app.config import get_settings
 
 def require_internal_key(x_internal_key: str | None = Header(default=None)) -> None:
@@ -24,14 +25,10 @@ def require_internal_key(x_internal_key: str | None = Header(default=None)) -> N
         return
     
     if x_internal_key != expected:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            
-            detail={
-                "error": {
-                    "code": "UNAUTHORIZED",
-                    "message": "유효하지 않은 내부 키 (X_INTERNAL_KEY 오류)",
-                    "retryable": False,
-                }
-            }
+        # HTTPException 대신 ApiError를 던지기
+        raise ApiError(
+            status_code=401,
+            error="UNAUTHORIZED",
+            message="유효하지 않은 내부 키",
+            retryable=False,
         )
