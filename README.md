@@ -53,36 +53,52 @@ React는 FastAPI를 직접 호출하지 않는다. **FastAPI의 호출자는 Spr
 | 그룹 | 메서드·경로 | 역할 | 방식 |
 |---|---|---|---|
 | 공통 | `GET /api/health` | 서비스 상태 | 동기 |
-| 분석 | `POST /api/v1/analyses` | 코드 분석 요청 (P02) | 비동기 job (202) |
-| 분석 | `GET /api/v1/analyses/{job_id}` | 분석 상태·결과 | 폴링 |
-| 세션 | `POST /api/v1/sessions` | 검증 세션 시작 → 첫 질문 | 동기 |
-| 세션 | `POST /api/v1/sessions/{id}/answers` | 답변 제출 → 다음 질문/종료 | 동기 (멱등키) |
-| 세션 | `GET /api/v1/sessions/{id}` | 세션 현재 상태 | 동기 |
-| 세션 | `POST /api/v1/sessions/{id}/restore` | 유실 세션 복원 | 동기 |
-| 채점 | `POST /api/v1/gradings` | transcript 5축 후채점 | 비동기 job (202) |
-| 채점 | `GET /api/v1/gradings/{job_id}` | 채점 상태·점수·근거 | 폴링 |
+| 분석 | `POST /api/v0/analyses` | 코드 분석 요청 (P02) | 비동기 job (202) |
+| 분석 | `GET /api/v0/analyses/{job_id}` | 분석 상태·결과 | 폴링 |
+| 세션 | `POST /api/v0/sessions` | 검증 세션 시작 → 첫 질문 | 동기 |
+| 세션 | `POST /api/v0/sessions/{id}/answers` | 답변 제출 → 다음 질문/종료 | 동기 (멱등키) |
+| 세션 | `GET /api/v0/sessions/{id}` | 세션 현재 상태 | 동기 |
+| 세션 | `POST /api/v0/sessions/{id}/restore` | 유실 세션 복원 | 동기 |
+| 채점 | `POST /api/v0/gradings` | transcript 5축 후채점 | 비동기 job (202) |
+| 채점 | `GET /api/v0/gradings/{job_id}` | 채점 상태·점수·근거 | 폴링 |
 
 ### 동기와 비동기를 나누는 기준
 
 사람이 화면 앞에서 기다리면 동기, 아니면 job이다. 답변 제출은 학생이 대기하므로 동기여야 하고, 분석·채점은 수초~수분이 걸리므로 202를 주고 폴링시킨다.
 
-비동기 job은 생성 시 `202 Accepted` + `{"job_id": "...", "status": "QUEUED"}`를 반환한다. 요청에 `callback_url`이 있으면 완료·실패 시 그 주소로 결과를 `POST`하고, `GET` 폴링은 콜백 유실 대비 폴백으로 유지한다.
+비동기 job은 생성 시 `202 Accepted` + `{"jobId": "...", "status": "QUEUED"}`를 반환한다. 요청에 `callbackUrl`이 있으면 완료·실패 시 그 주소로 결과를 `POST`하고, `GET` 폴링은 콜백 유실 대비 폴백으로 유지한다.
 
-### 인증
+### 요청 헤더 3종
 
-Spring이 매 요청 헤더에 `X-Internal-Key`를 실어 보내는 공유 API 키 방식. `GET /api/health`만 면제(운영 모니터링용).
+| 헤더 | 값 | 용도 |
+|---|---|---|
+| `X-Internal-Key` | 공유 비밀 | 서비스 간 인증. `GET /api/health`만 면제 |
+| `Idempotency-Key` | `submissionId:attemptNo` | 중복 요청 판별. 같은 키면 처음 만든 `jobId`를 `202`로 그대로 반환하고 재분석하지 않는다 |
+| `X-Trace-Id` | 추적 ID | Spring이 `analysis_job.trace_id`로 저장 |
 
-### 미결 사항 — 스키마 작성 전에 팀 합의 필요
+### 표기 규약 (2026-07-22 확정)
 
-백엔드 `origin/develop`의 관례와 기존 AI 명세가 세 곳에서 어긋난다.
+| 항목 | 확정 |
+|---|---|
+| 경로 prefix | **`/api/v0`** — 서비스 버전이 아니라 "개발 단계 API"라는 성숙도 표시. 계약이 안정되면 양쪽이 함께 v1으로 올린다 |
+| 필드 표기 | **camelCase** (`jobId`, `snapshotId`). 파이썬 내부는 snake_case로 쓰고 직렬화만 변환한다 |
+| 에러 형식 | **평탄 구조 `{error, message, retryable}`** |
 
-| 항목 | 백엔드 관례 | 기존 AI 명세 | 잠정 방침 |
-|---|---|---|---|
-| 경로 prefix | `/api/v0` | `/api/v1` | `/api/v1` 유지 — 별도 서비스라 Spring 내부 버전과 같을 이유 없음 |
-| 필드 표기 | camelCase | snake_case | **camelCase로 통일** — Spring 역직렬화 부담 제거 |
-| 에러 형식 | `{timestamp, status, error, message, path, fieldErrors}` | `{error:{code, message, retryable}}` | AI 형식 유지 — `retryable`이 Spring 재시도 판단에 필요 |
+```json
+{
+  "error": "INVALID_REQUEST",
+  "message": "method=GITHUB_URL에는 source.repoUrl이 필요합니다",
+  "retryable": false
+}
+```
+
+`error`는 기계가 분기하는 코드 문자열, `message`는 사람이 읽는 설명, `retryable`은 Spring의 재시도 판단용이다. `timestamp`·`path`는 쓰지 않는다.
+
+**`analysisId`는 Spring이 발급하며 AI는 만들지도 받지도 않는다.** Spring이 `jobId`로 연결한다.
 
 응답 본문의 세부 구조(특히 `findings[]` 내부)는 팀원 PoC 결과에 따라 바뀐다. **엔드포인트·상태코드·최상위 필드까지만 고정하고 내부는 열어둔다.**
+
+미결 항목은 `../qna/2026-07-22/backend-api-questions.md` 참고.
 
 ---
 

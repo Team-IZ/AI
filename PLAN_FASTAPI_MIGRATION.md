@@ -1,7 +1,7 @@
 # AI 파트 FastAPI 구축 계획
 
 > 마지막 갱신: 2026-07-22
-> 작업 브랜치: `feature/fastapi-migration`
+> 작업 브랜치: `feature/fastapi-skeleton` (`origin` push 완료)
 > 이 문서가 **AI 파트 진행 상황의 단일 기준**이다. 새 세션은 여기부터 읽는다.
 > 구조·계약의 설명은 `README.md`에 있다. 이 문서는 **무엇을 어떤 순서로 할지**만 다룬다.
 
@@ -15,10 +15,39 @@
 
 | 항목 | 상태 |
 |---|---|
-| 추적 파일 | `.env.example` `.gitignore` `README.md` `PLAN_FASTAPI_MIGRATION.md` `requirements.txt` |
-| 엔드포인트 | 0 / 9 |
-| 테스트 | 없음 |
-| 다음 작업 | **1단계 — `main.py` + `health.py` + `pytest.ini`** |
+| 완료 단계 | 1단계(앱 골격) · 2단계(설정·인증) |
+| 엔드포인트 | 1 / 9 — `GET /api/health` |
+| 테스트 | 2 passed |
+| 백엔드 계약 | C1~C6 확정(2026-07-22) — §3 |
+| 다음 작업 | **3단계 — `POST /api/v0/analyses` 스텁** |
+
+### 작업 이력
+
+**2026-07-22 — 환경 정리**
+
+| 한 일 | 결과 |
+|---|---|
+| PC 이전 흔적 정리 | 노트북 경로(`C:\KT_aivle\big-project`) 참조를 현재 경로로 전면 치환. `.venv`가 옛 파이썬(3.12 @ `C:\Users\User`)을 가리켜 깨져 있던 것을 `C:\Python313`으로 재생성 |
+| 브랜치 이름 정정 | 규칙에 어긋난 로컬 `feat/fastapi-migration` → `feature/*` 규칙에 맞게 정리. 이후 재구축용 **`feature/fastapi-skeleton`** 신설·push |
+| 낡은 원격 참조 정리 | `origin/feature/fastapi-migration`·`origin/feature/verification-ui`는 GitHub에서 이미 삭제된 브랜치였다(`fetch --prune`). 구 구현은 **`origin/develop`에 병합돼 남아 있다** |
+| PoC 워크트리 생성 | `../ai_poc/qna`·`../ai_poc/pdf`를 `AI/.git` 공유 워크트리로 생성(detached, 읽기 전용). 별도 clone을 쓰지 않는 이유와 사용법은 루트 `README.md` |
+
+**2026-07-22 — 재구축 결정과 실행**
+
+| 한 일 | 결과 |
+|---|---|
+| 역할 재정의 | 이 브랜치의 담당은 **골격·백엔드 통신**. PoC는 팀원 브랜치에서만 관리한다 |
+| 기존 구현 후퇴 | `app/`·`tests/`·`trainee/`·`shared/`·`pipeline/`·`reference/` 전량을 `_legacy/`로 이동 후 추적 해제(81파일). 삭제가 아니라 **참고용 로컬 사본** |
+| 문서 전면 재작성 | `README.md`(구조·계약), 이 문서(계획), 루트 `README.md`(워크스페이스·워크트리·작업 방식) |
+| 1단계 완료 | `main.py`·`api/health.py`·`pytest.ini`·`tests/test_health.py`. `GET /api/health` 200 |
+| 2단계 완료 | `config.py`·`api/deps.py`·`tests/test_auth.py`. `X-Internal-Key` 인증, production 빈 키 기동 거부 확인 |
+| 백엔드 계약 합의 | C1~C6 확정(§3). 질문지는 `../qna/2026-07-22/backend-api-questions.md` |
+
+**이 과정에서 드러난 사실 3개**
+
+1. **P03 문답 로직은 이미 Python에서 JS로 옮겨갔다.** `_legacy/pipeline/feedback/`의 `turn_engine.py`·`generate_questions.py`·`llm_interview_grader.py`는 상위 레포에서 제거된 옛 스냅샷이고, 살아 있는 구현은 `shared/p03-engine.js`(495줄)다. §4 백로그 참고
+2. **기존 AI 코드의 `analysis_job.status` 값이 틀렸다.** `ANALYZING`·`READY`는 각각 `measurement_attempt`·`assessment_session`의 값이었다. 올바른 값은 `QUEUED/RUNNING/SUCCEEDED/PARTIAL/FAILED` — §3
+3. **PoC가 팀 공용 Supabase를 쓰기 시작했다**(`e43d58c`). cross-tenant 위험을 팀원이 랩 한정으로 수용. 서버로 옮기지 말 것 — §4
 
 ---
 
@@ -66,9 +95,10 @@
 |---|---|
 | 산출물 | `app/schemas/common.py`, `app/schemas/analysis.py`, `app/api/analyses.py`, `tests/test_analyses.py` |
 | 배우는 것 | pydantic 요청 모델, `status_code=202`, 422 검증, `Literal` enum |
-| DoD | `POST /api/v1/analyses`가 202 + `{jobId, status:"QUEUED"}`. 필수 필드 누락 시 422 |
-| 선결 | **§3 미결 3건이 정해져야 한다**(prefix·필드 표기·에러 형식) |
+| DoD | `POST /api/v0/analyses`가 202 + `{jobId, status:"QUEUED"}`. 필수 필드 누락 시 422 |
+| 선결 | ✅ 해소 — §3의 C1~C6이 2026-07-22 확정됐다 |
 | 주의 | `method=ZIP_WITH_GITLOG`는 multipart라 JSON과 요청 형태가 다르다. 한 오퍼레이션에서 Body와 Form을 섞을 수 없으므로 라우터가 Content-Type으로 분기한다 |
+| 주의 | `Idempotency-Key` 헤더를 받아 기억하는 자리를 여기서 만든다(값은 `submissionId:attemptNo`). 같은 키 재요청은 처음 `jobId`를 202로 반환 |
 
 ### 4단계 — 분석 조회 스텁
 
@@ -76,7 +106,7 @@
 |---|---|
 | 산출물 | `app/schemas/analysis.py`(응답 모델 추가), `app/api/analyses.py` |
 | 배우는 것 | 경로 파라미터, `response_model`, 404 처리 |
-| DoD | `GET /api/v1/analyses/{jobId}`가 고정 결과 반환. 모르는 id는 404 |
+| DoD | `GET /api/v0/analyses/{jobId}`가 고정 결과 반환. 모르는 id는 404 |
 
 ### 5단계 — 엔진 소켓
 
@@ -119,25 +149,95 @@
 
 ---
 
-## 3. 팀 협의 대기 — 3단계 전에 필요
+## 3. 확정된 백엔드 계약 (2026-07-22 합의)
 
-백엔드 `origin/develop`의 관례와 기존 AI 명세가 어긋난다. 스키마를 쓰기 전에 정해야 하고, 나중에 바꾸면 9개를 전부 다시 손댄다.
+**3단계를 막던 항목은 전부 해소됐다.** 전체 논의 기록은 `../qna/2026-07-22/backend-api-questions.md`.
 
-| # | 항목 | 백엔드 | AI 명세 | 잠정 방침 | 상태 |
-|---|---|---|---|---|---|
-| C1 | 경로 prefix | `/api/v0` | `/api/v1` | `/api/v1` 유지 | ❓ |
-| C2 | 필드 표기 | camelCase | snake_case | camelCase로 통일 | ❓ |
-| C3 | 에러 형식 | `{timestamp,status,error,message,path,fieldErrors}` | `{error:{code,message,retryable}}` | AI 형식 유지 | ❓ |
+| # | 항목 | 확정 내용 |
+|---|---|---|
+| C1 | 경로 prefix | **`/api/v0`** — 서비스 버전이 아니라 "개발 단계 API"라는 성숙도 표시. 계약이 안정되면 양쪽이 함께 v1으로 올린다 |
+| C2 | 필드 표기 | **camelCase** (`jobId`, `snapshotId`) |
+| C3 | 에러 형식 | **평탄 구조 `{error, message, retryable}`.** `timestamp`·`path`는 쓰지 않는다 |
+| C4 | 멱등성 키 | Spring이 **`submissionId:attemptNo`**를 `Idempotency-Key` 헤더로 보낸다. FastAPI가 기억해 중복을 판별하고, 같은 키면 **처음 만든 `jobId`를 `202`로 그대로 반환**(재분석 없음) |
+| C5 | 추적 ID | `X-Trace-Id` 헤더 |
+| C6 | `analysisId` | Spring이 발급. **AI는 만들지도 받지도 않는다** — Spring이 `jobId`로 연결 |
 
-**C2가 제일 급하다.** 3단계 첫 스키마부터 갈린다.
-**C3 근거**: 백엔드 형식에는 `retryable`이 없다. Spring이 재시도할지 판단할 근거가 사라지므로 AI 형식을 유지하자는 입장.
+### 요청 헤더 3종
+
+| 헤더 | 값 | 비고 |
+|---|---|---|
+| `X-Internal-Key` | 공유 비밀 | 인증. `GET /api/health`만 면제 |
+| `Idempotency-Key` | `submissionId:attemptNo` | 중복 요청 판별 |
+| `X-Trace-Id` | 추적 ID | `analysis_job.trace_id`로 저장됨 |
+
+### 에러 응답
+
+```json
+{
+  "error": "INVALID_REQUEST",
+  "message": "method=GITHUB_URL에는 source.repoUrl이 필요합니다",
+  "retryable": false
+}
+```
+
+`error`는 기계가 분기하는 코드 문자열(대문자 스네이크), `message`는 사람이 읽는 설명, `retryable`은 Spring의 재시도 판단용이다. Spring이 기존 `ErrorResponse` DTO로 그대로 역직렬화할 수 있는 모양이다.
+
+### camelCase 구현
+
+pydantic 스키마의 공통 부모에 `alias_generator`를 걸면 파이썬 코드는 snake_case 그대로 쓰고 직렬화만 camelCase가 된다. 스키마마다 손대지 않는다.
+
+```python
+class BaseSchema(BaseModel):
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+```
+
+### 나중으로 미룬 것 — 멱등성 키 저장소를 Redis로
+
+**팀 결정: FastAPI에 Redis를 도입할 예정이다. 시기는 미정(나중).**
+
+그때까지는 멱등성 키를 **인메모리 dict**로 들고 간다. 따라서 아래 두 경우에 중복 job이 생길 수 있고, **이를 감수하기로 했다**(분석이 두 번 돌아도 결과가 같아 비용 낭비 외의 문제는 없다).
+
+| 상황 | 결과 |
+|---|---|
+| FastAPI 프로세스 재시작 | 기억 소실 → 같은 키에도 새 job 생성 |
+| 워커 2개 이상 | 워커별로 기억이 달라 중복 방지가 깨짐 |
+
+Redis가 들어오면 job 저장소도 함께 옮길 수 있다(§2 6단계의 "워커 1개" 제약과 D7이 같은 뿌리다). 도입 시점에 이 두 가지를 한 번에 처리한다.
+
+### DB 정의서에서 확정된 값 (테이블정의서 v06, 06_MEAS)
+
+**`analysis_job.status`는 DB CHECK 제약을 따른다.** 기존 AI 코드가 쓰던 `ANALYZING`·`READY`는 **다른 테이블의 값을 잘못 가져온 것**이었다(`ANALYZING`은 `measurement_attempt`, `READY`는 `assessment_session` 소속). 그대로 보내면 Spring INSERT가 CHECK 위반으로 실패한다.
+
+```
+analysis_job.status        QUEUED, RUNNING, SUCCEEDED, PARTIAL, FAILED
+decision_point.status      CANDIDATE, READY, USED, SKIPPED, INVALID
+assessment_session.status  READY, IN_PROGRESS, PAUSED, TIMEOUT, COMPLETED, ABANDONED, FAILED
+session_turn.state         PENDING, ANSWERED, SKIPPED, SAVED
+submission.method          GITHUB_URL, ZIP_WITH_GITLOG          ← 기존 AI와 일치
+*_scope_code               TOTAL, OWN_COMMIT                    ← 기존 AI와 일치
+```
+
+**AI만 아는 NOT NULL 값** — 응답에 없으면 Spring이 행을 만들 수 없다.
+
+| 테이블 | 컬럼 |
+|---|---|
+| `code_snapshot` | `content_hash`, `file_count`, `byte_count` |
+| `commit_attribution` | `commit_hash`, `authored_at`, `changed_line_count`, `contribution_ratio` |
+| `file_attribution` | `path`, `attribution_type`, `commit_count`, `changed_line_count`, `changed_function_count`, `confidence` |
+| `decision_point` | `source_path`, `line_start`, `line_end`, `evidence_hash`, `priority`, `extractor_version` |
+
+### 백엔드 확인 대기 목록
+
+전체 질문지는 **`../qna/2026-07-22/backend-api-questions.md`**. 답이 오면 그쪽에 기록하고 확정분만 이 절로 옮긴다.
+
+**3단계를 막는 항목은 없다.** 남은 것은 스키마 자리만 잡아두면 되는 것들이다 — 타임스탬프 형식(A-5), `null` vs 필드 생략(A-6), `job_type` 허용값(A-4), `PARTIAL` 조건(C-1), 콜백 vs 폴링(C-2).
 
 그 밖의 미결:
 
 | # | 항목 | 내용 |
 |---|---|---|
-| C4 | 응답 세부 구조 | `findings[]` 내부는 팀원 PoC 결과에 종속. **최상위 필드까지만 고정하고 내부는 열어둔다** |
-| C5 | `callback_url` | 명세는 콜백 방식(B3)인데 아직 미구현. 폴링만으로 먼저 붙일지 백엔드와 확인 |
+| C7 | 응답 세부 구조 | `findings[]` 내부는 팀원 PoC 결과에 종속. **최상위 필드까지만 고정하고 내부는 열어둔다** |
+| C8 | `callback_url` | 명세는 콜백 방식(B3)인데 아직 미구현. 폴링만으로 먼저 붙일지 백엔드와 확인 |
 
 ---
 
@@ -206,7 +306,9 @@ PoC는 브라우저에서 단독 실행되므로 서버에는 필요 없는 인�
 
 **브랜치 전략(팀 합의)**: `feature/*` → 동작·테스트 완료 후 `main` → `main` 기준 `develop` 생성 → 이후 `develop`에서 수정·테스트 후 `main` 병합.
 
-현재 `feature/fastapi-migration`이 `origin/feature/fastapi-migration`보다 앞서 있다. `develop`은 원격에 존재한다.
+현재 작업 브랜치는 **`feature/fastapi-skeleton`**(`origin` push 완료). GitHub의 브랜치는 `main`·`develop`·`feat/code_Q&A`·`feat/pdf_analysis`·`feature/fastapi-skeleton` 다섯이다.
+
+**PR은 아직 내지 않는다.** `origin/develop`에 구 구현이 살아 있어서 지금 PR을 올리면 **대량 삭제 diff**로 보인다. "AI 골격을 재구축했고 PoC는 팀원 브랜치에서만 관리한다"는 배경이 팀에 공유된 뒤에 올린다.
 
 **커밋 규칙** (`../rule/개발/이슈 O/Git 커밋 & PR 가이드.docx`)
 
