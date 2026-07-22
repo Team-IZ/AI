@@ -301,7 +301,7 @@
   "shared": {
     "nvidia_endpoint": "https://integrate.api.nvidia.com/v1/chat/completions",
     "cors_note": "이 엔드포인트는 Access-Control-Allow-Origin 헤더가 없어 브라우저 직접 호출이 차단된다(2026-07-14 실측). 모든 LLM 호출은 proxy_url을 거친다.",
-    "default_model": "stepfun-ai/step-3.5-flash",
+    "default_model": "stepfun-ai/step-3.7-flash",
     "locked_temperature": 0.0
   }
 }
