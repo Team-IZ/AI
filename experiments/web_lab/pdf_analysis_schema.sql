@@ -87,18 +87,44 @@ alter default privileges in schema pdf_analysis grant all on sequences to anon, 
 -- One row per unit (not per run) to match p03_turns_view's per-turn granularity, since
 -- "unit" is this domain's natural browsing grain, same as "turn" is for P03. Lives in
 -- public (not pdf_analysis) schema deliberately, so it shows up in the Table Editor
--- alongside p01_questions_view/p03_turns_view without switching the schema dropdown --
--- already applied live via the Management API (query pdf_analysis.runs/artifacts +
--- public.members across schemas, which plain SQL views do freely).
-create or replace view public.pdf_analysis_units_view as
+-- alongside p01_questions_view/p03_turns_view without switching the schema dropdown.
+--
+-- D4 (2026-07-22): D3's first version only queried pdf_analysis.runs/artifacts, which
+-- was empty (curriculum-manager's own DB-saved runs are still zero -- every test run this
+-- session was unauthenticated). But real unit_map data already existed: 12 genuine P01
+-- runs by real team members, saved to public.runs/artifacts by the ORIGINAL Pipeline Lab
+-- P01 tab (curriculum-manager wasn't the only thing ever producing this shape of data --
+-- confirmed live via the Management API: 122 units across 12 documents). Rebuilt as a
+-- UNION ALL of both sources (`source_tool` column distinguishes which one) instead of
+-- picking one -- "커리큘럼과 관련된 항목만 모아서" meant everything of this shape, not just
+-- this one tool's own future runs. DROP+CREATE (not CREATE OR REPLACE) because the new
+-- source_tool column sits in the middle of the existing column order and Postgres won't
+-- let CREATE OR REPLACE VIEW reorder/insert columns, only append at the end.
+create view public.pdf_analysis_units_view as
+with combined as (
+  select r.id as run_id, r.member_id, r.model, r.status, r.started_at,
+         r.input_meta->>'source_filename' as source_filename,
+         a.content as unit_map_content, 'curriculum-manager (pdf_analysis)' as source_tool
+  from pdf_analysis.runs r
+  join pdf_analysis.artifacts a on a.run_id = r.id and a.kind = 'unit_map'
+  where r.pipeline = 'p01'
+  union all
+  select r.id, r.member_id, r.model, r.status, r.started_at,
+         r.input_meta->>'source_filename',
+         a.content, 'Pipeline Lab P01 tab (public)' as source_tool
+  from public.runs r
+  join public.artifacts a on a.run_id = r.id and a.kind = 'unit_map'
+  where r.pipeline = 'p01'
+)
 select
-  r.id as run_id,
+  c.run_id,
   m.email,
   m.display_name,
-  coalesce(r.input_meta->>'source_filename', '(파일명 미기록)') as source_material,
-  r.model,
-  r.status,
-  r.started_at,
+  coalesce(c.source_filename, '(파일명 미기록)') as source_material,
+  c.source_tool,
+  c.model,
+  c.status,
+  c.started_at,
   unit.key as unit_id,
   unit.value->>'unit_title' as unit_title,
   (select min(p::int) from jsonb_array_elements_text(unit.value->'source_pages') p) as page_start,
@@ -106,13 +132,11 @@ select
   coalesce(jsonb_array_length(unit.value->'concepts'), 0) as concept_count,
   coalesce(jsonb_array_length(unit.value->'code_examples'), 0) as code_example_count,
   coalesce(jsonb_array_length(unit.value->'cautions'), 0) as caution_count,
-  (select string_agg(c->>'name', ', ' order by ord)
-     from jsonb_array_elements(unit.value->'concepts') with ordinality as t(c, ord)) as concept_names
-from pdf_analysis.runs r
-join pdf_analysis.artifacts a on a.run_id = r.id and a.kind = 'unit_map'
-left join public.members m on m.id = r.member_id
-cross join lateral jsonb_each(a.content) as unit(key, value)
-where r.pipeline = 'p01'
-order by r.started_at desc, unit.key;
+  (select string_agg(cn->>'name', ', ' order by ord)
+     from jsonb_array_elements(unit.value->'concepts') with ordinality as t(cn, ord)) as concept_names
+from combined c
+left join public.members m on m.id = c.member_id
+cross join lateral jsonb_each(c.unit_map_content) as unit(key, value)
+order by c.started_at desc, unit.key;
 
 grant select on public.pdf_analysis_units_view to authenticated;
