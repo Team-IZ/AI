@@ -158,7 +158,25 @@
 1. 프롬프트·파라미터는 `prompt_manifest.json`에서 가져온다. 코드에 문자열로 박지 않는다
 2. 제어 흐름만 Python 순수 함수로 옮긴다
 3. `app/engines/` 밖으로 새어나가지 않게 한다
-4. 팀원 브랜치를 직접 수정하지 않는다. 필요하면 요청한다
+4. 팀원 브랜치를 직접 수정하지 않는다
+
+### 이식 시 잘라내야 할 것 — PoC 인프라 의존
+
+PoC는 브라우저에서 단독 실행되므로 서버에는 필요 없는 인프라가 붙어 있다. **로직만 뽑고 아래는 전부 잘라낸다.**
+
+| PoC 의존 | 이유 | 서버에서는 |
+|---|---|---|
+| **Supabase** (`shared/db.js`, D213 이후 팀 공용 프로젝트) | 랩이 결과를 스스로 저장해야 했다 | **잘라낸다.** DB 단일 소유자는 Spring. FastAPI는 저장하지 않고 결과를 반환값으로 준다 |
+| Cloudflare Worker LLM 프록시 (`worker/nvidia-proxy.js`) | 브라우저에서 NVIDIA를 직접 부르면 CORS·키 노출 | 서버가 직접 호출. 레이트리밋·키로테이션 로직만 Python으로 이관 |
+| IndexedDB / `sessionStorage` (`shared/session-state.js`) | 새로고침 복원용 로컬 상태 | job 저장소·세션 상태로 대체 |
+| pdf.js (`docs/lab/pdfjs-loader.js`) | 브라우저 PDF 파싱 | 서버 PDF 라이브러리로 교체. **결과가 동일하지 않다** |
+| UI·타이머 (`createCountdownController` 등) | 학생 화면용 | 잘라낸다. 시간 제한은 Spring이 관리 |
+
+**Supabase 관련 보안 주의 (2026-07-22, PoC `e43d58c`/`c6a4b32`)**
+
+`feat/code_Q&A`가 팀 공용 Supabase 프로젝트를 쓰도록 바뀌었다. 그 프로젝트는 open signup(`disable_signup=false`, 도메인 제한 없음) + RLS read-all이라 다른 랩 사용자와 테이블을 공유한다. 보안 리뷰에서 cross-tenant 위험이 지적됐고, **팀원이 "랩에서는 감수한다"고 명시적으로 수용했다.**
+
+> 이 수용은 **브라우저 PoC 한정 결정이지 제품 결정이 아니다.** 서버 경로로 새어나가면 안 된다. 이식 과정에서 Supabase 클라이언트·테이블 스키마·인증 흐름을 따라 옮기지 않는다. 애초에 FastAPI는 저장하지 않으므로 옮길 것 자체가 없어야 정상이다 — Supabase 호출이 필요해 보이면 설계가 잘못된 것이니 멈추고 재검토한다.. 필요하면 요청한다
 
 **`_legacy/pipeline/feedback/`의 처분**
 
