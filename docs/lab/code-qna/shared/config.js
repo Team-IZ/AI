@@ -9,15 +9,34 @@
 // client code. Teammates still enter their own NVIDIA key/PAT and sign in with their own
 // email for per-member attribution.
 const LabConfig = (() => {
-  // D208: repointed to Team-IZ's own resources -- this branch no longer depends on
-  // popixoxipop-collab/Code_reviewer_with_feedback's shared Supabase project/Cloudflare
-  // Worker for either DB persistence or the NVIDIA proxy. See Readme.md's D208 note.
-  //   Supabase: reuses the `team-iz-curriculum-manager` project (ref tjmviobhxplucuwoibaj)
-  //   Team already created for a sibling tool -- this branch's runs/stage_events/artifacts/
-  //   presets tables + RLS policies were added to that SAME project (its existing
-  //   `members` table/policies/trigger were left untouched, only additive DDL was run).
-  const TEAM_SUPABASE_URL = "https://tjmviobhxplucuwoibaj.supabase.co";
-  const TEAM_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqbXZpb2JoeHBsdWN1d29pYmFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MDkzNDgsImV4cCI6MjEwMDE4NTM0OH0.rodmU-2ujq2ASsUtxPJyYMAPMGzHSPE-3nlIuNJYF8c";
+  // D208: repointed to Team-IZ's own resources for the NVIDIA proxy (Cloudflare Worker)
+  // -- unchanged, still team-iz-code-qna-proxy, see the DEFAULT_PROXY_URL comment below.
+  //
+  // D213 (2026-07-22): Supabase repointed AGAIN -- team-iz-curriculum-manager (D208) was a
+  // freshly-created, mostly-empty project (2 members). code-reviewer-pipeline-lab (the
+  // ORIGINAL popixoxipop-collab/Code_reviewer_with_feedback repo's own Supabase project)
+  // turned out to already hold this team's REAL usage history: 7 real members (confirmed
+  // by the user -- not dev/test accounts), 30 real p03 runs, 176 p02 runs, plus
+  // convenience views (p03_progress_view, p03_turns_view, runs_with_email,
+  // artifacts_with_email) team-iz-curriculum-manager never had.
+  //   WHY: this is where the team's actual interview history already lives -- pointing
+  //   code-qna at team-iz-curriculum-manager was creating a SECOND, mostly-empty,
+  //   disconnected history for the same team instead of continuing the real one.
+  //   COST: reintroduces a data dependency on a Supabase project namespaced/created for
+  //   the ORIGINAL repo's own Pipeline Lab -- NOT a cross-account/cross-org dependency
+  //   though (confirmed both projects sit under the same Supabase organization the user
+  //   already controls), so this is a scope/naming concern, not an infra-ownership one
+  //   like the Cloudflare Worker/Python-source D208 fix was. Team-IZ trainee runs are now
+  //   RLS-visible to (and mixed in the same tables as) whoever else uses that original
+  //   project's own Pipeline Lab -- acceptable here specifically because the 5 non-owner
+  //   members already there were confirmed to BE the real Team-IZ teammates this tool is
+  //   for, not unrelated third parties.
+  //   EXIT: if code-reviewer-pipeline-lab is ever retired/inaccessible, revert to a
+  //   dedicated Team-IZ-owned project (team-iz-curriculum-manager's runs/stage_events/
+  //   artifacts/presets tables are still there, just empty of code-qna activity since this
+  //   switch) by reverting these two constants and rerunning D208's Supabase schema note.
+  const TEAM_SUPABASE_URL = "https://oziaeqcvrkrqkhwrybfj.supabase.co";
+  const TEAM_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96aWFlcWN2cmtycWtod3J5YmZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMDA4MTksImV4cCI6MjA5OTU3NjgxOX0.hBgzs0V7Nw3WLB8_zNuPDfluYrqOH2_Dto1weQF5iKo";
 
   // Owner-deployed proxy (worker/nvidia-proxy.js), pre-filled as a default -- unlike the
   // Supabase values above this is NOT force-hardcoded: it's just a starting value in an
