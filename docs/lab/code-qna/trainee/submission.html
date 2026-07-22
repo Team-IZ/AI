@@ -38,6 +38,10 @@
   .toggle button.on { background: var(--c-primary); color: #fff; font-weight: 600; }
   .ghost { border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); border-radius: var(--r-md); padding: 8px 12px; font-size: var(--fs-xs); cursor: pointer; }
   .hint { font-size: var(--fs-xs); color: var(--c-text-3); margin-top: var(--sp-2); }
+  /* D214: GitHub PAT 발급 안내 링크 -- 이 페이지 전역 리셋(a { color: inherit;
+     text-decoration: none; })만으로는 클릭 가능한 요소라는 게 시각적으로 안 드러나서
+     별도 스타일 필요. */
+  .hint a { color: var(--c-primary); text-decoration: underline; }
   .cta { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 46px; background: var(--c-primary); color: #fff; border: 0; border-radius: var(--r-md); font-size: var(--fs-base); font-weight: 600; cursor: pointer; margin-top: var(--sp-2); }
   .cta:disabled { opacity: .5; cursor: default; }
   .cta.secondary-cta { background: var(--c-surface-2); color: var(--c-text); border: 1px solid var(--c-border-strong); height: 40px; margin-top: 0; }
@@ -92,7 +96,19 @@
       <div class="body">
         <div class="field"><label>NVIDIA API 키 (P03 검증 세션에서 사용)</label><input type="password" id="nvidia-key" placeholder="nvapi-..."></div>
         <div class="field"><label>프록시 URL</label><input type="text" id="proxy-url"></div>
-        <div class="field"><label>GitHub PAT (비공개 저장소만 필요)</label><input type="password" id="github-pat" placeholder="ghp_..."></div>
+        <div class="field">
+          <label>GitHub PAT (비공개 저장소만 필요)</label>
+          <input type="password" id="github-pat" placeholder="ghp_...">
+          <!-- D214: 팀원이 GitHub API 요청 한도(비인증 60회/시간) 초과 오류를 겪었을 때
+               "PAT을 입력하세요"라고만 안내하고 어디서/어떤 권한으로 발급하는지는 안
+               알려줘서 막막했던 문제 -- 발급 링크(scopes 파라미터로 'repo' 스코프
+               미리 체크됨) + 필요한 권한을 직접 명시. -->
+          <div class="hint">
+            발급: <a href="https://github.com/settings/tokens/new?scopes=repo&description=IZ-Get%20code-qna" target="_blank" rel="noopener noreferrer">github.com/settings/tokens/new</a>
+            (classic token) — <b>repo</b> 스코프 체크 후 생성. 공개 저장소만 쓴다면 <b>public_repo</b>만 체크해도 충분합니다.
+            비공개 저장소 접근뿐 아니라 GitHub API 요청 한도도 60회/시간 → 5,000회/시간으로 올려줍니다.
+          </div>
+        </div>
         <label class="remember"><input type="checkbox" id="remember-session" checked> 이 탭에서 기억하기(다음 페이지로 넘어갈 때 필요)</label>
         <div class="login-row">
           <button class="login-btn hidden" id="google-login-btn" type="button">Google로 로그인</button>
