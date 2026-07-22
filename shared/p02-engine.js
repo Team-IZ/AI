@@ -261,9 +261,15 @@ const P02Engine = (() => {
       ? new Date(resetTs * 1000).toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" })
       : null;
     const until = resetStr ? `${resetStr}까지는` : "한도가 리셋될 때까지(최대 1시간)";
+    // D214: the no-PAT branch used to say "PAT을 입력하면 해결됩니다" with no pointer to
+    // WHERE or WHICH permission -- a real team member hit this and had no idea where the
+    // field was or what scope to pick. This message renders as plain textContent (not
+    // HTML), so the URL is included as copy-pasteable text, not a clickable link -- the
+    // actual clickable link + scope guidance lives in submission.html's GitHub PAT field
+    // hint (D214), this just repeats the essential "where/what" at the point of failure.
     return new Error(pat
       ? `GitHub API 요청 한도 초과 (PAT 기준 5,000회/시간) — ${until} 재시도해도 계속 실패합니다`
-      : `GitHub API 요청 한도 초과 (비인증 IP당 60회/시간, 같은 네트워크 사용자끼리 공유) — ${until} 재시도해도 계속 실패합니다. GitHub PAT을 입력하면 한도가 5,000회/시간으로 늘어나 바로 해결됩니다`);
+      : `GitHub API 요청 한도 초과 (비인증 IP당 60회/시간, 같은 네트워크 사용자끼리 공유) — ${until} 재시도해도 계속 실패합니다. 위 "연결 설정" 패널의 GitHub PAT 칸에 토큰을 입력하면 한도가 5,000회/시간으로 늘어나 바로 해결됩니다 (발급: github.com/settings/tokens/new, repo 스코프 체크)`);
   }
 
   async function fetchGithubRepo(owner, repo, branch, pat, onProgress) {
