@@ -39,16 +39,22 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _handle_validation_error(
         request: Request, exc: RequestValidationError
     ) -> JSONResponse:
-        """pydantic 검증 실패를 계약 형태로
-        exc.errors()는 실패 목록. 여러 개여도 첫 번째만 메시지로 사용
-        호출자(Spring)이기에 전체 목록 필요 없음(사람이 굳이 볼 이유 없기에)
-        """
-        first = exc.errors()[0]
-        # loc = ("body", "source", "repoUrl") 같은 경로. 맨 앞 "body"는 빼고 이어붙이기
-        where = ".".join(str(part) for part in first["loc"][1:])
-        # 본문 자체가 JSON이 아니면 loc이 필드 경로가 아니라 문자 위치라 의미가 없다
-        message = f"{where}: {first['msg']}" if first["type"] != "json_invalid" else first["msg"]
         return JSONResponse(
             status_code=422,
-            content=_body("INVALID_REQUEST", message, False),
+            content=_body("INVALID_REQUEST", format_validation_message(exc.errors()), False),
         )
+        
+
+def format_validation_message(errors: list) -> str:
+    """ pydantic 검증 실패 목록에서 메시지 한 줄 만들기.
+    
+    핸들러(자동 검증)와 라우터(수동 검증) 양쪽이 같은 형식을 내도록
+    조립을 여기 한곳에 두기.
+    """
+    first = errors[0]
+    # loc = ("body", "source", "repoUrl") 같은 경로. 맨 앞 "body"는 빼고 이어붙이기
+    where = ".".join(str(part) for part in first["loc"][1:])
+    # 본문 자체가 JSON 아니면 loc이 필드 경로가 아니라 문자 위치라 의미가 없다
+    if first["type"] == "json_invalid":
+        return first["msg"]
+    return f"{where}: {first['msg']}"
