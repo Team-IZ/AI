@@ -79,3 +79,40 @@ grant all on all tables in schema pdf_analysis to anon, authenticated;
 grant all on all sequences in schema pdf_analysis to anon, authenticated;
 alter default privileges in schema pdf_analysis grant all on tables to anon, authenticated;
 alter default privileges in schema pdf_analysis grant all on sequences to anon, authenticated;
+
+-- D3 (2026-07-22): browsing raw unit_map JSON in the Table Editor's `artifacts` grid
+-- (public.artifacts also holds P02 findings/P01 questions rows, mixed together, content
+-- column truncated to a preview) isn't practical for scanning curriculum content -- same
+-- motivation as D175/D177's p01_questions_view for the shared public.runs/artifacts.
+-- One row per unit (not per run) to match p03_turns_view's per-turn granularity, since
+-- "unit" is this domain's natural browsing grain, same as "turn" is for P03. Lives in
+-- public (not pdf_analysis) schema deliberately, so it shows up in the Table Editor
+-- alongside p01_questions_view/p03_turns_view without switching the schema dropdown --
+-- already applied live via the Management API (query pdf_analysis.runs/artifacts +
+-- public.members across schemas, which plain SQL views do freely).
+create or replace view public.pdf_analysis_units_view as
+select
+  r.id as run_id,
+  m.email,
+  m.display_name,
+  coalesce(r.input_meta->>'source_filename', '(파일명 미기록)') as source_material,
+  r.model,
+  r.status,
+  r.started_at,
+  unit.key as unit_id,
+  unit.value->>'unit_title' as unit_title,
+  (select min(p::int) from jsonb_array_elements_text(unit.value->'source_pages') p) as page_start,
+  (select max(p::int) from jsonb_array_elements_text(unit.value->'source_pages') p) as page_end,
+  coalesce(jsonb_array_length(unit.value->'concepts'), 0) as concept_count,
+  coalesce(jsonb_array_length(unit.value->'code_examples'), 0) as code_example_count,
+  coalesce(jsonb_array_length(unit.value->'cautions'), 0) as caution_count,
+  (select string_agg(c->>'name', ', ' order by ord)
+     from jsonb_array_elements(unit.value->'concepts') with ordinality as t(c, ord)) as concept_names
+from pdf_analysis.runs r
+join pdf_analysis.artifacts a on a.run_id = r.id and a.kind = 'unit_map'
+left join public.members m on m.id = r.member_id
+cross join lateral jsonb_each(a.content) as unit(key, value)
+where r.pipeline = 'p01'
+order by r.started_at desc, unit.key;
+
+grant select on public.pdf_analysis_units_view to authenticated;
