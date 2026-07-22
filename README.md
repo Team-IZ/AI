@@ -12,7 +12,19 @@ React는 FastAPI를 직접 호출하지 않는다. **FastAPI의 호출자는 Spr
 
 **FastAPI는 DB를 갖지 않는다.** 결과를 응답이나 콜백으로 돌려줄 뿐이고 저장은 전부 Spring이 한다. 코드 원문도 임시 작업공간에만 두고 TTL로 지운다.
 
-> **상태: 재구축 중.** 기존 구현은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났고, 지금은 빈 FastAPI 골격부터 다시 쌓는 중이다. 진행 상황은 `PLAN_FASTAPI_MIGRATION.md`.
+> **상태: 재구축 중 — 9단계 중 4단계 완료 (엔드포인트 3/9, 16 passed).**
+> 기존 구현은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났고, 지금은 빈 FastAPI 골격부터 다시 쌓는 중이다.
+> 단계별 상세·미결 항목은 **`PLAN_FASTAPI_MIGRATION.md`**가 단일 기준이다.
+
+### 지금 동작하는 것
+
+```
+GET  /api/health                 서비스 상태. 인증 면제
+POST /api/v0/analyses            분석 요청. JSON + multipart(ZIP), 멱등성 키 처리
+GET  /api/v0/analyses/{job_id}   분석 결과 조회. 지금은 고정 스텁 응답
+```
+
+인증(`X-Internal-Key`), 계약 에러 형식, camelCase 직렬화, Swagger 문서화까지 붙어 있다. **백엔드는 이 3개에 대해 지금 바로 붙여볼 수 있다.**
 
 ---
 
@@ -163,19 +175,21 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 ### 쌓는 순서
 
-| # | 만드는 것 | 배우는 것 |
-|---|---|---|
-| 1 | `main.py` + `health.py` + `pytest.ini` | 앱 생성, `APIRouter` |
-| 2 | `config.py` + `deps.py` | `Settings`, `Depends`, `Header` |
-| 3 | `schemas/analysis.py` + `POST /analyses` 스텁 | pydantic 모델, 202, 422 |
-| 4 | `GET /analyses/{job_id}` 스텁 | 경로 파라미터, `response_model`, 404 |
-| 5 | `engines/base.py` + `stub.py` | Protocol, 의존성 주입 |
-| 6 | job 수명주기 | `BackgroundTasks`, 상태 전이 |
-| 7 | `sessions.py` 4개 스텁 | 세션 리소스 |
-| 8 | `gradings.py` 2개 스텁 | 9개 완성 |
-| 9 | 팀원 엔진 이식 | 실제 모듈화 |
+| # | 만드는 것 | 배우는 것 | |
+|---|---|---|---|
+| 1 | `main.py` + `health.py` + `pytest.ini` | 앱 생성, `APIRouter` | ✅ |
+| 2 | `config.py` + `deps.py` | `Settings`, `Depends`, `Header` | ✅ |
+| 3 | `schemas/` + `POST /analyses` 스텁 | pydantic 모델, 202, 422, 예외 핸들러, multipart | ✅ |
+| 4 | `GET /analyses/{job_id}` 스텁 | 경로 파라미터, `response_model`, 404 | ✅ |
+| 5 | `engines/base.py` + `stub.py` | Protocol, 의존성 주입 | ← 다음 |
+| 6 | job 수명주기 | `BackgroundTasks`, 상태 전이 | |
+| 7 | `sessions.py` 4개 스텁 | 세션 리소스 | |
+| 8 | `gradings.py` 2개 스텁 | 9개 완성 | |
+| 9 | 팀원 엔진 이식 | 실제 모듈화 | |
 
 1~8은 엔진 없이 전부 가능하다. 8단계가 끝나면 백엔드가 붙일 수 있다.
+
+구간이 셋으로 갈린다. **1~4**는 분석 API 하나로 FastAPI 기본기를 훑는 구간(완료). **5~6**은 엔진 교체 지점과 비동기 job이라는 뼈대를 세우는 구간이고 이 계획에서 제일 무겁다. **7~8**은 그 위에 세션·채점을 얹는 반복 작업이라 빠르다. **9**부터는 FastAPI 공부가 아니라 팀원 JS 코드를 Python으로 옮기는 작업이며 팀원 진행에 따라간다.
 
 ### 검증 방법
 

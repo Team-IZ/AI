@@ -15,11 +15,19 @@
 
 | 항목 | 상태 |
 |---|---|
-| 완료 단계 | 1단계(앱 골격) · 2단계(설정·인증) |
-| 엔드포인트 | 1 / 9 — `GET /api/health` |
-| 테스트 | 2 passed |
+| 완료 단계 | **1~4** (앱 골격 · 설정·인증 · 분석 요청 · 분석 조회) |
+| 엔드포인트 | **3 / 9** |
+| 테스트 | **16 passed** |
 | 백엔드 계약 | C1~C6 확정(2026-07-22) — §3 |
-| 다음 작업 | **3단계 — `POST /api/v0/analyses` 스텁** |
+| 다음 작업 | **5단계 — 엔진 소켓(`app/engines/`)** |
+
+살아 있는 엔드포인트:
+
+```
+GET  /api/health                      인증 면제
+POST /api/v0/analyses                 JSON + multipart(ZIP) 양쪽. 멱등성 키 처리
+GET  /api/v0/analyses/{job_id}        고정 결과 반환. 모르는 id는 404
+```
 
 ### 작업 이력
 
@@ -42,6 +50,8 @@
 | 1단계 완료 | `main.py`·`api/health.py`·`pytest.ini`·`tests/test_health.py`. `GET /api/health` 200 |
 | 2단계 완료 | `config.py`·`api/deps.py`·`tests/test_auth.py`. `X-Internal-Key` 인증, production 빈 키 기동 거부 확인 |
 | 백엔드 계약 합의 | C1~C6 확정(§3). 질문지는 `../qna/2026-07-22/backend-api-questions.md` |
+| 3단계 완료 | `schemas/common.py`(camelCase 기반)·`schemas/analysis.py`·`api/errors.py`·`api/analyses.py`. JSON·multipart 양쪽 수용, 멱등성 키 동작 확인(같은 키 = 같은 `jobId`) |
+| 4단계 완료 | `GET /analyses/{job_id}` + 응답 스키마. 404 `JOB_NOT_FOUND`, 타임스탬프 ISO 8601 UTC 확인 |
 
 **이 과정에서 드러난 사실 3개**
 
@@ -71,7 +81,7 @@
 
 각 단계는 **그 자체로 동작하고 커밋 가능한 단위**다. 한 단계에 FastAPI 개념 하나씩 붙인다.
 
-### 1단계 — 앱 골격
+### 1단계 — 앱 골격 ✅
 
 | | |
 |---|---|
@@ -80,7 +90,7 @@
 | DoD | `uvicorn app.main:app`으로 뜨고 `GET /api/health`가 200. `/docs`에 노출 |
 | 주의 | `pytest.ini`에 `norecursedirs = _legacy .venv` 필수 — 없으면 `_legacy/tests/`를 수집해 깨진다 |
 
-### 2단계 — 설정과 인증
+### 2단계 — 설정과 인증 ✅
 
 | | |
 |---|---|
@@ -89,7 +99,7 @@
 | DoD | `X-Internal-Key` 없거나 틀리면 401. `/api/health`는 면제 |
 | 결정 | 키 미설정(빈 값)이면 검증을 건너뛴다 — 로컬 개발 편의. 운영에서는 반드시 설정 |
 
-### 3단계 — 분석 요청 스텁
+### 3단계 — 분석 요청 스텁 ✅
 
 | | |
 |---|---|
@@ -100,7 +110,7 @@
 | 주의 | `method=ZIP_WITH_GITLOG`는 multipart라 JSON과 요청 형태가 다르다. 한 오퍼레이션에서 Body와 Form을 섞을 수 없으므로 라우터가 Content-Type으로 분기한다 |
 | 주의 | `Idempotency-Key` 헤더를 받아 기억하는 자리를 여기서 만든다(값은 `submissionId:attemptNo`). 같은 키 재요청은 처음 `jobId`를 202로 반환 |
 
-### 4단계 — 분석 조회 스텁
+### 4단계 — 분석 조회 스텁 ✅
 
 | | |
 |---|---|
@@ -108,7 +118,7 @@
 | 배우는 것 | 경로 파라미터, `response_model`, 404 처리 |
 | DoD | `GET /api/v0/analyses/{jobId}`가 고정 결과 반환. 모르는 id는 404 |
 
-### 5단계 — 엔진 소켓
+### 5단계 — 엔진 소켓 ← 다음
 
 | | |
 |---|---|
@@ -225,6 +235,28 @@ submission.method          GITHUB_URL, ZIP_WITH_GITLOG          ← 기존 AI와
 | `commit_attribution` | `commit_hash`, `authored_at`, `changed_line_count`, `contribution_ratio` |
 | `file_attribution` | `path`, `attribution_type`, `commit_count`, `changed_line_count`, `changed_function_count`, `confidence` |
 | `decision_point` | `source_path`, `line_start`, `line_end`, `evidence_hash`, `priority`, `extractor_version` |
+
+### `findings[]`의 결정권 — 누가 무엇을 정하는가
+
+`findings[]`는 DB `decision_point`(+ `dp_reference`) 테이블에 대응한다. **"명세가 없다"가 아니라 층마다 결정권자가 다르다.**
+
+| 항목 | 결정권 | 상태 |
+|---|---|---|
+| 필드 이름·타입·필수 여부 | **DB 명세**(테이블정의서 v06) | ✅ 확정 |
+| `status` 허용값 | DB CHECK | ✅ `CANDIDATE/READY/USED/SKIPPED/INVALID` |
+| `type`·`referenceType` 값 문자열 | AI 초안 → 백엔드 승인 | ❓ 카탈로그 자체가 없음(질문지 B-3) |
+| `priority` 산출 로직, 무엇을 finding으로 볼지 | **AI 팀원(엔진)** | 엔진 종속 |
+| 엔진 출력 → DB 스키마 매핑 | **이 브랜치** | 9단계 |
+| JSON 표기·구조 확정 | **이 브랜치** | ✅ |
+
+**즉 스텁의 `findings[]`는 `decision_point` 컬럼 이름을 그대로 써야 한다.** 임의로 지은 이름(`findingId` 등)을 두면 백엔드가 그걸로 DTO를 만들고 나중에 전부 갈아엎게 된다.
+
+```
+dpId, type, status, priority, focusCode, sourcePath, lineStart, lineEnd,
+evidenceHash, extractorVersion, references[{path, lineStart, lineEnd, evidenceHash, referenceType}]
+```
+
+**9단계에서 부딪힐 위험**: `line_start`·`line_end`가 NOT NULL인데, 구조적 finding(파일 간 관계 등)은 특정 줄에 대응하지 않는다. 옛 구현에도 "Tier-A finding은 line_start=null" 문제가 기록돼 있었다. **DB가 못 받는 값을 엔진이 낼 수 있다** — 그때 AI 팀원과 협의한다.
 
 ### 백엔드 확인 대기 목록
 
