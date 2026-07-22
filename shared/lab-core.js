@@ -149,8 +149,12 @@ const LabApp = (() => {
   // Promoted to shared.default_model for both P01 and P03 on this evidence, not
   // speculation.
   const MODEL_CHOICES = [
-    { id: "stepfun-ai/step-3.5-flash", label: "step-3.5-flash", tier: "good",
-      note: "기본값(D183) · D120의 '0/50'은 구파이프라인 reasoning_content 버그로 확정(D-G 이론을 실측 확인) · 재검증: P03 tool_calls 1.5-3.9s 3/3, P01 JSON모드 4.1-5.3s 3/3(reasoning_content 경유, 폴백 정상 동작)." },
+    // D215 (2026-07-22): step-3.5-flash -> step-3.7-flash, mirrored from app.js's own
+    // MODEL_CHOICES (this file is that extracted subset) -- see app.js's D215 comment
+    // for the full WHY/COST/EXIT. Verified via a real NVIDIA /v1/models call that
+    // step-3.7-flash is live before making this change.
+    { id: "stepfun-ai/step-3.7-flash", label: "step-3.7-flash", tier: "good",
+      note: "기본값(D215, 2026-07-22: step-3.5-flash가 provider deprecation 예정이라 교체 -- 3.7 자체 성능/재현성은 아직 재검증 안 됨, D183의 3.5 실측치를 그대로 승계한 상태). D120의 '0/50'은 구파이프라인 reasoning_content 버그로 확정(D-G 이론을 실측 확인) · 3.5 재검증 당시: P03 tool_calls 1.5-3.9s 3/3, P01 JSON모드 4.1-5.3s 3/3(reasoning_content 경유, 폴백 정상 동작)." },
     { id: "mistralai/mistral-medium-3.5-128b", label: "mistral-medium-3.5", tier: "unverified",
       note: "P01 기준 미검증 · P03 종합 2위(0.749) · D183 부수측정: 동일 4000자 프롬프트 13.2-17.3s(qwen 대비 5-6배 빠름, qwen과의 상대비교로만 측정, 단독 신뢰도 검증은 아직 부족)." },
     { id: "qwen/qwen3-next-80b-a3b-instruct", label: "qwen3-next-80b", tier: "unverified",
