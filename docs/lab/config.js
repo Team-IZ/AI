@@ -9,21 +9,21 @@
 // data; the anon key is meant to ship in client code. Teammates still enter their own
 // NVIDIA key/PAT and sign in with their own email for per-member attribution.
 //
-// *** INDEPENDENT TEAM-IZ DEPLOYMENT (2026-07-21) ***
-// TEAM_SUPABASE_URL/TEAM_SUPABASE_ANON_KEY + DEFAULT_PROXY_URL below now point at a
-// dedicated Supabase project ("team-iz-curriculum-manager") and Cloudflare Worker
-// ("team-iz-nvidia-proxy") -- separate resources from popixoxipop-collab's own shared
-// Pipeline Lab infra, though currently under the same personal Cloudflare/Supabase
-// accounts (popixoxipop@gmail.com) since this repo doesn't have its own cloud accounts
-// yet. To re-point this at a genuinely different account later: create a Supabase
-// project there, apply experiments/web_lab/members_schema.sql then
-// pdf_analysis_schema.sql, add "pdf_analysis" to its exposed PostgREST schemas, deploy
-// worker/ with `wrangler deploy` (own KV namespace + queue -- see wrangler.toml's own
-// note on why those can't be reused across accounts), then replace the values below.
-// Full steps: this folder's README.md, "자체 배포" section.
+// *** DB: back on the shared popixoxipop-collab project (2026-07-22) ***
+// TEAM_SUPABASE_URL/TEAM_SUPABASE_ANON_KEY point at "code-reviewer-pipeline-lab" (ref
+// oziaeqcvrkrqkhwrybfj) -- the SAME project Code_reviewer_with_feedback's own docs/lab/
+// pages use, reusing its existing `pdf_analysis` schema/tables/RLS (applied back when
+// curriculum-manager was still part of that repo, before this branch existed) and its
+// already-working Google OAuth (7 real members already sign in there). A short-lived
+// dedicated project ("team-iz-curriculum-manager") existed briefly (2026-07-21/22) but
+// never accumulated any real data (confirmed via the Management API before switching
+// back), so nothing was migrated -- just re-pointed.
+// DEFAULT_PROXY_URL below is UNCHANGED and still points at Team-IZ's own dedicated
+// Cloudflare Worker ("team-iz-nvidia-proxy", worker/ in this repo) -- this switch was
+// scoped to the DB only, not the NVIDIA proxy.
 const LabConfig = (() => {
-  const TEAM_SUPABASE_URL = "https://tjmviobhxplucuwoibaj.supabase.co";
-  const TEAM_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRqbXZpb2JoeHBsdWN1d29pYmFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ2MDkzNDgsImV4cCI6MjEwMDE4NTM0OH0.rodmU-2ujq2ASsUtxPJyYMAPMGzHSPE-3nlIuNJYF8c";
+  const TEAM_SUPABASE_URL = "https://oziaeqcvrkrqkhwrybfj.supabase.co";
+  const TEAM_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96aWFlcWN2cmtycWtod3J5YmZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMDA4MTksImV4cCI6MjA5OTU3NjgxOX0.hBgzs0V7Nw3WLB8_zNuPDfluYrqOH2_Dto1weQF5iKo";
 
   // Team-IZ's own deployed proxy (worker/nvidia-proxy.js, included in this repo -- see
   // worker/wrangler.toml), pre-filled as a default -- unlike the Supabase values above
