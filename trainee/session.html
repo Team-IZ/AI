@@ -269,6 +269,17 @@
     chatBody.scrollTop = chatBody.scrollHeight;
   }
 
+  // D212: renders a resumed run's already-answered turns as the exact same chat-bubble
+  // shapes onQuestion()/onAnswerRecorded() draw for a live turn -- otherwise a trainee
+  // resuming after L1+L2 would see the chat start abruptly at L3 with no visible history,
+  // even though the underlying data (transcript, grading, dbRun) is already using it.
+  function renderResumedTranscript(transcript) {
+    transcript.forEach((t) => {
+      appendBubble("q", t.question, `◆ 검증 질문 · ${LEVEL_LABEL[t.level] || t.level.toUpperCase()}`);
+      appendBubble("a", t.answer);
+    });
+  }
+
   function showTypingIndicator() {
     if (document.getElementById("typing-indicator")) return;
     const chatBody = document.getElementById("chat-body");
@@ -313,6 +324,12 @@
     await LabApp.loadManifest();
     document.getElementById("ctx-label").textContent = submission.finding.id || submission.finding.file || "finding";
     document.getElementById("req-text").textContent = submission.finding.finding || "";
+    // D212: tell the trainee up front that starting will continue an earlier attempt,
+    // not begin a fresh one -- avoids surprise when the chat starts mid-level instead of L1.
+    if (submission.resume) {
+      document.querySelector("#start-gate p").textContent =
+        `이전에 답한 ${submission.resume.transcript.length}턴을 이어서 진행합니다. 위에서 모델을 확인한 뒤 시작하세요.`;
+    }
 
     let activeCodeIdx = 0;
     function rerenderCode() { renderCodeTabs(submission.codeContexts, activeCodeIdx, (i) => { activeCodeIdx = i; rerenderCode(); }); }
@@ -475,9 +492,15 @@
     // gate (see the .start-gate CSS comment) -- not automatically on page load anymore.
     document.getElementById("start-btn").addEventListener("click", async () => {
       document.getElementById("start-gate").remove();
+      // D212: show the trainee what they already answered before continuing -- see
+      // renderResumedTranscript()'s comment. No-op (empty array) for a fresh interview.
+      if (submission.resume) renderResumedTranscript(submission.resume.transcript);
       try {
         const result = await P03Engine.run(
-          { finding: submission.finding, codeContexts: submission.codeContexts, model: selectedModel, repoRef: submission.repoRef, zipFiles: zipFileMap },
+          {
+            finding: submission.finding, codeContexts: submission.codeContexts, model: selectedModel,
+            repoRef: submission.repoRef, zipFiles: zipFileMap, resume: submission.resume,
+          },
           hooks
         );
         // Page-level enrichment for result.html's display only -- P03Engine.run()'s return

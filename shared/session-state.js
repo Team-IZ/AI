@@ -63,23 +63,27 @@ const SessionState = (() => {
   // finding: the P02 finding object as-is. codeContexts: [{path, content}], already
   // resolved+capped by P02Engine.resolveConnectableFile/MAX_CONNECT_FILES -- never the
   // full files map. repoRef (D200): optional {owner, repo, branch}, null for ZIP uploads.
-  function saveSubmission({ finding, codeContexts, repoRef }) {
-    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: null, repoRef: repoRef || null });
+  // resume (D212): optional {runId, transcript}, null for a fresh interview -- see
+  // p03-engine.js's D212 comment. Small enough (max 4 turns of text) for plain
+  // sessionStorage, unlike D210's zipFiles which needed IndexedDB.
+  function saveSubmission({ finding, codeContexts, repoRef, resume }) {
+    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: null, repoRef: repoRef || null, resume: resume || null });
   }
 
   // Optional 3rd field so submission.html can also hand session.html the model chosen in
   // its own connection-settings panel, if the page wires it that way; session.html falls
   // back to the manifest default itself if this is absent (same fallback the original
   // renderInput() did before selecting a model).
-  function saveSubmissionWithModel({ finding, codeContexts, model, repoRef }) {
-    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: model || null, repoRef: repoRef || null });
+  function saveSubmissionWithModel({ finding, codeContexts, model, repoRef, resume }) {
+    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: model || null, repoRef: repoRef || null, resume: resume || null });
   }
 
-  // Returns { finding, codeContexts, model, repoRef } or null if nothing valid was saved
-  // (direct navigation to session.html, expired/cleared sessionStorage, or a malformed
-  // value) -- the page must fall back to a "제출 단계로 돌아가세요" state in that case, not
-  // crash. D200: repoRef defaults to null for rows saved before this field existed (no
-  // migration needed -- `v.repoRef` is simply `undefined` on those, falls through below).
+  // Returns { finding, codeContexts, model, repoRef, resume } or null if nothing valid was
+  // saved (direct navigation to session.html, expired/cleared sessionStorage, or a
+  // malformed value) -- the page must fall back to a "제출 단계로 돌아가세요" state in that
+  // case, not crash. D200: repoRef defaults to null for rows saved before this field
+  // existed (no migration needed -- `v.repoRef` is simply `undefined` on those, falls
+  // through below). D212: same null-safe fallback for `resume`.
   function loadSubmission() {
     const v = safeGet(SUBMISSION_KEY);
     if (!v || typeof v !== "object" || !v.finding) return null;
@@ -88,6 +92,7 @@ const SessionState = (() => {
       codeContexts: Array.isArray(v.codeContexts) ? v.codeContexts : [],
       model: v.model || null,
       repoRef: (v.repoRef && v.repoRef.owner && v.repoRef.repo) ? v.repoRef : null,
+      resume: (v.resume && v.resume.runId && Array.isArray(v.resume.transcript)) ? v.resume : null,
     };
   }
 

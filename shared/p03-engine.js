@@ -711,13 +711,18 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
   //          getAnswer({level,question}) -> Promise<string>,
   //          onAnswerRecorded({level,question,answer,classification}),
   //          countdown: {start(totalMinutes), resume(), pause(), stop()} }
+  // D212: new trailing `resume` ({runId, transcript} or null) -- reconstructed by
+  // submission.html via LabDB.findResumableRun()/loadRunTurns() when the trainee chooses
+  // to continue an earlier running/abandoned/error'd run for this same finding instead of
+  // starting over. `null` (the common case) is a fully inert no-op, byte-identical to
+  // pre-D212 behavior.
   async function run(input, hooks) {
     // D200: repoRef ({owner,repo,branch} or null for ZIP uploads) enables the live
     // fact-check tool-loop in generateQuestion() -- see its D200 comment.
     // D210: zipFiles ({path: content} loaded from IndexedDB via SessionState.loadZipFileMap(),
     // or null) is the ZIP-upload equivalent -- see generateQuestion()'s D210 comment for how
     // the two sources are picked between.
-    const { finding, codeContexts, model, repoRef, zipFiles } = input;
+    const { finding, codeContexts, model, repoRef, zipFiles, resume } = input;
     if (!finding) {
       hooks.onStatus("먼저 finding을 불러오고 선택하세요", "error");
       throw new Error("먼저 finding을 불러오고 선택하세요");
@@ -768,8 +773,16 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         hooks.onProgress("⚠ 저장소/파일 정보 없음(이전 버전에서 스캔했거나 파일 캐시 저장 실패) — 이번 인터뷰는 실시간 코드 재확인 없이 저장된 스니펫만으로 진행됩니다");
       }
 
-      const transcript = [];
-      let verdict = "exhausted_at_cap";
+      // D212: resumed turns (already answered+classified+logged in a prior attempt at
+      // this same finding) seed `transcript` directly -- everything downstream (question
+      // generation's transcript-derived context, grading, the turn loop below) already
+      // treats `transcript` as "every turn that has actually happened", so this needed no
+      // separate code path, just a non-empty starting value.
+      const transcript = (resume && Array.isArray(resume.transcript)) ? resume.transcript.slice() : [];
+      // D212: a resumed transcript may already contain a `defended` turn if the trainee's
+      // browser crashed/closed between classifying that answer and finishing grading --
+      // don't re-run the turn loop in that case, go straight to grading below.
+      let verdict = transcript.some((t) => t.classification && t.classification.verdict === "defended") ? "defended" : "exhausted_at_cap";
       const maxTurns = LabApp.resolveParam("p03", "p03-6", "max_turns") || 4;
       const totalTurns = Math.min(LEVELS.length, maxTurns);
 
@@ -778,7 +791,13 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       // WHY/COST/EXIT. Failure here is non-fatal to the actual verification flow (same
       // "DB 미설정" tone as maybeSaveRun below) -- a team member who can't reach Supabase
       // for a moment should still be able to answer questions, just without persistence.
-      if (LabDB.isConfigured()) {
+      // D212: resuming reuses the EXISTING run row (submission.html already looked it up
+      // via findResumableRun()) instead of opening a new one -- logTurn()/saveRun() below
+      // are completely unchanged, they just keep writing to this same run_id.
+      if (resume && resume.runId) {
+        dbRun = { id: resume.runId };
+        hooks.onProgress(`이전 진행 상황 복원 (${transcript.length}턴 완료됨) — 이어서 진행합니다`);
+      } else if (LabDB.isConfigured()) {
         try {
           dbRun = await LabDB.startRun({ pipeline: "p03", model, input_meta: { finding_id: finding.id }, overrides: {} });
         } catch (e) {
@@ -803,7 +822,14 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         }
       }
 
-      for (let i = 0; i < totalTurns; i++) {
+      // D212: `i` starts at `transcript.length` (0 for a fresh run, unchanged) instead of
+      // always 0 -- resumed turns already occupy indices 0..transcript.length-1, so this
+      // naturally picks up at the next unanswered level without re-asking anything. If a
+      // resumed transcript already reached `defended`, `verdict` was already set to that
+      // above and this loop is skipped entirely (re-entering it would re-ask a level the
+      // trainee already successfully defended, past this session's own "loop breaks on
+      // defended" rule).
+      for (let i = transcript.length; verdict !== "defended" && i < totalTurns; i++) {
         const level = LEVELS[i];
         const genAttemptInfo = await resolveMaxAttempts();
         if (genAttemptInfo.elevated) hooks.onProgress(`⚠ 현재 트래픽 ${genAttemptInfo.count}/${genAttemptInfo.threshold}${genAttemptInfo.scopeNote} -- 재시도 여유를 ${ELEVATED_MAX_ATTEMPTS}회로 늘려서 요청`);
