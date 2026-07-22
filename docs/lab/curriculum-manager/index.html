@@ -508,6 +508,14 @@
     return state.curricula.find((c) => c.id === state.selectedId) || null;
   }
 
+  // 유닛이 한 페이지에만 걸치면 "p.32–32"가 아니라 "p.32"로 (동일 페이지 범위 표시는
+  // 중복 정보라 사용자가 지적함). structure/mapping 탭 둘 다 이 함수로 통일.
+  function formatPageRange(pages) {
+    if (!pages || !pages.length) return "—";
+    const min = Math.min(...pages), max = Math.max(...pages);
+    return min === max ? `p.${min}` : `p.${min}–${max}`;
+  }
+
   function renderStructureTab() {
     const c = currentCurriculum();
     const tbody = document.getElementById("structure-tbody");
@@ -537,8 +545,7 @@
       return;
     }
     tbody.innerHTML = units.map(([unitId, unit]) => {
-      const pages = unit.source_pages || [];
-      const pageRange = pages.length ? `p.${Math.min(...pages)}–${Math.max(...pages)}` : "—";
+      const pageRange = formatPageRange(unit.source_pages);
       const kw = (unit.concepts || []).map((cn) => `<span class="kw">${LabApp.escapeHtml(cn.name)}</span>`).join("");
       return `<tr>
         <td class="name"><b>${LabApp.escapeHtml(unit.unit_title || unitId)}</b></td>
@@ -589,8 +596,7 @@
     function group(label, items) {
       if (!items || !items.length) return "";
       const cards = items.map((it) => {
-        const pages = it.source_pages || [];
-        const pg = pages.length ? `p.${Math.min(...pages)}–${Math.max(...pages)}` : "—";
+        const pg = formatPageRange(it.source_pages);
         return `<div class="recocard">
           <div class="rmod">${LabApp.escapeHtml(it.name || "")}<span class="rpg">${pg}</span></div>
           ${it.summary ? `<div class="rsum">${LabApp.escapeHtml(it.summary)}</div>` : ""}
