@@ -105,6 +105,38 @@ const LabLLM = (() => {
     throw new Error(`작업이 ${Math.round(MAX_POLL_MS / 60000)}분 안에 끝나지 않음 (job_id=${jobId})`);
   }
 
+  // D217 (2026-07-22): reasoning_effort is a real, documented Chat Completions parameter
+  // for some models (StepFun's step-3.7-flash supports low/medium/high, default medium)
+  // but is NOT universally accepted -- confirmed live: sending it to
+  // mistralai/mistral-medium-3.5-128b returns a hard HTTP 400 ("reasoning_effort=low is
+  // not supported by Mistral models. Supported values are: ['none', 'high']"), not a
+  // silently-ignored extra field. So this cannot be a blanket parameter on every call.
+  //   WHY: step-3.7-flash (the default model as of D215, since step-3.5-flash is being
+  //   deprecated by the provider) measured significantly slower/less reliable than 3.5 was
+  //   for the same P01/P03 tasks -- one plain call left its whole answer in
+  //   reasoning_content only, got truncated by max_tokens before ever reaching the
+  //   content field. "low" effort at least avoided that specific failure mode in testing
+  //   (content populated directly instead). Centralized here (one model->value map) in
+  //   llm.js's request layer instead of pushed out to every P01/P03 call site, so adding
+  //   another reasoning model later is a one-line addition here, not a change to every
+  //   caller -- and no caller needs to know this quirk exists at all.
+  //   COST: does NOT close the latency gap -- a real "low"-effort call still took 39s
+  //   (vs step-3.5-flash's <6s for the same prompt) and a second attempt timed out
+  //   entirely at 120s in testing. This only avoids the truncation failure mode, not the
+  //   underlying slowness; our existing generous per-attempt timeout + retry budget
+  //   (worker/nvidia-proxy.js's 600s/attempt, MAX_ATTEMPTS=3) is what actually absorbs
+  //   the rest.
+  //   EXIT: if a future model needs its own reasoning_effort value (e.g. Mistral's own
+  //   "none"/"high" if we ever want to tune it down there too), add it to this map --
+  //   never send a value a model doesn't list as supported, confirmed here to be a hard
+  //   error, not a no-op.
+  const REASONING_EFFORT_BY_MODEL = {
+    "stepfun-ai/step-3.7-flash": "low",
+  };
+  function reasoningEffortFor(model) {
+    return REASONING_EFFORT_BY_MODEL[model];
+  }
+
   async function chatJSON({ model, messages, maxTokens, temperature = 0.0, jsonMode = true, maxAttempts }) {
     const proxyUrl = LabConfig.get("proxy-url");
     const apiKey = LabConfig.get("nvidia-key");
@@ -112,6 +144,8 @@ const LabLLM = (() => {
       throw new Error("NVIDIA API 키와 프록시 URL을 먼저 입력하세요 (상단 연결 설정).");
     }
     const body = { model, messages, max_tokens: maxTokens, temperature };
+    const reasoningEffort = reasoningEffortFor(model);
+    if (reasoningEffort) body.reasoning_effort = reasoningEffort;
     if (jsonMode) body.response_format = { type: "json_object" };
     const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts });
     const choice = data.choices && data.choices[0] && data.choices[0].message;
@@ -147,6 +181,10 @@ const LabLLM = (() => {
       tools: [{ type: "function", function: { name: tool.name, description: tool.description, parameters: tool.input_schema } }],
       tool_choice: { type: "function", function: { name: tool.name } },
     };
+    // D217: see its comment above chatJSON -- reasoning_effort only for models that
+    // actually support it, never sent blindly.
+    const reasoningEffort = reasoningEffortFor(model);
+    if (reasoningEffort) body.reasoning_effort = reasoningEffort;
     const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts });
     const choice = data.choices && data.choices[0] && data.choices[0].message;
     const call = choice && choice.tool_calls && choice.tool_calls.find((c) => c.function.name === tool.name);
@@ -225,6 +263,10 @@ const LabLLM = (() => {
         tools: forced ? [terminalDef] : mustCallNonTerminal ? nonTerminalDefs : toolDefs,
         tool_choice: forced ? { type: "function", function: { name: terminalToolName } } : "auto",
       };
+      // D217: see chatJSON's comment above -- reasoning_effort only for models that
+      // actually support it, never sent blindly (e.g. Mistral rejects it with HTTP 400).
+      const reasoningEffort = reasoningEffortFor(model);
+      if (reasoningEffort) body.reasoning_effort = reasoningEffort;
       const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts });
       const choice = data.choices && data.choices[0] && data.choices[0].message;
       const calls = (choice && choice.tool_calls) || [];
