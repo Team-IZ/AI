@@ -28,15 +28,38 @@ def detect_category(text, category):
     return False, None
 
 
+# D-fix5 (연주 audit G1, 2026-07-23): a single confirmed-pattern match was sufficient for
+# justified=True by itself -- e.g. an answer consisting of nothing but the trigger phrase
+# itself. Both repos this code ships from are public GitHub repos, so the exact confirmed
+# regex text is discoverable without reverse-engineering.
+#   WHY: also require the answer to clear a minimum substance floor before honoring ANY
+#   pattern match. This doesn't require the pattern's exact language (unlike a
+#   semantic/LLM check, which would be a bigger design change away from this pipeline's
+#   documented "규칙 기반이라 투명하고 디버깅 가능" philosophy, D3 in judgment/score_findings.py),
+#   and it stops the most trivial gaming case (typing only the trigger phrase) at near-zero
+#   cost.
+#   COST: does NOT stop a more effortful attack that pads a trigger phrase with filler text
+#   to clear the floor -- this is explicitly a partial mitigation, not a closed hole. It also
+#   cannot be closed by hiding the pattern files: P02/P03 execute this exact Python via
+#   Pyodide IN THE STUDENT'S OWN BROWSER, so the regex is inspectable (devtools/view-source)
+#   regardless of the git repo's visibility -- repo-privacy was never a real defense here.
+#   EXIT: MIN_SUBSTANCE_CHARS is unmeasured/provisional (chosen conservatively low to avoid
+#   rejecting genuinely short-but-real answers) -- if real trainee answer-length data becomes
+#   available, recalibrate against it rather than guessing further.
+MIN_SUBSTANCE_CHARS = 20
+
+
 def classify_justification(text):
-    """4개 카테고리 각각을 confirmed 패턴으로 검사, 하나라도 매치하면 justified=True."""
+    """4개 카테고리 각각을 confirmed 패턴으로 검사, 하나라도 매치 + 최소 분량(D-fix5)을 넘으면 justified=True."""
     results = {}
     for cat in SUPPORTED_CATEGORIES:
         matched, pattern_id = detect_category(text, cat)
         results[cat] = {"matched": matched, "pattern_id": pattern_id}
-    justified = any(r["matched"] for r in results.values())
+    has_match = any(r["matched"] for r in results.values())
+    substantive = len((text or "").strip()) >= MIN_SUBSTANCE_CHARS
+    justified = has_match and substantive
     matched_categories = [c for c, r in results.items() if r["matched"]]
-    return {"justified": justified, "matched_categories": matched_categories, "categories": results}
+    return {"justified": justified, "matched_categories": matched_categories, "categories": results, "substantive": substantive}
 
 
 def main():
