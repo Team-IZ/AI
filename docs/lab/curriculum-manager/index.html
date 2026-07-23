@@ -350,6 +350,8 @@
       id: row.id,
       source, // "pdf_analysis" | "public" -- which client/schema this row came from (D3, labdb-shim.js), so delete routes to the right one
       ownerEmail: (row.members && row.members.email) || null, // D5 (2026-07-23): who registered this, so a blocked delete tells you who to ask
+      model: row.model || null, // D6 (2026-07-23)
+      durationMs: row.finished_at ? (new Date(row.finished_at) - new Date(row.started_at)) : null, // D6
       title: meta.source_filename ? String(meta.source_filename).replace(/\.pdf$/i, "") : `교안 (${String(row.id).slice(0, 8)})`,
       result: {
         unit_map: byKind.unit_map || {},
@@ -501,6 +503,23 @@
   }
 
   // ---- list tab ----
+  // D6 (2026-07-23): "같은 이름 교안이 여러 번 분석됨"을 구분하고 싶다는 요청 -- there's no
+  // stored version column anywhere (nothing in the DB schema tracks this), so this
+  // computes it purely client-side from whatever's currently in state.curricula: group by
+  // title, sort each group oldest-first, number them v1/v2/... Recomputed on every render
+  // (cheap, and always reflects the current set after a delete/refresh) rather than stored
+  // on the entry itself, which would go stale the moment a sibling row got deleted.
+  function computeVersions(curricula) {
+    const byTitle = {};
+    for (const c of curricula) (byTitle[c.title] = byTitle[c.title] || []).push(c);
+    const versions = {};
+    for (const title in byTitle) {
+      byTitle[title].slice().sort((a, b) => a.analyzedAt - b.analyzedAt)
+        .forEach((c, i) => { versions[c.id] = i + 1; });
+    }
+    return versions;
+  }
+
   function renderListTab() {
     document.getElementById("list-count").textContent = `총 ${state.curricula.length}개`;
     const delModeBtn = document.getElementById("delete-mode-btn");
@@ -510,15 +529,17 @@
     const theadRow = document.getElementById("list-thead-row");
     // D5 (2026-07-23): "등록자" column -- a blocked delete only ever said "본인이 등록한
     // 교안만 삭제할 수 있습니다" with no way to tell who to actually go ask.
-    const baseHeaders = ["교안명", "등록자", "유닛", "그래프", "추출 상태", "분석 시각"];
+    // D6 (2026-07-23): "버전"(동명 교안 구분), "추출 모델", "소요 시간" 추가.
+    const baseHeaders = ["교안명", "버전", "등록자", "유닛", "그래프", "추출 상태", "추출 모델", "분석 시각", "소요 시간"];
     theadRow.innerHTML = baseHeaders.map((h) => `<th>${h}</th>`).join("") + (deleteMode ? `<th style="width:64px"></th>` : "");
 
     const tbody = document.getElementById("list-tbody");
-    const colspan = deleteMode ? 7 : 6;
+    const colspan = deleteMode ? 10 : 9;
     if (!state.curricula.length) {
       tbody.innerHTML = `<tr><td colspan="${colspan}" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr>`;
       return;
     }
+    const versions = computeVersions(state.curricula);
     tbody.innerHTML = state.curricula.map((c) => {
       const r = c.result;
       const unitCount = Object.keys(r.unit_map || {}).length;
@@ -533,11 +554,14 @@
         : "";
       return `<tr class="${deleteMode ? "" : "click"}" data-id="${LabApp.escapeHtml(c.id)}">
         <td class="name"><b>${LabApp.escapeHtml(c.title)}</b><div class="sub">${LabApp.escapeHtml(c.courseLabel || "")}</div></td>
+        <td class="sub">v${versions[c.id]}</td>
         <td class="sub">${LabApp.escapeHtml(c.ownerEmail || "—")}</td>
         <td>${unitCount}개</td>
         <td>${graphBadge}</td>
         <td>${extractBadge}</td>
+        <td class="sub">${LabApp.escapeHtml(c.model || "—")}</td>
         <td class="date">${c.analyzedAt.toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" })}</td>
+        <td class="sub">${c.durationMs != null ? LabApp.formatElapsed(c.durationMs) : "—"}</td>
         ${delCell}
       </tr>`;
     }).join("");
@@ -675,6 +699,7 @@
       // validity already comes from chunk-analysis alone. Real large documents showed
       // this loop can burn ~20+ minutes with every fix attempt rejected and zero net
       // change to the final unit_map. See p01-runner.js's run(opts) for both flags.
+      const startedAt = new Date(); // D6 (2026-07-23): captured before run(), matches how rowToEntry() reads DB rows' started_at
       currentRunPromise = P01Runner.run({ skipQuestionGen: true, skipRefine: true });
       try {
         await currentRunPromise;
@@ -690,12 +715,18 @@
         // so a freshly-analyzed row shows an owner immediately, not just after the next
         // refreshFromDB() DB round-trip relabels it.
         const owner = await LabDB.currentMemberOrNull().catch(() => null);
+        // D6: same idea as D5's owner lookup -- selectedModel lives in p01-runner.js's own
+        // closure with no getter, but the active chip's data-model attribute is plain DOM
+        // state this page can read directly, no export needed.
+        const activeChip = document.querySelector("#p01-model-group .model-chip.active");
         const entry = {
           id: String(state.nextId++),
           ownerEmail: owner ? owner.email : null,
+          model: activeChip ? activeChip.dataset.model : null,
+          durationMs: Date.now() - startedAt.getTime(),
           title: typedTitle || (lastPdfName ? lastPdfName.replace(/\.pdf$/i, "") : `교안 #${state.nextId - 1}`),
           result,
-          analyzedAt: new Date(),
+          analyzedAt: startedAt,
         };
         state.curricula.unshift(entry);
         state.selectedId = entry.id;
