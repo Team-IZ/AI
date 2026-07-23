@@ -151,20 +151,56 @@ const P02Engine = (() => {
   // Object.keys() match -- not a new ambiguity, since the real pipeline's own
   // os.path.basename() reduction already collapses same-named files from different
   // folders into one fan_in key.
+  // D-fix8 (연주 audit D1, 2026-07-23): when the same basename exists in >1 folder, the old
+  // Object.keys().find() picked whichever came first in insertion order -- for a ZIP this is
+  // the archive's own internal entry order, which isn't something a student or reviewer
+  // controls or can predict, so which file "won" varied non-deterministically by upload.
+  //   WHY: collect every candidate and sort deterministically (shorter path first, then
+  //   alphabetical) before picking -- doesn't make the pick "correct" (still a real
+  //   ambiguity the original pipeline's own basename-keyed fan_in already has, per D179's
+  //   comment above), but makes it reproducible: the same files always resolve to the same
+  //   evidence code across reruns/re-uploads.
+  //   COST: none beyond the sort itself (candidate counts are always small -- one project's
+  //   worth of same-named files, not repo-wide).
+  //   EXIT: if collision visibility (not just determinism) is needed later, this can return
+  //   the full sorted candidate list instead of just the first, mirroring how
+  //   resolveConnectableFile's text-mention branch already exposes `allPaths`.
   function findFileByBasename(files, basename) {
     if (!basename) return null;
     if (files[basename] !== undefined) return basename;
-    return Object.keys(files).find((relPath) => relPath.split("/").pop() === basename) || null;
+    const candidates = Object.keys(files).filter((relPath) => relPath.split("/").pop() === basename);
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => a.length - b.length || a.localeCompare(b));
+    return candidates[0];
+  }
+
+  // D-fix7 (연주 audit C2/D2, 2026-07-23): plain .includes() matched a basename anywhere
+  // inside findingText, including as a substring of an unrelated longer word/filename
+  // (e.g. "app.js" matching inside "webapp.js" or inside prose that happens to contain
+  // that exact character run) -- a real risk given repeated-pattern findings' free-text
+  // descriptions aren't controlled vocabulary.
+  //   WHY: require the basename to be flanked by something other than a word character or
+  //   a dot on both sides (or be at the very start/end of the text) -- basenames contain a
+  //   dot themselves, so a plain \b word-boundary regex doesn't work here directly.
+  //   COST: still not perfect (e.g. a basename embedded with no separator at all inside a
+  //   run-on word is still possible in principle, just much rarer than the plain-substring
+  //   case this replaces).
+  //   EXIT: if false positives/negatives are actually observed, tighten further (e.g.
+  //   require surrounding backticks/quotes specifically, matching how finding text usually
+  //   quotes filenames) or loosen back towards the old substring behavior.
+  function isBoundedMatch(text, needle) {
+    const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`(^|[^\\w.])${escaped}($|[^\\w.])`).test(text);
   }
 
   // D180: repeated-pattern:duplicate-definition findings legitimately have file: null (see
   // judgment/score_findings.py's find_duplicate_definitions()) -- the real files ARE named
   // in the finding's free-text description though (Python f-string list/dict repr). Rather
   // than parsing that repr syntax, this checks each already-known real filename for whether
-  // its basename literally appears as a substring of the finding text.
+  // its basename appears as a boundary-delimited match in the finding text (D-fix7).
   function findReferencedFiles(files, findingText) {
     if (!findingText) return [];
-    return Object.keys(files).filter((relPath) => findingText.includes(relPath.split("/").pop()));
+    return Object.keys(files).filter((relPath) => isBoundedMatch(findingText, relPath.split("/").pop()));
   }
 
   // Single entry point for "what file(s) (if any) can this finding connect to" -- prefers
@@ -311,7 +347,14 @@ const P02Engine = (() => {
     const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`, { headers });
     if (!treeRes.ok) throw (githubRateLimitError(treeRes, pat) || new Error(`파일 목록 조회 실패 (HTTP ${treeRes.status})`));
     const tree = await treeRes.json();
-    if (tree.truncated) onProgress("경고: repo가 커서 GitHub API가 파일 목록을 일부만 반환함");
+    // D-fix6 (연주 audit A2, 2026-07-23): this truncation happens on GitHub's own tree
+    // response BEFORE isSkippedPath() runs below -- if the repo has build artifacts
+    // committed (they'd normally be skipped) sorted ahead of real source in the tree,
+    // GitHub's own item-count cap can be spent on those before source ever gets returned.
+    // Cannot be fixed here (GitHub API's own limit, not something this fetch controls) --
+    // message upgraded to at least explain the likely cause + remedy, mirroring D214's
+    // "where/what" guidance pattern for the PAT rate-limit message above.
+    if (tree.truncated) onProgress("경고: repo가 커서 GitHub API가 파일 목록을 일부만 반환함 -- 빌드 산출물(node_modules 등)이 커밋돼 있으면 그게 먼저 소진시켰을 수 있음. 산출물을 .gitignore 처리하거나 ZIP 업로드로 전환 권장");
 
     // D166: notebooks pass this filter too now (isSkippedPath alone would still reject
     // .ipynb) so they reach the per-blob step below, where the actual code-cell

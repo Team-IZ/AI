@@ -62,6 +62,9 @@
 //      is expected to disable its model selector once hooks.onRunStart() fires, so the UI
 //      itself doesn't imply a capability that no longer exists.
 //
+// 연주 audit F4 (2026-07-23): reviewed, no change -- this IS the documented decision above
+// (change #9), not an oversight; no new evidence to revisit it.
+//
 // P03 v1 is human-in-the-loop only (persona/AI-answerer mode is out of scope here). Question
 // generation + grading are real NVIDIA calls (same manifest prompts as P01/P02). Answer
 // classification (surface/partial/defended) is NOT an LLM call -- it's the same
@@ -109,14 +112,25 @@ const P03Engine = (() => {
   }
 
   // D181: concatenates every candidate file (labeled with its path) into one prompt-ready
-  // string, then applies the manifest's own existing p03-1.truncation.code_context cap to
-  // the WHOLE combined text -- not proportionally splitting per file, a deliberately simple
-  // choice: if the first file's content alone exceeds the cap, later files get cut, which is
-  // an acceptable provisional behavior, not a silent data-loss regression.
+  // string. D-fix10 below changed HOW the cap is applied (per-file instead of once on the
+  // whole joined string) -- see that comment for why.
+  // D-fix10 (연주 audit F3, 2026-07-23): joining first then slicing the WHOLE combined
+  // string meant the first file alone could consume the entire cap, silently dropping every
+  // later file's content in full -- if the actually-relevant file for this finding happened
+  // to be 2nd/3rd among MAX_CONNECT_FILES candidates, its content never reached the prompt.
+  //   WHY: split `cap` evenly across `contexts.length` BEFORE joining, so every candidate
+  //   file gets at least some representation instead of an all-or-nothing split by position.
+  //   COST: a file whose actual content is shorter than its even share "wastes" budget that
+  //   could have gone to a longer sibling file -- simple equal split, not content-aware
+  //   rebalancing (that would need a second pass; not worth the complexity for a 3-file cap).
+  //   EXIT: if a content-aware allocation is needed later (give unused budget from short
+  //   files to longer ones), rebalance here -- callers don't need to change.
   function buildCombinedCodeContext(contexts, cap) {
     if (!contexts || !contexts.length) return null;
-    const labeled = contexts.map((c) => `--- ${c.path} ---\n${c.content}`).join("\n\n");
-    return cap ? labeled.slice(0, cap) : labeled;
+    const perFileCap = cap ? Math.floor(cap / contexts.length) : null;
+    return contexts
+      .map((c) => `--- ${c.path} ---\n${perFileCap ? c.content.slice(0, perFileCap) : c.content}`)
+      .join("\n\n");
   }
 
   // D181: shared 40rpm ceiling has real prior incidents from P01's chunk bursts (D163-171).
@@ -128,6 +142,10 @@ const P03Engine = (() => {
   // ELEVATED_RATE_THRESHOLD/ELEVATED_MAX_ATTEMPTS are both unmeasured/provisional -- 75% of
   // the documented ~40rpm ceiling, and one more than the worker's own MAX_ATTEMPTS=3 default.
   // Change #6: returns a struct instead of logging directly; caller builds the message.
+  // 연주 audit H1 (2026-07-23): reviewed, no change -- re-verified traffic-rate.js's
+  // getCurrentRate() DOES see team-wide traffic when the proxy's ?traffic=1 responds
+  // (isServerWide=true case); "탭 기준만" only applies in the degraded fallback below.
+  // Original audit claim ("P03만 탭 안에서 안다") was an overstatement, not a real bug.
   async function resolveMaxAttempts() {
     if (typeof DebugTraffic === "undefined" || !DebugTraffic.getCurrentRate) return { maxAttempts: undefined, elevated: false };
     const { count, isServerWide, threshold } = await DebugTraffic.getCurrentRate();
@@ -580,15 +598,29 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       }
       if (factCheckBroken) {
         const prompt = buildLevelPrompt(level, finding, codeContext, transcript, rejected, false);
-        const fallback = await LabLLM.chatTool({ model: resolvedModel, messages: [{ role: "user", content: prompt }], tool: askQuestionTool, maxTokens: 2048, maxAttempts });
+        // D-fix12 (연주 audit H2): forwards onProgress so long polls get reassurance -- see
+        // llm.js's submitAndPoll matching D-fix12 comment.
+        const fallback = await LabLLM.chatTool({ model: resolvedModel, messages: [{ role: "user", content: prompt }], tool: askQuestionTool, maxTokens: 2048, maxAttempts, onProgress });
         candidate = fallback.question;
       }
 
       const dupOf = priorQuestions.find((q) => isDuplicateQuestion(candidate, q));
-      if (!dupOf) return candidate;
+      // D-fix9 (연주 audit F2, 2026-07-23): the exhausted-retries path below returned the
+      // same bare `candidate` string as the clean path, so a question that slipped through
+      // as a still-probable duplicate was indistinguishable from a verified-fresh one in
+      // the saved record (only a live onProgress log line marked it, gone once the session
+      // ended).
+      //   WHY: return {question, dedupUncertain} instead of a bare string -- generateQuestion
+      //   has exactly one call site (run()'s turn loop), so this is a contained shape change;
+      //   dedupUncertain now rides along into hooks.onQuestion/transcript.push, which
+      //   ultimately reaches the Supabase-persisted transcript artifact.
+      //   COST: none beyond updating that one call site.
+      //   EXIT: if a future consumer wants finer-grained info (which prior question it
+      //   almost-matched), thread `dupOf` through too -- not needed yet.
+      if (!dupOf) return { question: candidate, dedupUncertain: false };
       if (attempt === DEDUP_MAX_RETRIES) {
         if (onProgress) onProgress(`⚠ ${level.toUpperCase()} 질문이 이전 질문과 유사해 보이지만 재생성 한도(${DEDUP_MAX_RETRIES}회) 소진 — 그대로 진행`);
-        return candidate;
+        return { question: candidate, dedupUncertain: true };
       }
       if (onProgress) onProgress(`⚠ ${level.toUpperCase()} 질문이 이전 질문과 겹쳐 재생성 중 (${attempt + 1}/${DEDUP_MAX_RETRIES})...`);
       // D206: store the SPECIFIC prior question this candidate matched (`dupOf`) alongside
@@ -673,7 +705,12 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
   // Change #1: takes `model` explicitly (was module-level selectedModel fallback).
   // D197: takes the full `transcript` (all turns actually run) instead of a single
   // (question, answer) pair -- see the D197 comment above for the full WHY/COST/EXIT.
-  async function gradeAnswer(finding, transcript, maxAttempts, model) {
+  // D-fix12 (연주 audit H2, 2026-07-23): gradeAnswer had no onProgress hook at all, unlike
+  // generateQuestion -- during a long submit-and-poll wait (up to 35min worst case, see
+  // llm.js's MAX_POLL_MS) there was no way to reassure the user grading was still in
+  // progress versus silently stuck. Added purely so llm.js's own poll-reassurance (see its
+  // matching D-fix12 comment) has somewhere to surface for this call too.
+  async function gradeAnswer(finding, transcript, maxAttempts, model, onProgress) {
     const stage = LabApp.getStage("p03", "p03-7");
     const override = LabApp.getOverride("p03", "p03-7") || {};
     const rubric = override.rubric || stage.rubric;
@@ -726,15 +763,29 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     // Scoped to just this call (not every chatTool/chatToolLoop site) since the smaller
     // ask_question tool call (1 field) never showed this failure in the same testing.
     const llmGrades = gradable.length
-      ? await LabLLM.chatTool({ model: resolvedModel, messages: [{ role: "user", content: userMsg }], tool, maxTokens: 4096, maxAttempts })
+      ? await LabLLM.chatTool({ model: resolvedModel, messages: [{ role: "user", content: userMsg }], tool, maxTokens: 4096, maxAttempts, onProgress })
       : {};
     // D197: JS is the sole source of truth for axis eligibility -- merge LLM-scored
     // (gradable) axes with deterministic not-tested placeholders for the rest.
+    // D-fix11 (연주 audit G2, 2026-07-23): evidence is model-generated free text with no
+    // verification step -- a high score with paper-thin evidence currently looks identical
+    // to a high score with substantive evidence in the stored record.
+    //   WHY: flag (not alter) -- reuses G1's MIN_SUBSTANCE_CHARS-style floor so a reviewer
+    //   can spot "score looks confident but evidence text is suspiciously short" without
+    //   this code silently second-guessing/adjusting a score it has no ground truth to
+    //   correct (that would be inventing a new bias with zero measurement behind it).
+    //   COST: purely additive field -- no existing consumer of `grades[axis]` breaks.
+    //   EXIT: if real grading data shows thin_evidence correlates with actually-wrong
+    //   scores, that's the measurement needed before ever acting on this flag automatically.
+    const MIN_EVIDENCE_CHARS = 20;
     const grades = {};
     for (const axis of axes) {
-      grades[axis] = gradable.includes(axis)
-        ? { ...llmGrades[axis], tested: true }
-        : { score: null, evidence: notTestedEvidence(axis, axisLevelMap), tested: false };
+      if (gradable.includes(axis)) {
+        const evidence = (llmGrades[axis] && llmGrades[axis].evidence) || "";
+        grades[axis] = { ...llmGrades[axis], tested: true, thin_evidence: evidence.trim().length < MIN_EVIDENCE_CHARS };
+      } else {
+        grades[axis] = { score: null, evidence: notTestedEvidence(axis, axisLevelMap), tested: false };
+      }
     }
     return { grades, rubric_overridden: rubricOverridden };
   }
@@ -879,15 +930,15 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         // derives the cumulative verdict trail from it directly, no separate param needed.
         // D200: repoRef enables live fact-checking for L2/L3/Reflection. D210: zipFiles is
         // the ZIP-upload equivalent -- generateQuestion() picks whichever source is present.
-        const question = await generateQuestion(level, finding, codeContext, transcript, genAttemptInfo.maxAttempts, model, hooks.onProgress, repoRef, zipFiles);
-        hooks.onQuestion({ level, question, turnIndex: i, totalTurns });
+        const { question, dedupUncertain } = await generateQuestion(level, finding, codeContext, transcript, genAttemptInfo.maxAttempts, model, hooks.onProgress, repoRef, zipFiles);
+        hooks.onQuestion({ level, question, turnIndex: i, totalTurns, dedupUncertain });
         hooks.onProgress("답변 대기 중...");
         hooks.countdown.resume(); // D182: only start ticking once the human can actually see+answer this question
         const answer = await hooks.getAnswer({ level, question });
         hooks.countdown.pause();
         hooks.onProgress("답변 분류 중 (결정론적 분류기, LLM 아님)...");
         const classification = await classifyAnswer(category, answer, level);
-        transcript.push({ level, question, answer, classification });
+        transcript.push({ level, question, answer, classification, dedupUncertain });
         hooks.onAnswerRecorded({ level, question, answer, classification });
         // D193: persist this turn immediately -- if a later turn fails, this one still
         // survives in stage_events (see p03_progress_view). Failure here must not break
@@ -912,7 +963,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       if (gradeAttemptInfo.elevated) hooks.onProgress(`⚠ 현재 트래픽 ${gradeAttemptInfo.count}/${gradeAttemptInfo.threshold}${gradeAttemptInfo.scopeNote} -- 재시도 여유를 ${ELEVATED_MAX_ATTEMPTS}회로 늘려서 요청`);
       // D197: grade the full transcript (all turns actually run), not just the last turn --
       // see gradeAnswer()'s D197 comment for the full WHY/COST/EXIT.
-      const { grades, rubric_overridden } = await gradeAnswer(finding, transcript, gradeAttemptInfo.maxAttempts, model);
+      const { grades, rubric_overridden } = await gradeAnswer(finding, transcript, gradeAttemptInfo.maxAttempts, model, hooks.onProgress);
 
       const finishedAt = new Date();
       hooks.onRunEnd(finishedAt - startedAt);

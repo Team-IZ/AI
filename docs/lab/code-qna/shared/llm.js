@@ -60,6 +60,18 @@ const LabLLM = (() => {
   // is forwarded as the x-max-attempts header -- worker/nvidia-proxy.js falls back to its
   // existing MAX_ATTEMPTS=3 auto-retry when this header is absent, so P03 and P01's own
   // refine/question-gen calls (which never set it) are completely unaffected.
+  // D-fix12 (연주 audit H2, 2026-07-23): a poll cycle can legitimately run up to
+  // MAX_POLL_MS (35min, see its own comment above) with zero user-visible feedback beyond
+  // whatever the caller logged once before the wait started -- indistinguishable from
+  // "stuck" to a trainee watching the screen.
+  //   WHY: optional opts.onPoll(elapsedMs) callback, fired at most once per
+  //   POLL_REASSURANCE_INTERVAL_MS of elapsed wait -- purely additive, every existing caller
+  //   that doesn't pass onPoll behaves byte-identically to before.
+  //   COST: none beyond the callback itself (already throttled to avoid spamming).
+  //   EXIT: interval (60s) is unmeasured/provisional -- adjust if it proves too chatty or
+  //   too sparse once real long-poll cases are observed.
+  const POLL_REASSURANCE_INTERVAL_MS = 60_000;
+
   async function submitAndPoll(proxyUrl, apiKey, body, opts = {}) {
     recordRequest();
     const headers = { "content-type": "application/json", "x-nvidia-api-key": apiKey };
@@ -80,8 +92,14 @@ const LabLLM = (() => {
     const base = proxyUrl.split("?")[0];
     const pollUrl = `${base}?job=${encodeURIComponent(jobId)}`;
     const startedAt = Date.now();
+    let lastPollNoticeAt = startedAt;
     while (Date.now() - startedAt < MAX_POLL_MS) {
       await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+      const now = Date.now();
+      if (opts.onPoll && now - lastPollNoticeAt >= POLL_REASSURANCE_INTERVAL_MS) {
+        lastPollNoticeAt = now;
+        opts.onPoll(now - startedAt);
+      }
       let job;
       try {
         const pollRes = await fetch(pollUrl);
@@ -137,7 +155,7 @@ const LabLLM = (() => {
     return REASONING_EFFORT_BY_MODEL[model];
   }
 
-  async function chatJSON({ model, messages, maxTokens, temperature = 0.0, jsonMode = true, maxAttempts }) {
+  async function chatJSON({ model, messages, maxTokens, temperature = 0.0, jsonMode = true, maxAttempts, onProgress }) {
     const proxyUrl = LabConfig.get("proxy-url");
     const apiKey = LabConfig.get("nvidia-key");
     if (!proxyUrl || !apiKey) {
@@ -147,7 +165,8 @@ const LabLLM = (() => {
     const reasoningEffort = reasoningEffortFor(model);
     if (reasoningEffort) body.reasoning_effort = reasoningEffort;
     if (jsonMode) body.response_format = { type: "json_object" };
-    const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts });
+    // D-fix12: forwards as onPoll -- see submitAndPoll's own D-fix12 comment.
+    const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts, onPoll: onProgress ? (elapsedMs) => onProgress(`⏳ 처리 중... (경과 ${Math.round(elapsedMs / 1000)}초)`) : undefined });
     const choice = data.choices && data.choices[0] && data.choices[0].message;
     if (!choice) throw new Error(`예상치 못한 응답 형태: ${JSON.stringify(data).slice(0, 300)}`);
     // D131/D142's fallback chain, ported from the real pipeline -- some models (step-3.5-flash)
@@ -170,7 +189,7 @@ const LabLLM = (() => {
   // that ever needed it before now. P03's interview calls all go through this function, so
   // without this they had no way to opt into more retry budget under elevated shared
   // traffic (see debug-traffic.js's getCurrentRate(), used by p03-runner.js).
-  async function chatTool({ model, messages, tool, maxTokens, temperature = 0.0, maxAttempts }) {
+  async function chatTool({ model, messages, tool, maxTokens, temperature = 0.0, maxAttempts, onProgress }) {
     const proxyUrl = LabConfig.get("proxy-url");
     const apiKey = LabConfig.get("nvidia-key");
     if (!proxyUrl || !apiKey) {
@@ -185,7 +204,8 @@ const LabLLM = (() => {
     // actually support it, never sent blindly.
     const reasoningEffort = reasoningEffortFor(model);
     if (reasoningEffort) body.reasoning_effort = reasoningEffort;
-    const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts });
+    // D-fix12: forwards as onPoll -- see submitAndPoll's own D-fix12 comment.
+    const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts, onPoll: onProgress ? (elapsedMs) => onProgress(`⏳ 처리 중... (경과 ${Math.round(elapsedMs / 1000)}초)`) : undefined });
     const choice = data.choices && data.choices[0] && data.choices[0].message;
     const call = choice && choice.tool_calls && choice.tool_calls.find((c) => c.function.name === tool.name);
     if (!call) throw new Error(`tool_calls에서 ${tool.name}을 찾지 못함: ${JSON.stringify(data).slice(0, 300)}`);
@@ -267,7 +287,8 @@ const LabLLM = (() => {
       // actually support it, never sent blindly (e.g. Mistral rejects it with HTTP 400).
       const reasoningEffort = reasoningEffortFor(model);
       if (reasoningEffort) body.reasoning_effort = reasoningEffort;
-      const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts });
+      // D-fix12: forwards as onPoll -- see submitAndPoll's own D-fix12 comment.
+      const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts, onPoll: onProgress ? (elapsedMs) => onProgress(`⏳ 처리 중... (경과 ${Math.round(elapsedMs / 1000)}초)`) : undefined });
       const choice = data.choices && data.choices[0] && data.choices[0].message;
       const calls = (choice && choice.tool_calls) || [];
 
