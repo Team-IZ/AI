@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 # Request — 원시 요청 객체. Content-Type·본문·폼에 직접 접근할 수 있다.
 #           스키마 자동 바인딩을 포기하는 대신 분기를 제어한다.
-from fastapi import APIRouter, Header, Request, status
+from fastapi import APIRouter, Depends, Header, Request, status
 
 # ValidationError — pydantic이 검증 실패 시 던지는 예외.
 #                   자동 바인딩이 아니라 직접 검증.
@@ -22,6 +22,9 @@ from app.schemas.analysis import (
 )
 from app.schemas.common import ErrorResponse
 
+from app.engines import get_analysis_engine
+from app.engines.base import AnalysisEngine
+
 router = APIRouter(tags=["analyses"])
 
 # 멱등성 키 -> job_id
@@ -33,43 +36,18 @@ _job_id_by_idempotency_key: dict[str, str] = {}
 # ponytail: 인메모리 dict — 프로세스 재시작 시 유실. Redis 도입 시 함께 교체(PLAN §3)
 _jobs: dict[str, AnalysisJobStatus] = {}
 
-def _stub_result() -> AnalysisResult:
-    """스텁이 돌려주는 고정 결과.
 
-    백엔드가 파싱 코드를 짤 수 있도록 실제와 같은 모양을 준다.
-    엔진이 붙으면 5단계의 engines/stub.py가 이 자리를 대신한다.
-    """
-    return AnalysisResult(
-        snapshot_id="00000000-0000-0000-0000-000000000001",
-        snapshot_meta=SnapshotMeta(
-            content_hash="0" * 64,
-            file_count=3,
-            byte_count=1024,
-        ),
-        applied_scope="TOTAL",
-        scope_fallback=False,
-        fallback_reason=None,
-        commit_sha="0123456789abcdef0123456789abcdef01234567",
-        findings=[
-            {
-                "findingId": "tier-b-risk:app/main.py:hardcoded-secret",
-                "sourcePath": "app/main.py",
-                "lineStart": "12",
-                "lineEnd": "14",
-                "evidenceHash": "1" * 64,
-            }
-        ],
-        question_count_planned=1,
-    )
-
-
-def _create_job(body: AnalysisRequest) -> AnalysisJobStatus:
+def _create_job(body: AnalysisRequest, engine: AnalysisEngine, zip_bytes: bytes | None) -> AnalysisJobStatus:
     """job을 만들어 저장한다.
 
-    스텁이라 즉시 완료 상태로 만든다. 실제 상태 전이(QUEUED→RUNNING→SUCCEEDED)는
-    6단계에서 BackgroundTasks로 붙인다.
+    엔진에게 분석을 시키고(dict 반환), 그 dict를 AnalysisResult로 검증한다.
+    엔진이 계약(스키마)을 어기면 model_validate가 여기서 터진다 → 잘못된 응답이
+    나가기 전에 잡힌다.
     """
     now = datetime.now(timezone.utc)
+    raw = engine.analyze(body.model_dump(), zip_bytes)  # dict in, dict out
+    result = AnalysisResult.model_validate(raw)
+    
     job = AnalysisJobStatus(
         job_id=str(uuid.uuid4()),
         attempt_id=body.attempt_id,
@@ -77,7 +55,7 @@ def _create_job(body: AnalysisRequest) -> AnalysisJobStatus:
         status="SUCCEEDED",
         started_at=now,
         completed_at=now,
-        result=_stub_result(),
+        result=result
     )
     _jobs[job.job_id] = job
     return job
@@ -168,6 +146,10 @@ _REQUEST_BODY = {
 )
 async def create_analysis(
     request: Request,
+    # Depends: FastAPI가 get_analysis_engine 먼저 실행해 그 반환값을 여기에
+    # 라우터는 어떤 엔진인지 모른다 - 팩토리가 설정 보고 고름
+    engine: AnalysisEngine = Depends(get_analysis_engine),
+    
     # 파라미터명 -> 헤더명 자동 변환(언더스코어 -> 하이픈, 첫글자 대문자로)
     idempotency_key: str | None = Header(
         default=None, description="submissionId:attemptNo. 중복 요청 판별"
@@ -195,7 +177,7 @@ async def create_analysis(
             job_id=_job_id_by_idempotency_key[idempotency_key], status="QUEUED"
         )
         
-    job = _create_job(body)
+    job = _create_job(body, engine, zip_bytes)
     if idempotency_key:
         _job_id_by_idempotency_key[idempotency_key] = job.job_id
 

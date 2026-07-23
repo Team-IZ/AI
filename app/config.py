@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     # Spring이 X-Internal-Key 헤더에 실어 보내는 공유 비밀
     # 값은 .env에만 둠.
     internal_api_key: str = ""
+    
+    # 분석 엔진 선택. 기본은 가짜(stub). 실물은 나중에 이식 후 "real"로
+    engine_mode: Literal["stub", "real"] = "stub"
 
 @lru_cache
 def get_settings() -> Settings:
