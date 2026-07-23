@@ -65,5 +65,44 @@
     return client;
   }
 
+  // D3 (2026-07-23): second client, scoped to the DEFAULT ("public") schema instead of
+  // pdf_analysis -- needed so this page can also read/delete the pre-existing curricula
+  // that were analyzed through the original Pipeline Lab P01 tab (docs/lab/index.html),
+  // which writes to public.runs/public.artifacts, not pdf_analysis.*. ensureClient()
+  // above can't be reused for this: it's permanently pinned to db.schema:"pdf_analysis",
+  // and PostgREST's schema option is fixed per client (no per-query override).
+  //   WHY: same Supabase project/URL/anon key/session -- a second createClient() call is
+  //     the only way supabase-js exposes a different `db.schema` at the same time.
+  //   COST: two GoTrueClient instances against the same URL log a harmless "Multiple
+  //     GoTrueClient instances detected" console warning. Both still share the same
+  //     underlying localStorage session (neither sets a custom storageKey, so they agree
+  //     on the default key) -- a known-benign duplicate-instance warning, not a
+  //     functional issue for the read/delete calls this page makes.
+  //   EXIT: if that warning ever needs to go away, give both clients an explicit,
+  //     matching `auth.storageKey` instead of relying on the default coinciding.
+  let publicClient = null;
+  let publicLoadingPromise = null;
+
+  async function ensurePublicClient() {
+    if (publicClient) return publicClient;
+    if (!LabDB.isConfigured()) throw new Error("Supabase가 설정되지 않음");
+    if (!publicLoadingPromise) {
+      publicLoadingPromise = (async () => {
+        if (!window.supabase) {
+          await loadScript(
+            "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js",
+            "sha384-GFr3yTh5lJznCbZfpTtXnwboFsxqtTQoeTZCRHhE0579KrRmlCzen5AA8ohaB5ug"
+          );
+        }
+        publicClient = window.supabase.createClient(LabConfig.get("supabase-url"), LabConfig.get("supabase-anon-key"), {
+          auth: { flowType: "pkce" },
+        });
+      })();
+    }
+    await publicLoadingPromise;
+    return publicClient;
+  }
+
   LabDB.ensureClient = ensureClient;
+  LabDB.ensurePublicClient = ensurePublicClient;
 })();

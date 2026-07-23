@@ -341,13 +341,14 @@
   // in, this reconstructs state.curricula from the DB instead of just this tab's memory.
   // Reassembles the shape P01Runner.run() itself builds (see its result literal) from the
   // separate artifacts rows + input_meta columns saveRun() split them into.
-  function rowToEntry(row) {
+  function rowToEntry(row, source) {
     const byKind = {};
     for (const a of row.artifacts || []) byKind[a.kind] = a.content;
     const meta = row.input_meta || {};
     const failedCount = meta.failed_chunk_count || 0;
     return {
       id: row.id,
+      source, // "pdf_analysis" | "public" -- which client/schema this row came from (D3, labdb-shim.js), so delete routes to the right one
       title: meta.source_filename ? String(meta.source_filename).replace(/\.pdf$/i, "") : `교안 (${String(row.id).slice(0, 8)})`,
       result: {
         unit_map: byKind.unit_map || {},
@@ -370,12 +371,22 @@
     const user = await LabDB.currentMemberOrNull().catch(() => null);
     if (!user) return;
     try {
-      const c = await LabDB.ensureClient();
-      const { data, error } = await c
-        .from("runs").select("*, artifacts(kind, content, truncated)")
-        .eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50);
-      if (error) throw error;
-      state.curricula = (data || []).map(rowToEntry);
+      // D3 (2026-07-23): also read public.runs (the original Pipeline Lab P01 tab's
+      // table) through a second, public-schema-scoped client (labdb-shim.js), so
+      // curricula analyzed there before this page existed show up here too -- this page
+      // used to only ever see its own pdf_analysis.runs rows.
+      const [c, pc] = await Promise.all([LabDB.ensureClient(), LabDB.ensurePublicClient()]);
+      const selectArgs = ["*, artifacts(kind, content, truncated)"];
+      const [own, legacy] = await Promise.all([
+        c.from("runs").select(...selectArgs).eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50),
+        pc.from("runs").select(...selectArgs).eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50),
+      ]);
+      if (own.error) throw own.error;
+      if (legacy.error) throw legacy.error;
+      state.curricula = [
+        ...(own.data || []).map((row) => rowToEntry(row, "pdf_analysis")),
+        ...(legacy.data || []).map((row) => rowToEntry(row, "public")),
+      ].sort((a, b) => b.analyzedAt - a.analyzedAt);
       if (state.selectedId && !state.curricula.some((c) => c.id === state.selectedId)) state.selectedId = null;
       persistSession();
       route(); // re-render whichever tab is currently on screen with the DB-backed list
@@ -444,7 +455,12 @@
     try {
       const user = await LabDB.currentMemberOrNull();
       if (!user) throw new Error("로그인이 필요합니다");
-      const c = await LabDB.ensureClient();
+      // removed.source picks which client/schema to send the DELETE to (D3,
+      // labdb-shim.js) -- "public" rows came from the original Pipeline Lab P01 tab's
+      // table, not this page's own pdf_analysis schema. Either way RLS's "own rows only"
+      // check (both schemas now have a matching delete-own policy) is the real
+      // authorization boundary; this only picks the right table.
+      const c = removed.source === "public" ? await LabDB.ensurePublicClient() : await LabDB.ensureClient();
       const { error, count } = await c.from("runs").delete({ count: "exact" }).eq("id", id);
       if (error) throw error;
       if (!count) throw new Error("본인이 등록한 교안만 삭제할 수 있습니다");
