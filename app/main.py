@@ -2,7 +2,7 @@
 
 from fastapi import Depends, FastAPI
 
-from app.api import analyses, health, sessions
+from app.api import analyses, gradings, health, sessions
 from app.api.deps import require_internal_key
 from app.api.errors import register_error_handlers
 from app.config import API_V0_PREFIX
@@ -28,6 +28,12 @@ app.include_router(
 
 app.include_router(
     sessions.router,
+    prefix=API_V0_PREFIX,
+    dependencies=[Depends(require_internal_key)],
+)
+
+app.include_router(
+    gradings.router,
     prefix=API_V0_PREFIX,
     dependencies=[Depends(require_internal_key)],
 )
