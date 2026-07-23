@@ -1,7 +1,7 @@
 # AI 파트 FastAPI 구축 계획
 
-> 마지막 갱신: 2026-07-22
-> 작업 브랜치: `feature/fastapi-skeleton` (`origin` push 완료)
+> 마지막 갱신: 2026-07-23
+> 작업 브랜치: `feature/sessions` (7단계용, `develop`에서 분기)
 > 이 문서가 **AI 파트 진행 상황의 단일 기준**이다. 새 세션은 여기부터 읽는다.
 > 구조·계약의 설명은 `README.md`에 있다. 이 문서는 **무엇을 어떤 순서로 할지**만 다룬다.
 
@@ -15,11 +15,11 @@
 
 | 항목 | 상태 |
 |---|---|
-| 완료 단계 | **1~4** (앱 골격 · 설정·인증 · 분석 요청 · 분석 조회) |
-| 엔드포인트 | **3 / 9** |
-| 테스트 | **16 passed** |
+| 완료 단계 | **1~6** (앱 골격 · 설정·인증 · 분석 요청 · 분석 조회 · 엔진 소켓 · job 수명주기) |
+| 엔드포인트 | **3 / 9** (5·6단계는 내부 구조라 새 엔드포인트 없음) |
+| 테스트 | **24 passed** |
 | 백엔드 계약 | C1~C6 확정(2026-07-22) — §3 |
-| 다음 작업 | **5단계 — 엔진 소켓(`app/engines/`)** |
+| 다음 작업 | **7단계 — 세션 엔드포인트 4개(`app/api/sessions.py`)** |
 
 살아 있는 엔드포인트:
 
@@ -52,6 +52,15 @@ GET  /api/v0/analyses/{job_id}        고정 결과 반환. 모르는 id는 404
 | 백엔드 계약 합의 | C1~C6 확정(§3). 질문지는 `../qna/2026-07-22/backend-api-questions.md` |
 | 3단계 완료 | `schemas/common.py`(camelCase 기반)·`schemas/analysis.py`·`api/errors.py`·`api/analyses.py`. JSON·multipart 양쪽 수용, 멱등성 키 동작 확인(같은 키 = 같은 `jobId`) |
 | 4단계 완료 | `GET /analyses/{job_id}` + 응답 스키마. 404 `JOB_NOT_FOUND`, 타임스탬프 ISO 8601 UTC 확인 |
+
+**2026-07-23 — 5·6단계 + 브랜치 개편**
+
+| 한 일 | 결과 |
+|---|---|
+| 브랜치 개편 | 꼬였던 구 `develop`을 `develop-old`로 백업(로컬+원격 보존, 나중 삭제). 재구축 브랜치 `feature/fastapi-skeleton`을 정리해 **`develop`을 새 기준선**으로 삼음. 기본 브랜치는 GitHub에서 `develop` |
+| 5단계 완료 | `app/engines/`(`base.py` Protocol · `stub.py` · `__init__.py` 팩토리)·`config.py` `engine_mode`·`api/analyses.py` 의존성 주입·`tests/test_engines.py`. `_stub_result` 인라인 제거, findings를 `decision_point` 컬럼명으로 교정. **21 passed** |
+| 6단계 완료 | `app/jobs.py`(인메모리 저장소 + 수명주기)·`api/analyses.py` `BackgroundTasks` 배선·`tests/test_jobs.py`. 202 즉시 반환 후 QUEUED→RUNNING→SUCCEEDED/FAILED 전이, 폴링으로 관측. **24 passed** |
+| develop 반영 | `feature/engine-socket`(5·6단계)을 `develop`에 fast-forward 병합·push. 7단계용 `feature/sessions` 분기 |
 
 **이 과정에서 드러난 사실 3개**
 
@@ -354,9 +363,9 @@ PoC는 브라우저에서 단독 실행되므로 서버에는 필요 없는 인�
 
 **브랜치 전략(팀 합의)**: `feature/*` → 동작·테스트 완료 후 `main` → `main` 기준 `develop` 생성 → 이후 `develop`에서 수정·테스트 후 `main` 병합.
 
-현재 작업 브랜치는 **`feature/fastapi-skeleton`**(`origin` push 완료). GitHub의 브랜치는 `main`·`develop`·`feat/code_Q&A`·`feat/pdf_analysis`·`feature/fastapi-skeleton` 다섯이다.
+**2026-07-23 개편 반영**: 꼬였던 구 `develop`은 `develop-old`로 백업(로컬+원격, 나중 삭제). 재구축 골격이 정리된 새 `develop`이 기준선이고 GitHub 기본 브랜치도 `develop`이다. 단계별 `feature/*`를 develop에 fast-forward 병합하며 나아간다(5·6단계 = `feature/engine-socket` 병합 완료). 현재 작업 브랜치는 **`feature/sessions`**(7단계용).
 
-**PR은 아직 내지 않는다.** `origin/develop`에 구 구현이 살아 있어서 지금 PR을 올리면 **대량 삭제 diff**로 보인다. "AI 골격을 재구축했고 PoC는 팀원 브랜치에서만 관리한다"는 배경이 팀에 공유된 뒤에 올린다.
+**PR은 아직 내지 않는다.** 단계 학습이 목적이라 develop에 직접 병합 중. 팀 공유 시점에 정리해 올린다.
 
 **커밋 규칙** (`../rule/개발/이슈 O/Git 커밋 & PR 가이드.docx`)
 
