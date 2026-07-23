@@ -73,7 +73,20 @@ const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 // Restrict to your GitHub Pages origin once you know it -- "*" works but means any
 // website could relay calls through your worker using a visitor's own pasted key
 // (that key is still theirs, but it's needless exposure of your worker as an open relay).
-const ALLOWED_ORIGIN = "*"; // e.g. "https://popixoxipop-collab.github.io"
+// D-fix15 (연주 audit H3, 2026-07-23): confirmed this constant IS enforced (corsHeaders()
+// below echoes it as access-control-allow-origin) -- the wildcard meant literally any
+// website could relay NVIDIA calls through this Worker using a visitor's own pasted key.
+//   WHY: narrow to this tool's actual deployed origin now that it's known.
+//   COST: any other legitimate caller (a different Team-IZ page, local dev over file://,
+//   etc.) would need adding here explicitly -- judged fine since this Worker was deployed
+//   specifically for this one tool (worker/wrangler.toml: team-iz-code-qna-proxy).
+//   EXIT: if a second legitimate origin needs access, either add it as a second allowed
+//   value (corsHeaders would need an array-aware check) or revert to "*" if that's judged
+//   simpler than maintaining a list.
+//   DEPLOY NOTE: this repo has no CI/CD for the Worker (no .github/workflows) -- pushing
+//   this source change does NOT update the live Cloudflare Worker by itself. Requires a
+//   manual `wrangler deploy` from worker/ with Cloudflare credentials.
+const ALLOWED_ORIGIN = "https://team-iz.github.io";
 
 const JOB_TTL_SECONDS = 3600; // 1 hour -- generous for an actively-polling client, not indefinite
 

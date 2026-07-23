@@ -40,6 +40,16 @@ const SessionState = (() => {
   // per SCAN, not per finding -- every finding from the same scan shares the same repo.
   const REPO_KEY = "teamiz_p02_repo_context";
 
+  // D-fix14 (연주 audit E2, 2026-07-23): a quota failure surfaced the raw browser
+  // exception's own message -- technically not swallowed (already true before this fix),
+  // but not obviously actionable to a trainee reading it either.
+  //   WHY: recognize QuotaExceededError specifically (name across browsers, or legacy
+  //   code 22) and attach a clearer Korean hint alongside the original error object -- the
+  //   original `error` is still returned unchanged so nothing that already reads `.message`
+  //   directly breaks, this only adds a `hint` a caller can prefer to show instead.
+  //   COST: none -- additive field only.
+  //   EXIT: if a caller wants this hint to fully replace the raw message, read `.hint` first
+  //   and fall back to `.error.message`.
   function safeSet(key, value) {
     try {
       sessionStorage.setItem(key, JSON.stringify(value));
@@ -47,7 +57,12 @@ const SessionState = (() => {
     } catch (err) {
       // Most likely QuotaExceededError (or sessionStorage unavailable in a locked-down
       // context) -- report it explicitly rather than pretending the save succeeded.
-      return { ok: false, error: err };
+      const isQuota = err && (err.name === "QuotaExceededError" || err.code === 22);
+      return {
+        ok: false,
+        error: err,
+        hint: isQuota ? "저장 용량 초과 -- finding이 너무 많거나 근거 코드가 큽니다 (브라우저 세션 저장공간 한도)" : undefined,
+      };
     }
   }
 
@@ -66,8 +81,39 @@ const SessionState = (() => {
   // resume (D212): optional {runId, transcript}, null for a fresh interview -- see
   // p03-engine.js's D212 comment. Small enough (max 4 turns of text) for plain
   // sessionStorage, unlike D210's zipFiles which needed IndexedDB.
+  // D-fix13 (연주 audit E1, 2026-07-23): sessionStorage is scoped per-tab -- opening the
+  // submission->session link in a new tab, or bookmarking straight to session.html, always
+  // hit the "제출 단계로 돌아가세요" fallback below even though the trainee had just picked
+  // a finding a moment ago in a DIFFERENT tab. This file's own header already anticipated
+  // this exact EXIT path for saveFindingsList ("swap sessionStorage for localStorage").
+  //   WHY: mirror SUBMISSION_KEY into localStorage alongside sessionStorage on save, and
+  //   have loadSubmission() fall back to the localStorage copy only when sessionStorage is
+  //   empty -- sessionStorage stays the primary/preferred source (still correctly isolates
+  //   two genuinely different in-flight submissions in two tabs in the common case), the
+  //   mirror only kicks in for the specific "this tab has nothing" case E1 describes.
+  //   COST: if two DIFFERENT submissions are genuinely in flight in two tabs at once (rare
+  //   for a single-user local tool), a tab that never had its own sessionStorage entry could
+  //   recover the OTHER tab's submission via the mirror instead of correctly showing "제출
+  //   단계로 돌아가세요" -- judged acceptable given how rarely that scenario occurs versus
+  //   how often the new-tab/bookmark case does.
+  //   EXIT: if the cross-tab mix-up above turns out to matter in practice, drop the
+  //   localStorage fallback and revisit a scoped alternative (e.g. a URL param carrying a
+  //   session id) instead of reverting all the way to "no recovery."
+  const LOCAL_MIRROR_KEY = "teamiz_p02_submission_mirror";
+
+  function saveSubmissionPayload(payload) {
+    const result = safeSet(SUBMISSION_KEY, payload);
+    try {
+      localStorage.setItem(LOCAL_MIRROR_KEY, JSON.stringify(payload));
+    } catch (err) {
+      // best-effort mirror only -- sessionStorage above is still the primary save path and
+      // already reported ok/fail via `result`.
+    }
+    return result;
+  }
+
   function saveSubmission({ finding, codeContexts, repoRef, resume }) {
-    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: null, repoRef: repoRef || null, resume: resume || null });
+    return saveSubmissionPayload({ finding, codeContexts: codeContexts || [], model: null, repoRef: repoRef || null, resume: resume || null });
   }
 
   // Optional 3rd field so submission.html can also hand session.html the model chosen in
@@ -75,7 +121,7 @@ const SessionState = (() => {
   // back to the manifest default itself if this is absent (same fallback the original
   // renderInput() did before selecting a model).
   function saveSubmissionWithModel({ finding, codeContexts, model, repoRef, resume }) {
-    return safeSet(SUBMISSION_KEY, { finding, codeContexts: codeContexts || [], model: model || null, repoRef: repoRef || null, resume: resume || null });
+    return saveSubmissionPayload({ finding, codeContexts: codeContexts || [], model: model || null, repoRef: repoRef || null, resume: resume || null });
   }
 
   // Returns { finding, codeContexts, model, repoRef, resume } or null if nothing valid was
@@ -84,8 +130,7 @@ const SessionState = (() => {
   // case, not crash. D200: repoRef defaults to null for rows saved before this field
   // existed (no migration needed -- `v.repoRef` is simply `undefined` on those, falls
   // through below). D212: same null-safe fallback for `resume`.
-  function loadSubmission() {
-    const v = safeGet(SUBMISSION_KEY);
+  function normalizeSubmission(v) {
     if (!v || typeof v !== "object" || !v.finding) return null;
     return {
       finding: v.finding,
@@ -94,6 +139,19 @@ const SessionState = (() => {
       repoRef: (v.repoRef && v.repoRef.owner && v.repoRef.repo) ? v.repoRef : null,
       resume: (v.resume && v.resume.runId && Array.isArray(v.resume.transcript)) ? v.resume : null,
     };
+  }
+
+  function loadSubmission() {
+    const fromSession = normalizeSubmission(safeGet(SUBMISSION_KEY));
+    if (fromSession) return fromSession;
+    // D-fix13: fall back to the cross-tab localStorage mirror only when THIS tab's own
+    // sessionStorage has nothing -- see LOCAL_MIRROR_KEY's own comment above for the tradeoff.
+    try {
+      const raw = localStorage.getItem(LOCAL_MIRROR_KEY);
+      return raw ? normalizeSubmission(JSON.parse(raw)) : null;
+    } catch (err) {
+      return null;
+    }
   }
 
   // D200: set once per scan (submission.html, right after P02Engine.run() resolves) --

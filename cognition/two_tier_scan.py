@@ -57,6 +57,9 @@ import json
 #        산출물은 이 필터로는 못 거름). 손으로 작성한 `.d.ts`(타입 선언 전용 코드)도 스캔에서 빠짐.
 #   EXIT: 오검출(실제 소스가 잘못 스킵되는) 사례가 나오면 SKIP_DIRS/SKIP_DIR_PREFIXES/
 #        SKIP_DIR_SUFFIXES/GENERATED_FILENAME_RE에서 해당 항목을 조정.
+#
+# 연주 audit B2 (2026-07-23): 검토 완료, 변경 없음 -- 위 COST에 이미 알고 감수한
+# 트레이드오프. 더 좁히면 D195가 고치려던 실제 문제(빌드 산출물 누락)가 재발할 위험.
 
 SRC_EXTS = (
     ".ts", ".tsx", ".js", ".jsx",
@@ -178,6 +181,32 @@ def extract_java_same_package_targets(text, sibling_class_stems, own_stem):
     return targets
 
 
+# D-fix16 (연주 audit B1, 2026-07-23): extract_java_same_package_targets() (D122, above)
+# does pure word-boundary matching against the raw file text -- a sibling class name that
+# happens to also be a common word (its own documented example: "Test") can match inside
+# an unrelated comment or log string, not just real code references.
+#   WHY: strip line comments (//...), block comments (/*...*/), and string literals
+#   ("...") before running the same-package word-boundary check specifically -- this only
+#   affects THIS check; JAVA_IMPORT_RE above still scans the raw text (real import
+#   statements inside comments are not a case this project has observed).
+#   COST: a rough regex-based strip, not a real Java tokenizer -- doesn't handle escaped
+#   quotes inside strings perfectly, and a stripped comment leaves a gap that could in
+#   theory change word adjacency -- judged low-risk since the check only cares about
+#   whole-word matches, not position.
+#   EXIT: if this proves insufficient (comments containing escaped-quote edge cases,
+#   etc.), swap for a proper tokenizer pass -- not needed at this project's current scale.
+_JAVA_LINE_COMMENT_RE = re.compile(r"//[^\n]*")
+_JAVA_BLOCK_COMMENT_RE = re.compile(r"/\*.*?\*/", re.DOTALL)
+_JAVA_STRING_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
+
+
+def _strip_java_comments_and_strings(text):
+    text = _JAVA_BLOCK_COMMENT_RE.sub(" ", text)
+    text = _JAVA_LINE_COMMENT_RE.sub(" ", text)
+    text = _JAVA_STRING_RE.sub(" ", text)
+    return text
+
+
 def extract_c_targets(text):
     return [m.group(1) for m in C_INCLUDE_RE.finditer(text)]
 
@@ -230,7 +259,10 @@ def tier_a_structural_scan(files):
                     edge_set.add((src, dst))
         if src.endswith(".java"):
             own_stem = os.path.splitext(src)[0]
-            for target in extract_java_same_package_targets(text, java_stems, own_stem):
+            # D-fix16: match against comment/string-stripped text for this check only --
+            # see _strip_java_comments_and_strings()'s own comment for the WHY/COST/EXIT.
+            cleaned_text = _strip_java_comments_and_strings(text)
+            for target in extract_java_same_package_targets(cleaned_text, java_stems, own_stem):
                 for dst in resolve_matches(target, fan_in_keys):
                     if dst != src:
                         edge_set.add((src, dst))
@@ -270,6 +302,20 @@ def tier_b_risk_triggered_scan(files):
     return {"flagged": flagged, "deep_read_count": deep_read_count, "total_files": len(files)}
 
 
+# D-fix17 (연주 audit B3, 2026-07-23): Swift files silently produce zero structural edges
+# (extract_targets_for_file's documented Swift branch, above) -- a Swift-heavy submission
+# gets a near-empty fan_in graph with no indication anywhere in the JSON that this is an
+# inherent language-coverage gap, not "this code has no dependencies."
+#   WHY: surface this at the data level (not a UI string baked into only one page) so any
+#   consumer of scan()'s JSON can choose to show it.
+#   COST: one more top-level key, null when not applicable -- no existing consumer breaks.
+#   EXIT: extend the same pattern if another structurally-unsupported language is added later.
+def _language_coverage_notice(files):
+    if any(f.endswith(".swift") for f in files):
+        return "Swift는 구조 스캔(fan-in/의존그래프) 미지원 -- 모듈 단위 가시성이라 파일간 로컬 import가 없음(문서화된 한계)"
+    return None
+
+
 def scan(repo_root):
     files = find_src_files(repo_root)
     tier_a = tier_a_structural_scan(files)
@@ -277,6 +323,7 @@ def scan(repo_root):
     return {
         "repo": repo_root,
         "total_source_files": len(files),
+        "language_coverage_notice": _language_coverage_notice(files),
         "tier_a_structural": {
             "fan_in": tier_a["fan_in"],
             "zero_fan_in_files": tier_a["zero_fan_in_files"],
