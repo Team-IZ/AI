@@ -165,6 +165,14 @@ const LabApp = (() => {
       note: "기본값(2026-07-22, 메인 repo D218 미러: refine이 콘텐츠를 깎지 않고 실제 빈 구멍을 채운 유일한 모델 -- item-level 정성 대조로 확인). P01-T1 실측 96% 성공(D120, 표본 50). ⚠ step-3.5-flash 대비 20-50배 느림, 같은 날 실사용에서 524로 1시간 실패 이력 있음(별도 세션 실행은 8/8 정상) -- 품질은 낫지만 가용성은 날마다 다를 수 있음." },
     { id: "stepfun-ai/step-3.5-flash", label: "step-3.5-flash", tier: "good",
       note: "메인 repo D218 미러(2026-07-22): 기본값을 qwen3-next-80b로 넘김(위 항목 참고) -- 이 모델은 빠르고 안정적이지만 refine 정성 대조에서 정의급 개념이 대체 없이 소실되는 게 확인됨. 속도/안정성이 급하면 여전히 이 모델. D120의 '0/50'은 구파이프라인 reasoning_content 버그로 확정 · 재검증: P03 tool_calls 1.5-3.9s 3/3, P01 JSON모드 4.1-5.3s 3/3(reasoning_content 경유, 폴백 정상 동작)." },
+    // D-mirror-217 (2026-07-23): 원래 메인 repo D216-D218를 이 파일로 미러할 때 "이 저장소는
+    // step-3.7-flash 스왑을 거친 적 없다"는 이유로 이 항목 자체를 아예 뺐었음 -- 그런데 실제
+    // 화면(P01 모델 선택 칩)에는 원래 11종이 보였어야 했고, 목록 자체엔 과거에 잠깐이라도
+    // 기본값이었던 모델을 "선택은 가능하되 tier:bad로 경고"하는 게 메인 repo의 방식이라 여기도
+    // 맞춰 다시 추가함(사용자 요청, 2026-07-23). 메인 repo D217 원문 참고: 잠시 기본값이었다가
+    // reasoning 모델로 확인되며 원복.
+    { id: "stepfun-ai/step-3.7-flash", label: "step-3.7-flash", tier: "bad",
+      note: "메인 repo D217 미러: 잠시 기본값이었으나 원복 -- reasoning 모델로 확인됨. 실제 p01-2 규모 JSON모드 요청은 NVIDIA에 직접 호출해도 180초간 응답 자체가 없음(HTTP_CODE 000). 실제 파이프라인 실험도 8청크 전부 90분간 하나도 안 끝남." },
     { id: "mistralai/mistral-medium-3.5-128b", label: "mistral-medium-3.5", tier: "unverified",
       note: "P01 기준 미검증 · P03 종합 2위(0.749) · D183 부수측정: 동일 4000자 프롬프트 13.2-17.3s(qwen 대비 5-6배 빠름, qwen과의 상대비교로만 측정, 단독 신뢰도 검증은 아직 부족)." },
     { id: "nvidia/nemotron-3-super-120b-a12b", label: "nemotron-3-super-120b", tier: "unverified",
@@ -183,6 +191,11 @@ const LabApp = (() => {
       note: "P01 기준 미검증 · P03에서 쿼타 소진 이력." },
     { id: "minimaxai/minimax-m3", label: "minimax-m3", tier: "unverified",
       note: "P01 기준 미검증 · P03에서 100회 반복 중 DEGRADED 재발 이력." },
+    // D-mirror-216 (2026-07-23): 원래 미러 당시 이 항목도 같이 빠져있었음(같은 이유로 위
+    // step-3.7-flash와 같이 발견+복구, 사용자 요청 없이 발견한 김에 같이 추가 -- 명시적으로
+    // 요청받은 건 step-3.7-flash뿐이었음).
+    { id: "nvidia/nemotron-3-ultra-550b-a55b", label: "nemotron-3-ultra-550b", tier: "unverified",
+      note: "P01 기준 미검증(2026-07-22 추가) · reasoning 모델 -- llm.js가 stream/chat_template_kwargs/reasoning_budget 미지원이지만 직접 curl 실측 결과 이 옵션들 없이도 content 필드 정상 반환 확인(짧은 프롬프트 기준). 실제 파이프라인의 max_tokens=3600에서 긴 추론 트레이스가 답변 전에 예산을 소진할 위험은 미검증." },
   ];
 
   return {
