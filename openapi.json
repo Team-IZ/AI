@@ -1,0 +1,1624 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "IZ-GET",
+    "description": "코드 분석 및 소크라틱 문답과 채점, 교안 분석 및 안내를 위한 AI 서비스",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "서비스 상태 확인",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Health Api Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/analyses": {
+      "post": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "코드 분석 요청 (P02)",
+        "description": "분석 요청 접수하고 즉시 202 반환. 실제 분석은 백그라운드\n\nx_trace_id는 아직 사용 X. 헤더 자리 게약 고정하고 Swagger 노출 위해 지금 받아둠\n- 로깅에 붙이는 것은 나중",
+        "operationId": "create_analysis_api_v0_analyses_post",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "submissionId:attemptNo. 중복 요청 판별",
+              "title": "Idempotency-Key"
+            },
+            "description": "submissionId:attemptNo. 중복 요청 판별"
+          },
+          {
+            "name": "x-trace-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "분산 추적 ID",
+              "title": "X-Trace-Id"
+            },
+            "description": "분산 추적 ID"
+          },
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "요청 스키마 위반",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "POST /api/v0/analyses 요청 본문 ",
+                "properties": {
+                  "attemptId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Spring 측 측정수행 키(에코용)",
+                    "title": "Attemptid"
+                  },
+                  "submissionId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Submissionid"
+                  },
+                  "callbackUrl": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현",
+                    "title": "Callbackurl"
+                  },
+                  "method": {
+                    "enum": [
+                      "GITHUB_URL",
+                      "ZIP_WITH_GITLOG"
+                    ],
+                    "title": "Method",
+                    "type": "string"
+                  },
+                  "source": {
+                    "properties": {
+                      "repoUrl": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "method=GITHUB_URL일 때 필수. 공개 레포만 지원",
+                        "title": "Repourl"
+                      },
+                      "branch": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ],
+                        "description": "생략 시 기본 브랜치",
+                        "title": "Branch"
+                      }
+                    },
+                    "title": "AnalysisSource",
+                    "type": "object"
+                  },
+                  "extractionScope": {
+                    "default": "TOTAL",
+                    "enum": [
+                      "TOTAL",
+                      "OWN_COMMIT"
+                    ],
+                    "title": "Extractionscope",
+                    "type": "string"
+                  },
+                  "commitEmail": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "OWN_COMMIT일 때 필수",
+                    "title": "Commitemail"
+                  },
+                  "questionBudget": {
+                    "default": 4,
+                    "description": "계획 질문 수",
+                    "minimum": 1,
+                    "title": "Questionbudget",
+                    "type": "integer"
+                  },
+                  "focusAreas": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "title": "Focusareas",
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "method"
+                ],
+                "title": "AnalysisRequest",
+                "type": "object"
+              },
+              "example": {
+                "method": "GITHUB_URL",
+                "source": {
+                  "repoUrl": "https://github.com/owner/repo",
+                  "branch": "main"
+                },
+                "extractionScope": "TOTAL",
+                "questionBudget": 4
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "payload",
+                  "file"
+                ],
+                "properties": {
+                  "payload": {
+                    "type": "string",
+                    "description": "요청 JSON을 문자열로. method는 ZIP_WITH_GITLOG",
+                    "example": "{\"method\":\"ZIP_WITH_GITLOG\",\"extractionScope\":\"TOTAL\"}"
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "제출 ZIP"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/analyses/{job_id}": {
+      "get": {
+        "tags": [
+          "analyses"
+        ],
+        "summary": "분석 상태·결과 조회 (P02)",
+        "description": "분석 job의 현재 상태와 결과를 돌려준다.\n\n경로의 {job_id}가 함수 파라미터 job_id로 자동 연결된다. 이름이 같아야 한다.\n\njob 저장소가 인메모리라 프로세스가 재시작되면 404가 난다.\n그때는 Spring이 분석을 다시 요청하면 된다(FastAPI는 상태의 소유자가 아니다).",
+        "operationId": "get_analysis_api_v0_analyses__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisJobStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "모르는 job_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/sessions": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "검증 세션 시작 (P03)",
+        "description": "세션 만들고 첫 질문 돌려주기",
+        "operationId": "start_session_api_v0_sessions_post",
+        "parameters": [
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionStart"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/sessions/{session_id}/answers": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "답변 제출 -> 다음 질문/종료 (P03)",
+        "description": "답변 받고 다음 질문(또는 종료)를 돌려줌.\n\n같은 client_request_id 재전송 -> 처음 응답 그대로(멱등).\n세션 유실이면 404 -> Spring이 restore 호출",
+        "operationId": "submit_answer_api_v0_sessions__session_id__answers_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnswerSubmit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "모르는 세션",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "세션 상태 조회 (P03)",
+        "description": "세션 현재 상태, 질문 반환(Spring 풀링/복구용)",
+        "operationId": "get_session_api_v0_sessions__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "모르는 세션",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/sessions/{session_id}/restore": {
+      "post": {
+        "tags": [
+          "sessions"
+        ],
+        "summary": "유실 세션 복원(P03)",
+        "description": "Spring이 저장해둔 transcript로 유실 세션 재구성하고 이어질 질문 반환",
+        "operationId": "restore_session_api_v0_sessions__session_id__restore_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SessionRestore"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionView"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/gradings": {
+      "post": {
+        "tags": [
+          "gradings"
+        ],
+        "summary": "세션 transcript 5축 후채점 요청",
+        "description": "채점 요청 접수하고 즉시 202. 실제 채점은 백그라운드에서",
+        "operationId": "create_grading_api_v0_gradings_post",
+        "parameters": [
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GradingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GradingAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/gradings/{job_id}": {
+      "get": {
+        "tags": [
+          "gradings"
+        ],
+        "summary": "채점 상태·점수·근거 조회",
+        "operationId": "get_grading_api_v0_gradings__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GradingJobStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "모르는 job_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AnalysisAccepted": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "status": {
+            "type": "string",
+            "const": "QUEUED",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "title": "AnalysisAccepted",
+        "description": "202 응답. 점수만 알리고 결과는 폴링으로 가져감 "
+      },
+      "AnalysisJobStatus": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "attemptId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attemptid"
+          },
+          "submissionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Submissionid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "SUCCEEDED",
+              "PARTIAL",
+              "FAILED"
+            ],
+            "title": "Status"
+          },
+          "failureReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failurereason",
+            "description": "FAILED일 때만 채워진다"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AnalysisResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SUCCEEDED·PARTIAL일 때만"
+          },
+          "aiUsage": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Aiusage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "title": "AnalysisJobStatus",
+        "description": "GET /analyses/{jobId} 응답.\n\nstatus 값은 DB analysis_job.status의 CHECK 제약과 같다(PLAN §3).\nANALYZING·READY는 다른 테이블의 값이라 여기 쓰면 Spring INSERT가 깨진다."
+      },
+      "AnalysisResult": {
+        "properties": {
+          "snapshotId": {
+            "type": "string",
+            "title": "Snapshotid",
+            "description": "Spring code_snapshot 행의 키"
+          },
+          "snapshotMeta": {
+            "$ref": "#/components/schemas/SnapshotMeta"
+          },
+          "appliedScope": {
+            "type": "string",
+            "enum": [
+              "TOTAL",
+              "OWN_COMMIT"
+            ],
+            "title": "Appliedscope"
+          },
+          "scopeFallback": {
+            "type": "boolean",
+            "title": "Scopefallback",
+            "description": "요청 범위를 못 지켜 TOTAL로 물러났는지"
+          },
+          "fallbackReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fallbackreason"
+          },
+          "commitSha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commitsha"
+          },
+          "findings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Findings"
+          },
+          "questionCountPlanned": {
+            "type": "integer",
+            "title": "Questioncountplanned",
+            "description": "계획된 질문 수. 유효 DP가 적으면 축소된다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "snapshotId",
+          "snapshotMeta",
+          "appliedScope",
+          "scopeFallback",
+          "questionCountPlanned"
+        ],
+        "title": "AnalysisResult",
+        "description": "분석이 성공했을 때의 결과 본문.\n\nfindings 각 항목의 내부 구조는 팀원 엔진 결과에 따라 바뀌므로\ndict로 열어둔다(PLAN §3 C7). 최상위 필드만 계약으로 고정한다."
+      },
+      "AnswerSubmit": {
+        "properties": {
+          "clientRequestId": {
+            "type": "string",
+            "title": "Clientrequestid",
+            "description": "세션 내 유일 멱등키"
+          },
+          "answerText": {
+            "type": "string",
+            "title": "Answertext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "clientRequestId",
+          "answerText"
+        ],
+        "title": "AnswerSubmit",
+        "description": "POST /sessions/{id}/answers 요청."
+      },
+      "AxisEvidence": {
+        "properties": {
+          "turnRef": {
+            "type": "integer",
+            "title": "Turnref"
+          },
+          "quoteText": {
+            "type": "string",
+            "title": "Quotetext"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "turnRef",
+          "quoteText",
+          "reason"
+        ],
+        "title": "AxisEvidence",
+        "description": "점수 근거. 답변 인용 필수 "
+      },
+      "AxisScore": {
+        "properties": {
+          "axisCode": {
+            "type": "string",
+            "enum": [
+              "CODE_UNDERSTANDING",
+              "DESIGN_LOGIC",
+              "ALTERNATIVE_COMPARISION",
+              "COUNTEREXAMPLE_RESPONSE",
+              "SELF_CORRECTION"
+            ],
+            "title": "Axiscode"
+          },
+          "score": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 1.0,
+            "title": "Score"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/AxisEvidence"
+            },
+            "type": "array",
+            "title": "Evidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "axisCode",
+          "score"
+        ],
+        "title": "AxisScore"
+      },
+      "CodeContext": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "snippet": {
+            "type": "string",
+            "title": "Snippet"
+          },
+          "lineStart": {
+            "type": "integer",
+            "title": "Linestart"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "snippet",
+          "lineStart"
+        ],
+        "title": "CodeContext",
+        "description": "질문이 가르키는 코드 발췌 "
+      },
+      "ErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "title": "Error"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "title": "ErrorResponse"
+      },
+      "GradingAccepted": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "status": {
+            "type": "string",
+            "const": "QUEUED",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "title": "GradingAccepted",
+        "description": "202 응답 "
+      },
+      "GradingJobStatus": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "sessionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessionid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "GRADING",
+              "COMPELETED",
+              "PARTIAL",
+              "FAILED"
+            ],
+            "title": "Status"
+          },
+          "failureReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failurereason"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GradingResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "aiUsage": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Aiusage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "title": "GradingJobStatus",
+        "description": "GET /gradings/{jobId} 응답\n\nstatus 분석 job과 다름: RUNNING 아니라 GRADING\nPARTIAL =  일부 축만 실패"
+      },
+      "GradingRequest": {
+        "properties": {
+          "sessionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessionid"
+          },
+          "scoreRunId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scorerunid",
+            "description": "Spring ScoreRun 키(에코용)"
+          },
+          "transcript": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Transcript"
+          }
+        },
+        "type": "object",
+        "title": "GradingRequest",
+        "description": "POST /gradings 요청. 세션 종료 후 transcript 전체를 채점 "
+      },
+      "GradingResult": {
+        "properties": {
+          "axisScores": {
+            "items": {
+              "$ref": "#/components/schemas/AxisScore"
+            },
+            "type": "array",
+            "title": "Axisscores"
+          },
+          "totalScore": {
+            "type": "integer",
+            "title": "Totalscore"
+          },
+          "averageScore": {
+            "type": "number",
+            "title": "Averagescore"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/GradingVersions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "axisScores",
+          "totalScore",
+          "averageScore",
+          "versions"
+        ],
+        "title": "GradingResult"
+      },
+      "GradingVersions": {
+        "properties": {
+          "modelCode": {
+            "type": "string",
+            "title": "Modelcode"
+          },
+          "promptVersion": {
+            "type": "string",
+            "title": "Promptversion"
+          },
+          "rubricVersion": {
+            "type": "string",
+            "title": "Rubricversion"
+          }
+        },
+        "type": "object",
+        "required": [
+          "modelCode",
+          "promptVersion",
+          "rubricVersion"
+        ],
+        "title": "GradingVersions",
+        "description": "어떤 모델,프롬프트,루브릭으로 채점했는지. "
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Progress": {
+        "properties": {
+          "dpIndex": {
+            "type": "integer",
+            "title": "Dpindex"
+          },
+          "dpTotal": {
+            "type": "integer",
+            "title": "Dptotal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dpIndex",
+          "dpTotal"
+        ],
+        "title": "Progress"
+      },
+      "Question": {
+        "properties": {
+          "dpId": {
+            "type": "string",
+            "title": "Dpid"
+          },
+          "depthLevel": {
+            "type": "string",
+            "title": "Depthlevel"
+          },
+          "sequenceNo": {
+            "type": "integer",
+            "title": "Sequenceno"
+          },
+          "questionText": {
+            "type": "string",
+            "title": "Questiontext"
+          },
+          "codeContext": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "dpId",
+          "depthLevel",
+          "sequenceNo",
+          "questionText"
+        ],
+        "title": "Question",
+        "description": "지금 물어보는 질문 하나 "
+      },
+      "SessionRestore": {
+        "properties": {
+          "attemptId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attemptid"
+          },
+          "analysisJobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysisjobid"
+          },
+          "timeLimitSec": {
+            "type": "integer",
+            "title": "Timelimitsec",
+            "default": 2400
+          },
+          "elapsedSec": {
+            "type": "integer",
+            "title": "Elapsedsec",
+            "default": 0
+          },
+          "transcript": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptTurn"
+            },
+            "type": "array",
+            "title": "Transcript"
+          },
+          "findings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Findings"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "type": "object",
+        "title": "SessionRestore",
+        "description": "POST /sessions/{id}/restore 요청 (명세 §4.4)."
+      },
+      "SessionStart": {
+        "properties": {
+          "attemptId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attemptid"
+          },
+          "analysisJobId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysisjobid"
+          },
+          "sessionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessionid",
+            "description": "Spring AssessmentSession 키(에코용)"
+          },
+          "selectedFindingIds": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Selectedfindingids",
+            "description": "세션에 포함할 DP. 생략 시 전체"
+          },
+          "timeLimitSec": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Timelimitsec",
+            "default": 2400
+          }
+        },
+        "type": "object",
+        "title": "SessionStart",
+        "description": "POST /sessions 요청."
+      },
+      "SessionView": {
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "title": "Sessionid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "IN_PROGRESS",
+              "COMPLETED",
+              "TIMEOUT",
+              "FAILED"
+            ],
+            "title": "State"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Question"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Progress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "transcript": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptTurn"
+            },
+            "type": "array",
+            "title": "Transcript"
+          },
+          "aiUsage": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Aiusage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessionId",
+          "state"
+        ],
+        "title": "SessionView",
+        "description": "세션 응답.\n\n명세는 진행/종료 두 형태로 나뉘지만, 스텁에서는 한 모델에 선택 필드로 담아\n단순하게 간다(진행 중이면 current+progress, 끝났으면 transcript).\n실제 계약을 굳힐 때 분리 여부를 정한다."
+      },
+      "SnapshotMeta": {
+        "properties": {
+          "contentHash": {
+            "type": "string",
+            "title": "Contenthash",
+            "description": "sha256 hex 64자"
+          },
+          "fileCount": {
+            "type": "integer",
+            "title": "Filecount"
+          },
+          "byteCount": {
+            "type": "integer",
+            "title": "Bytecount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "contentHash",
+          "fileCount",
+          "byteCount"
+        ],
+        "title": "SnapshotMeta",
+        "description": "code_snapshot 테이블 대응. 코드 원문 저장하지 않고 메타만 주기 "
+      },
+      "TranscriptTurn": {
+        "properties": {
+          "dpId": {
+            "type": "string",
+            "title": "Dpid"
+          },
+          "depthLevel": {
+            "type": "string",
+            "title": "Depthlevel"
+          },
+          "questionText": {
+            "type": "string",
+            "title": "Questiontext"
+          },
+          "answerText": {
+            "type": "string",
+            "title": "Answertext"
+          },
+          "answeredAt": {
+            "type": "string",
+            "title": "Answeredat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dpId",
+          "depthLevel",
+          "questionText",
+          "answerText",
+          "answeredAt"
+        ],
+        "title": "TranscriptTurn",
+        "description": "확정된 문답 한 턴. Spring이 즉시 영속화하는 복구 근거."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  }
+}
