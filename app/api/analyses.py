@@ -1,24 +1,20 @@
 """ 분석 API (P02) - POST /api/v0/analyses """
 import json
-import uuid
 from typing import Any
-from datetime import datetime, timezone
 
 # Request — 원시 요청 객체. Content-Type·본문·폼에 직접 접근할 수 있다.
 #           스키마 자동 바인딩을 포기하는 대신 분기를 제어한다.
-from fastapi import APIRouter, Depends, Header, Request, status
-
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Request, status
 # ValidationError — pydantic이 검증 실패 시 던지는 예외.
 #                   자동 바인딩이 아니라 직접 검증.
 from pydantic import ValidationError
 
+from app import jobs
 from app.api.errors import ApiError, format_validation_message
 from app.schemas.analysis import (
     AnalysisAccepted,
     AnalysisJobStatus,
     AnalysisRequest,
-    AnalysisResult,
-    SnapshotMeta,
 )
 from app.schemas.common import ErrorResponse
 
@@ -26,39 +22,6 @@ from app.engines import get_analysis_engine
 from app.engines.base import AnalysisEngine
 
 router = APIRouter(tags=["analyses"])
-
-# 멱등성 키 -> job_id
-# 같은 키로 다시 오면 새 job을 만들지 않고 처음 만든 id를 돌려줌
-# Redis 도입 시 교체하고 job 저장소와 합침.
-_job_id_by_idempotency_key: dict[str, str] = {}
-
-# job_id → 상태·결과. 6단계에서 app/jobs.py로 옮기고 실제 상태 전이를 붙인다.
-# ponytail: 인메모리 dict — 프로세스 재시작 시 유실. Redis 도입 시 함께 교체(PLAN §3)
-_jobs: dict[str, AnalysisJobStatus] = {}
-
-
-def _create_job(body: AnalysisRequest, engine: AnalysisEngine, zip_bytes: bytes | None) -> AnalysisJobStatus:
-    """job을 만들어 저장한다.
-
-    엔진에게 분석을 시키고(dict 반환), 그 dict를 AnalysisResult로 검증한다.
-    엔진이 계약(스키마)을 어기면 model_validate가 여기서 터진다 → 잘못된 응답이
-    나가기 전에 잡힌다.
-    """
-    now = datetime.now(timezone.utc)
-    raw = engine.analyze(body.model_dump(), zip_bytes)  # dict in, dict out
-    result = AnalysisResult.model_validate(raw)
-    
-    job = AnalysisJobStatus(
-        job_id=str(uuid.uuid4()),
-        attempt_id=body.attempt_id,
-        submission_id=body.submission_id,
-        status="SUCCEEDED",
-        started_at=now,
-        completed_at=now,
-        result=result
-    )
-    _jobs[job.job_id] = job
-    return job
 
 def _invalid(message: str) -> ApiError:
     return ApiError(status_code=422, error="INVALID_REQUEST", message=message)
@@ -146,8 +109,9 @@ _REQUEST_BODY = {
 )
 async def create_analysis(
     request: Request,
-    # Depends: FastAPI가 get_analysis_engine 먼저 실행해 그 반환값을 여기에
-    # 라우터는 어떤 엔진인지 모른다 - 팩토리가 설정 보고 고름
+    # BackgroundTasks: FastAPI가 자동 주입. 여기 add_task 한 작업은
+    # 응답을 보낸 "뒤"에 실행된다 → 202를 먼저 돌려주고 분석은 나중.
+    background_tasks: BackgroundTasks,
     engine: AnalysisEngine = Depends(get_analysis_engine),
     
     # 파라미터명 -> 헤더명 자동 변환(언더스코어 -> 하이픈, 첫글자 대문자로)
@@ -156,9 +120,7 @@ async def create_analysis(
     ),
     x_trace_id: str | None = Header(default=None, description="분산 추적 ID"),
 ) -> AnalysisAccepted:
-    """ 분석 요청 접수하고 즉시 202 반환 
-    
-    지금 스텁이라 job_id만 발급.
+    """ 분석 요청 접수하고 즉시 202 반환. 실제 분석은 백그라운드
     
     x_trace_id는 아직 사용 X. 헤더 자리 게약 고정하고 Swagger 노출 위해 지금 받아둠
     - 로깅에 붙이는 것은 나중
@@ -171,15 +133,17 @@ async def create_analysis(
     if body.method == "ZIP_WITH_GITLOG" and not zip_bytes:
         raise _invalid("method=ZIP_WITH_GITLOG는 multipart/form-data로 ZIP을 함께 보내야 합니다")
         
-    if idempotency_key and idempotency_key in _job_id_by_idempotency_key:
-        # 같은 요청 다시 온 경우 새로 만들지 않고 처음 것 돌려주기.
-        return AnalysisAccepted(
-            job_id=_job_id_by_idempotency_key[idempotency_key], status="QUEUED"
-        )
-        
-    job = _create_job(body, engine, zip_bytes)
     if idempotency_key:
-        _job_id_by_idempotency_key[idempotency_key] = job.job_id
+        # 같은 요청 다시 온 경우 새로 만들지 않고 처음 것 돌려주기.
+        existing = jobs.job_id_for_key(idempotency_key)
+        if existing:
+            return AnalysisAccepted(job_id=existing, status="QUEUED")
+        
+    job = jobs.create_job(body, idempotency_key)
+    
+    # 분석 백그라운드로 넘김. 이 줄은 즉시 반환, run_analysis는
+    # 응답 전송 후 실행되어 QUEUED->RUNNING->SUCCEDED로 전이
+    background_tasks.add_task(jobs.run_analysis, job.job_id, body, engine, zip_bytes)
 
     # 202는 "접수했다"는 뜻이다. 실제 job이 이미 끝났는지는 별개이고,
     # 호출자는 GET으로 상태를 확인한다.
@@ -199,7 +163,7 @@ async def get_analysis(job_id: str) -> AnalysisJobStatus:
     job 저장소가 인메모리라 프로세스가 재시작되면 404가 난다.
     그때는 Spring이 분석을 다시 요청하면 된다(FastAPI는 상태의 소유자가 아니다).
     """
-    job = _jobs.get(job_id)
+    job = jobs.get_job(job_id)
     if job is None:
         raise ApiError(
             status_code=404,
