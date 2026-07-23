@@ -118,14 +118,30 @@ GET  /api/v0/analyses/{job_id}        고정 결과 반환. 모르는 id는 404
 | 배우는 것 | 경로 파라미터, `response_model`, 404 처리 |
 | DoD | `GET /api/v0/analyses/{jobId}`가 고정 결과 반환. 모르는 id는 404 |
 
-### 5단계 — 엔진 소켓 ← 다음
+### 5단계 — 엔진 소켓 ← 다음 (코드 미착수)
 
 | | |
 |---|---|
-| 산출물 | `app/engines/base.py`, `app/engines/stub.py`, `tests/test_engines.py` |
-| 배우는 것 | `Protocol`, 의존성 주입으로 구현체 교체 |
+| 산출물 | `app/engines/__init__.py`·`base.py`·`stub.py`, `tests/test_engines.py`, `config.py`·`api/analyses.py` 수정 |
+| 배우는 것 | `Protocol`, 의존성 주입으로 구현체 교체(`Depends`, `dependency_overrides`) |
 | DoD | `engine_mode` 설정으로 스텁/실물이 갈린다. 라우터는 어느 쪽인지 모른다 |
 | 원칙 | 엔진은 FastAPI·pydantic·HTTP를 모른다. `dict` in, `dict` out |
+
+**설계 세부 (다음 세션에서 이대로 구현)**
+
+1. **`base.py` — `AnalysisEngine` Protocol.** 메서드 하나: `analyze(request: dict, zip_bytes: bytes | None = None) -> dict`. Protocol이라 팀원 코드가 상속·import할 필요 없이 시그니처만 맞으면 된다. request는 `body.model_dump()`(snake_case 키), 반환은 `AnalysisResult` 스키마에 대응하는 snake_case dict.
+
+2. **`stub.py` — `StubAnalysisEngine`.** 지금 `analyses.py`에 인라인된 `_stub_result()`를 이리로 이사. **동시에 `findings[]`를 `decision_point` 컬럼명으로 교정**한다(현재 `findingId` 등 임의 이름 → `dp_id`·`type`·`status`·`priority`·`focus_code`·`source_path`·`line_start`·`line_end`·`evidence_hash`·`extractor_version` + `references[{path,line_start,line_end,evidence_hash,reference_type}]`). `type`·`reference_type` 값 문자열은 카탈로그 미정(B-3)이라 잠정값(`CODE_RISK`/`PRIMARY`). 요청 값 일부를 반영(예: `applied_scope = request["extraction_scope"]`, `byte_count = len(zip_bytes)`)해 배선이 실제로 연결됐는지 드러나게 한다.
+
+3. **`__init__.py` — `get_analysis_engine()`.** `engine_mode=="stub"`이면 `StubAnalysisEngine()`, `"real"`이면 `NotImplementedError`로 **시끄럽게 실패**(조용히 스텁 폴백 금지 — 가짜 데이터가 운영까지 흘러감). FastAPI 의존성으로 쓴다.
+
+4. **`config.py`** — `engine_mode: Literal["stub","real"] = "stub"` 추가.
+
+5. **`analyses.py`** — `_stub_result()` 삭제. `create_analysis`에 `engine: AnalysisEngine = Depends(get_analysis_engine)` 주입. `_create_job(body, engine, zip_bytes)`가 `engine.analyze(body.model_dump(), zip_bytes)` 호출 후 `AnalysisResult.model_validate(raw)`로 검증(엔진이 계약 어기면 여기서 터지게).
+
+6. **`test_engines.py`** — 핵심은 `test_router_uses_injected_engine`: `app.dependency_overrides[get_analysis_engine] = FakeEngine`으로 갈아끼우고 응답에 FakeEngine 값이 나오는지 확인(`finally`에서 `clear()`). 통과 = 9단계에서 라우터 안 건드려도 엔진 교체됨. 그 외: 스텁 계약 모양, 요청 값 반영, finding이 decision_point 컬럼명 사용, real 모드 `NotImplementedError`.
+
+**DoD 목표: 21 passed.**
 
 ### 6단계 — job 수명주기
 
