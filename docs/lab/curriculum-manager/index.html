@@ -349,6 +349,7 @@
     return {
       id: row.id,
       source, // "pdf_analysis" | "public" -- which client/schema this row came from (D3, labdb-shim.js), so delete routes to the right one
+      ownerEmail: (row.members && row.members.email) || null, // D5 (2026-07-23): who registered this, so a blocked delete tells you who to ask
       title: meta.source_filename ? String(meta.source_filename).replace(/\.pdf$/i, "") : `교안 (${String(row.id).slice(0, 8)})`,
       result: {
         unit_map: byKind.unit_map || {},
@@ -384,7 +385,10 @@
       // curricula analyzed there before this page existed show up here too -- this page
       // used to only ever see its own pdf_analysis.runs rows.
       const [c, pc] = await Promise.all([LabDB.ensureClient(), LabDB.ensurePublicClient()]);
-      const selectArgs = ["*, artifacts(kind, content, truncated)"];
+      // D5 (2026-07-23): embed members(email) via runs.member_id's FK so the list can
+      // show who registered each row -- "members read all" RLS (qual:true) means any
+      // logged-in user can already see any other member's email through this embed.
+      const selectArgs = ["*, artifacts(kind, content, truncated), members(email)"];
       const [own, legacy] = await Promise.all([
         c.from("runs").select(...selectArgs).eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50),
         pc.from("runs").select(...selectArgs).eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50),
@@ -497,11 +501,13 @@
     delModeBtn.classList.toggle("danger-outline", deleteMode);
 
     const theadRow = document.getElementById("list-thead-row");
-    const baseHeaders = ["교안명", "유닛", "그래프", "추출 상태", "분석 시각"];
+    // D5 (2026-07-23): "등록자" column -- a blocked delete only ever said "본인이 등록한
+    // 교안만 삭제할 수 있습니다" with no way to tell who to actually go ask.
+    const baseHeaders = ["교안명", "등록자", "유닛", "그래프", "추출 상태", "분석 시각"];
     theadRow.innerHTML = baseHeaders.map((h) => `<th>${h}</th>`).join("") + (deleteMode ? `<th style="width:64px"></th>` : "");
 
     const tbody = document.getElementById("list-tbody");
-    const colspan = deleteMode ? 6 : 5;
+    const colspan = deleteMode ? 7 : 6;
     if (!state.curricula.length) {
       tbody.innerHTML = `<tr><td colspan="${colspan}" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr>`;
       return;
@@ -520,6 +526,7 @@
         : "";
       return `<tr class="${deleteMode ? "" : "click"}" data-id="${LabApp.escapeHtml(c.id)}">
         <td class="name"><b>${LabApp.escapeHtml(c.title)}</b><div class="sub">${LabApp.escapeHtml(c.courseLabel || "")}</div></td>
+        <td class="sub">${LabApp.escapeHtml(c.ownerEmail || "—")}</td>
         <td>${unitCount}개</td>
         <td>${graphBadge}</td>
         <td>${extractBadge}</td>
@@ -671,8 +678,14 @@
           return;
         }
         const typedTitle = document.getElementById("curriculum-title-input").value.trim();
+        // D5 (2026-07-23): whoever is logged in right now is who this run will actually
+        // be saved under (maybeSaveRun() stamps member_id = auth.uid()) -- set it here too
+        // so a freshly-analyzed row shows an owner immediately, not just after the next
+        // refreshFromDB() DB round-trip relabels it.
+        const owner = await LabDB.currentMemberOrNull().catch(() => null);
         const entry = {
           id: String(state.nextId++),
+          ownerEmail: owner ? owner.email : null,
           title: typedTitle || (lastPdfName ? lastPdfName.replace(/\.pdf$/i, "") : `교안 #${state.nextId - 1}`),
           result,
           analyzedAt: new Date(),
