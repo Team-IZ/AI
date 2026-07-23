@@ -12,7 +12,7 @@ React는 FastAPI를 직접 호출하지 않는다. **FastAPI의 호출자는 Spr
 
 **FastAPI는 DB를 갖지 않는다.** 결과를 응답이나 콜백으로 돌려줄 뿐이고 저장은 전부 Spring이 한다. 코드 원문도 임시 작업공간에만 두고 TTL로 지운다.
 
-> **상태: 재구축 중 — 9단계 중 6단계 완료 (엔드포인트 3/9, 24 passed).**
+> **상태: 재구축 중 — 9단계 중 7단계 완료 (엔드포인트 7/9, 31 passed).**
 > 기존 구현은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났고, 지금은 빈 FastAPI 골격부터 다시 쌓는 중이다.
 > 단계별 상세·미결 항목은 **`PLAN_FASTAPI_MIGRATION.md`**가 단일 기준이다.
 
@@ -121,6 +121,7 @@ app/
 ├─ main.py          앱 조립. 라우터 등록만. 로직 없음
 ├─ config.py        Settings — 환경변수 (engine_mode 포함)
 ├─ jobs.py          분석 job 인메모리 저장소 + 수명주기(상태 전이)
+├─ sessions.py      문답 세션 인메모리 저장소 + 스텁 진행(멱등)
 ├─ api/             HTTP 계층 — 백엔드가 보는 면
 │  ├─ deps.py         인증
 │  ├─ health.py
@@ -185,8 +186,8 @@ engine_mode: Literal["stub", "real"] = "stub"
 | 4 | `GET /analyses/{job_id}` 스텁 | 경로 파라미터, `response_model`, 404 | ✅ |
 | 5 | `engines/base.py` + `stub.py` | Protocol, 의존성 주입 | ✅ |
 | 6 | `jobs.py` 수명주기 | `BackgroundTasks`, 상태 전이 | ✅ |
-| 7 | `sessions.py` 4개 스텁 | 세션 리소스 | ← 다음 |
-| 8 | `gradings.py` 2개 스텁 | 9개 완성 | |
+| 7 | `sessions.py` 4개 스텁 | 세션 리소스, 하위 리소스, 멱등 | ✅ |
+| 8 | `gradings.py` 2개 스텁 | 9개 완성 | ← 다음 |
 | 9 | 팀원 엔진 이식 | 실제 모듈화 | |
 
 1~8은 엔진 없이 전부 가능하다. 8단계가 끝나면 백엔드가 붙일 수 있다.

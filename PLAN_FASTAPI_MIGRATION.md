@@ -15,18 +15,22 @@
 
 | 항목 | 상태 |
 |---|---|
-| 완료 단계 | **1~6** (앱 골격 · 설정·인증 · 분석 요청 · 분석 조회 · 엔진 소켓 · job 수명주기) |
-| 엔드포인트 | **3 / 9** (5·6단계는 내부 구조라 새 엔드포인트 없음) |
-| 테스트 | **24 passed** |
+| 완료 단계 | **1~7** (앱 골격 · 설정·인증 · 분석 요청 · 분석 조회 · 엔진 소켓 · job 수명주기 · 세션 4개) |
+| 엔드포인트 | **7 / 9** (health · analyses 2 · sessions 4) |
+| 테스트 | **31 passed** |
 | 백엔드 계약 | C1~C6 확정(2026-07-22) — §3 |
-| 다음 작업 | **7단계 — 세션 엔드포인트 4개(`app/api/sessions.py`)** |
+| 다음 작업 | **8단계 — 채점 엔드포인트 2개(`app/api/gradings.py`), 9/9 완성** |
 
 살아 있는 엔드포인트:
 
 ```
-GET  /api/health                      인증 면제
-POST /api/v0/analyses                 JSON + multipart(ZIP) 양쪽. 멱등성 키 처리
-GET  /api/v0/analyses/{job_id}        고정 결과 반환. 모르는 id는 404
+GET  /api/health                          인증 면제
+POST /api/v0/analyses                     JSON + multipart(ZIP) 양쪽. 멱등성 키 처리
+GET  /api/v0/analyses/{job_id}            고정 결과 반환. 모르는 id는 404
+POST /api/v0/sessions                     세션 시작 → 첫 질문(201). 동기
+POST /api/v0/sessions/{id}/answers        답변 제출 → 다음 질문/종료. client_request_id 멱등
+GET  /api/v0/sessions/{id}                세션 상태 조회. 모르는 id는 404
+POST /api/v0/sessions/{id}/restore        유실 세션을 transcript로 재구성
 ```
 
 ### 작업 이력
@@ -61,6 +65,10 @@ GET  /api/v0/analyses/{job_id}        고정 결과 반환. 모르는 id는 404
 | 5단계 완료 | `app/engines/`(`base.py` Protocol · `stub.py` · `__init__.py` 팩토리)·`config.py` `engine_mode`·`api/analyses.py` 의존성 주입·`tests/test_engines.py`. `_stub_result` 인라인 제거, findings를 `decision_point` 컬럼명으로 교정. **21 passed** |
 | 6단계 완료 | `app/jobs.py`(인메모리 저장소 + 수명주기)·`api/analyses.py` `BackgroundTasks` 배선·`tests/test_jobs.py`. 202 즉시 반환 후 QUEUED→RUNNING→SUCCEEDED/FAILED 전이, 폴링으로 관측. **24 passed** |
 | develop 반영 | `feature/engine-socket`(5·6단계)을 `develop`에 fast-forward 병합·push. 7단계용 `feature/sessions` 분기 |
+| Swagger 버그 수정 | `POST /analyses` 요청 스키마의 중첩 모델(`AnalysisSource`) `$ref`가 components에 없는 경로를 가리켜 Swagger가 해석 실패하던 것(3단계부터 잠복)을 `$defs` 인라인 펼치기로 해결 |
+| 7단계 완료 | `schemas/session.py`(단수 — `analysis.py`와 짝)·`app/sessions.py`(저장소, `jobs.py`와 짝)·`api/sessions.py`(4개 엔드포인트)·`main.py` 등록·`tests/test_sessions.py`. 동기 리소스, `client_request_id` 멱등, 내부 상태(dataclass)/와이어 DTO(pydantic) 분리, restore로 transcript 재구성. **31 passed** |
+
+**파일명 규칙(기존 코드가 정한 것)**: `schemas/`는 **단수**(`analysis.py`·`session.py`), `api/`·저장소 모듈은 **복수**(`analyses.py`·`sessions.py`·`jobs.py`).
 
 **이 과정에서 드러난 사실 3개**
 
