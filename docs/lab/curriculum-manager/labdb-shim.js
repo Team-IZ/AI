@@ -73,13 +73,18 @@
   // and PostgREST's schema option is fixed per client (no per-query override).
   //   WHY: same Supabase project/URL/anon key/session -- a second createClient() call is
   //     the only way supabase-js exposes a different `db.schema` at the same time.
-  //   COST: two GoTrueClient instances against the same URL log a harmless "Multiple
-  //     GoTrueClient instances detected" console warning. Both still share the same
-  //     underlying localStorage session (neither sets a custom storageKey, so they agree
-  //     on the default key) -- a known-benign duplicate-instance warning, not a
-  //     functional issue for the read/delete calls this page makes.
-  //   EXIT: if that warning ever needs to go away, give both clients an explicit,
-  //     matching `auth.storageKey` instead of relying on the default coinciding.
+  //   COST: two GoTrueClient instances against the same URL was NOT just a cosmetic
+  //     console warning -- refreshFromDB() calls ensureClient()+ensurePublicClient() in
+  //     Promise.all() at page load, which is also the moment the browser lands back here
+  //     with `?code=...` after a Google login. supabase-js's `detectSessionInUrl`
+  //     defaults to true (confirmed in the shipped bundle), so with no override BOTH
+  //     clients raced to consume that same one-time code, and a user hit
+  //     bad_oauth_state/"OAuth state not found or expired" shortly after this shipped --
+  //     not proven as the only cause (state validation errors can also come from stale
+  //     browser state), but a real, confirmed mechanism, so fixed regardless.
+  //   EXIT: if a third schema is ever needed, give it the same detectSessionInUrl:false
+  //     treatment -- only ONE client on a page should ever be allowed to process the
+  //     OAuth callback URL.
   let publicClient = null;
   let publicLoadingPromise = null;
 
@@ -94,8 +99,14 @@
             "sha384-GFr3yTh5lJznCbZfpTtXnwboFsxqtTQoeTZCRHhE0579KrRmlCzen5AA8ohaB5ug"
           );
         }
+        // detectSessionInUrl:false -- this client only ever reads a session that
+        // ensureClient()'s client (the one wireLogin()/signInWithGoogle() actually run
+        // through) already established; it must never independently try to process an
+        // OAuth callback URL itself. autoRefreshToken:false for the same reason: token
+        // lifecycle belongs to the primary client, this one just piggybacks on its
+        // shared localStorage session (no custom storageKey on either client).
         publicClient = window.supabase.createClient(LabConfig.get("supabase-url"), LabConfig.get("supabase-anon-key"), {
-          auth: { flowType: "pkce" },
+          auth: { flowType: "pkce", detectSessionInUrl: false, autoRefreshToken: false },
         });
       })();
     }
