@@ -388,10 +388,17 @@
       // D5 (2026-07-23): embed members(email) via runs.member_id's FK so the list can
       // show who registered each row -- "members read all" RLS (qual:true) means any
       // logged-in user can already see any other member's email through this embed.
-      const selectArgs = ["*, artifacts(kind, content, truncated), members(email)"];
+      // members lives in the public schema: public.runs -> public.members is a
+      // same-schema FK PostgREST embeds fine, but pdf_analysis.runs -> public.members is
+      // CROSS-schema -- PostgREST's embed resolution only looks within the client's own
+      // scoped schema, so asking the pdf_analysis-scoped client for members(email) 400s
+      // with PGRST200 ("no relationship found"), which used to throw and abort the whole
+      // function before ever reaching legacy's (successful) result. Split the select so
+      // each client only asks for what its own schema can actually embed.
+      const artifactsSelect = "*, artifacts(kind, content, truncated)";
       const [own, legacy] = await Promise.all([
-        c.from("runs").select(...selectArgs).eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50),
-        pc.from("runs").select(...selectArgs).eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50),
+        c.from("runs").select(artifactsSelect).eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50),
+        pc.from("runs").select(`${artifactsSelect}, members(email)`).eq("pipeline", "p01").order("started_at", { ascending: false }).limit(50),
       ]);
       if (own.error) throw own.error;
       if (legacy.error) throw legacy.error;
