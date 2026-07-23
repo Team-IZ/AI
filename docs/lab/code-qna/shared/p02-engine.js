@@ -180,6 +180,26 @@ const P02Engine = (() => {
     return null;
   }
 
+  // D-fix1 (연주 audit A3, 2026-07-23): ZIP entry names are attacker-controlled and were
+  // used verbatim as Pyodide FS paths in writeTargetFiles() ("/target/" + relPath) with no
+  // traversal check -- a crafted entry like "../lib/judgment/score_findings.py" could
+  // escape /target and overwrite the real grading logic loaded into /lib moments earlier by
+  // ensurePipelineSource().
+  //   WHY: reject at parse time (before the path ever enters `files`) rather than only
+  //   guarding writeTargetFiles(), so every downstream consumer of `files`
+  //   (resolveConnectableFile, findReferencedFiles, etc.) never sees a path outside the
+  //   intended tree either. writeTargetFiles() also re-checks (defense-in-depth) in case a
+  //   future caller populates `files` some other way.
+  //   COST: a legitimate entry name that happens to contain a literal ".." path segment
+  //   (no known real-world case observed in any corpus this project has scanned) would also
+  //   be rejected.
+  //   EXIT: if Pyodide FS's own mkdirTree/writeFile ever gain built-in traversal
+  //   protection, this becomes redundant defense-in-depth, not incorrect -- safe to keep
+  //   either way.
+  function isUnsafeZipPath(name) {
+    return !name || name.startsWith("/") || name.split("/").some((seg) => seg === "..");
+  }
+
   // Change #2: split from the original handleZipFile(file, container), which interleaved
   // this exact parsing/categorization with `container.querySelector("#p02-zip-status")`
   // DOM writes. Throws on a genuine unzip failure (JSZip.loadAsync) -- the page catches
@@ -193,6 +213,12 @@ const P02Engine = (() => {
     const skippedExtCounts = {};
     let notebookCodeCount = 0;
     for (const entry of entries) {
+      // D-fix1: reject path-traversal entries before any other categorization -- see
+      // isUnsafeZipPath()'s comment above.
+      if (isUnsafeZipPath(entry.name)) {
+        skippedExtCounts["(안전하지 않은 경로)"] = (skippedExtCounts["(안전하지 않은 경로)"] || 0) + 1;
+        continue;
+      }
       if (isNotebookPath(entry.name)) {
         try {
           const raw = await entry.async("string");
@@ -360,6 +386,7 @@ shutil.rmtree("/target", ignore_errors=True)
     }
     pyodide.FS.mkdirTree("/target");
     for (const [relPath, content] of Object.entries(files)) {
+      if (isUnsafeZipPath(relPath)) continue; // D-fix1 defense-in-depth, see isUnsafeZipPath()
       const fullPath = "/target/" + relPath;
       const dir = fullPath.substring(0, fullPath.lastIndexOf("/"));
       pyodide.FS.mkdirTree(dir);
@@ -445,6 +472,37 @@ _result = webtool_driver.run_scan("/target", overrides_json)
     }
   }
 
+  // D-fix4 (연주 audit I1, 2026-07-23): a Supabase save failure used to append exactly one
+  // onProgress log line -- easy to miss in a scrolling log, no retry for what's often a
+  // transient network blip, and once the tab/session ends the result is genuinely gone
+  // (session-state.js only persists to sessionStorage, not any durable store). From a
+  // reviewer's later perspective this made a failed save indistinguishable from "the run
+  // never happened."
+  //   WHY: (1) retry a couple of times first -- unlike an LLM call this is a fast, cheap
+  //   Supabase write, so a short bounded retry costs little and recovers from exactly the
+  //   transient-failure case this codebase already assumes elsewhere (worker/nvidia-proxy.js's
+  //   own MAX_ATTEMPTS=3 pattern). (2) on final failure, also raise hooks.onStatus(...,
+  //   "error") -- the same call run()'s own catch block already uses for a failed run, so
+  //   this reuses an existing "the user will actually notice this" UI path instead of only
+  //   the scrolling onProgress log.
+  //   COST: a genuinely down Supabase project now costs up to 2 extra ~1s round-trips of
+  //   latency before the user sees the final failure, instead of failing immediately.
+  //   EXIT: retry count (3 total attempts) and delay (1s) are unmeasured/provisional, chosen
+  //   to mirror this codebase's existing MAX_ATTEMPTS=3-style conventions rather than fit to
+  //   real Supabase transient-failure data -- revisit if real failure logs show a different
+  //   pattern. Duplicated in p03-engine.js's maybeSaveRun (separate IIFE, same reasoning --
+  //   see that file's own D-fix4 comment).
+  async function saveRunWithRetry(payload, attempts = 3, delayMs = 1000) {
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await LabDB.saveRun(payload);
+      } catch (err) {
+        if (i === attempts - 1) throw err;
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+    }
+  }
+
   // `method` param replaces the original's module-level `currentMethod` read (see file
   // header change #3).
   async function maybeSaveRun(result, files, startedAt, finishedAt, method, hooks) {
@@ -453,7 +511,7 @@ _result = webtool_driver.run_scan("/target", overrides_json)
       return;
     }
     try {
-      await LabDB.saveRun({
+      await saveRunWithRetry({
         pipeline: "p02",
         model: null,
         input_meta: { file_count: Object.keys(files).length, method },
@@ -465,6 +523,7 @@ _result = webtool_driver.run_scan("/target", overrides_json)
       hooks.onProgress(`결과가 팀 DB에 저장됨 (소요시간 ${LabApp.formatElapsed(finishedAt - startedAt)})`);
     } catch (err) {
       hooks.onProgress(`DB 저장 실패(결과는 화면에 남아있음): ${err.message}`);
+      hooks.onStatus(`DB 저장 실패 -- 팀 기록에 남지 않았습니다: ${err.message}`, "error");
     }
   }
 

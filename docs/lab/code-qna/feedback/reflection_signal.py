@@ -20,6 +20,11 @@ REQUIRED_SUB_SIGNALS = ("self_error_recognition",)
 OPTIONAL_SUB_SIGNALS = tuple(s for s in SUB_SIGNALS if s not in REQUIRED_SUB_SIGNALS)
 MIN_OPTIONAL_MATCHES = 2  # OPTIONAL 3개(reason/judgment/improvement) 중 최소 2개
 
+# D-fix5 (연주 audit G1, 2026-07-23): see judgment/isolation_classifier.py's matching
+# D-fix5 comment for the full WHY/COST/EXIT (identical reasoning -- a bare required+optional
+# pattern match was sufficient regardless of answer length, and the pattern list is public).
+MIN_SUBSTANCE_CHARS = 20
+
 
 def detect_sub_signal(text, sub_signal):
     """confirmed 상태인 정규식 패턴만으로 텍스트를 검사한다 — candidate 패턴은 신뢰 안 함(D6 계승)."""
@@ -45,7 +50,8 @@ def evaluate_reflection(text):
 
     required_ok = all(results[s]["matched"] for s in REQUIRED_SUB_SIGNALS)
     optional_matches = sum(1 for s in OPTIONAL_SUB_SIGNALS if results[s]["matched"])
-    reflection_present = required_ok and optional_matches >= MIN_OPTIONAL_MATCHES
+    substantive = len((text or "").strip()) >= MIN_SUBSTANCE_CHARS
+    reflection_present = required_ok and optional_matches >= MIN_OPTIONAL_MATCHES and substantive
 
     matched_count = sum(1 for r in results.values() if r["matched"])
     return {
@@ -55,6 +61,7 @@ def evaluate_reflection(text):
         "required_ok": required_ok,
         "optional_matches": optional_matches,
         "min_optional_required": MIN_OPTIONAL_MATCHES,
+        "substantive": substantive,
         "sub_signals": results,
     }
 
