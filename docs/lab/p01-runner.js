@@ -98,7 +98,7 @@ const P01Runner = (() => {
           텍스트 추출은 pdf.js를 쓴다 — 원본 파이프라인의 pdftotext -layout과 완전히 동일한 결과는 아니다
           (모든 실행 기록에 extractor: "pdfjs"로 표시됨).
         </p>
-        <div class="field-label" style="margin-top:14px;">모델 선택 (11종 — 3개 프롬프트 단계+JSON 복구 전부에 적용)</div>
+        <div class="field-label" style="margin-top:14px;">모델 선택 (${LabApp.MODEL_CHOICES.length}종 — 3개 프롬프트 단계+JSON 복구 전부에 적용)</div>
         <div class="model-toggle-group" id="p01-model-group"></div>
         <p class="model-note" id="p01-model-note"></p>
       </div>`;
