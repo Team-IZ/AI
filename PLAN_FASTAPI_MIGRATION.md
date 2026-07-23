@@ -15,11 +15,11 @@
 
 | 항목 | 상태 |
 |---|---|
-| 완료 단계 | **1~7** (앱 골격 · 설정·인증 · 분석 요청 · 분석 조회 · 엔진 소켓 · job 수명주기 · 세션 4개) |
-| 엔드포인트 | **7 / 9** (health · analyses 2 · sessions 4) |
-| 테스트 | **31 passed** |
+| 완료 단계 | **1~8** (앱 골격 · 설정·인증 · 분석 2 · 엔진 소켓 · job 수명주기 · 세션 4 · 채점 2) |
+| 엔드포인트 | **9 / 9 완성** (health · analyses 2 · sessions 4 · gradings 2) |
+| 테스트 | **36 passed** |
 | 백엔드 계약 | C1~C6 확정(2026-07-22) — §3 |
-| 다음 작업 | **8단계 — 채점 엔드포인트 2개(`app/api/gradings.py`), 9/9 완성** |
+| 다음 작업 | **Postman 컬렉션 작성(8단계 DoD) → 9단계 팀원 엔진 이식** |
 
 살아 있는 엔드포인트:
 
@@ -31,6 +31,8 @@ POST /api/v0/sessions                     세션 시작 → 첫 질문(201). 동
 POST /api/v0/sessions/{id}/answers        답변 제출 → 다음 질문/종료. client_request_id 멱등
 GET  /api/v0/sessions/{id}                세션 상태 조회. 모르는 id는 404
 POST /api/v0/sessions/{id}/restore        유실 세션을 transcript로 재구성
+POST /api/v0/gradings                     세션 transcript 5축 후채점 요청(202). 비동기 job
+GET  /api/v0/gradings/{job_id}            채점 상태·5축 점수·근거 조회. 모르는 id는 404
 ```
 
 ### 작업 이력
@@ -68,7 +70,12 @@ POST /api/v0/sessions/{id}/restore        유실 세션을 transcript로 재구�
 | Swagger 버그 수정 | `POST /analyses` 요청 스키마의 중첩 모델(`AnalysisSource`) `$ref`가 components에 없는 경로를 가리켜 Swagger가 해석 실패하던 것(3단계부터 잠복)을 `$defs` 인라인 펼치기로 해결 |
 | 7단계 완료 | `schemas/session.py`(단수 — `analysis.py`와 짝)·`app/sessions.py`(저장소, `jobs.py`와 짝)·`api/sessions.py`(4개 엔드포인트)·`main.py` 등록·`tests/test_sessions.py`. 동기 리소스, `client_request_id` 멱등, 내부 상태(dataclass)/와이어 DTO(pydantic) 분리, restore로 transcript 재구성. **31 passed** |
 
-**파일명 규칙(기존 코드가 정한 것)**: `schemas/`는 **단수**(`analysis.py`·`session.py`), `api/`·저장소 모듈은 **복수**(`analyses.py`·`sessions.py`·`jobs.py`).
+| develop 재정합 | GitHub에서 feature/sessions PR #3가 세션 코드 올라가기 전 상태로 develop에 미리 머지돼(내용 없는 머지 커밋) 로컬 develop과 갈라짐. `git merge origin/develop`으로 흡수(로컬이 상위집합, 충돌 없음) 후 push. 이후 8단계용 `feature/gradings` 분기 |
+| 8단계 완료 | `schemas/grading.py`·`app/gradings.py`(저장소·스텁, `jobs.py`와 형제)·`api/gradings.py`(2개)·`main.py` 등록·`tests/test_gradings.py`. 분석과 같은 비동기 job 패턴. 5축 채점 결과 계약(`axis_scores` 5개·총점·평균·재현성 `versions`) 확정. **엔드포인트 9/9 완성, 36 passed** |
+
+**파일명 규칙(기존 코드가 정한 것)**: `schemas/`는 **단수**(`analysis.py`·`session.py`·`grading.py`), `api/`·저장소 모듈은 **복수**(`analyses.py`·`sessions.py`·`gradings.py`·`jobs.py`).
+
+**브랜치 운영 주의**: 팀이 GitHub PR로 develop에 머지하는 흐름과, 로컬에서 직접 develop push하는 흐름이 섞이면 이번처럼 갈라진다. develop 반영 방식을 팀과 통일할 것.
 
 **이 과정에서 드러난 사실 3개**
 
