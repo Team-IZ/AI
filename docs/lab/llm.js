@@ -105,6 +105,28 @@ const LabLLM = (() => {
     throw new Error(`작업이 ${Math.round(MAX_POLL_MS / 60000)}분 안에 끝나지 않음 (job_id=${jobId})`);
   }
 
+  // D-fix (2026-07-23): NVIDIA sometimes returns HTTP 200 with an error-shaped body instead
+  // of a proper 5xx -- observed live: vLLM's EngineCore crashing mid-request, body =
+  // {"error":{"code":500,"type":"InternalServerError",...}}. worker/nvidia-proxy.js's
+  // RETRYABLE_STATUSES check never sees this (the HTTP status looked fine to it), so every
+  // "unexpected shape" throw below used to carry no .retryable at all -- silently treated as
+  // non-retryable, the chunk/call abandoned after one attempt while a same-round HTTP 524
+  // got a real retry for what's functionally the same kind of transient NVIDIA hiccup.
+  //   WHY: mirror worker/nvidia-proxy.js's own RETRYABLE_STATUSES set against the code
+  //   NVIDIA embedded in the body -- same threshold, just read from a different place (these
+  //   two files can't share a literal constant: Worker runtime vs. browser bundle).
+  //   COST: if NVIDIA ever nests a genuinely permanent client error under one of these codes
+  //   (unlikely for 500/502/503/524, more plausible for 429 which usually IS transient
+  //   anyway), it'd get retried once too many times rather than failing fast -- the same
+  //   tradeoff the worker already accepts for its own identical set.
+  //   EXIT: if a specific body error code needs different handling later, split this set
+  //   instead of adding a one-off special case at a call site.
+  const RETRYABLE_BODY_ERROR_CODES = new Set([429, 500, 502, 503, 524]);
+  function markRetryableFromBody(err, data) {
+    err.retryable = Boolean(data && data.error && RETRYABLE_BODY_ERROR_CODES.has(data.error.code));
+    return err;
+  }
+
   async function chatJSON({ model, messages, maxTokens, temperature = 0.0, jsonMode = true, maxAttempts }) {
     const proxyUrl = LabConfig.get("proxy-url");
     const apiKey = LabConfig.get("nvidia-key");
@@ -115,7 +137,7 @@ const LabLLM = (() => {
     if (jsonMode) body.response_format = { type: "json_object" };
     const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts });
     const choice = data.choices && data.choices[0] && data.choices[0].message;
-    if (!choice) throw new Error(`예상치 못한 응답 형태: ${JSON.stringify(data).slice(0, 300)}`);
+    if (!choice) throw markRetryableFromBody(new Error(`예상치 못한 응답 형태: ${JSON.stringify(data).slice(0, 300)}`), data);
     // D131/D142's fallback chain, ported from the real pipeline -- some models (step-3.5-flash)
     // put their actual JSON-mode answer in reasoning_content, leaving content null/empty.
     const resolved = choice.content || choice.reasoning_content;
@@ -150,7 +172,7 @@ const LabLLM = (() => {
     const data = await submitAndPoll(proxyUrl, apiKey, body, { maxAttempts });
     const choice = data.choices && data.choices[0] && data.choices[0].message;
     const call = choice && choice.tool_calls && choice.tool_calls.find((c) => c.function.name === tool.name);
-    if (!call) throw new Error(`tool_calls에서 ${tool.name}을 찾지 못함: ${JSON.stringify(data).slice(0, 300)}`);
+    if (!call) throw markRetryableFromBody(new Error(`tool_calls에서 ${tool.name}을 찾지 못함: ${JSON.stringify(data).slice(0, 300)}`), data);
     return JSON.parse(call.function.arguments);
   }
 
@@ -202,7 +224,7 @@ const LabLLM = (() => {
       const calls = (choice && choice.tool_calls) || [];
 
       if (!calls.length) {
-        if (forced) throw new Error(`chatToolLoop: 강제 종료 라운드에서도 tool_calls 없음: ${JSON.stringify(data).slice(0, 300)}`);
+        if (forced) throw markRetryableFromBody(new Error(`chatToolLoop: 강제 종료 라운드에서도 tool_calls 없음: ${JSON.stringify(data).slice(0, 300)}`), data);
         // Model responded with plain text instead of calling any tool under "auto" -- not
         // expected, but not fatal: record what it said and force terminal-only on the next
         // round instead of throwing (guaranteed termination still holds).
