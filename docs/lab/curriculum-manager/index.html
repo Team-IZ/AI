@@ -367,7 +367,15 @@
   }
 
   async function refreshFromDB() {
-    if (!window.LabDB || !LabDB.isConfigured()) return;
+    // D4 (2026-07-23): was `!window.LabDB` -- db.js declares `const LabDB` at classic-
+    // script top level, which is never a `window` property (same pitfall already hit
+    // twice in this project, D136/D151 in the original Pipeline Lab page). That check
+    // was always true, so this function has silently no-op'd on its very first line
+    // since it was written -- every list this page ever showed came from sessionStorage
+    // only, never a real DB read. Invisible until now because pdf_analysis.runs was
+    // always empty anyway (nothing to visibly lose); the public.runs merge (D3) finally
+    // gave it real data to fail to show.
+    if (typeof LabDB === "undefined" || !LabDB.isConfigured()) return;
     const user = await LabDB.currentMemberOrNull().catch(() => null);
     if (!user) return;
     try {
@@ -451,7 +459,10 @@
     renderListTab();
 
     const isDbId = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
-    if (!isDbId || !window.LabDB || !LabDB.isConfigured()) return;
+    // D4 (2026-07-23): same `window.LabDB` bug as refreshFromDB() above -- this always
+    // returned early too, so a "delete" on any DB-backed row only ever removed it from
+    // this tab's local state/sessionStorage and silently left the real DB row untouched.
+    if (!isDbId || typeof LabDB === "undefined" || !LabDB.isConfigured()) return;
     try {
       const user = await LabDB.currentMemberOrNull();
       if (!user) throw new Error("로그인이 필요합니다");
