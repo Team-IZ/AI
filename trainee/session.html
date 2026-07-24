@@ -322,6 +322,7 @@
     document.getElementById("session-root").classList.remove("hidden");
 
     await LabApp.loadManifest();
+    await LabApp.refreshModelChoices();
     document.getElementById("ctx-label").textContent = submission.finding.id || submission.finding.file || "finding";
     document.getElementById("req-text").textContent = submission.finding.finding || "";
     // D212: tell the trainee up front that starting will continue an earlier attempt,

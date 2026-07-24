@@ -148,7 +148,15 @@ const LabApp = (() => {
   // was measuring the OLD pipeline's missing fallback, not a real model failure.
   // Promoted to shared.default_model for both P01 and P03 on this evidence, not
   // speculation.
-  const MODEL_CHOICES = [
+  // D-catalog (2026-07-24): renamed from MODEL_CHOICES -- this is now the CURATED base
+  // (hand-verified tier/notes, the thing that used to go stale -- e.g. qwen3.5-122b and
+  // mistral-large-3 below are both actually HTTP 410 "end of life" as of this session but
+  // were still listed as selectable). The live-selectable MODEL_CHOICES below is built by
+  // merging this against NVIDIA's actual catalog via the Worker's ?models=1. Same pattern
+  // already shipped for Team-IZ/AI's app.js (feat/pdf_analysis's docs/lab/lab-core.js,
+  // this file's own "extracted subset" source) and for curriculum-manager's separate copy
+  // -- this repeats it a third time for this branch's standalone code-qna deployment.
+  const CURATED_MODELS = [
     // D215 (2026-07-22): step-3.5-flash -> step-3.7-flash, mirrored from app.js's own
     // MODEL_CHOICES (this file is that extracted subset) -- see app.js's D215 comment
     // for the full WHY/COST/EXIT. Verified via a real NVIDIA /v1/models call that
@@ -177,8 +185,67 @@ const LabApp = (() => {
       note: "P01 기준 미검증 · P03에서 100회 반복 중 DEGRADED 재발 이력." },
   ];
 
+  // D-catalog (2026-07-24): 사용자 요청 -- deprecation/신규모델을 매번 수동 갱신하지 않도록.
+  // WHY/COST/EXIT 전문은 worker/nvidia-proxy.js의 동일 주석 및 curriculum-manager 쪽
+  // docs/lab/lab-core.js의 동일 주석 참고(그대로 반복 안 함). 요지: NVIDIA GET /v1/models을
+  // 이 Worker(team-iz-code-qna-proxy)의 ?models=1 경유로 확인해 CURATED_MODELS와 병합,
+  // 단종 모델은 자동 제외·새 chat계열은 "미검증"으로 자동 노출. 카탈로그 응답에 타입 필드가
+  // 없어 제외 키워드 방식 사용.
+  const NON_CHAT_KEYWORDS = [
+    "embed", "bge", "retriever", "rerank", "-parse", "guard", "safety", "moderation",
+    "-pii", "reward", "translate", "vision", "-vl", "vlm", "vila", "kosmos", "fuyu",
+    "neva", "nvclip", "clip", "deplot", "diffusion", "detector", "calibration", "reason2",
+    "cosmos", "codegemma", "starcoder", "codestral", "codellama", "deepseek-coder",
+    "-code-instruct", "chatqa",
+  ];
+  function looksLikeChatModel(id) {
+    const lower = id.toLowerCase();
+    return !NON_CHAT_KEYWORDS.some((kw) => lower.includes(kw));
+  }
+  function shortLabel(id) {
+    const afterSlash = id.includes("/") ? id.split("/")[1] : id;
+    return afterSlash.length > 28 ? afterSlash.slice(0, 26) + "…" : afterSlash;
+  }
+
+  const MODEL_CHOICES = CURATED_MODELS.slice();
+
+  async function refreshModelChoices() {
+    try {
+      const proxyUrl = LabConfig.get("proxy-url");
+      const apiKey = LabConfig.get("nvidia-key");
+      if (!proxyUrl || !apiKey) return;
+      const base = proxyUrl.split("?")[0];
+      const res = await fetch(`${base}?models=1`, { headers: { "x-nvidia-api-key": apiKey } });
+      if (!res.ok) return;
+      const data = await res.json();
+      const liveIds = new Set((data.data || []).map((m) => m.id));
+      if (!liveIds.size) return;
+
+      const curatedById = new Map(CURATED_MODELS.map((m) => [m.id, m]));
+      const merged = [];
+      for (const m of CURATED_MODELS) {
+        if (liveIds.has(m.id)) merged.push(m);
+      }
+      for (const id of liveIds) {
+        if (curatedById.has(id)) continue;
+        if (!looksLikeChatModel(id)) continue;
+        merged.push({
+          id, label: shortLabel(id), tier: "new",
+          note: "카탈로그에 새로 나타남(자동 감지, 2026-07-24~) -- 아직 이 프로젝트에서 실측/검증 안 됨.",
+        });
+      }
+      if (merged.length) {
+        MODEL_CHOICES.length = 0;
+        MODEL_CHOICES.push(...merged);
+      }
+    } catch (e) {
+      // network error, worker down, etc. -- CURATED_MODELS (already in MODEL_CHOICES) stands as-is
+    }
+  }
+
   return {
     loadManifest, getManifest, getStage, getOverride, setOverride, resolveTemplate, resolveParam,
     fillTemplate, escapeHtml, formatElapsed, jsonResultBlock, saveFailedRun, MODEL_CHOICES,
+    refreshModelChoices,
   };
 })();

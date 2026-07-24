@@ -214,6 +214,52 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
+    // GET /?models=1 -- D-catalog (2026-07-24): live NVIDIA model catalog, replacing the
+    // need to hand-maintain lab-core.js's MODEL_CHOICES every time NVIDIA deprecates a
+    // model (hit twice in one session: qwen3.5-122b and mistral-large-3 both came back
+    // HTTP 410 "reached end of life" while still listed as selectable here) or ships a
+    // new one. This endpoint is a DUMB passthrough+cache only -- no filtering, no
+    // curation. That logic deliberately lives client-side (lab-core.js) instead, not here.
+    //   WHY: this repo has no CI/CD for the Worker (see the file-header DEPLOY NOTE) --
+    //   every Worker change needs a manual `wrangler deploy` with Cloudflare credentials
+    //   not everyone on the team has. Filtering/curation logic will need tuning over time
+    //   (which keywords mean "not a chat model", which new entries look trustworthy) --
+    //   putting that in lab-core.js means a plain `git push` ships the next tweak, same as
+    //   any other client-side fix in this repo.
+    //   COST: raw catalog exposed to any caller of this endpoint (same trust boundary as
+    //   the rest of this Worker -- CORS already restricts callers to ALLOWED_ORIGIN).
+    //   6h KV cache so a page load doesn't hit NVIDIA every time; catalog changes are not
+    //   time-sensitive enough to need less than that.
+    //   EXIT: if filtering ever needs to be server-side (e.g. to hide it from curious
+    //   users), move MODELS_EXCLUDE_KEYWORDS-equivalent logic here and have this endpoint
+    //   return the already-filtered list instead.
+    //   NOTE: this Worker (team-iz-code-qna-proxy) already had this endpoint live before
+    //   this commit -- it was deployed from Team-IZ/AI feat/pdf_analysis's copy of this
+    //   same file (docs/lab/code-qna/worker/nvidia-proxy.js), which targets the identical
+    //   Cloudflare Worker resource (see worker/wrangler.toml's `name`). This edit is
+    //   source-parity only, not a new deploy.
+    if (request.method === "GET" && url.searchParams.has("models")) {
+      const apiKey = request.headers.get("x-nvidia-api-key");
+      if (!apiKey) return jsonResponse({ error: "missing x-nvidia-api-key header" }, 401, origin);
+      const CACHE_KEY = "models_catalog_cache";
+      const CACHE_TTL_SECONDS = 6 * 3600;
+      try {
+        const cached = await env.NVIDIA_JOBS.get(CACHE_KEY);
+        if (cached) return jsonResponse(JSON.parse(cached), 200, origin);
+        const upstream = await fetch("https://integrate.api.nvidia.com/v1/models", {
+          headers: { authorization: `Bearer ${apiKey}` },
+        });
+        if (!upstream.ok) {
+          return jsonResponse({ error: `NVIDIA models list failed: HTTP ${upstream.status}` }, upstream.status, origin);
+        }
+        const data = await upstream.json();
+        await env.NVIDIA_JOBS.put(CACHE_KEY, JSON.stringify(data), { expirationTtl: CACHE_TTL_SECONDS });
+        return jsonResponse(data, 200, origin);
+      } catch (e) {
+        return jsonResponse({ error: `models list error: ${e.message}` }, 500, origin);
+      }
+    }
+
     // GET /?traffic=1 -- D160: recent actual NVIDIA request timestamps (every attempt,
     // first + retries, from every client through this Worker) for docs/lab/debug-traffic.js.
     // Read-only, best-effort -- never blocks or affects job submission/polling.
