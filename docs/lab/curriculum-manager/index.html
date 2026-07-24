@@ -161,6 +161,13 @@
   .model-chip{border:1px solid var(--c-border-strong);background:#fff;color:var(--c-text-2);border-radius:20px;padding:5px 11px;font-size:11px;cursor:pointer}
   .model-chip.active{background:var(--c-primary);color:#fff;border-color:var(--c-primary);font-weight:600}
   .model-note{font-size:11px;color:var(--c-text-3);margin-top:6px}
+
+  /* D-P01ORCH: 목록 탭의 진행중(queued/running) 섹션 -- 서버 오케스트레이터가 도는
+     동안 이 브라우저가 닫혀 있어도 다른 기기/새로고침에서 동일하게 보임 */
+  .inprog-list{display:flex;flex-direction:column;gap:8px;margin-bottom:var(--sp-4)}
+  .inprog-row{background:var(--c-primary-soft);border:1px solid var(--c-border);border-radius:var(--r-md);padding:12px 16px;display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
+  .inprog-row .ip-title{font-weight:700;flex:1;min-width:160px}
+  .inprog-row .ip-progress{font-size:12px;color:var(--c-text-2);font-family:var(--mono)}
 </style>
 </head>
 <body>
@@ -203,6 +210,7 @@
             <button class="btn ghost" id="delete-mode-btn">− 교안 삭제</button>
           </div>
         </div>
+        <div id="in-progress-section"></div>
         <div class="card">
           <table class="dtbl">
             <thead><tr id="list-thead-row"><th>교안명</th><th>유닛</th><th>그래프</th><th>추출 상태</th><th>분석 시각</th></tr></thead>
@@ -289,6 +297,7 @@
 <script src="../pyodide-shared.js"></script>
 <script src="../pdfjs-loader.js"></script>
 <script src="../p01-runner.js"></script>
+<script src="p01-job-client.js"></script>
 <script>
 (function () {
   const state = { curricula: [], selectedId: null, nextId: 1 };
@@ -299,6 +308,11 @@
   // anyway, an existing pre-D1 limitation this change doesn't touch).
   let deleteMode = false;
   let currentRunPromise = null;
+  // D-P01ORCH: polling interval id for in-progress (queued/running) server-side jobs --
+  // module-level like the above since it's the same kind of "doesn't belong in
+  // persistSession()" transient UI state (a live setInterval handle can't be serialized
+  // either). Idempotent: startInProgressPolling() is safe to call repeatedly.
+  let pollTimer = null;
 
   // A P01 run takes minutes (mainly the chunk-analysis wave -- refine/question-gen are
   // both skipped here, see skipRefine/skipQuestionGen below) and only lives in
@@ -349,6 +363,10 @@
     return {
       id: row.id,
       source, // "pdf_analysis" | "public" -- which client/schema this row came from (D3, labdb-shim.js), so delete routes to the right one
+      // D-P01ORCH: not read anywhere before this feature -- "done" is the implicit status
+      // every pre-existing row has (the only value p01-runner.js's own maybeSaveRun() ever
+      // wrote), so rows from before this feature shipped render exactly as before.
+      status: row.status || "done",
       ownerEmail: (row.members && row.members.email) || null, // D5 (2026-07-23): who registered this, so a blocked delete tells you who to ask
       model: row.model || null, // D6 (2026-07-23)
       durationMs: row.finished_at ? (new Date(row.finished_at) - new Date(row.started_at)) : null, // D6
@@ -411,9 +429,25 @@
       if (state.selectedId && !state.curricula.some((c) => c.id === state.selectedId)) state.selectedId = null;
       persistSession();
       route(); // re-render whichever tab is currently on screen with the DB-backed list
+      startInProgressPolling();
     } catch (err) {
       console.warn("DB에서 교안 목록 불러오기 실패(로컬 캐시 유지):", err);
     }
+  }
+
+  // D-P01ORCH: as long as any row is queued/running, keep re-polling the DB so this
+  // page reflects the server-side orchestrator's progress -- this is what makes "resume
+  // on ANY later page load, not just the same tab/session" true (refreshFromDB() already
+  // queries by team-wide RLS, no tab affinity). Self-stops once nothing is left
+  // in-progress; idempotent so callers never need to check pollTimer themselves.
+  function startInProgressPolling() {
+    const hasInProgress = state.curricula.some((c) => c.status === "queued" || c.status === "running");
+    if (!hasInProgress) {
+      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+      return;
+    }
+    if (pollTimer) return;
+    pollTimer = setInterval(refreshFromDB, 8000);
   }
 
   // ---- hash routing (same PAGE table as Team-IZ curriculum.html) ----
@@ -435,6 +469,8 @@
     if (e.target.closest("#delete-mode-btn")) { toggleDeleteMode(); return; }
     const delBtn = e.target.closest(".del-row-btn");
     if (delBtn) { confirmAndDelete(delBtn.dataset.id); return; }
+    const cancelJobBtn = e.target.closest(".in-progress-cancel-btn");
+    if (cancelJobBtn) { cancelInProgressJob(cancelJobBtn.dataset.jobId, cancelJobBtn); return; }
     const row = e.target.closest("#list-tbody tr[data-id]");
     if (row && !deleteMode) { state.selectedId = row.dataset.id; persistSession(); location.hash = "structure"; return; }
     const nv = e.target.closest("[data-nav]");
@@ -452,6 +488,21 @@
     if (!c) return;
     if (!confirm(`"${c.title}" 교안을 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
     await deleteCurriculum(id);
+  }
+
+  // D-P01ORCH: cancels a server-side job (worker/p01-orchestrator/'s Durable Object) --
+  // unlike the old in-tab cancel (labapp-shim.js's throw-based checkCancelled), this
+  // takes effect on the NEXT alarm() tick, not instantly, since the job may currently be
+  // mid-wave with no code running client-side to interrupt.
+  async function cancelInProgressJob(jobId, btnEl) {
+    if (btnEl) { btnEl.disabled = true; btnEl.textContent = "취소 처리 중..."; }
+    try {
+      await P01JobClient.cancelJob(jobId);
+      refreshFromDB();
+    } catch (err) {
+      alert(`취소 요청 실패: ${err.message}`);
+      if (btnEl) { btnEl.disabled = false; btnEl.textContent = "취소"; }
+    }
   }
 
   // D2 (2026-07-21): optimistic local removal first (instant feedback, and the only
@@ -520,11 +571,31 @@
     return versions;
   }
 
+  // D-P01ORCH: rows still being processed server-side (see worker/p01-orchestrator/) --
+  // shown in their own section since unit_map/graph are partial or empty for these.
+  function renderInProgressSection(inProgress) {
+    const el = document.getElementById("in-progress-section");
+    if (!inProgress.length) { el.innerHTML = ""; return; }
+    el.innerHTML = `<div class="inprog-list">${inProgress.map((c) => {
+      const label = c.status === "queued" ? "대기 중" : c.status === "running" ? "분석 중" : c.status;
+      const unitCount = Object.keys((c.result && c.result.unit_map) || {}).length;
+      return `<div class="inprog-row" data-job-id="${LabApp.escapeHtml(c.id)}">
+        <span class="ip-title">${LabApp.escapeHtml(c.title)}</span>
+        <span class="ip-progress">${LabApp.escapeHtml(label)}${unitCount ? ` · 지금까지 유닛 ${unitCount}개` : ""}</span>
+        <button type="button" class="btn ghost danger-outline in-progress-cancel-btn" data-job-id="${LabApp.escapeHtml(c.id)}">취소</button>
+      </div>`;
+    }).join("")}</div>`;
+  }
+
   function renderListTab() {
     document.getElementById("list-count").textContent = `총 ${state.curricula.length}개`;
     const delModeBtn = document.getElementById("delete-mode-btn");
     delModeBtn.textContent = deleteMode ? "완료" : "− 교안 삭제";
     delModeBtn.classList.toggle("danger-outline", deleteMode);
+
+    const inProgress = state.curricula.filter((c) => c.status === "queued" || c.status === "running");
+    const completed = state.curricula.filter((c) => c.status !== "queued" && c.status !== "running");
+    renderInProgressSection(inProgress);
 
     const theadRow = document.getElementById("list-thead-row");
     // D5 (2026-07-23): "등록자" column -- a blocked delete only ever said "본인이 등록한
@@ -535,12 +606,12 @@
 
     const tbody = document.getElementById("list-tbody");
     const colspan = deleteMode ? 10 : 9;
-    if (!state.curricula.length) {
+    if (!completed.length) {
       tbody.innerHTML = `<tr><td colspan="${colspan}" class="pnone">아직 분석한 교안이 없습니다 — "+ 교안 등록"으로 시작하세요.</td></tr>`;
       return;
     }
-    const versions = computeVersions(state.curricula);
-    tbody.innerHTML = state.curricula.map((c) => {
+    const versions = computeVersions(completed);
+    tbody.innerHTML = completed.map((c) => {
       const r = c.result;
       const unitCount = Object.keys(r.unit_map || {}).length;
       const graphBadge = r.graph_generated
@@ -677,6 +748,7 @@
   function wireP01Upload() {
     const container = document.getElementById("p01-input-container");
     P01Runner.renderInput(container);
+    P01JobClient.wireFileCapture(container); // D-P01ORCH: own listeners on the same DOM elements, p01-runner.js untouched
     const pdfInput = document.getElementById("p01-pdf-input");
     const dz = document.getElementById("p01-dropzone");
     if (pdfInput) pdfInput.addEventListener("change", () => { if (pdfInput.files[0]) lastPdfName = pdfInput.files[0].name; });
@@ -687,9 +759,42 @@
 
     runBtn.addEventListener("click", async () => {
       runBtn.disabled = true;
+      showUploadError("");
+
+      // D-P01ORCH: a durable, close-the-browser-and-it-keeps-going job (see
+      // worker/p01-orchestrator/) requires an authenticated member_id for its DB row
+      // (RLS: "pdf_analysis runs insert own") -- there is no anonymous durable path.
+      // Not logged in -> fall back to the exact original in-tab-only flow, unchanged
+      // (nothing about this feature removes that mode).
+      const owner = await LabDB.currentMemberOrNull().catch(() => null);
+      if (!owner) {
+        await runInTabFallback();
+        return;
+      }
+
+      try {
+        const activeChip = document.querySelector("#p01-model-group .model-chip.active");
+        const model = activeChip ? activeChip.dataset.model : null;
+        // NOTE: server-submitted jobs are titled from the PDF filename only -- the
+        // "교안명" input isn't sent (rowToEntry() has no field to receive a custom title
+        // into for DB-backed rows). Same limitation as before this feature.
+        await P01JobClient.submitAnalysis({ model, courseLabel: "Java", chunkSize: 10 });
+        // Re-enable immediately (not in a finally after the whole analysis) -- this IS
+        // the concurrency requirement at the UI layer: a second, differently-keyed
+        // analysis can be submitted right away instead of waiting minutes.
+        runBtn.disabled = false;
+        location.hash = "list";
+        refreshFromDB(); // also (re)starts in-progress polling once the new row is loaded
+      } catch (err) {
+        showUploadError(`교안 분석 제출 실패: ${err.message}`);
+        runBtn.disabled = false;
+      }
+    });
+
+    // ---- original in-tab-only flow (unchanged), used only when nobody's logged in ----
+    async function runInTabFallback() {
       cancelBtn.disabled = false;
       cancelBtn.textContent = "취소";
-      showUploadError("");
       window.LabAppShim.resetCancel();
       // D-skipQG: this tab's structure/mapping tables only ever read unit_map, never
       // questions -- skipping question-gen saves a whole per-unit LLM wave for output
@@ -699,7 +804,7 @@
       // validity already comes from chunk-analysis alone. Real large documents showed
       // this loop can burn ~20+ minutes with every fix attempt rejected and zero net
       // change to the final unit_map. See p01-runner.js's run(opts) for both flags.
-      const startedAt = new Date(); // D6 (2026-07-23): captured before run(), matches how rowToEntry() reads DB rows' started_at
+      const startedAt = new Date();
       currentRunPromise = P01Runner.run({ skipQuestionGen: true, skipRefine: true });
       try {
         await currentRunPromise;
@@ -710,18 +815,11 @@
           return;
         }
         const typedTitle = document.getElementById("curriculum-title-input").value.trim();
-        // D5 (2026-07-23): whoever is logged in right now is who this run will actually
-        // be saved under (maybeSaveRun() stamps member_id = auth.uid()) -- set it here too
-        // so a freshly-analyzed row shows an owner immediately, not just after the next
-        // refreshFromDB() DB round-trip relabels it.
-        const owner = await LabDB.currentMemberOrNull().catch(() => null);
-        // D6: same idea as D5's owner lookup -- selectedModel lives in p01-runner.js's own
-        // closure with no getter, but the active chip's data-model attribute is plain DOM
-        // state this page can read directly, no export needed.
         const activeChip = document.querySelector("#p01-model-group .model-chip.active");
         const entry = {
           id: String(state.nextId++),
-          ownerEmail: owner ? owner.email : null,
+          status: "done",
+          ownerEmail: null,
           model: activeChip ? activeChip.dataset.model : null,
           durationMs: Date.now() - startedAt.getTime(),
           title: typedTitle || (lastPdfName ? lastPdfName.replace(/\.pdf$/i, "") : `교안 #${state.nextId - 1}`),
@@ -733,17 +831,8 @@
         state.selectedUnitId = null;
         persistSession();
         location.hash = "structure";
-        // p01-runner.js's own run() already awaited its internal maybeSaveRun() before
-        // resolving -- if logged in, the DB row (with its real UUID) already exists by
-        // now, so this supersedes the local temp `entry` above with the DB-backed list.
-        // If not logged in, refreshFromDB() is a no-op and the local entry stands alone.
-        refreshFromDB();
       } catch (err) {
         if (err && err.isCancelled) {
-          // D1: expected path -- user clicked 취소 while running. Whatever run() had
-          // built up (partial unit_map, in-flight fixGroup results, etc.) is thrown away
-          // along with the rejected promise; nothing here adds it to state.curricula or
-          // navigates anywhere, so a wrong/unwanted analysis never shows up in the list.
           const statusEl = document.getElementById("status-p01");
           statusEl.textContent = "취소됨";
           statusEl.className = "run-status";
@@ -756,7 +845,7 @@
         cancelBtn.disabled = false;
         cancelBtn.textContent = "취소";
       }
-    });
+    }
 
     // D1: idle (no run in flight) -- unchanged "뒤로가기" behavior. Mid-run -- actually
     // stops the pipeline (see labapp-shim.js's checkCancelled()) instead of navigating,
