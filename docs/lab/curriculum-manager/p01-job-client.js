@@ -89,15 +89,36 @@ const P01JobClient = (() => {
     return res.json(); // {jobId, status}
   }
 
+  // D-fix (security review): both endpoints now require the caller's own Supabase
+  // session (see worker/p01-orchestrator/index.js's own D-fix note) -- pulled fresh each
+  // call rather than cached, same as submitAnalysis(), so a token refresh mid-session is
+  // picked up automatically.
+  async function currentAccessToken() {
+    const c = await LabDB.ensureClient();
+    const { data } = await c.auth.getSession();
+    return data && data.session ? data.session.access_token : null;
+  }
+
   async function pollJob(jobId) {
-    const res = await fetch(`${ORCHESTRATOR_URL}/analyses/${encodeURIComponent(jobId)}`);
+    const token = await currentAccessToken();
+    if (!token) throw new Error("로그인이 필요합니다");
+    const res = await fetch(`${ORCHESTRATOR_URL}/analyses/${encodeURIComponent(jobId)}?token=${encodeURIComponent(token)}`);
     if (!res.ok) throw new Error(`상태 조회 실패 (HTTP ${res.status})`);
     return res.json();
   }
 
   async function cancelJob(jobId) {
-    const res = await fetch(`${ORCHESTRATOR_URL}/analyses/${encodeURIComponent(jobId)}/cancel`, { method: "POST" });
-    if (!res.ok) throw new Error(`취소 요청 실패 (HTTP ${res.status})`);
+    const token = await currentAccessToken();
+    if (!token) throw new Error("로그인이 필요합니다");
+    const res = await fetch(`${ORCHESTRATOR_URL}/analyses/${encodeURIComponent(jobId)}/cancel`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ supabaseAccessToken: token }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`취소 요청 실패 (HTTP ${res.status}): ${text.slice(0, 200)}`);
+    }
     return res.json();
   }
 

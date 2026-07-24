@@ -374,8 +374,17 @@ async function insertQueuedRun(accessToken, { model, input_meta }) {
   return rows[0];
 }
 
-async function patchRun(accessToken, runId, patch) {
-  await pgFetch(accessToken, `runs?id=eq.${encodeURIComponent(runId)}`, { method: "PATCH", body: JSON.stringify(patch) });
+async function patchRun(accessToken, runId, patch, extraFilter = "") {
+  const rows = await pgFetch(accessToken, `runs?id=eq.${encodeURIComponent(runId)}${extraFilter}`, { method: "PATCH", body: JSON.stringify(patch) });
+  return rows;
+}
+
+// D-fix (security review, post-verification): proves the caller is allowed to READ this
+// run by reusing the same "runs read all" RLS any authenticated team member already gets
+// via the normal Supabase client -- rejects (throws) only for a token that isn't even a
+// valid authenticated session, not owner-only (matching the DB's own visibility model).
+async function verifyReadAccess(accessToken, runId) {
+  await pgFetch(accessToken, `runs?id=eq.${encodeURIComponent(runId)}&select=id`, { method: "GET" });
 }
 
 // mirrors db.js:133-138's artifacts insert, but upsert (onConflict run_id,kind) so
@@ -590,12 +599,53 @@ export default {
       return new Response(initBody, { status: initRes.status, headers: { ...headers, "content-type": "application/json" } });
     }
 
+    // D-fix (security review, found live post-verification): neither route below used
+    // to check WHO was asking -- a job UUID alone was enough to view or cancel anyone's
+    // analysis (an IDOR: "pdf_analysis runs read all"/"update own" RLS exists precisely
+    // to gate this at the DB layer, but these routes talked to the Durable Object
+    // directly, bypassing it entirely). Both now require the caller's own Supabase
+    // access token and prove authorization by reusing those SAME RLS policies via a
+    // real PostgREST call, instead of reimplementing ownership logic here.
     const analysisMatch = url.pathname.match(/^\/analyses\/([^/]+)(\/cancel)?$/);
-    if (analysisMatch && (request.method === "GET" || request.method === "POST")) {
+    if (analysisMatch && analysisMatch[2] && request.method === "POST") {
       const jobId = analysisMatch[1];
-      const isCancel = Boolean(analysisMatch[2]);
+      const body = await request.json().catch(() => ({}));
+      const callerToken = body.supabaseAccessToken;
+      if (!callerToken) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED", message: "supabaseAccessToken 필요" }), { status: 401, headers: { ...headers, "content-type": "application/json" } });
+      }
+      // Ownership proof IS this call: "runs update own" RLS only lets it affect a row
+      // where member_id = auth.uid(). Scoped to still-in-progress rows too, so cancelling
+      // an already-finished run can't retroactively relabel its real outcome; a 0-row
+      // result covers "not yours" and "already finished" alike without distinguishing
+      // them in the response (avoids leaking which one it was).
+      let affected;
+      try {
+        affected = await patchRun(callerToken, jobId, { status: "cancelled", finished_at: new Date().toISOString() }, "&status=in.(queued,running)");
+      } catch (err) {
+        return new Response(JSON.stringify({ error: "FORBIDDEN", message: "본인이 제출한, 아직 진행 중인 분석만 취소할 수 있습니다" }), { status: 403, headers: { ...headers, "content-type": "application/json" } });
+      }
+      if (!affected || !affected.length) {
+        return new Response(JSON.stringify({ error: "FORBIDDEN", message: "본인이 제출한, 아직 진행 중인 분석만 취소할 수 있습니다" }), { status: 403, headers: { ...headers, "content-type": "application/json" } });
+      }
       const stub = env.P01_JOBS.get(env.P01_JOBS.idFromName(jobId));
-      const doRes = await stub.fetch(`http://do/${isCancel ? "cancel" : "status"}`, { method: isCancel ? "POST" : "GET" });
+      const doRes = await stub.fetch("http://do/cancel", { method: "POST" });
+      const doBody = await doRes.text();
+      return new Response(doBody, { status: doRes.status, headers: { ...headers, "content-type": "application/json" } });
+    }
+    if (analysisMatch && !analysisMatch[2] && request.method === "GET") {
+      const jobId = analysisMatch[1];
+      const callerToken = url.searchParams.get("token");
+      if (!callerToken) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED", message: "token 쿼리파라미터 필요" }), { status: 401, headers: { ...headers, "content-type": "application/json" } });
+      }
+      try {
+        await verifyReadAccess(callerToken, jobId);
+      } catch (err) {
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED", message: "유효한 로그인 세션이 필요합니다" }), { status: 401, headers: { ...headers, "content-type": "application/json" } });
+      }
+      const stub = env.P01_JOBS.get(env.P01_JOBS.idFromName(jobId));
+      const doRes = await stub.fetch("http://do/status", { method: "GET" });
       const doBody = await doRes.text();
       return new Response(doBody, { status: doRes.status, headers: { ...headers, "content-type": "application/json" } });
     }
