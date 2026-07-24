@@ -441,14 +441,34 @@ export class P01AnalysisJob extends DurableObject {
   }
 
   async handleStatus() {
-    const [status, chunkState, round, error] = await Promise.all([
-      this.ctx.storage.get("status"), this.ctx.storage.get("chunkState"), this.ctx.storage.get("round"), this.ctx.storage.get("error"),
+    const [status, chunkState, round, error, model] = await Promise.all([
+      this.ctx.storage.get("status"), this.ctx.storage.get("chunkState"), this.ctx.storage.get("round"),
+      this.ctx.storage.get("error"), this.ctx.storage.get("model"),
     ]);
     if (status === undefined) return new Response(JSON.stringify({ status: "unknown" }), { status: 404, headers: { "content-type": "application/json" } });
     const total = (chunkState || []).length;
     const done = (chunkState || []).filter((s) => s.result).length;
     const failed = (chunkState || []).filter((s) => s.err && !s.retryable).length;
-    return new Response(JSON.stringify({ status, round, chunksTotal: total, chunksDone: done, chunksFailed: failed, error: error || null }), {
+    // D-debug-panel (2026-07-24): 사용자 요청 -- 진행중 배너에서 어떤 청크가 왜 실패
+    // 중인지 번호로 보고 싶다고. err는 DO storage의 structured-clone 라운드트립을 거친
+    // 진짜 Error 인스턴스(message 보존됨, JSON.stringify(new Error())와 다름 -- 그냥
+    // 객체째로 응답에 넣으면 "{}"로 직렬화되는 함정) -- 여기서 명시적으로 message만
+    // 평탄화한다. 이 파이프라인엔 깔끔한 숫자 에러코드가 없어서(HTTP 상태가 메시지
+    // 안에 섞여 있거나 아예 없는 경우도 있음, 예: JSON 파싱 실패) 설명형 메시지
+    // 문자열 자체를 "코드"로 취급.
+    const chunkErrors = (chunkState || [])
+      .map((s, i) => ({ s, i }))
+      .filter(({ s }) => s.err)
+      .map(({ s, i }) => ({
+        index: i + 1,
+        range: s.chunk.range,
+        message: String((s.err && s.err.message) || s.err),
+        retryable: !!s.retryable,
+      }));
+    return new Response(JSON.stringify({
+      status, round, maxRounds: MAX_RETRY_ROUNDS, chunksTotal: total, chunksDone: done, chunksFailed: failed,
+      error: error || null, model: model || null, chunkErrors,
+    }), {
       headers: { "content-type": "application/json" },
     });
   }

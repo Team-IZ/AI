@@ -168,7 +168,9 @@
   .inprog-list{display:flex;flex-direction:column;gap:8px;margin-bottom:var(--sp-4)}
   .inprog-row{background:var(--c-primary-soft);border:1px solid var(--c-border);border-radius:var(--r-md);padding:12px 16px;display:flex;align-items:center;gap:var(--sp-3);flex-wrap:wrap}
   .inprog-row .ip-title{font-weight:700;flex:1;min-width:160px}
-  .inprog-row .ip-progress{font-size:12px;color:var(--c-text-2);font-family:var(--mono)}
+  .inprog-row .ip-meta{font-size:11px;color:var(--c-text-2);font-family:var(--mono);width:100%;margin-top:4px}
+  .inprog-row .ip-chunk-errors{font-size:11px;color:var(--c-warning);font-family:var(--mono);width:100%;margin-top:2px}
+  .inprog-row .ip-chunk-errors span{margin-right:2px}
 </style>
 </head>
 <body>
@@ -314,6 +316,12 @@
   // persistSession()" transient UI state (a live setInterval handle can't be serialized
   // either). Idempotent: startInProgressPolling() is safe to call repeatedly.
   let pollTimer = null;
+  // D-debug-panel (2026-07-24): 사용자 요청 -- 진행중 배너에 등록자/모델/경과시간/재시도
+  // 회차/청크별 실패사유를 보여달라는 디버깅 목적. jobId -> P01JobClient.pollJob()의
+  // 최근 응답(맵)을 담는 캐시. 위 pollTimer와 같은 이유로 state/persistSession() 밖에
+  // 둔다 -- 폴링 스냅샷일 뿐이라 새로고침 후 되살리면 stale 데이터가 다음 폴링(최대 8초)
+  // 전까지 화면에 남는 게 오히려 오해를 줌.
+  let liveStatus = {};
 
   // A P01 run takes minutes (mainly the chunk-analysis wave -- refine/question-gen are
   // both skipped here, see skipRefine/skipQuestionGen below) and only lives in
@@ -436,19 +444,34 @@
     }
   }
 
+  // D-debug-panel (2026-07-24): P01JobClient.pollJob()은 이미 있었지만(D-P01ORCH의
+  // cancelJob과 같은 파일) 어디서도 호출되지 않던 죽은 코드 -- 이 배너에 등록자/모델/
+  // 경과시간/재시도 회차/청크별 실패사유를 보여달라는 사용자 요청으로 처음 연결.
+  // 실패한 잡은 조용히 건너뜀(liveStatus를 지우지 않음 -- 이번 틱만 기존 값 유지,
+  // 다음 8초 틱에 재시도) -- DO가 일시적으로 응답 못 해도 배너 전체가 깨지지 않게.
+  async function refreshLiveStatus(inProgress) {
+    const results = await Promise.all(
+      inProgress.map((c) => P01JobClient.pollJob(c.id).then((r) => [c.id, r]).catch(() => [c.id, null]))
+    );
+    for (const [id, r] of results) {
+      if (r) liveStatus[id] = r;
+    }
+    renderInProgressSection(inProgress);
+  }
+
   // D-P01ORCH: as long as any row is queued/running, keep re-polling the DB so this
   // page reflects the server-side orchestrator's progress -- this is what makes "resume
   // on ANY later page load, not just the same tab/session" true (refreshFromDB() already
   // queries by team-wide RLS, no tab affinity). Self-stops once nothing is left
   // in-progress; idempotent so callers never need to check pollTimer themselves.
   function startInProgressPolling() {
-    const hasInProgress = state.curricula.some((c) => c.status === "queued" || c.status === "running");
-    if (!hasInProgress) {
+    const inProgress = state.curricula.filter((c) => c.status === "queued" || c.status === "running");
+    if (!inProgress.length) {
       if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
       return;
     }
-    if (pollTimer) return;
-    pollTimer = setInterval(refreshFromDB, 8000);
+    if (!pollTimer) pollTimer = setInterval(refreshFromDB, 8000);
+    refreshLiveStatus(inProgress); // D-debug-panel: fire-and-forget, re-renders once resolved
   }
 
   // ---- hash routing (same PAGE table as Team-IZ curriculum.html) ----
@@ -574,16 +597,45 @@
 
   // D-P01ORCH: rows still being processed server-side (see worker/p01-orchestrator/) --
   // shown in their own section since unit_map/graph are partial or empty for these.
+  // D-debug-panel (2026-07-24): 사용자 요청 -- 실행중인 P01 작업의 등록자/모델/경과시간/
+  // 재시도 회차/청크별 실패사유를 디버깅용으로 보여줌. email/model/경과시간은
+  // rowToEntry()가 이미 모든 상태(큐/진행/완료)에서 매핑해두는 값이라 새 호출 없이
+  // 바로 씀(390번대 근처 rowToEntry() 참고) -- 라운드/청크에러만 liveStatus(위
+  // refreshLiveStatus()가 채움, P01JobClient.pollJob()의 응답)에서 온다. liveStatus가
+  // 아직 없으면(첫 폴링 전, 또는 이번 틱 실패) 그 부분만 생략 -- 배너 전체가 깨지지 않음.
   function renderInProgressSection(inProgress) {
     const el = document.getElementById("in-progress-section");
     if (!inProgress.length) { el.innerHTML = ""; return; }
     el.innerHTML = `<div class="inprog-list">${inProgress.map((c) => {
+      const live = liveStatus[c.id];
       const label = c.status === "queued" ? "대기 중" : c.status === "running" ? "분석 중" : c.status;
+      const roundLabel = live ? ` (라운드 ${live.round}/${live.maxRounds})` : "";
       const unitCount = Object.keys((c.result && c.result.unit_map) || {}).length;
+      const elapsed = LabApp.formatElapsed(Date.now() - c.analyzedAt.getTime());
+      const metaLine = [
+        `등록자: ${c.ownerEmail || "—"}`,
+        `모델: ${c.model || "—"}`,
+        `경과 ${elapsed}`,
+        `${label}${roundLabel}`,
+        unitCount ? `지금까지 유닛 ${unitCount}개` : null,
+      ].filter(Boolean).join(" · ");
+      // D-debug-panel: 이 파이프라인엔 숫자 에러코드가 없음(HTTP 상태가 message
+      // 안에 섞여있거나 없는 경우도 있음) -- 설명형 메시지 문자열 자체를 그대로 보여줌.
+      // NVIDIA/프록시 응답 원문이 최대 300자까지 message에 섞여 들어올 수 있어
+      // escapeHtml 필수(신뢰 못 하는 외부 텍스트로 취급).
+      const chunkErrors = live && live.chunkErrors ? live.chunkErrors : [];
+      const chunkErrorsHtml = chunkErrors.length
+        ? `<span class="ip-chunk-errors">청크 ${chunkErrors.length}개 실패: ${chunkErrors.map((ce) => {
+            const msg = ce.message.length > 50 ? ce.message.slice(0, 50) + "…" : ce.message;
+            const suffix = ce.retryable ? "" : " (재시도 중단)";
+            return `<span title="${LabApp.escapeHtml(ce.message)}">#${ce.index}(${LabApp.escapeHtml(ce.range)}p) ${LabApp.escapeHtml(msg)}${LabApp.escapeHtml(suffix)}</span>`;
+          }).join(" · ")}</span>`
+        : "";
       return `<div class="inprog-row" data-job-id="${LabApp.escapeHtml(c.id)}">
         <span class="ip-title">${LabApp.escapeHtml(c.title)}</span>
-        <span class="ip-progress">${LabApp.escapeHtml(label)}${unitCount ? ` · 지금까지 유닛 ${unitCount}개` : ""}</span>
         <button type="button" class="btn ghost danger-outline in-progress-cancel-btn" data-job-id="${LabApp.escapeHtml(c.id)}">취소</button>
+        <span class="ip-meta">${LabApp.escapeHtml(metaLine)}</span>
+        ${chunkErrorsHtml}
       </div>`;
     }).join("")}</div>`;
   }
