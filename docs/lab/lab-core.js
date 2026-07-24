@@ -226,19 +226,38 @@ const LabApp = (() => {
     return afterSlash.length > 28 ? afterSlash.slice(0, 26) + "…" : afterSlash;
   }
 
-  const MODEL_CHOICES = CURATED_MODELS.slice();
+  // D-catalog-gate (2026-07-24): 사용자 실사용 스크린샷으로 재현된 문제 -- 이전엔
+  // MODEL_CHOICES가 페이지 로드 즉시 CURATED_MODELS(13개, qwen3.5-122b/mistral-large-3
+  // 등 이미 단종 확인된 모델 포함)로 채워져 있어서, 아직 NVIDIA 키를 입력하지 않은
+  // 사용자에게도 "13종"이 정상 선택지인 것처럼 보였음(실제로는 한 번도 실시간 검증된
+  // 적 없는 하드코딩 값). code-qna(session.html)는 이 문제가 구조적으로 없음 -- 그
+  // 페이지는 이전 페이지(submission.html)에서 키 입력이 이미 강제된 뒤에야 도달하는
+  // 반면, curriculum-manager는 "교안" 메뉴로 키 입력 없이 바로 진입 가능한 SPA라서
+  // 같은 보장이 없음. 사용자 결정(2026-07-24): 서버측 공용 키를 두어 키 없이도 카탈로그를
+  // 보여주는 대신, **키 입력 전엔 모델 선택 자체를 비워서 안 보이게** -- 서버에 새 비밀을
+  // 두지 않는 쪽을 선택.
+  //   WHY: 팀 공용 NVIDIA 키를 Worker에 저장하면 카탈로그 조회는 키 없이도 가능해지지만,
+  //   "필요할 때만 서버측 비밀 최소화" 원칙(이 프로젝트 전역 -- 다른 모든 키는 클라이언트가
+  //   직접 들고 헤더로 넘김, 서버는 무상태)에서 벗어남. 게이트 UX는 새 비밀 없이 동일한
+  //   사용자 체감(잘못된/오래된 목록을 절대 안 보여줌)을 얻음.
+  //   COST: 키를 아직 안 넣은 사용자는 모델 선택 UI가 비어 보임(0종) -- 아래
+  //   renderP01Panel()이 그 상태에 안내 문구를 대신 표시해 완화.
+  //   EXIT: 그래도 키 입력 전 카탈로그를 보여줘야 한다는 요구가 생기면, Worker에
+  //   `wrangler secret put`으로 읽기전용 조회용 키를 추가하고 이 함수의 조기 return을
+  //   그 키로의 폴백으로 바꾸면 됨(구조 변경 없이 이 함수 안에서만 처리 가능).
+  const MODEL_CHOICES = [];
 
   async function refreshModelChoices() {
+    const proxyUrl = LabConfig.get("proxy-url");
+    const apiKey = LabConfig.get("nvidia-key");
+    if (!proxyUrl || !apiKey) return; // 키 없음 -- MODEL_CHOICES는 빈 채로 둔다(위 D-catalog-gate)
     try {
-      const proxyUrl = LabConfig.get("proxy-url");
-      const apiKey = LabConfig.get("nvidia-key");
-      if (!proxyUrl || !apiKey) return;
       const base = proxyUrl.split("?")[0];
       const res = await fetch(`${base}?models=1`, { headers: { "x-nvidia-api-key": apiKey } });
-      if (!res.ok) return;
+      if (!res.ok) throw new Error(`models fetch failed: HTTP ${res.status}`);
       const data = await res.json();
       const liveIds = new Set((data.data || []).map((m) => m.id));
-      if (!liveIds.size) return;
+      if (!liveIds.size) throw new Error("empty catalog");
 
       const curatedById = new Map(CURATED_MODELS.map((m) => [m.id, m]));
       const merged = [];
@@ -253,12 +272,14 @@ const LabApp = (() => {
           note: "카탈로그에 새로 나타남(자동 감지, 2026-07-24~) -- 아직 이 프로젝트에서 실측/검증 안 됨.",
         });
       }
-      if (merged.length) {
-        MODEL_CHOICES.length = 0;
-        MODEL_CHOICES.push(...merged);
-      }
+      MODEL_CHOICES.length = 0;
+      MODEL_CHOICES.push(...(merged.length ? merged : CURATED_MODELS));
     } catch (e) {
-      // network error, worker down, etc. -- CURATED_MODELS (already in MODEL_CHOICES) stands as-is
+      // 키는 있었지만 실패(네트워크/워커/파싱) -- 아예 비우는 것보단 큐레이션 폴백이 나음.
+      // "키 없음"과는 다른 경로(위에서 이미 return됨)라 여기 도달했다는 것 자체가 시도는
+      // 했다는 뜻.
+      MODEL_CHOICES.length = 0;
+      MODEL_CHOICES.push(...CURATED_MODELS);
     }
   }
 

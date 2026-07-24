@@ -762,6 +762,19 @@
     const dz = document.getElementById("p01-dropzone");
     if (pdfInput) pdfInput.addEventListener("change", () => { if (pdfInput.files[0]) lastPdfName = pdfInput.files[0].name; });
     if (dz) dz.addEventListener("drop", (e) => { if (e.dataTransfer.files[0]) lastPdfName = e.dataTransfer.files[0].name; });
+
+    // D-catalog-gate (2026-07-24): 사용자 결정 -- 키 입력 전엔 모델 선택 자체가 안
+    // 보여야 함(서버측 공용 키로 키 없이도 카탈로그를 보여주는 대안은 기각, WHY/COST/EXIT는
+    // lab-core.js의 MODEL_CHOICES 선언부 주석 참고). lab-core.js가 키 없을 땐
+    // MODEL_CHOICES를 빈 배열로 두므로, 그 상태(length===0)일 때만 p01-runner.js가 그린
+    // "모델 선택 (0종...)" 라벨+빈 칩 영역을 이 안내문으로 대체한다. p01-runner.js
+    // 자체는 수정하지 않음(여러 페이지가 공유하는 파일).
+    if (!LabApp.MODEL_CHOICES.length) {
+      const modelLabel = container.querySelector(".field-label");
+      const modelNote = container.querySelector("#p01-model-note");
+      if (modelLabel) modelLabel.textContent = "모델 선택";
+      if (modelNote) modelNote.textContent = "위 \"⚙ 연결 설정\"에서 NVIDIA 키를 입력하면 실시간 모델 목록이 표시됩니다.";
+    }
   }
 
   // D-catalog-refresh (2026-07-24): 사용자 재현 보고("13종에서 안 바뀐다", 스크린샷) --
