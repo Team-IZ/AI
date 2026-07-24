@@ -163,6 +163,25 @@
       note.className = "model-note" + (m && m.tier === "bad" ? " warn" : "");
       note.textContent = ""; // clear (no interpolation -- plain clear is always safe)
 
+      // D-quality-badge (2026-07-24): 사용자 요청 -- P01-EQ codex 채점 결과를 공유 메모
+      // 영역에 함께 표시(정렬 근거를 눈으로도 확인 가능하게). qualityScore가 실제
+      // 숫자일 때만 그림(아직 미채점인 모델이 다수라 "PENDING" 같은 placeholder를
+      // 보여주면 노이즈만 늘어남 -- 없으면 그냥 안 보여줌). 편집모드 여부와 무관하게
+      // 항상 표시(점수는 note 텍스트 편집과 무관한 별도 정보라 토글에 안 숨김).
+      const qs = dbEntry ? Number(dbEntry.qualityScore) : NaN;
+      if (dbEntry && dbEntry.qualityScore !== null && dbEntry.qualityScore !== undefined && Number.isFinite(qs)) {
+        const badge = document.createElement("span");
+        badge.className = `note-quality band-${dbEntry.qualityBand || "?"}`;
+        badge.textContent = `P01-EQ ${dbEntry.qualityBand || ""} · ${qs.toFixed(2)}`.replace("  ", " ");
+        if (dbEntry.qualityAxes && typeof dbEntry.qualityAxes === "object") {
+          const parts = Object.entries(dbEntry.qualityAxes)
+            .filter(([, v]) => typeof v === "number")
+            .map(([k, v]) => `${k}:${v.toFixed(2)}`);
+          if (parts.length) badge.title = parts.join(" ");
+        }
+        note.appendChild(badge);
+      }
+
       if (!editing) {
         const textSpan = document.createElement("span");
         textSpan.className = "note-text";

@@ -21,6 +21,20 @@ create table if not exists public.model_notes (
 );
 alter table public.model_notes enable row level security;
 
+-- D3 (2026-07-24): P01-EQ 정량 품질점수 컬럼 추가 -- codex 판정(30개 모델, G/Q3축 30회
+-- 반복+다수결) 결과를 모델 선택 정렬 근거로 쓰기 위함. note(자유텍스트, 사람이 씀)와
+-- 분리된 별도 컬럼인 이유: 클라이언트가 정렬 키로 직접 써야 해서 텍스트 파싱은 부적절.
+--   WHY: quality_score(numeric)만 있으면 정렬은 충분하지만, quality_band/quality_axes도
+--   같이 저장해야 note 텍스트를 재생성하지 않고도 UI에 축별 내역을 보여줄 수 있음.
+--   COST: 점수 산출 로직(rubric)이 DB 밖 파이썬 스크립트에만 있음 -- DB는 결과값만
+--   들고 있고 "왜 이 점수인지"는 quality_axes(jsonb)의 스냅샷에 의존.
+--   EXIT: rubric이 바뀌면 재채점 후 upsert로 덮어씀(별도 버전 컬럼 없음 -- 지금은
+--   "항상 최신 채점 결과만 유효"로 충분, 이력이 필요해지면 D2의 감사테이블 EXIT와 통합).
+alter table public.model_notes add column if not exists quality_score numeric;
+alter table public.model_notes add column if not exists quality_band text;
+alter table public.model_notes add column if not exists quality_axes jsonb;
+alter table public.model_notes add column if not exists quality_scored_at timestamptz;
+
 -- D2: "아무 팀원이나 아무 행이나 쓸 수 있음" -- 이 프로젝트의 다른 테이블들(runs/artifacts)
 -- 전부 "own만 write"인 것과 의도적으로 다른 정책. 협업 메모장이 목적이라 own-only로는
 -- 다른 사람이 이미 남긴 메모를 못 고침.

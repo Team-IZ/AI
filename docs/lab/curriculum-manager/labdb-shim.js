@@ -120,11 +120,17 @@
   // embed가 same-schema로 문제없이 동작(pdf_analysis.runs 쪽에서 이미 겪은
   // 크로스스키마 embed 400 함정을 처음부터 피함). 스키마/RLS는
   // experiments/web_lab/model_notes_schema.sql 참고.
+  // D3 (2026-07-24): quality_score 등은 codex P01-EQ 채점(30개 모델, DB 밖 파이썬
+  // 스크립트가 직접 REST로 upsert)이 채우는 컬럼 -- 이 함수는 읽기만, 쓰기는 없음
+  // (saveModelNote는 note 텍스트 전용으로 그대로 둠, 점수는 사람이 UI로 편집하는
+  // 대상이 아니라서).
   async function fetchModelNotes() {
     if (!LabDB.isConfigured()) return {};
     try {
       const c = await ensurePublicClient();
-      const { data, error } = await c.from("model_notes").select("model_id, note, updated_at, members(email)");
+      const { data, error } = await c.from("model_notes").select(
+        "model_id, note, updated_at, members(email), quality_score, quality_band, quality_axes, quality_scored_at"
+      );
       if (error) throw error;
       const map = {};
       for (const row of data || []) {
@@ -132,6 +138,10 @@
           note: row.note,
           updatedByEmail: (row.members && row.members.email) || null,
           updatedAt: row.updated_at,
+          qualityScore: row.quality_score,
+          qualityBand: row.quality_band,
+          qualityAxes: row.quality_axes,
+          qualityScoredAt: row.quality_scored_at,
         };
       }
       return map;

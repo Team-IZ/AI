@@ -260,6 +260,35 @@ const LabApp = (() => {
   // 처리할 "일시적 인프라 장애"와는 다른 종류의 실패).
   const HEADER_SAFE_KEY_RE = /^[\x20-\x7e]+$/;
 
+  // D-catalog-quality (2026-07-24): 사용자 요청 -- P01-EQ codex 채점(public.model_notes.
+  // quality_score)이 끝난 모델을 목록 앞쪽으로 정렬. 점수 없는 모델끼리는 기존 상대순서
+  // (큐레이션 tier 그룹핑)를 그대로 보존(stable) -- 아직 소수 모델만 채점된 상태(codex
+  // 계정 사용한도로 28개 중 4개만 완료)라, 점수 없는 나머지가 서로 순서를 흔들면 "왜
+  // 갑자기 바뀌었지"하는 혼란만 생기고 얻는 정보는 없음.
+  //   WHY: LabApp.modelNotesCache[id].qualityScore는 PostgREST 응답이라 numeric 컬럼이
+  //   JSON 숫자로 오는지 문자열로 오는지 클라이언트 코드가 단정하면 안 됨(실측 전) --
+  //   Number()로 강제 변환 후 Number.isFinite로 판정해 두 표현 다 안전하게 처리.
+  //   COST: null도 Number(null)===0(유한)이라 그대로 두면 "채점 안 됨"과 "실채점 0점"이
+  //   섞임 -- qualityScore가 null/undefined인 경우를 Number() 변환 전에 먼저 걸러 별도
+  //   취급(scoreOf 참고).
+  function sortByQualityScore(list) {
+    const notes = LabApp.modelNotesCache || {};
+    function scoreOf(m) {
+      const entry = notes[m.id];
+      if (!entry || entry.qualityScore === null || entry.qualityScore === undefined) return null;
+      const n = Number(entry.qualityScore);
+      return Number.isFinite(n) ? n : null;
+    }
+    return list
+      .map((m, idx) => ({ m, idx, score: scoreOf(m) }))
+      .sort((a, b) => {
+        if (a.score !== null && b.score !== null) return b.score - a.score || a.idx - b.idx;
+        if ((a.score !== null) !== (b.score !== null)) return a.score !== null ? -1 : 1;
+        return a.idx - b.idx; // 둘 다 미채점 -- 원래 순서 유지
+      })
+      .map((x) => x.m);
+  }
+
   async function refreshModelChoices() {
     lastCatalogError = null;
     const proxyUrl = LabConfig.get("proxy-url");
@@ -298,7 +327,7 @@ const LabApp = (() => {
         });
       }
       MODEL_CHOICES.length = 0;
-      MODEL_CHOICES.push(...(merged.length ? merged : CURATED_MODELS));
+      MODEL_CHOICES.push(...sortByQualityScore(merged.length ? merged : CURATED_MODELS));
     } catch (e) {
       // 형식은 멀쩡한 키인데 실패(네트워크/워커/파싱 -- NVIDIA가 키 자체를 거부하는
       // 경우는 위에서 이미 확인했듯 이 엔드포인트에선 사실상 발생하지 않음). 아예
@@ -306,7 +335,7 @@ const LabApp = (() => {
       // "키 형식 오류"와는 성격이 다름.
       lastCatalogError = "fetch-failed";
       MODEL_CHOICES.length = 0;
-      MODEL_CHOICES.push(...CURATED_MODELS);
+      MODEL_CHOICES.push(...sortByQualityScore(CURATED_MODELS));
     }
   }
 
