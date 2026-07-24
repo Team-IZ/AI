@@ -114,6 +114,50 @@
     return publicClient;
   }
 
+  // D1 (2026-07-24): 사용자 요청 -- 모델 선택 UI의 "비고"를 하드코딩(lab-core.js의
+  // CURATED_MODELS)에서 팀 공유 DB 메모로 전환. public.model_notes 사용(pdf_analysis
+  // 아님) -- ensurePublicClient()가 이미 public 스키마 클라이언트라 members(email)
+  // embed가 same-schema로 문제없이 동작(pdf_analysis.runs 쪽에서 이미 겪은
+  // 크로스스키마 embed 400 함정을 처음부터 피함). 스키마/RLS는
+  // experiments/web_lab/model_notes_schema.sql 참고.
+  async function fetchModelNotes() {
+    if (!LabDB.isConfigured()) return {};
+    try {
+      const c = await ensurePublicClient();
+      const { data, error } = await c.from("model_notes").select("model_id, note, updated_at, members(email)");
+      if (error) throw error;
+      const map = {};
+      for (const row of data || []) {
+        map[row.model_id] = {
+          note: row.note,
+          updatedByEmail: (row.members && row.members.email) || null,
+          updatedAt: row.updated_at,
+        };
+      }
+      return map;
+    } catch (e) {
+      console.warn("[LabDB] fetchModelNotes 실패(페이지는 정적 비고로 계속 동작):", e);
+      return {};
+    }
+  }
+
+  // 실패 시 그대로 throw -- 호출부(labapp-shim.js)가 저장 버튼 UI에 실패를 보여줘야
+  // 하므로 여기서 삼키지 않음(fetchModelNotes와 반대 -- 그쪽은 페이지 로드시 자동
+  // 호출이라 조용히 폴백하는 게 맞고, 이쪽은 사용자가 명시적으로 누른 저장 액션).
+  async function saveModelNote(modelId, note) {
+    const c = await ensurePublicClient();
+    const user = await LabDB.currentMember(); // throws "로그인이 필요합니다" if not logged in
+    const updatedAt = new Date().toISOString();
+    const { error } = await c.from("model_notes").upsert(
+      { model_id: modelId, note, updated_by: user.id, updated_at: updatedAt },
+      { onConflict: "model_id" }
+    );
+    if (error) throw error;
+    return { updatedByEmail: user.email, updatedAt };
+  }
+
   LabDB.ensureClient = ensureClient;
   LabDB.ensurePublicClient = ensurePublicClient;
+  LabDB.fetchModelNotes = fetchModelNotes;
+  LabDB.saveModelNote = saveModelNote;
 })();

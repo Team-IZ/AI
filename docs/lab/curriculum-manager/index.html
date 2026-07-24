@@ -162,6 +162,13 @@
   .model-chip.active{background:var(--c-primary);color:#fff;border-color:var(--c-primary);font-weight:600}
   .model-note{font-size:11px;color:var(--c-text-3);margin-top:6px}
   .model-note.warn{color:var(--c-warning)}
+  .model-note .note-text{display:block}
+  .model-note .note-caption{color:var(--c-text-3);font-size:10px;margin-top:3px}
+  .model-note .note-edit-btn{margin-top:6px;font-size:10px;padding:3px 9px}
+  .model-note .note-textarea{width:100%;max-width:480px;font:inherit;font-size:11px;padding:6px 8px;border:1px solid var(--c-border-strong);border-radius:var(--r-sm);resize:vertical;box-sizing:border-box}
+  .model-note .note-edit-actions{margin-top:6px;display:flex;align-items:center;gap:var(--sp-2)}
+  .model-note .note-save-btn,.model-note .note-cancel-btn{font-size:10px;padding:3px 9px}
+  .model-note .note-save-status{font-size:10px;color:var(--c-text-3)}
 
   /* D-P01ORCH: 목록 탭의 진행중(queued/running) 섹션 -- 서버 오케스트레이터가 도는
      동안 이 브라우저가 닫혀 있어도 다른 기기/새로고침에서 동일하게 보임 */
@@ -965,6 +972,10 @@
     restoreSession();
     await LabApp.loadManifest();
     await LabApp.refreshModelChoices();
+    // D1 (2026-07-24): 모델 비고 팀 공유 메모 -- wireP01Upload()가 곧바로
+    // renderModelToggle()을 호출해 첫 렌더를 하므로, 그 전에 캐시를 채워야 새로고침
+    // 없이 바로 DB 메모가 보임(로그인 안 됐으면 빈 객체 -- 정적 fallback으로 렌더).
+    LabApp.modelNotesCache = await LabDB.fetchModelNotes();
     wireP01Upload();
     document.getElementById("nvidia-key").addEventListener("change", refreshModelChoicesAndRerenderChips);
     document.getElementById("proxy-url").addEventListener("change", refreshModelChoicesAndRerenderChips);

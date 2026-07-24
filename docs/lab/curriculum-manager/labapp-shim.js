@@ -131,9 +131,15 @@
   // simply discarded.
   function showResults() {}
 
-  // Copied verbatim from docs/lab/app.js:69-91 -- fully self-contained (container +
-  // explicit selectors + getter/setter callbacks, no fixed global IDs), so it's safe to
-  // reuse as-is with this page's own #p01-model-group/#p01-model-note elements.
+  // Originally copied verbatim from docs/lab/app.js:69-91 -- already a local-only copy
+  // (see file header), so free to diverge from the original without a sync concern.
+  //
+  // D1 (2026-07-24): 비고를 CURATED_MODELS의 정적 텍스트에서 팀 공유 DB 메모
+  // (public.model_notes, experiments/web_lab/model_notes_schema.sql)로 확장. 정적
+  // 텍스트는 여전히 "아무도 DB에 메모를 안 남긴 모델"의 fallback으로 남음.
+  // LabApp.modelNotesCache는 index.html이 LabDB.fetchModelNotes()로 채움(로그인
+  // 안 됐으면 빈 객체 -- 그 경우 이 함수는 정적 fallback만 보여주고 편집 UI도
+  // 저장 시 LabDB.currentMember()가 알아서 "로그인이 필요합니다"로 막음).
   function renderModelToggle(container, groupSelector, noteSelector, getSelected, setSelected) {
     const group = container.querySelector(groupSelector);
     const note = container.querySelector(noteSelector);
@@ -143,11 +149,84 @@
       if (m.tier === "bad") cls.push("warn");
       return `<button type="button" class="${cls.join(" ")}" data-model="${LabApp.escapeHtml(m.id)}">${LabApp.escapeHtml(m.label)}</button>`;
     }).join("");
-    const updateNote = () => {
-      const m = LabApp.MODEL_CHOICES.find((x) => x.id === getSelected());
-      note.textContent = m ? m.note : "";
+
+    let editing = false;
+    // D1-security: 팀원이 직접 입력하는 필드(비고 내용, 이메일)는 XSS 벡터라 innerHTML
+    // 문자열조합+escapeHtml 대신 DOM 메서드(createElement+textContent)만 사용 --
+    // textContent는 파서를 아예 안 거치므로 이스케이프 실수 자체가 구조적으로
+    // 불가능(보안 훅이 innerHTML 패턴에 지적한 걸 계기로 이 방식으로 확정).
+    function renderNoteArea() {
+      const selectedId = getSelected();
+      const m = LabApp.MODEL_CHOICES.find((x) => x.id === selectedId);
+      const dbEntry = (LabApp.modelNotesCache || {})[selectedId];
+      const displayNote = dbEntry ? dbEntry.note : (m ? m.note : "");
       note.className = "model-note" + (m && m.tier === "bad" ? " warn" : "");
-    };
+      note.textContent = ""; // clear (no interpolation -- plain clear is always safe)
+
+      if (!editing) {
+        const textSpan = document.createElement("span");
+        textSpan.className = "note-text";
+        textSpan.textContent = displayNote || "(비고 없음)";
+        note.appendChild(textSpan);
+
+        if (dbEntry) {
+          const caption = document.createElement("div");
+          caption.className = "note-caption";
+          caption.textContent = `최근 수정: ${dbEntry.updatedByEmail || "알 수 없음"} · ${new Date(dbEntry.updatedAt).toLocaleString("ko-KR")}`;
+          note.appendChild(caption);
+        }
+
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "btn ghost note-edit-btn";
+        editBtn.textContent = "메모 편집";
+        editBtn.addEventListener("click", () => { editing = true; renderNoteArea(); });
+        note.appendChild(editBtn);
+        return;
+      }
+
+      const textarea = document.createElement("textarea");
+      textarea.className = "note-textarea";
+      textarea.rows = 3;
+      textarea.value = displayNote; // DOM 프로퍼티 -- 파서를 거치지 않음
+      note.appendChild(textarea);
+
+      const actions = document.createElement("div");
+      actions.className = "note-edit-actions";
+      const saveBtn = document.createElement("button");
+      saveBtn.type = "button";
+      saveBtn.className = "btn note-save-btn";
+      saveBtn.textContent = "저장";
+      const cancelBtn = document.createElement("button");
+      cancelBtn.type = "button";
+      cancelBtn.className = "btn ghost note-cancel-btn";
+      cancelBtn.textContent = "취소";
+      const statusEl = document.createElement("span");
+      statusEl.className = "note-save-status";
+      actions.appendChild(saveBtn);
+      actions.appendChild(cancelBtn);
+      actions.appendChild(statusEl);
+      note.appendChild(actions);
+
+      cancelBtn.addEventListener("click", () => { editing = false; renderNoteArea(); });
+      saveBtn.addEventListener("click", async () => {
+        const value = textarea.value;
+        saveBtn.disabled = true;
+        statusEl.textContent = "저장 중...";
+        try {
+          const result = await LabDB.saveModelNote(selectedId, value);
+          LabApp.modelNotesCache = LabApp.modelNotesCache || {};
+          LabApp.modelNotesCache[selectedId] = { note: value, updatedByEmail: result.updatedByEmail, updatedAt: result.updatedAt };
+          editing = false;
+          renderNoteArea();
+        } catch (err) {
+          statusEl.textContent = `저장 실패: ${err.message}`;
+          saveBtn.disabled = false;
+        }
+      });
+    }
+    const updateNote = () => { editing = false; renderNoteArea(); }; // 모델 전환 시 편집상태 초기화
+
     group.querySelectorAll(".model-chip").forEach((btn) => {
       btn.addEventListener("click", () => {
         setSelected(btn.dataset.model);
