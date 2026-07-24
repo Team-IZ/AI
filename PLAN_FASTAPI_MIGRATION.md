@@ -1,7 +1,7 @@
 # AI 파트 FastAPI 구축 계획
 
-> 마지막 갱신: 2026-07-23
-> 작업 브랜치: `feature/sessions` (7단계용, `develop`에서 분기)
+> 마지막 갱신: 2026-07-24
+> 작업 브랜치: `feature/engine-transplant` (9단계 이식용, `develop`에서 분기)
 > 이 문서가 **AI 파트 진행 상황의 단일 기준**이다. 새 세션은 여기부터 읽는다.
 > 구조·계약의 설명은 `README.md`에 있다. 이 문서는 **무엇을 어떤 순서로 할지**만 다룬다.
 
@@ -72,6 +72,8 @@ GET  /api/v0/gradings/{job_id}            채점 상태·5축 점수·근거 조
 
 | develop 재정합 | GitHub에서 feature/sessions PR #3가 세션 코드 올라가기 전 상태로 develop에 미리 머지돼(내용 없는 머지 커밋) 로컬 develop과 갈라짐. `git merge origin/develop`으로 흡수(로컬이 상위집합, 충돌 없음) 후 push. 이후 8단계용 `feature/gradings` 분기 |
 | 8단계 완료 | `schemas/grading.py`·`app/gradings.py`(저장소·스텁, `jobs.py`와 형제)·`api/gradings.py`(2개)·`main.py` 등록·`tests/test_gradings.py`. 분석과 같은 비동기 job 패턴. 5축 채점 결과 계약(`axis_scores` 5개·총점·평균·재현성 `versions`) 확정. **엔드포인트 9/9 완성, 36 passed** |
+| openapi 스냅샷·통신 테스트 | `openapi.json` 커밋(백엔드 Postman Import용). 로컬 통신 자체검증 통과(9개 전 경로, 인증 헤더 동작). 백엔드 터널 통신은 cloudflared로 준비(계획: `../output_docs/AI-Backend_통신테스트_계획_2026-07-24.md`), 팀원 일정 대기 |
+| PoC 워크트리 최신화 | `ai_poc/qna`(`feat/code_Q&A` → 1277784)·`ai_poc/pdf`(`feat/pdf_analysis` → 9884447) 최신 참조로 이동. 9단계 이식 대비 P02(룰 finding 추출)·P03·교안분석 구조 분석. 논의는 `../output_docs/`(월요일 안건·전체 논의·통신 미해결) |
 
 **파일명 규칙(기존 코드가 정한 것)**: `schemas/`는 **단수**(`analysis.py`·`session.py`·`grading.py`), `api/`·저장소 모듈은 **복수**(`analyses.py`·`sessions.py`·`gradings.py`·`jobs.py`).
 

@@ -16,15 +16,21 @@ React는 FastAPI를 직접 호출하지 않는다. **FastAPI의 호출자는 Spr
 > 기존 구현은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났고, 지금은 빈 FastAPI 골격부터 다시 쌓는 중이다.
 > 단계별 상세·미결 항목은 **`PLAN_FASTAPI_MIGRATION.md`**가 단일 기준이다.
 
-### 지금 동작하는 것
+### 지금 동작하는 것 — 엔드포인트 9/9 (전부 스텁)
 
 ```
-GET  /api/health                 서비스 상태. 인증 면제
-POST /api/v0/analyses            분석 요청. JSON + multipart(ZIP), 멱등성 키 처리
-GET  /api/v0/analyses/{job_id}   분석 결과 조회. 지금은 고정 스텁 응답
+GET  /api/health                        서비스 상태. 인증 면제
+POST /api/v0/analyses                   분석 요청(202). JSON + multipart(ZIP), 멱등성 키
+GET  /api/v0/analyses/{job_id}          분석 상태·결과 조회. 폴링
+POST /api/v0/sessions                   세션 시작 → 첫 질문(201). 동기
+POST /api/v0/sessions/{id}/answers      답변 제출 → 다음 질문/종료. 멱등(clientRequestId)
+GET  /api/v0/sessions/{id}              세션 상태 조회
+POST /api/v0/sessions/{id}/restore      유실 세션 복원
+POST /api/v0/gradings                   5축 후채점 요청(202). 비동기
+GET  /api/v0/gradings/{job_id}          채점 상태·5축 점수 조회. 폴링
 ```
 
-인증(`X-Internal-Key`), 계약 에러 형식, camelCase 직렬화, Swagger 문서화까지 붙어 있다. **백엔드는 이 3개에 대해 지금 바로 붙여볼 수 있다.**
+인증(`X-Internal-Key`), 계약 에러 형식, camelCase 직렬화, Swagger 문서화까지 붙어 있다. **응답은 전부 고정 스텁**이지만 계약 모양은 확정 — 백엔드는 9개 전부 지금 바로 붙여볼 수 있다. 기계용 스펙은 `openapi.json`(Postman Import용).
 
 ---
 
@@ -216,16 +222,39 @@ engine_mode: Literal["stub", "real"] = "stub"
 python -m venv .venv
 ./.venv/Scripts/python.exe -m pip install -r requirements.txt
 
-# 개발 서버
+# 개발 서버 (로컬 확인용)
 ./.venv/Scripts/python.exe -m uvicorn app.main:app --reload
 
-# 테스트
+# 테스트 (현재 36 passed)
 ./.venv/Scripts/python.exe -m pytest -q
 ```
 
-Swagger UI: http://127.0.0.1:8000/docs
+Swagger UI: http://127.0.0.1:8000/docs — 여기서 9개 엔드포인트 직접 클릭 테스트.
 
-> **워커는 1개로 유지한다.** job 저장소가 인메모리라 `--workers 2` 이상이면 job을 만든 프로세스와 조회하는 프로세스가 달라져 404가 난다. 스케일이 필요해지면 Redis나 DB로 옮긴다.
+> **워커는 1개로 유지한다.** job·세션 저장소가 인메모리라 `--workers 2` 이상이면 만든 프로세스와 조회 프로세스가 달라져 404가 난다. 스케일이 필요해지면 Redis나 DB로 옮긴다.
+
+### 백엔드와 통신 테스트 (배포 전, 터널)
+
+Spring이 Railway(공인)에 떠 있으면, 로컬 FastAPI를 터널로 노출해 통신 확인한다. **배포 불필요.**
+
+```bash
+# 1) 외부 노출용으로 서버 실행 (--host 0.0.0.0)
+./.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 2) 다른 터미널에서 터널 (cloudflared — 가입·토큰 불필요)
+cloudflared tunnel --url http://localhost:8000
+#   → https://xxxx.trycloudflare.com 발급 → 백엔드에 이 URL 전달(prefix /api/v0)
+```
+
+- 인증: `.env`의 `INTERNAL_API_KEY`에 값 있으면 헤더 `X-Internal-Key` 필요(health 면제). 비우면 인증 꺼짐.
+- 창 닫거나 PC 절전 들어가면 터널 끊김. quick tunnel은 URL이 실행마다 바뀜.
+- 상세 절차·스모크 테스트 순서: `../output_docs/AI-Backend_통신테스트_계획_2026-07-24.md`
+
+### openapi.json 갱신 (계약 바뀌면)
+
+```bash
+./.venv/Scripts/python.exe -c "from app.main import app; import json,io; io.open('openapi.json','w',encoding='utf-8').write(json.dumps(app.openapi(),ensure_ascii=False,indent=2))"
+```
 
 ### 설정
 
