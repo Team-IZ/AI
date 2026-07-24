@@ -322,6 +322,11 @@
     document.getElementById("session-root").classList.remove("hidden");
 
     await LabApp.loadManifest();
+    // D-catalog (2026-07-24): refresh MODEL_CHOICES against NVIDIA's live catalog before
+    // the chips below ever render, so a dead/deprecated model never shows up selectable
+    // in the first place. Best-effort -- see lab-core.js's refreshModelChoices() for the
+    // fallback-to-curated-list behavior if this fails.
+    await LabApp.refreshModelChoices();
     document.getElementById("ctx-label").textContent = submission.finding.id || submission.finding.file || "finding";
     document.getElementById("req-text").textContent = submission.finding.finding || "";
     // D212: tell the trainee up front that starting will continue an earlier attempt,

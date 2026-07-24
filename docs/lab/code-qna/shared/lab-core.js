@@ -148,7 +148,10 @@ const LabApp = (() => {
   // was measuring the OLD pipeline's missing fallback, not a real model failure.
   // Promoted to shared.default_model for both P01 and P03 on this evidence, not
   // speculation.
-  const MODEL_CHOICES = [
+  // D-catalog (2026-07-24): renamed from MODEL_CHOICES -- this is now the CURATED base
+  // (hand-verified tier/notes, the thing that used to go stale). The live-selectable
+  // MODEL_CHOICES below is built by merging this against NVIDIA's actual catalog.
+  const CURATED_MODELS = [
     // D215 (2026-07-22): step-3.5-flash -> step-3.7-flash, mirrored from app.js's own
     // MODEL_CHOICES (this file is that extracted subset) -- see app.js's D215 comment
     // for the full WHY/COST/EXIT. Verified via a real NVIDIA /v1/models call that
@@ -177,8 +180,85 @@ const LabApp = (() => {
       note: "P01 기준 미검증 · P03에서 100회 반복 중 DEGRADED 재발 이력." },
   ];
 
+  // D-catalog (2026-07-24): 사용자 요청 -- NVIDIA deprecation/신규 모델이 계속 생기는데
+  // MODEL_CHOICES를 매번 손으로 갱신하는 게 싫다고 함. 같은 세션에서 qwen3.5-122b/
+  // mistral-large-3 둘 다 이미 HTTP 410(단종)인 채로 선택 가능한 상태였던 게 직접 계기.
+  //   WHY: NVIDIA GET /v1/models(워커의 ?models=1 경유)로 "지금 실제로 살아있는 모델"을
+  //   매 페이지 로드 때 확인 -> CURATED_MODELS와 병합해서 (1)단종된 건 자동 제외
+  //   (2)새로 생긴 chat 계열은 "미검증" 상태로 자동 노출 (3)기존 큐레이션(tier/note)은
+  //   그대로 보존. 응답에 타입/카테고리 필드가 없어서(id만 있음) LLM 여부는 제외
+  //   키워드로 판별 -- 허용목록보다 이쪽이 새 모델 등장에 더 잘 버팀(모델명은 계속
+  //   바뀌지만 "embed/vision/guard류는 채팅모델이 아니다"라는 카테고리는 안정적).
+  //   COST: 키워드 휴리스틱이라 100% 정확하진 않음(신조어 모델명이 우연히 걸릴 수 있음)
+  //   -- 다만 오탐 방향이 "새 chat 모델을 놓침"이지 "비-chat 모델을 잘못 노출"보다는
+  //   안전한 쪽으로 치우치게 설계(애매하면 제외).
+  //   EXIT: 필터가 계속 틀리면 NON_CHAT_KEYWORDS만 손보면 됨(허용목록으로 통째 전환할
+  //   필요 없음). 워커가 죽거나 카탈로그 호출이 실패하면 CURATED_MODELS 그대로 폴백 --
+  //   이 기능 자체가 실패해도 기존 동작을 절대 깨지 않음.
+  // D-catalog-fix (2026-07-24): simulated against the live 118-model catalog before
+  // shipping -- caught 2 misses this list already fixes: "bge" (baai/bge-m3 is an
+  // embedding model, doesn't contain the literal substring "embed") and "-vl" without a
+  // trailing dash (nvidia/nemotron-nano-12b-v2-vl is vision-language but ends in "-vl",
+  // not "-vl-"). Re-run the same simulation if this list changes again -- don't just
+  // eyeball a few examples.
+  const NON_CHAT_KEYWORDS = [
+    "embed", "bge", "retriever", "rerank", "-parse", "guard", "safety", "moderation",
+    "-pii", "reward", "translate", "vision", "-vl", "vlm", "vila", "kosmos", "fuyu",
+    "neva", "nvclip", "clip", "deplot", "diffusion", "detector", "calibration", "reason2",
+    "cosmos", "codegemma", "starcoder", "codestral", "codellama", "deepseek-coder",
+    "-code-instruct", "chatqa",
+  ];
+  function looksLikeChatModel(id) {
+    const lower = id.toLowerCase();
+    return !NON_CHAT_KEYWORDS.some((kw) => lower.includes(kw));
+  }
+  function shortLabel(id) {
+    const afterSlash = id.includes("/") ? id.split("/")[1] : id;
+    return afterSlash.length > 28 ? afterSlash.slice(0, 26) + "…" : afterSlash;
+  }
+
+  const MODEL_CHOICES = CURATED_MODELS.slice();
+
+  async function refreshModelChoices() {
+    try {
+      const proxyUrl = LabConfig.get("proxy-url");
+      const apiKey = LabConfig.get("nvidia-key");
+      if (!proxyUrl || !apiKey) return; // no key yet -- CURATED_MODELS fallback stands
+      const base = proxyUrl.split("?")[0];
+      const res = await fetch(`${base}?models=1`, { headers: { "x-nvidia-api-key": apiKey } });
+      if (!res.ok) return;
+      const data = await res.json();
+      const liveIds = new Set((data.data || []).map((m) => m.id));
+      if (!liveIds.size) return; // empty/malformed response -- don't wipe out the curated list over nothing
+
+      const curatedById = new Map(CURATED_MODELS.map((m) => [m.id, m]));
+      const merged = [];
+      for (const m of CURATED_MODELS) {
+        if (liveIds.has(m.id)) merged.push(m);
+        // else: curated model no longer in NVIDIA's catalog -- silently dropped (D217/
+        // D-fix history already showed forcing a dead model to stay selectable just
+        // reproduces the "선택했더니 410" problem this feature exists to prevent).
+      }
+      for (const id of liveIds) {
+        if (curatedById.has(id)) continue; // already handled above with its curated tier/note
+        if (!looksLikeChatModel(id)) continue;
+        merged.push({
+          id, label: shortLabel(id), tier: "new",
+          note: "카탈로그에 새로 나타남(자동 감지, 2026-07-24~) -- 아직 이 프로젝트에서 실측/검증 안 됨.",
+        });
+      }
+      if (merged.length) {
+        MODEL_CHOICES.length = 0;
+        MODEL_CHOICES.push(...merged);
+      }
+    } catch (e) {
+      // network error, worker down, etc. -- CURATED_MODELS (already in MODEL_CHOICES) stands as-is
+    }
+  }
+
   return {
     loadManifest, getManifest, getStage, getOverride, setOverride, resolveTemplate, resolveParam,
     fillTemplate, escapeHtml, formatElapsed, jsonResultBlock, saveFailedRun, MODEL_CHOICES,
+    refreshModelChoices,
   };
 })();
