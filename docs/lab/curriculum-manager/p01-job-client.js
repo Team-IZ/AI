@@ -99,10 +99,15 @@ const P01JobClient = (() => {
     return data && data.session ? data.session.access_token : null;
   }
 
+  // D-fix (security review): token used to go in the URL as ?token=... -- moved to an
+  // Authorization header (see index.js's own D-fix note at the GET route) so it can't
+  // land in Cloudflare/proxy access logs via the query string.
   async function pollJob(jobId) {
     const token = await currentAccessToken();
     if (!token) throw new Error("로그인이 필요합니다");
-    const res = await fetch(`${ORCHESTRATOR_URL}/analyses/${encodeURIComponent(jobId)}?token=${encodeURIComponent(token)}`);
+    const res = await fetch(`${ORCHESTRATOR_URL}/analyses/${encodeURIComponent(jobId)}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
     if (!res.ok) throw new Error(`상태 조회 실패 (HTTP ${res.status})`);
     return res.json();
   }

@@ -564,7 +564,7 @@ export class P01AnalysisJob extends DurableObject {
 function corsHeaders(origin) {
   const allowed = ALLOWED_ORIGINS.includes(origin) ? origin : "";
   return allowed
-    ? { "access-control-allow-origin": allowed, "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type" }
+    ? { "access-control-allow-origin": allowed, "access-control-allow-methods": "GET, POST, OPTIONS", "access-control-allow-headers": "content-type, authorization" }
     : {};
 }
 
@@ -635,9 +635,15 @@ export default {
     }
     if (analysisMatch && !analysisMatch[2] && request.method === "GET") {
       const jobId = analysisMatch[1];
-      const callerToken = url.searchParams.get("token");
+      // D-fix (security review): was url.searchParams.get("token") -- a bearer credential
+      // in a URL query string ends up in Cloudflare's own request logs (this account's
+      // observability tooling included) and any intermediary's access logs, same class of
+      // issue as CWE-598. Authorization header isn't logged that way and isn't cached/
+      // replayable off a copied URL; corsHeaders() above already allows it on preflight.
+      const authHeader = request.headers.get("authorization") || "";
+      const callerToken = authHeader.startsWith("Bearer ") ? authHeader.slice(7) : "";
       if (!callerToken) {
-        return new Response(JSON.stringify({ error: "UNAUTHORIZED", message: "token 쿼리파라미터 필요" }), { status: 401, headers: { ...headers, "content-type": "application/json" } });
+        return new Response(JSON.stringify({ error: "UNAUTHORIZED", message: "Authorization: Bearer <token> 헤더 필요" }), { status: 401, headers: { ...headers, "content-type": "application/json" } });
       }
       try {
         await verifyReadAccess(callerToken, jobId);
