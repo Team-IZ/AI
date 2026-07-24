@@ -428,12 +428,12 @@ export class P01AnalysisJob extends DurableObject {
   }
 
   async handleInit(payload) {
-    const { runId, accessToken, apiKey, proxyUrl, model, courseLabel, chunks } = payload;
+    const { runId, accessToken, apiKey, proxyUrl, model, courseLabel, chunks, sourceFilename } = payload;
     // one Promise.all(...) wave per round, exactly p01-runner.js:561-601's shape --
     // result/err/retryable per chunk, aggregated across rounds.
     const chunkState = chunks.map((chunk) => ({ chunk, result: null, err: null, retryable: false }));
     await this.ctx.storage.put({
-      runId, accessToken, apiKey, proxyUrl, model, courseLabel,
+      runId, accessToken, apiKey, proxyUrl, model, courseLabel, sourceFilename,
       chunkState, round: 1, status: "queued", cancelled: false,
     });
     await this.ctx.storage.setAlarm(Date.now());
@@ -479,9 +479,9 @@ export class P01AnalysisJob extends DurableObject {
       await patchRun(accessToken, runId, { status: "running" }).catch(() => {});
     }
 
-    const [apiKey, proxyUrl, model, courseLabel, round] = await Promise.all([
+    const [apiKey, proxyUrl, model, courseLabel, sourceFilename, round] = await Promise.all([
       this.ctx.storage.get("apiKey"), this.ctx.storage.get("proxyUrl"), this.ctx.storage.get("model"),
-      this.ctx.storage.get("courseLabel"), this.ctx.storage.get("round"),
+      this.ctx.storage.get("courseLabel"), this.ctx.storage.get("sourceFilename"), this.ctx.storage.get("round"),
     ]);
     let chunkState = await this.ctx.storage.get("chunkState");
 
@@ -541,10 +541,17 @@ export class P01AnalysisJob extends DurableObject {
         upsertArtifact(accessToken, runId, "graph", graphGenerated ? graph : { error: "graph_generated=false" }),
         upsertArtifact(accessToken, runId, "refine_fixes", []),
       ]);
+      // D-fix (found live: a completed run's list title fell back to 교안 (<id>) instead
+      // of the PDF's own name): this PATCH's input_meta is a plain column UPDATE, not a
+      // JSON merge -- it replaces insertQueuedRun()'s original {source_filename,...}
+      // wholesale. sourceFilename must be repeated here explicitly (now threaded through
+      // handleInit's storage, see D-fix there) or rowToEntry() (index.html) loses the
+      // filename it title-cases from the moment a job finishes.
       await patchRun(accessToken, runId, {
         status: "done",
         finished_at: new Date().toISOString(),
         input_meta: {
+          source_filename: sourceFilename || null,
           extractor: "pdfjs", chunk_count: chunkState.length, failed_chunk_count: failedChunks.length,
           unit_count: Object.keys(unitMap).length, graph_generated: graphGenerated,
           refine_fixes_applied: 0, refine_fixes_rejected: 0,
@@ -593,7 +600,10 @@ export default {
       const stub = env.P01_JOBS.get(env.P01_JOBS.idFromName(run.id));
       const initRes = await stub.fetch("http://do/init", {
         method: "POST",
-        body: JSON.stringify({ runId: run.id, accessToken: supabaseAccessToken, apiKey: nvidiaApiKey, proxyUrl, model, courseLabel: courseLabel || "Java", chunks }),
+        body: JSON.stringify({
+          runId: run.id, accessToken: supabaseAccessToken, apiKey: nvidiaApiKey, proxyUrl, model,
+          courseLabel: courseLabel || "Java", chunks, sourceFilename: sourceFilename || null,
+        }),
       });
       const initBody = await initRes.text();
       return new Response(initBody, { status: initRes.status, headers: { ...headers, "content-type": "application/json" } });
