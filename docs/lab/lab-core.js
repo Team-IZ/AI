@@ -246,11 +246,36 @@ const LabApp = (() => {
   //   `wrangler secret put`으로 읽기전용 조회용 키를 추가하고 이 함수의 조기 return을
   //   그 키로의 폴백으로 바꾸면 됨(구조 변경 없이 이 함수 안에서만 처리 가능).
   const MODEL_CHOICES = [];
+  let lastCatalogError = null;
+
+  // D-catalog-badkey (2026-07-24): 사용자 재현 보고 -- 잘못된 키를 넣었을 때도 조용히
+  // CURATED_MODELS(13개)로 폴백돼, "게이트가 다시 뚫린 것"처럼 보이는 별도 버그. 원인을
+  // curl로 먼저 확인: NVIDIA `/v1/models`는 **키 유효성을 검사하지 않음**(완전히 가짜인
+  // "nvapi-fake..." 같은 키로도 200+전체 카탈로그 반환 -- 실측 확인, 짐작 아님) --
+  // 그래서 이 엔드포인트로는 "키가 틀렸다"를 원천적으로 감지할 수 없다. 대신 재현 스크립트로
+  // 실제 실패 경로를 찾음: 사용자가 키 필드에 비-ASCII 문자(예: 한글)를 넣으면 `fetch()`의
+  // 헤더 설정 자체가 브라우저에서 예외를 던짐(HTTP 헤더 값은 ISO-8859-1만 가능) -- 이게
+  // catch로 떨어져 CURATED_MODELS 폴백을 탔던 것. 헤더로 못 보낼 값은 네트워크를 시도조차
+  // 하지 말고 명시적으로 걸러서 "키 형식이 이상하다"고 알려주는 게 맞음(공용 catch가
+  // 처리할 "일시적 인프라 장애"와는 다른 종류의 실패).
+  const HEADER_SAFE_KEY_RE = /^[\x20-\x7e]+$/;
 
   async function refreshModelChoices() {
+    lastCatalogError = null;
     const proxyUrl = LabConfig.get("proxy-url");
     const apiKey = LabConfig.get("nvidia-key");
-    if (!proxyUrl || !apiKey) return; // 키 없음 -- MODEL_CHOICES는 빈 채로 둔다(위 D-catalog-gate)
+    if (!proxyUrl || !apiKey) {
+      MODEL_CHOICES.length = 0; // 키 없음 -- 위 D-catalog-gate: 빈 채로 둔다
+      return;
+    }
+    if (!HEADER_SAFE_KEY_RE.test(apiKey)) {
+      // 형식이 틀린 게 확실한 입력 -- 시도조차 하지 않고, 오래된 큐레이션으로도 폴백하지
+      // 않는다(둘 다 "이 목록을 믿어도 된다"는 잘못된 인상을 줄 수 있어서). renderP01Panel()이
+      // getCatalogError()로 이 상태를 읽어 구체적인 안내 문구를 보여준다.
+      MODEL_CHOICES.length = 0;
+      lastCatalogError = "invalid-key-format";
+      return;
+    }
     try {
       const base = proxyUrl.split("?")[0];
       const res = await fetch(`${base}?models=1`, { headers: { "x-nvidia-api-key": apiKey } });
@@ -275,17 +300,23 @@ const LabApp = (() => {
       MODEL_CHOICES.length = 0;
       MODEL_CHOICES.push(...(merged.length ? merged : CURATED_MODELS));
     } catch (e) {
-      // 키는 있었지만 실패(네트워크/워커/파싱) -- 아예 비우는 것보단 큐레이션 폴백이 나음.
-      // "키 없음"과는 다른 경로(위에서 이미 return됨)라 여기 도달했다는 것 자체가 시도는
-      // 했다는 뜻.
+      // 형식은 멀쩡한 키인데 실패(네트워크/워커/파싱 -- NVIDIA가 키 자체를 거부하는
+      // 경우는 위에서 이미 확인했듯 이 엔드포인트에선 사실상 발생하지 않음). 아예
+      // 비우는 것보단 큐레이션 폴백이 나음 -- 시도는 했고 인프라 쪽 문제라는 뜻이라
+      // "키 형식 오류"와는 성격이 다름.
+      lastCatalogError = "fetch-failed";
       MODEL_CHOICES.length = 0;
       MODEL_CHOICES.push(...CURATED_MODELS);
     }
   }
 
+  function getCatalogError() {
+    return lastCatalogError;
+  }
+
   return {
     loadManifest, getManifest, getStage, getOverride, setOverride, resolveTemplate, resolveParam,
     fillTemplate, escapeHtml, formatElapsed, jsonResultBlock, saveFailedRun, MODEL_CHOICES,
-    refreshModelChoices,
+    refreshModelChoices, getCatalogError,
   };
 })();
