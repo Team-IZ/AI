@@ -745,7 +745,16 @@
   }
 
   // ---- P01 PDF upload + run ----
-  function wireP01Upload() {
+  // D-catalog-refresh (2026-07-24): split out of wireP01Upload() so a model-catalog
+  // refresh (see refreshModelChoicesAndRerenderChips below) can safely rebuild just the
+  // #p01-input-container subtree (dropzone/model chips) without re-running wireP01Upload()
+  // as a whole -- run-p01-btn/cancel-p01-btn live OUTSIDE this container as static elements,
+  // so re-running their addEventListener("click", ...) a second time would stack a duplicate
+  // handler (분석 실행 클릭 시 P01JobClient.submitAnalysis()가 두 번 실행되는 별도 버그).
+  // renderInput()/wireFileCapture() are safe to call repeatedly -- both re-query children of
+  // `container` fresh each call, and renderInput() replaces container.innerHTML wholesale,
+  // so prior listeners on the old (now-detached) nodes are simply discarded, not doubled.
+  function renderP01Panel() {
     const container = document.getElementById("p01-input-container");
     P01Runner.renderInput(container);
     P01JobClient.wireFileCapture(container); // D-P01ORCH: own listeners on the same DOM elements, p01-runner.js untouched
@@ -753,7 +762,22 @@
     const dz = document.getElementById("p01-dropzone");
     if (pdfInput) pdfInput.addEventListener("change", () => { if (pdfInput.files[0]) lastPdfName = pdfInput.files[0].name; });
     if (dz) dz.addEventListener("drop", (e) => { if (e.dataTransfer.files[0]) lastPdfName = e.dataTransfer.files[0].name; });
+  }
 
+  // D-catalog-refresh (2026-07-24): 사용자 재현 보고("13종에서 안 바뀐다", 스크린샷) --
+  // 이 페이지는 SPA라 연결 설정(키 입력)과 교안 등록(모델 목록)이 새로고침 없이 같은
+  // 로드 안에 공존한다. refreshModelChoices()를 DOMContentLoaded 시점에 한 번만 부르면,
+  // 그 시점에 키가 아직 없던 사용자(페이지 열자마자 연결 설정부터 펼쳐 키를 입력하는 게
+  // 가장 흔한 순서)는 이후 키를 넣어도 모델 목록이 CURATED_MODELS(단종 모델 포함)로
+  // 영구 고정됨 -- 실제로 재현 확인(키 입력 전/후 MODEL_CHOICES.length 둘 다 13, 무변화).
+  // 키/프록시 URL이 바뀔 때마다 다시 병합하도록 리스너로 보완.
+  async function refreshModelChoicesAndRerenderChips() {
+    await LabApp.refreshModelChoices();
+    renderP01Panel();
+  }
+
+  function wireP01Upload() {
+    renderP01Panel();
     const runBtn = document.getElementById("run-p01-btn");
     const cancelBtn = document.getElementById("cancel-p01-btn");
 
@@ -866,6 +890,8 @@
     await LabApp.loadManifest();
     await LabApp.refreshModelChoices();
     wireP01Upload();
+    document.getElementById("nvidia-key").addEventListener("change", refreshModelChoicesAndRerenderChips);
+    document.getElementById("proxy-url").addEventListener("change", refreshModelChoicesAndRerenderChips);
     route();
     refreshFromDB();
   });
