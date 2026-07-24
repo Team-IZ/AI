@@ -775,6 +775,7 @@
   document.addEventListener("DOMContentLoaded", async () => {
     restoreSession();
     await LabApp.loadManifest();
+    await LabApp.refreshModelChoices();
     wireP01Upload();
     route();
     refreshFromDB();

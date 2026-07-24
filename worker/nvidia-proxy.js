@@ -184,6 +184,32 @@ export default {
       return new Response(null, { status: 204, headers: corsHeaders(origin) });
     }
 
+    // GET /?models=1 -- D-catalog (2026-07-24): same feature as the code-qna Worker's own
+    // ?models=1 (see docs/lab/code-qna/worker/nvidia-proxy.js for the full WHY/COST/EXIT --
+    // not repeated here). Dumb passthrough+cache only; filtering/curation lives client-side
+    // in lab-core.js so it ships via plain `git push`, not a Worker redeploy.
+    if (request.method === "GET" && url.searchParams.has("models")) {
+      const apiKey = request.headers.get("x-nvidia-api-key");
+      if (!apiKey) return jsonResponse({ error: "missing x-nvidia-api-key header" }, 401, origin);
+      const CACHE_KEY = "models_catalog_cache";
+      const CACHE_TTL_SECONDS = 6 * 3600;
+      try {
+        const cached = await env.NVIDIA_JOBS.get(CACHE_KEY);
+        if (cached) return jsonResponse(JSON.parse(cached), 200, origin);
+        const upstream = await fetch("https://integrate.api.nvidia.com/v1/models", {
+          headers: { authorization: `Bearer ${apiKey}` },
+        });
+        if (!upstream.ok) {
+          return jsonResponse({ error: `NVIDIA models list failed: HTTP ${upstream.status}` }, upstream.status, origin);
+        }
+        const data = await upstream.json();
+        await env.NVIDIA_JOBS.put(CACHE_KEY, JSON.stringify(data), { expirationTtl: CACHE_TTL_SECONDS });
+        return jsonResponse(data, 200, origin);
+      } catch (e) {
+        return jsonResponse({ error: `models list error: ${e.message}` }, 500, origin);
+      }
+    }
+
     // GET /?traffic=1 -- D160: recent actual NVIDIA request timestamps (every attempt,
     // first + retries, from every client through this Worker) for docs/lab/debug-traffic.js.
     // Read-only, best-effort -- never blocks or affects job submission/polling.
