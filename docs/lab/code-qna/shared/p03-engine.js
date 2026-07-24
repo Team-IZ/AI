@@ -930,7 +930,26 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         // derives the cumulative verdict trail from it directly, no separate param needed.
         // D200: repoRef enables live fact-checking for L2/L3/Reflection. D210: zipFiles is
         // the ZIP-upload equivalent -- generateQuestion() picks whichever source is present.
+        // D-latency (2026-07-24): stage_events.latency_ms has existed since D193 but no
+        // caller ever passed a value (every row NULL) -- a user asked "why does Q&A feel
+        // slow" and there was no way to answer beyond re-running a synthetic curl benchmark
+        // that doesn't reflect a real turn's fact-check tool-loop overhead. Timed narrowly
+        // around generateQuestion() specifically, NOT the whole turn: hooks.getAnswer()
+        // right below is the human typing their answer, and including that would make
+        // "AI response time" meaningless (it'd just measure how fast the trainee types).
+        //   WHY: this is exactly the span the trainee is actually waiting on the system for
+        //   (countdown.resume() below only starts once the question is already delivered) --
+        //   the number a "make responses faster" investigation actually needs.
+        //   COST: classifyAnswer() (deterministic, non-LLM, sub-ms) isn't included, so
+        //   latency_ms slightly undercounts true server-side-per-turn time -- judged
+        //   negligible next to a real LLM call, not worth the extra complexity of a second
+        //   timer.
+        //   EXIT: if classifyAnswer ever becomes LLM-based (it explicitly isn't today, see
+        //   its own onProgress line below), fold its timing into this same window instead of
+        //   adding a separate column.
+        const questionStartedAt = Date.now();
         const { question, dedupUncertain } = await generateQuestion(level, finding, codeContext, transcript, genAttemptInfo.maxAttempts, model, hooks.onProgress, repoRef, zipFiles);
+        const questionLatencyMs = Date.now() - questionStartedAt;
         hooks.onQuestion({ level, question, turnIndex: i, totalTurns, dedupUncertain });
         hooks.onProgress("답변 대기 중...");
         hooks.countdown.resume(); // D182: only start ticking once the human can actually see+answer this question
@@ -945,7 +964,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
         // the actual verification flow: the answer was already recorded in-memory above.
         if (dbRun) {
           try {
-            await LabDB.logTurn({ run_id: dbRun.id, stage_id: level, seq: i, output: { level, question, answer, classification } });
+            await LabDB.logTurn({ run_id: dbRun.id, stage_id: level, seq: i, output: { level, question, answer, classification }, latency_ms: questionLatencyMs });
           } catch (e) {
             hooks.onProgress(`턴 저장 실패(진행은 계속됨): ${e.message}`);
           }
