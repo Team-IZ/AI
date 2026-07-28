@@ -1,0 +1,112 @@
+{
+  "manifest_version": "p04-0.1.0",
+  "generated_from_commit_note": "P04 통합 PoC (교안 teaches -> 제출 -> 코드분석 -> 문답 -> 보고서). 채점 임계값/루브릭은 이 파일이 아니라 app/scoring-config.js가 단일 소스(D3) -- 채점 프롬프트의 {rubric_block}은 실행 시 POCScoring.buildRubricBlock()이 주입한다.",
+  "pipelines": {
+    "p04": {
+      "label": "P04 통합 검증 PoC",
+      "source_files": ["app/poc-engine.js", "app/hint-ladder.js", "app/scoring-config.js"],
+      "has_llm_calls": true,
+      "stages": [
+        {
+          "id": "p04-1",
+          "title": "코드 분석 문서",
+          "kind": "prompt",
+          "function": "buildAnalysisDoc()",
+          "system": "You analyze a student's submitted codebase for an oral code-ownership assessment. Output strict JSON only. Ground every statement in the given files -- never invent files, functions, or behavior that is not shown.",
+          "user_template": "아래는 학생이 제출한 코드에서 구조 스캐너가 뽑은 finding 목록과, 실제 소스 일부다.\n이 제출물을 나중에 사람이 읽고 판단할 수 있도록 분석 문서를 작성하라.\n\n## 교안에서 이번에 검증할 teaches\n{teaches_block}\n\n## 구조 스캐너 finding\n{findings_block}\n\n## 소스 코드\n{code_block}\n\n다음 JSON만 반환하라:\n{{\n  \"overview\": \"이 제출물이 무엇을 하는 코드인지 3-5문장\",\n  \"structure\": [{{\"area\": \"영역 이름\", \"files\": [\"실제 파일 경로\"], \"role\": \"이 영역이 맡은 일\"}}],\n  \"decision_points\": [{{\"title\": \"판단이 개입된 지점\", \"file\": \"실제 파일 경로\", \"lines\": [12, 34], \"why_it_matters\": \"왜 이 지점이 이해도 검증에 쓸 만한지\", \"related_teach\": \"위 teaches 중 하나의 id, 없으면 null\"}}],\n  \"risks\": [\"코드에서 실제로 확인되는 위험 요소\"]\n}}\n\n규칙:\n- file 값은 반드시 위 소스 코드에 등장한 실제 경로여야 한다.\n- lines는 그 파일에서 실제로 해당 내용이 있는 줄 범위 [시작, 끝]이다. 확신이 없으면 그 항목을 빼라.\n- decision_points는 최소 3개, 서로 다른 파일/영역에서 뽑아라.",
+          "required_placeholders": ["teaches_block", "findings_block", "code_block"],
+          "truncation": { "code_block": 12000, "findings_block": 6000 },
+          "params": [
+            { "key": "max_tokens", "type": "int", "default": 2400 },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true, "note": "재현성 요구 -- 같은 제출물은 같은 분석 문서가 나와야 비교가 가능하다" }
+          ]
+        },
+        {
+          "id": "p04-2",
+          "title": "요구사항 P/F 판정",
+          "kind": "prompt",
+          "function": "Requirements.judge()",
+          "system": "You verify whether a student's submitted code satisfies each stated requirement. Output strict JSON only. A requirement is PASS only when you can point at concrete evidence in the given code.",
+          "user_template": "아래 요구사항 각각에 대해 제출된 코드가 충족하는지 P/F로 판정하라.\n\n## 요구사항\n{requirements_block}\n\n## 소스 코드\n{code_block}\n\n다음 JSON만 반환하라:\n{{\n  \"results\": [{{\n    \"requirement\": \"요구사항 원문 그대로\",\n    \"verdict\": \"P\" 또는 \"F\",\n    \"evidence\": {{\"file\": \"실제 파일 경로 또는 null\", \"lines\": [12, 20], \"quote\": \"근거가 되는 코드 한두 줄\"}},\n    \"note\": \"대체 구현이거나 부분 충족이면 그 사실을 여기에 적는다\"\n  }}]\n}}\n\n규칙:\n- 근거를 코드에서 찾지 못하면 무조건 \"F\"다. 있을 법하다는 추정으로 P를 주지 마라.\n- 요구사항과 다른 방식으로 구현됐으면 \"F\" + note에 무엇으로 대체됐는지 적어라.\n- results의 순서와 개수는 입력 요구사항과 정확히 일치해야 한다.",
+          "required_placeholders": ["requirements_block", "code_block"],
+          "truncation": { "code_block": 12000 },
+          "params": [
+            { "key": "max_tokens", "type": "int", "default": 1800 },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true }
+          ]
+        },
+        {
+          "id": "p04-3",
+          "title": "문제 3개 선정",
+          "kind": "prompt",
+          "function": "buildQuestionTopics()",
+          "system": "You select assessment topics for an oral code-ownership interview. Output strict JSON only. Each topic must be anchored to BOTH a curriculum teaching point and a concrete location in the student's own code.",
+          "system_note": "질문 문장 자체는 여기서 만들지 않는다 -- 여기서는 '무엇에 대해 물을지'(문제)만 고른다. 실제 세부질문 L1~L4는 p04-4가 문제 단위로 한 번에 생성한다.",
+          "user_template": "아래 교안 teaches와 코드 분석 문서를 근거로, 이 학생에게 물을 문제 {question_count}개를 골라라.\n\n## 교안 teaches (이번에 검증할 대상)\n{teaches_block}\n\n## 코드 분석 문서\n{analysis_block}\n\n## 구조 스캐너 finding\n{findings_block}\n\n다음 JSON만 반환하라:\n{{\n  \"topics\": [{{\n    \"teach_id\": \"위 teaches 중 하나의 id\",\n    \"title\": \"이 문제가 다루는 주제 한 줄\",\n    \"rationale\": \"이 지점이 왜 이해도 검증에 적합한지\",\n    \"code_ref\": {{\"file\": \"실제 파일 경로\", \"lines\": [12, 34]}}\n  }}]\n}}\n\n규칙:\n- topics는 정확히 {question_count}개.\n- 각 topic은 서로 다른 teach를 다뤄야 한다. 같은 teach를 두 번 쓰지 마라.\n- code_ref.file은 코드 분석 문서에 실제로 등장한 파일이어야 하고, lines는 그 파일의 실제 줄 범위다.\n- 교안 teach와 학생 코드가 실제로 만나는 지점을 골라라. 교안에만 있고 코드에 없는 주제는 고르지 마라.",
+          "required_placeholders": ["teaches_block", "analysis_block", "question_count"],
+          "optional_placeholders": ["findings_block"],
+          "truncation": { "analysis_block": 8000, "findings_block": 4000 },
+          "params": [
+            { "key": "max_tokens", "type": "int", "default": 1600 },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true }
+          ]
+        },
+        {
+          "id": "p04-4",
+          "title": "세부질문 L1~L4 + 고정 힌트 생성",
+          "kind": "prompt",
+          "function": "HintLadder.freezeQuestionSet()",
+          "system": "You write a fixed four-step oral assessment for one topic, together with a fixed graduated-prompting hint ladder for each step. Output strict JSON only.",
+          "system_note": "D4: 이 호출은 문제 시작 시 단 한 번, 학생 답변을 보기 전에 실행되고 결과는 그대로 동결된다. 같은 문제를 받은 두 학생은 글자 단위로 같은 질문과 같은 힌트를 받아야 한다 -- 그래야 '몇 번째 힌트에서 통과했는가'가 학생 차이를 재는 값이 된다.",
+          "user_template": "아래 문제 하나에 대해, 학생에게 순서대로 물을 세부질문 4개와 각 세부질문의 힌트 2개를 만들어라.\n\n## 문제\n{topic_block}\n\n## 근거 코드 ({code_ref})\n{code_block}\n\n## 교안 teach\n{teach_block}\n\n## 세부질문 4단계의 목적\n{axis_intent_block}\n\n다음 JSON만 반환하라:\n{{\n  \"levels\": [{{\n    \"axis\": \"L1_코드기술\",\n    \"question\": \"학생에게 그대로 보여줄 질문 문장\",\n    \"hints\": [\n      {{\"lv\": 1, \"kind\": \"재진술\", \"text\": \"...\"}},\n      {{\"lv\": 2, \"kind\": \"재진술-난이도하향\", \"text\": \"...\"}}\n    ]\n  }}]\n}}\n\n질문 규칙 (어기면 이 응답은 폐기된다):\n- levels는 정확히 4개이고 axis는 순서대로 L1_코드기술, L2_설계논리, L3_반례한계, L4_대안이다.\n- 질문은 이 학생의 실제 코드(위 근거 코드)를 구체적으로 인용해야 한다. 일반론 질문 금지.\n- **질문 안에 선택지·보기를 넣지 마라.** \"A와 B 중 무엇인가\", \"다음 중\", 번호 매긴 항목 나열 모두 금지다. 보기를 주는 순간 학생은 고르기만 하면 되고, 그건 이해도 측정이 아니다.\n- 4개 질문은 서로 다른 것을 물어야 한다. 표현만 바꾼 재질문 금지.\n\n힌트 규칙 (graduated prompting -- 어기면 이 응답은 폐기된다):\n- lv1 \"재진술\": 같은 것을 묻되 표현만 바꾼다. **새로운 정보를 추가하지 마라.**\n- lv2 \"재진술-난이도하향\": 질문의 범위를 좁히거나 더 작은 하위 질문으로 쪼개서 난이도를 낮춘다.\n- 두 힌트 모두 **정답을 말하지 마라. 선택지를 주지 마라. 정답이 있는 코드 위치를 지목하지 마라. 학생이 모르는 새 사실을 알려주지 마라.**\n- 힌트는 학생의 답변을 보기 전에 고정되는 것이다. 특정 오답을 가정하고 쓰지 마라.",
+          "required_placeholders": ["topic_block", "code_block", "axis_intent_block"],
+          "optional_placeholders": ["teach_block", "code_ref"],
+          "truncation": { "code_block": 6000 },
+          "params": [
+            { "key": "max_tokens", "type": "int", "default": 2600 },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true, "note": "D4의 전제 -- 같은 입력이면 같은 질문/힌트가 나와야 학생 간 비교가 성립한다" },
+            { "key": "max_regenerations", "type": "int", "default": 2, "note": "question-guard가 선택지 포함을 잡아냈을 때 재생성할 횟수 상한. 소진되면 flagged로 표시하고 사람이 보게 남긴다" }
+          ]
+        },
+        {
+          "id": "p04-5",
+          "title": "답변 채점 (레벨 1개, 0~5점)",
+          "kind": "prompt",
+          "function": "gradeLevelAnswer()",
+          "system": "You score one answer in an oral code-ownership assessment against one rubric axis. Output strict JSON only. Score strictly from the rubric's own level descriptions.",
+          "system_note": "rubric_block/axis_label은 app/scoring-config.js의 POCScoring.buildRubricBlock()이 주입한다(D3). 이 프롬프트에 루브릭 문구를 직접 적지 마라 -- 두 곳이 어긋난다.",
+          "user_template": "아래 답변을 해당 축의 값 단계 서술만을 근거로 0~5점으로 채점하라.\n\n## 채점 축\n{rubric_block}\n\n## 학생에게 준 질문\n{question}\n\n## 학생이 받은 힌트 ({hints_used}개)\n{hints_block}\n\n## 근거 코드 ({code_ref})\n{code_block}\n\n## 학생 답변\n{answer}\n\n다음 JSON만 반환하라:\n{{\n  \"score\": 0~5 정수,\n  \"matched_level\": \"이 점수를 준 근거가 된 값 단계 서술을 그대로 인용\",\n  \"evidence\": \"학생 답변에서 그 판단의 근거가 된 부분 인용\",\n  \"missing\": \"한 단계 위 점수를 받으려면 답변에 무엇이 더 있어야 했는지\"\n}}\n\n규칙:\n- 값 단계 서술에 없는 기준으로 가감하지 마라.\n- 답변이 코드 사실과 어긋나면 그 사실을 evidence에 적고 점수에 반영하라.\n- 힌트를 받았다는 이유로 점수를 깎지 마라. 힌트에 따른 상한은 채점 이후에 시스템이 따로 적용한다.",
+          "required_placeholders": ["rubric_block", "question", "answer"],
+          "optional_placeholders": ["hints_block", "hints_used", "code_block", "code_ref"],
+          "truncation": { "code_block": 4000, "answer": 6000 },
+          "params": [
+            { "key": "max_tokens", "type": "int", "default": 1200 },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true }
+          ]
+        },
+        {
+          "id": "p04-6",
+          "title": "보고서",
+          "kind": "prompt",
+          "function": "buildReport()",
+          "system": "You write an assessment report for a student's oral code-ownership session. Output strict JSON only. Point at the curriculum material the student should revisit, using only the given page/unit data.",
+          "user_template": "아래는 한 학생의 검증 세션 전체 기록이다. 보고서를 작성하라.\n\n## 교안 teaches (unit·페이지 포함)\n{teaches_block}\n\n## 코드 분석 문서\n{analysis_block}\n\n## 요구사항 P/F 결과\n{requirements_block}\n\n## 문답 기록 (문제별 · 레벨별 점수 · 힌트 사용 횟수)\n{transcript_block}\n\n다음 JSON만 반환하라:\n{{\n  \"summary\": \"이 학생의 코드 이해도 상태를 4-6문장으로\",\n  \"strengths\": [{{\"axis\": \"축 id\", \"detail\": \"실제 답변을 근거로\"}}],\n  \"gaps\": [{{\n    \"axis\": \"축 id\",\n    \"detail\": \"무엇이 부족했는지, 실제 답변을 근거로\",\n    \"teach_id\": \"관련 teach id\",\n    \"study_pointer\": \"교안의 어느 unit / 몇 페이지를 다시 봐야 하는지 -- 위 teaches에 실제로 있는 값만 쓸 것\"\n  }}],\n  \"retest\": [{{\"topic_title\": \"재시험이 필요한 문제 제목\", \"reason\": \"어느 레벨에서 왜 막혔는지\"}}],\n  \"autonomy_note\": \"힌트 없이 답한 부분과 힌트를 받고서야 답한 부분의 차이에 대한 해석\"\n}}\n\n규칙:\n- study_pointer의 unit·페이지는 위 teaches 블록에 실제로 있는 값만 써라. 페이지 번호를 지어내지 마라.\n- gaps는 점수가 낮았거나 X로 끝난 축만 다뤄라.\n- 힌트를 받고 통과한 항목은 '통과'가 아니라 '보조를 받아 도달'로 서술하라.",
+          "required_placeholders": ["transcript_block", "teaches_block"],
+          "optional_placeholders": ["analysis_block", "requirements_block"],
+          "truncation": { "transcript_block": 14000, "analysis_block": 6000 },
+          "params": [
+            { "key": "max_tokens", "type": "int", "default": 2600 },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true }
+          ]
+        }
+      ]
+    }
+  },
+  "shared": {
+    "nvidia_endpoint": "https://integrate.api.nvidia.com/v1/chat/completions",
+    "cors_note": "이 엔드포인트는 Access-Control-Allow-Origin 헤더가 없어 브라우저 직접 호출이 차단된다. 모든 LLM 호출은 proxy_url을 거친다.",
+    "default_model": "stepfun-ai/step-3.7-flash",
+    "locked_temperature": 0.0,
+    "scoring_config_note": "임계값(pass=3)·힌트 상한(5/4/3)·레벨당 힌트 수(2)·축별 값 단계 서술은 이 파일이 아니라 app/scoring-config.js에 있다(D3)."
+  }
+}

@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>P04 통합 검증 PoC · IZ</title>
+<!--
+  리다이렉트 스텁.
+
+  실제 페이지는 app/ 아래에 있다. 저장소 루트가 아니라 한 단계 깊이에 두는 건 취향이
+  아니라 제약이다 -- 이 브랜치가 feat/code_Q&A에서 무수정으로 들여온 파일들이 "../"를
+  페이지 기준으로 해석한다(shared/p02-engine.js의 REPO_RAW_BASE, shared/lab-core.js의
+  loadManifest()). 페이지를 루트에 두면 그 "../"가 사이트 루트 밖을 가리켜 파이썬 원본과
+  p02 매니페스트 로딩이 둘 다 깨진다. 그 파일들은 드리프트 검사(.github/workflows/pages.yml)
+  때문에 고칠 수 없으므로, 페이지 쪽이 깊이를 맞춘다.
+-->
+<meta http-equiv="refresh" content="0; url=app/index.html">
+<link rel="canonical" href="app/index.html">
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", sans-serif;
+         padding: 48px; color: #1f2328; }
+  a { color: #2563eb; }
+</style>
+</head>
+<body>
+  <p>이동 중… 자동으로 넘어가지 않으면 <a href="app/index.html">app/index.html</a>을 여세요.</p>
+</body>
+</html>
