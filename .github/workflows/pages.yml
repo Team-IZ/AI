@@ -25,13 +25,35 @@
 #   {branch: feat/pdf_analysis, path: /docs} (build_type "legacy"), restore
 #   docs/lab/code-qna/ on feat/pdf_analysis from feat/code_Q&A, and delete this file
 #   from both branches.
-name: Deploy Pages (P01 + code-qna)
+#
+# D-poc1 (2026-07-28): a THIRD source branch, feat/poc_full, joins the assembly.
+#
+#   feat/poc_full -> repo root -> /lab/poc/**  (P04, 교안→제출→코드분석→문답→보고서 통합 PoC)
+#
+#   WHY: the P04 PoC spans what P01 and P02/P03 each own half of, but its turn loop is
+#   structurally different from P03's (per-level immediate 0-5 scoring + a fixed 2-step
+#   hint ladder + fail-fast per question, vs P03's escalate-until-defended + one grading
+#   pass at the end). Editing P03 into that shape would have broken the tool the team is
+#   actively using, so P04 is its own branch/tool under the same one-branch-one-tool rule
+#   this file already enforces.
+#   COST: the workflow file now has to stay in sync across THREE branches, and a broken
+#   commit on any one of them blocks the other two from deploying. feat/poc_full also
+#   carries a vendored copy of shared/, cognition/, judgment/, feedback/ (it was branched
+#   from feat/code_Q&A and reuses the P02 scanner unmodified) -- exactly the duplication
+#   that silently drifted before this workflow existed.
+#   EXIT/mitigation: the "Drift-check vendored files" step below fails the build the moment
+#   those copies stop being byte-identical, so the old failure mode (fix applied to one
+#   copy, other copy silently stale) is now loud. To intentionally fork one of those files
+#   onto feat/poc_full, remove it from VENDORED/EXCLUDES there and say why.
+#
+name: Deploy Pages (P01 + code-qna + poc)
 
 on:
   push:
     branches:
       - "feat/pdf_analysis"
       - "feat/code_Q&A"
+      - "feat/poc_full"
   workflow_dispatch:
 
 permissions:
@@ -62,6 +84,13 @@ jobs:
           path: src-codeqna
           fetch-depth: 1
 
+      - name: Checkout poc source (feat/poc_full)
+        uses: actions/checkout@v4
+        with:
+          ref: "feat/poc_full"
+          path: src-poc
+          fetch-depth: 1
+
       - name: Assemble site
         run: |
           set -euo pipefail
@@ -82,6 +111,16 @@ jobs:
             --exclude='.git' --exclude='.github' --exclude='__pycache__' \
             src-codeqna/ site/lab/code-qna/
 
+          # poc half (D-poc1): same shape as code-qna -- the whole feat/poc_full tree,
+          # including its vendored cognition/judgment/feedback (runtime fetch targets, see
+          # above). Its pages live one directory deep (app/) because the vendored files
+          # resolve "../" against the page: p02-engine.js's REPO_RAW_BASE and
+          # lab-core.js's loadManifest() both assume it. Root index.html is a redirect stub.
+          mkdir -p site/lab/poc
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            src-poc/ site/lab/poc/
+
       - name: Show assembled tree
         run: find site -maxdepth 3 | sort
 
@@ -101,6 +140,13 @@ jobs:
             "site/lab/code-qna/prompt_manifest.json" \
             "site/lab/code-qna/cognition/two_tier_scan.py" \
             "site/lab/code-qna/judgment/isolation_classifier.py" \
+            "site/lab/poc/index.html" \
+            "site/lab/poc/app/index.html" \
+            "site/lab/poc/app/scoring-config.js" \
+            "site/lab/poc/app/prompt_manifest.json" \
+            "site/lab/poc/shared/p02-engine.js" \
+            "site/lab/poc/cognition/two_tier_scan.py" \
+            "site/lab/poc/webtool_driver.py" \
           ; do
             if [ -f "$f" ]; then echo "  OK   $f"; else echo "  MISS $f"; fail=1; fi
           done
@@ -111,6 +157,47 @@ jobs:
           if grep -q '"p01"' site/lab/code-qna/prompt_manifest.json; then
             echo "  FAIL site/lab/code-qna sourced from the wrong branch (p01 present)"
             fail=1
+          fi
+
+          # D-poc1 ownership assertion, same shape: the poc half must carry the p04
+          # manifest, and must NOT have picked up feat/code_Q&A's trainee/ pages (those
+          # were deleted on feat/poc_full precisely so /lab/poc/ can't become a second,
+          # drifting copy of the code-qna tool).
+          if ! grep -q '"p04"' site/lab/poc/app/prompt_manifest.json; then
+            echo "  FAIL site/lab/poc/app/prompt_manifest.json has no p04 pipeline"
+            fail=1
+          fi
+          if [ -e "site/lab/poc/trainee" ] || [ -e "site/lab/poc/shared/p03-engine.js" ]; then
+            echo "  FAIL site/lab/poc carries a duplicate of the code-qna tool"
+            fail=1
+          fi
+          exit $fail
+
+      # D-poc1: feat/poc_full was branched from feat/code_Q&A and vendors its P02 scanner
+      # verbatim. That duplication is the exact thing that drifted silently before this
+      # workflow existed (docs/lab/code-qna/ vs feat/code_Q&A), so it is checked here
+      # rather than trusted. A fix to any vendored file belongs on feat/code_Q&A first and
+      # must then be copied to feat/poc_full in the same PR/session.
+      - name: Drift-check vendored files (feat/poc_full vs feat/code_Q&A)
+        run: |
+          set -uo pipefail
+          fail=0
+          # Deliberately absent from feat/poc_full (see its own D2 note): the code-qna
+          # tool's own pages/engine. Everything else below must be byte-identical.
+          for p in cognition judgment feedback shared worker prompt_manifest.json webtool_driver.py; do
+            if diff -r -q \
+                 --exclude='__pycache__' --exclude='p03-engine.js' \
+                 "src-codeqna/$p" "src-poc/$p"; then
+              echo "  SAME  $p"
+            else
+              echo "  DRIFT $p -- feat/poc_full's vendored copy no longer matches feat/code_Q&A"
+              fail=1
+            fi
+          done
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "Fix: apply the change on feat/code_Q&A, then copy the same file(s) to"
+            echo "feat/poc_full. To fork a file on purpose, drop it from this step's list."
           fi
           exit $fail
 
