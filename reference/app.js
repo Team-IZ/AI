@@ -1,71 +1,61 @@
 // Loads prompt_manifest.json once, renders the generic stage-card UI (shared across
-// P01/P02/P03), and tracks per-stage overrides in memory. Pipeline-specific execution
-// logic lives in p01-runner.js / p02-runner.js / p03-runner.js, which read the current
+// P02/P03), and tracks per-stage overrides in memory. Pipeline-specific execution
+// logic lives in p02-runner.js / p03-runner.js, which read the current
 // (possibly-edited) stage state via LabApp.getOverride()/getStageDefault().
 const LabApp = (() => {
   let manifest = null;
-  const overrides = { p01: {}, p02: {}, p03: {} };
+  const overrides = { p02: {}, p03: {} };
   let activePipeline = "p02";
   const runners = {}; // pipeline -> { renderInput(container), run() }
   const timers = {}; // pipeline -> { startMs, intervalId }
   const renderedPipelines = new Set(); // D-K: which pipelines' DOM has already been built once
 
-  // D182: moved here from p01-runner.js (was a private const there) -- P03's model
-  // selection was buried inside a stage-card param field instead of getting the same
-  // top-level toggle P01 has, and this list's own notes already reference BOTH pipelines'
+  // D182: P03's model selection was buried inside a stage-card param field instead of
+  // getting a top-level toggle, and this list's own notes already reference P03's
   // benchmark results ("P03 종합 2위" etc.), so a single shared source was already the
-  // right shape, just not extracted yet. Two independent copies could silently drift.
+  // right shape.
   //
-  // Ranking + notes sourced from docs/pipelines.html's 11-model 4-axis table (D116). That
-  // benchmark measures a DIFFERENT task (P03 question-gen x grading) -- P01-T1 (D119/D120)
-  // separately found step-3.5-flash (rank #1 there) fails completely on P01's chunk-analysis
-  // task (0/50) while qwen3-next-80b succeeds 96%. So `tier` below is P01-specific evidence
-  // (good/bad), not a re-skin of the P03 rank -- the other 9 are honestly labeled unverified
-  // for P01 rather than implying the P03 ranking transfers.
+  // Ranking + notes sourced from docs/pipelines.html's 11-model 4-axis table (D116), which
+  // measures the P03 question-gen x grading task directly.
   //
-  // D183 (2026-07-15): D-G's "0/50 might be a reasoning_content bug" suspicion (2026-07-14)
-  // is now CONFIRMED, not just theorized -- a real 524 on a P03 interview (D181's 4000-char
+  // D183 (2026-07-15): a real 524 on a P03 interview (D181's 4000-char
   // duplicate-definition code context) prompted a from-scratch investigation. Direct curl to
   // NVIDIA, same prompt, model-only swapped: qwen3-next-80b took 75.9-95.9s per call (3/3
   // eventually succeeded, but this project's own history shows this model intermittently
   // 524s exactly in this range -- D142/D144/D145); step-3.5-flash took 1.5-3.9s for the
   // identical prompt via chatTool's real tool_choice path (tool_calls populated correctly
-  // every time, questions were concretely grounded in the actual code). Separately verified
-  // step-3.5-flash's chatJSON path too (P01's actual mechanism, not just P03's): a
-  // realistic 10-page chunk-analysis prompt came back in 4.1-5.3s, answer in
-  // reasoning_content with content:null every time -- exactly D-G's hypothesis, and
-  // llm.js's existing D131 fallback recovered it cleanly in all 3 calls. D120's "0/50" was
-  // measuring the OLD pipeline's missing fallback, not a real model failure. Promoted to
-  // shared.default_model for both P01 and P03 on this evidence, not speculation.
+  // every time, questions were concretely grounded in the actual code). llm.js's existing
+  // D131 fallback recovers a reasoning_content/content:null response cleanly.
+  // Promoted to shared.default_model on this evidence, not speculation.
   const MODEL_CHOICES = [
     { id: "stepfun-ai/step-3.5-flash", label: "step-3.5-flash", tier: "good",
-      note: "기본값(D183) · D120의 '0/50'은 구파이프라인 reasoning_content 버그로 확정(D-G 이론을 실측 확인) · 재검증: P03 tool_calls 1.5-3.9s 3/3, P01 JSON모드 4.1-5.3s 3/3(reasoning_content 경유, 폴백 정상 동작)." },
+      note: "기본값(D183) · 재검증: P03 tool_calls 1.5-3.9s 3/3(reasoning_content 경유, 폴백 정상 동작)." },
     { id: "mistralai/mistral-medium-3.5-128b", label: "mistral-medium-3.5", tier: "unverified",
-      note: "P01 기준 미검증 · P03 종합 2위(0.749) · D183 부수측정: 동일 4000자 프롬프트 13.2-17.3s(qwen 대비 5-6배 빠름, qwen과의 상대비교로만 측정, 단독 신뢰도 검증은 아직 부족)." },
+      note: "P03 종합 2위(0.749) · D183 부수측정: 동일 4000자 프롬프트 13.2-17.3s(qwen 대비 5-6배 빠름, qwen과의 상대비교로만 측정, 단독 신뢰도 검증은 아직 부족)." },
     { id: "qwen/qwen3-next-80b-a3b-instruct", label: "qwen3-next-80b", tier: "unverified",
-      note: "P01-T1 실측 96% 성공(D120, 표본 50). D183: 동일 프롬프트에서 step-3.5-flash 대비 20-50배 느림(75.9-95.9s, 이전 회차엔 3회 중 1회 524도 있었음) -- 더는 기본값 아님, 느림/간헐적 524(D142/D144/D145 기존 이력)로 tier 재평가." },
+      note: "D183: 동일 프롬프트에서 step-3.5-flash 대비 20-50배 느림(75.9-95.9s, 이전 회차엔 3회 중 1회 524도 있었음) -- 더는 기본값 아님, 느림/간헐적 524(D142/D144/D145 기존 이력)로 tier 재평가." },
     { id: "nvidia/nemotron-3-super-120b-a12b", label: "nemotron-3-super-120b", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 범위 밖 점수 출력 결함 이력." },
+      note: "P03에서 범위 밖 점수 출력 결함 이력." },
     { id: "qwen/qwen3.5-122b-a10b", label: "qwen3.5-122b", tier: "unverified",
-      note: "P01 기준 미검증 · P03 종합 5위(0.589)." },
+      note: "P03 종합 5위(0.589)." },
     { id: "nvidia/llama-3.3-nemotron-super-49b-v1.5", label: "nemotron-super-49b", tier: "unverified",
-      note: "P01 기준 미검증 · P03 종합 6위(0.531)." },
+      note: "P03 종합 6위(0.531)." },
     { id: "deepseek-ai/deepseek-v4-pro", label: "deepseek-v4-pro", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 쿼타 소진 이력(측정 당시 몇 시간 전엔 100%)." },
+      note: "P03에서 쿼타 소진 이력(측정 당시 몇 시간 전엔 100%)." },
     { id: "meta/llama-4-maverick-17b-128e-instruct", label: "llama-4-maverick", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 NVIDIA 서빙 장애로 측정 불가 이력." },
+      note: "P03에서 NVIDIA 서빙 장애로 측정 불가 이력." },
     { id: "mistralai/mistral-large-3-675b-instruct-2512", label: "mistral-large-3", tier: "unverified",
-      note: "P01 기준 미검증 · P03 채점기 역할에서 퇴행 생성 루프 결함 이력(질문생성 역할만 정상)." },
+      note: "P03 채점기 역할에서 퇴행 생성 루프 결함 이력(질문생성 역할만 정상)." },
     { id: "z-ai/glm-5.2", label: "glm-5.2", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 쿼타 소진 이력." },
+      note: "P03에서 쿼타 소진 이력." },
     { id: "minimaxai/minimax-m3", label: "minimax-m3", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 100회 반복 중 DEGRADED 재발 이력." },
+      note: "P03에서 100회 반복 중 DEGRADED 재발 이력." },
   ];
 
-  // D182: shared model-toggle chip renderer -- P01 had this exact logic (chips, active
-  // highlight, note-on-select) as a private function; P03 needs identical behavior. Doesn't
-  // own selection state itself (getSelected/setSelected are the caller's own variable) so
-  // P01 and P03 picking different models never cross-contaminate each other.
+  // D182: shared model-toggle chip renderer -- P03 needs chips/active-highlight/
+  // note-on-select behavior. Doesn't own selection state itself (getSelected/setSelected
+  // are the caller's own variable) so different callers picking different models never
+  // cross-contaminate each other.
   function renderModelToggle(container, groupSelector, noteSelector, getSelected, setSelected) {
     const group = container.querySelector(groupSelector);
     const note = container.querySelector(noteSelector);
@@ -255,7 +245,7 @@ const LabApp = (() => {
     wireStageInputs(pipelineId, stage, container);
   }
 
-  // D157 (2026-07-15): locked params (e.g. P01/P03's temperature=0, "고정 — 재현성
+  // D157 (2026-07-15): locked params (e.g. P03's temperature=0, "고정 — 재현성
   // 요구사항") used to still render as a disabled input with a "고정" tag -- user
   // pointed out there's no reason to show a value nobody can ever change. Skipped
   // entirely now instead of shown-but-disabled; the fixed value and its reason still
@@ -463,7 +453,7 @@ const LabApp = (() => {
   // run whose outer try/catch fires (a hard failure before reaching its own success-shaped
   // maybeSaveRun()) leaves NO trace in the DB at all -- not even a status='error' row.
   // Every pipeline's outer catch already has pipelineId/model/startedAt/err in scope, so
-  // this is a single shared helper (not tripled across p01/p02/p03-runner.js) called from
+  // this is a single shared helper (not duplicated across p02/p03-runner.js) called from
   // each. Mirrors maybeSaveRun()'s own existing "not configured / not logged in -> just
   // log, never throw" tolerance -- a failed attempt to record a failure must never itself
   // crash the run() catch block that's already handling a real error.
@@ -482,14 +472,14 @@ const LabApp = (() => {
   }
 
   // D162 (2026-07-15): all 3 runners' "원본 JSON" block used to hardcode
-  // `.slice(0, 20000)` with no indication anything was cut -- a real 9-unit/26-chunk P01
-  // result silently lost content mid-structure, and the CSS has no height clipping
+  // `.slice(0, 20000)` with no indication anything was cut -- a real large result
+  // silently lost content mid-structure, and the CSS has no height clipping
   // (.results-view pre only sets overflow-x), so the user correctly read it as the raw
   // JSON itself being cut, not a viewport issue. Same exact pattern existed identically in
   // all 3 runners (grep-checked), so fixed once here instead of three separate patches.
   // INLINE_CAP (500,000 chars) is a generous safety backstop against a truly pathological
-  // result, not a normal ceiling -- every real run seen so far (P01's 9-unit/26-chunk
-  // result included) is well under it. A full-JSON download link is offered unconditionally
+  // result, not a normal ceiling -- every real run seen so far is well under it.
+  // A full-JSON download link is offered unconditionally
   // (not just when truncated) so the complete result is never only reachable by raising
   // this number -- this mirrors D153's rule of never leaving output in a silently-partial
   // state.

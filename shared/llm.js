@@ -53,13 +53,13 @@ const LabLLM = (() => {
     return requestLog.slice();
   }
 
-  // D169 (2026-07-15): user asked to move retry ownership for P01's chunk-analysis burst
-  // from the worker (each of up to 26 jobs independently deciding when to retry, per D-I)
-  // to the client (this file + p01-runner.js), which can see all chunks' outcomes at once
-  // and retry them together in coordinated, concurrency-capped rounds instead. opts.maxAttempts
-  // is forwarded as the x-max-attempts header -- worker/nvidia-proxy.js falls back to its
-  // existing MAX_ATTEMPTS=3 auto-retry when this header is absent, so P03 and P01's own
-  // refine/question-gen calls (which never set it) are completely unaffected.
+  // D169 (2026-07-15): user asked to move retry ownership for burst calls from the worker
+  // (each job independently deciding when to retry, per D-I) to the client, which can see
+  // all outcomes at once and retry them together in coordinated, concurrency-capped rounds
+  // instead. opts.maxAttempts is forwarded as the x-max-attempts header --
+  // worker/nvidia-proxy.js falls back to its existing MAX_ATTEMPTS=3 auto-retry when this
+  // header is absent, so P03's own refine/question-gen calls (which never set it) are
+  // completely unaffected.
   // D-fix12 (연주 audit H2, 2026-07-23): a poll cycle can legitimately run up to
   // MAX_POLL_MS (35min, see its own comment above) with zero user-visible feedback beyond
   // whatever the caller logged once before the wait started -- indistinguishable from
@@ -131,11 +131,11 @@ const LabLLM = (() => {
   // silently-ignored extra field. So this cannot be a blanket parameter on every call.
   //   WHY: step-3.7-flash (the default model as of D215, since step-3.5-flash is being
   //   deprecated by the provider) measured significantly slower/less reliable than 3.5 was
-  //   for the same P01/P03 tasks -- one plain call left its whole answer in
+  //   for the same P03 tasks -- one plain call left its whole answer in
   //   reasoning_content only, got truncated by max_tokens before ever reaching the
   //   content field. "low" effort at least avoided that specific failure mode in testing
   //   (content populated directly instead). Centralized here (one model->value map) in
-  //   llm.js's request layer instead of pushed out to every P01/P03 call site, so adding
+  //   llm.js's request layer instead of pushed out to every P03 call site, so adding
   //   another reasoning model later is a one-line addition here, not a change to every
   //   caller -- and no caller needs to know this quirk exists at all.
   //   COST: does NOT close the latency gap -- a real "low"-effort call still took 39s
@@ -185,10 +185,10 @@ const LabLLM = (() => {
   }
 
   // D181: maxAttempts wasn't threaded through here even though submitAndPoll/the worker
-  // have supported it since D169 -- chatJSON (P01's chunk-analysis) was the only caller
-  // that ever needed it before now. P03's interview calls all go through this function, so
-  // without this they had no way to opt into more retry budget under elevated shared
-  // traffic (see debug-traffic.js's getCurrentRate(), used by p03-runner.js).
+  // have supported it since D169 -- nothing needed it before now. P03's interview calls
+  // all go through this function, so without this they had no way to opt into more retry
+  // budget under elevated shared traffic (see debug-traffic.js's getCurrentRate(), used by
+  // p03-runner.js).
   async function chatTool({ model, messages, tool, maxTokens, temperature = 0.0, maxAttempts, onProgress }) {
     const proxyUrl = LabConfig.get("proxy-url");
     const apiKey = LabConfig.get("nvidia-key");

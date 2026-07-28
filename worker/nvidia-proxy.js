@@ -298,11 +298,11 @@ export default {
     }
 
     // D169 (2026-07-15): optional per-job attempt-count override, requested by the client
-    // via this header -- lets P01's chunk-analysis stage own its own coordinated retry
-    // (see docs/lab/p01-runner.js) instead of each job independently retrying per D-I.
-    // Absent/invalid falls back to MAX_ATTEMPTS below unchanged, so P03 (and P01's own
-    // refine/question-gen calls, which never send this header) keep today's behavior
-    // exactly as-is -- this is opt-in per request, not a global policy change.
+    // via this header -- lets a burst of jobs own its own coordinated retry instead of
+    // each job independently retrying per D-I. Absent/invalid falls back to MAX_ATTEMPTS
+    // below unchanged, so P03's refine/question-gen calls (which never send this header)
+    // keep today's behavior exactly as-is -- this is opt-in per request, not a global
+    // policy change.
     const maxAttemptsHeader = request.headers.get("x-max-attempts");
     const maxAttemptsOverride = maxAttemptsHeader ? parseInt(maxAttemptsHeader, 10) : NaN;
     // D209: clamp to MAX_ATTEMPTS_CEILING -- see its own comment above for the WHY/COST/EXIT.

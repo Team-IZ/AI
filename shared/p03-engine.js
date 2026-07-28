@@ -66,7 +66,7 @@
 // (change #9), not an oversight; no new evidence to revisit it.
 //
 // P03 v1 is human-in-the-loop only (persona/AI-answerer mode is out of scope here). Question
-// generation + grading are real NVIDIA calls (same manifest prompts as P01/P02). Answer
+// generation + grading are real NVIDIA calls (same manifest prompts as P02). Answer
 // classification (surface/partial/defended) is NOT an LLM call -- it's the same
 // deterministic regex classifiers P02 already proved run fine in Pyodide.
 // D208: REPO_RAW_BASE (below) used to be an absolute raw.githubusercontent.com URL
@@ -133,12 +133,12 @@ const P03Engine = (() => {
       .join("\n\n");
   }
 
-  // D181: shared 40rpm ceiling has real prior incidents from P01's chunk bursts (D163-171).
-  // P03's own calls are never a burst by themselves (one in-flight call at a time,
-  // human-paced between turns) -- the actual risk is several teammates' P03 sessions
+  // D181: shared 40rpm ceiling has real prior incidents from concurrent burst traffic
+  // (D163-171). P03's own calls are never a burst by themselves (one in-flight call at a
+  // time, human-paced between turns) -- the actual risk is several teammates' P03 sessions
   // overlapping against the same shared proxy/key, invisible to each other without this
   // check. Reuses DebugTraffic's own already-throttled rolling count and, if it's elevated,
-  // requests more retry budget via the same x-max-attempts mechanism D169 built for P01.
+  // requests more retry budget via the same x-max-attempts mechanism D169 built.
   // ELEVATED_RATE_THRESHOLD/ELEVATED_MAX_ATTEMPTS are both unmeasured/provisional -- 75% of
   // the documented ~40rpm ceiling, and one more than the worker's own MAX_ATTEMPTS=3 default.
   // Change #6: returns a struct instead of logging directly; caller builds the message.
@@ -986,7 +986,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       // that any turns already logged via logTurn() above must survive this failure.
       // saveFailedRun() stays the fallback for the case dbRun was never obtained (DB not
       // configured, or startRun() itself failed) -- unchanged behavior for that case, and
-      // unchanged entirely for P01/P02 which don't go through this function at all.
+      // unchanged entirely for P02 which doesn't go through this function at all.
       if (dbRun) {
         try {
           await LabDB.saveRun({ run_id: dbRun.id, status: "error", error: String((err && err.message) || err), finished_at: new Date().toISOString(), artifacts: [] });

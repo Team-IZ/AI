@@ -22,7 +22,7 @@
 // window.LabApp.getManifest() internally to stamp manifest_version on every saved run.
 const LabApp = (() => {
   let manifest = null;
-  const overrides = { p01: {}, p02: {}, p03: {} };
+  const overrides = { p02: {}, p03: {} };
 
   async function loadManifest() {
     const res = await fetch("../prompt_manifest.json");
@@ -124,30 +124,20 @@ const LabApp = (() => {
     }
   }
 
-  // D182: model list + notes shared by P01 and P03. Ranking + notes sourced from
-  // docs/pipelines.html's 11-model 4-axis table (D116); that benchmark measures a
-  // DIFFERENT task (P03 question-gen x grading) -- P01-T1 (D119/D120) separately found
-  // step-3.5-flash (rank #1 there) fails completely on P01's chunk-analysis task (0/50)
-  // while qwen3-next-80b succeeds 96%. So `tier` below is P01-specific evidence
-  // (good/bad), not a re-skin of the P03 rank -- the other 9 are honestly labeled
-  // unverified for P01 rather than implying the P03 ranking transfers.
+  // D182: model list + notes for P03. Ranking + notes sourced from docs/pipelines.html's
+  // 11-model 4-axis table (D116), which measures the P03 question-gen x grading task
+  // directly.
   //
-  // D183 (2026-07-15): D-G's "0/50 might be a reasoning_content bug" suspicion
-  // (2026-07-14) is now CONFIRMED, not just theorized -- a real 524 on a P03 interview
-  // (D181's 4000-char duplicate-definition code context) prompted a from-scratch
-  // investigation. Direct curl to NVIDIA, same prompt, model-only swapped:
-  // qwen3-next-80b took 75.9-95.9s per call (3/3 eventually succeeded, but this
-  // project's own history shows this model intermittently 524s exactly in this range --
-  // D142/D144/D145); step-3.5-flash took 1.5-3.9s for the identical prompt via
-  // chatTool's real tool_choice path (tool_calls populated correctly every time,
-  // questions were concretely grounded in the actual code). Separately verified
-  // step-3.5-flash's chatJSON path too (P01's actual mechanism, not just P03's): a
-  // realistic 10-page chunk-analysis prompt came back in 4.1-5.3s, answer in
-  // reasoning_content with content:null every time -- exactly D-G's hypothesis, and
-  // llm.js's existing D131 fallback recovered it cleanly in all 3 calls. D120's "0/50"
-  // was measuring the OLD pipeline's missing fallback, not a real model failure.
-  // Promoted to shared.default_model for both P01 and P03 on this evidence, not
-  // speculation.
+  // D183 (2026-07-15): a real 524 on a P03 interview (D181's 4000-char
+  // duplicate-definition code context) prompted a from-scratch investigation. Direct curl
+  // to NVIDIA, same prompt, model-only swapped: qwen3-next-80b took 75.9-95.9s per call
+  // (3/3 eventually succeeded, but this project's own history shows this model
+  // intermittently 524s exactly in this range -- D142/D144/D145); step-3.5-flash took
+  // 1.5-3.9s for the identical prompt via chatTool's real tool_choice path (tool_calls
+  // populated correctly every time, questions were concretely grounded in the actual
+  // code). llm.js's existing D131 fallback recovers a reasoning_content/content:null
+  // response cleanly.
+  // Promoted to shared.default_model on this evidence, not speculation.
   // D-catalog (2026-07-24): renamed from MODEL_CHOICES -- this is now the CURATED base
   // (hand-verified tier/notes, the thing that used to go stale -- e.g. qwen3.5-122b and
   // mistral-large-3 below are both actually HTTP 410 "end of life" as of this session but
@@ -162,27 +152,27 @@ const LabApp = (() => {
     // for the full WHY/COST/EXIT. Verified via a real NVIDIA /v1/models call that
     // step-3.7-flash is live before making this change.
     { id: "stepfun-ai/step-3.7-flash", label: "step-3.7-flash", tier: "good",
-      note: "기본값(D215, 2026-07-22: step-3.5-flash가 provider deprecation 예정이라 교체 -- 3.7 자체 성능/재현성은 아직 재검증 안 됨, D183의 3.5 실측치를 그대로 승계한 상태). D120의 '0/50'은 구파이프라인 reasoning_content 버그로 확정(D-G 이론을 실측 확인) · 3.5 재검증 당시: P03 tool_calls 1.5-3.9s 3/3, P01 JSON모드 4.1-5.3s 3/3(reasoning_content 경유, 폴백 정상 동작)." },
+      note: "기본값(D215, 2026-07-22: step-3.5-flash가 provider deprecation 예정이라 교체 -- 3.7 자체 성능/재현성은 아직 재검증 안 됨, D183의 3.5 실측치를 그대로 승계한 상태). 3.5 재검증 당시: P03 tool_calls 1.5-3.9s 3/3(reasoning_content 경유, 폴백 정상 동작)." },
     { id: "mistralai/mistral-medium-3.5-128b", label: "mistral-medium-3.5", tier: "unverified",
-      note: "P01 기준 미검증 · P03 종합 2위(0.749) · D183 부수측정: 동일 4000자 프롬프트 13.2-17.3s(qwen 대비 5-6배 빠름, qwen과의 상대비교로만 측정, 단독 신뢰도 검증은 아직 부족)." },
+      note: "P03 종합 2위(0.749) · D183 부수측정: 동일 4000자 프롬프트 13.2-17.3s(qwen 대비 5-6배 빠름, qwen과의 상대비교로만 측정, 단독 신뢰도 검증은 아직 부족)." },
     { id: "qwen/qwen3-next-80b-a3b-instruct", label: "qwen3-next-80b", tier: "unverified",
-      note: "P01-T1 실측 96% 성공(D120, 표본 50). D183: 동일 프롬프트에서 step-3.5-flash 대비 20-50배 느림(75.9-95.9s, 이전 회차엔 3회 중 1회 524도 있었음) -- 더는 기본값 아님, 느림/간헐적 524(D142/D144/D145 기존 이력)로 tier 재평가." },
+      note: "D183: 동일 프롬프트에서 step-3.5-flash 대비 20-50배 느림(75.9-95.9s, 이전 회차엔 3회 중 1회 524도 있었음) -- 더는 기본값 아님, 느림/간헐적 524(D142/D144/D145 기존 이력)로 tier 재평가." },
     { id: "nvidia/nemotron-3-super-120b-a12b", label: "nemotron-3-super-120b", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 범위 밖 점수 출력 결함 이력." },
+      note: "P03에서 범위 밖 점수 출력 결함 이력." },
     { id: "qwen/qwen3.5-122b-a10b", label: "qwen3.5-122b", tier: "unverified",
-      note: "P01 기준 미검증 · P03 종합 5위(0.589)." },
+      note: "P03 종합 5위(0.589)." },
     { id: "nvidia/llama-3.3-nemotron-super-49b-v1.5", label: "nemotron-super-49b", tier: "unverified",
-      note: "P01 기준 미검증 · P03 종합 6위(0.531)." },
+      note: "P03 종합 6위(0.531)." },
     { id: "deepseek-ai/deepseek-v4-pro", label: "deepseek-v4-pro", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 쿼타 소진 이력(측정 당시 몇 시간 전엔 100%)." },
+      note: "P03에서 쿼타 소진 이력(측정 당시 몇 시간 전엔 100%)." },
     { id: "meta/llama-4-maverick-17b-128e-instruct", label: "llama-4-maverick", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 NVIDIA 서빙 장애로 측정 불가 이력." },
+      note: "P03에서 NVIDIA 서빙 장애로 측정 불가 이력." },
     { id: "mistralai/mistral-large-3-675b-instruct-2512", label: "mistral-large-3", tier: "unverified",
-      note: "P01 기준 미검증 · P03 채점기 역할에서 퇴행 생성 루프 결함 이력(질문생성 역할만 정상)." },
+      note: "P03 채점기 역할에서 퇴행 생성 루프 결함 이력(질문생성 역할만 정상)." },
     { id: "z-ai/glm-5.2", label: "glm-5.2", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 쿼타 소진 이력." },
+      note: "P03에서 쿼타 소진 이력." },
     { id: "minimaxai/minimax-m3", label: "minimax-m3", tier: "unverified",
-      note: "P01 기준 미검증 · P03에서 100회 반복 중 DEGRADED 재발 이력." },
+      note: "P03에서 100회 반복 중 DEGRADED 재발 이력." },
   ];
 
   // D-catalog (2026-07-24): 사용자 요청 -- deprecation/신규모델을 매번 수동 갱신하지 않도록.

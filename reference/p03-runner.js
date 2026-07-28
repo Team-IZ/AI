@@ -1,6 +1,6 @@
 // P03 v1 is human-in-the-loop only (persona/AI-answerer mode is v2, PLAN.md section 5) --
 // a teammate types real answers to real generated questions. Question generation +
-// grading are real NVIDIA calls (same manifest prompts as P01/P02). Answer classification
+// grading are real NVIDIA calls (same manifest prompts as P02). Answer classification
 // (surface/partial/defended) is NOT an LLM call in the real pipeline either -- it's the
 // same deterministic regex classifiers P02 already proved run fine in Pyodide, so this
 // reuses that shared instance rather than re-implementing the classifiers in JS.
@@ -26,10 +26,9 @@ const P03Runner = (() => {
   let selectedFinding = null;
   let pendingAnswerResolve = null;
   // D182: P03's model choice used to live only inside p03-1/p03-7's collapsed stage-card
-  // param fields -- much less discoverable than P01's prominent top-level toggle, and the
-  // user asked for parity ("모델 11종 중에 선택할 수 있어야할 거 같은데 교안 분석
-  // 파이프라인처럼"). Same sticky-across-tab-switches pattern as P01Runner's own
-  // selectedModel (initialized from manifest.shared.default_model on first render).
+  // param fields -- much less discoverable, and the user asked for a prominent top-level
+  // toggle instead. Sticky-across-tab-switches pattern, initialized from
+  // manifest.shared.default_model on first render.
   let selectedModel = null;
   // D176: real source content for the currently-selected finding, when it came from P02's
   // "인터뷰 시작" connector (see loadFindingFromP02). Empty array for manual JSON-paste
@@ -162,14 +161,14 @@ const P03Runner = (() => {
     return cap ? labeled.slice(0, cap) : labeled;
   }
 
-  // D181: shared 40rpm ceiling has real prior incidents from P01's chunk bursts (D163-171).
-  // P03's own calls are never a burst by themselves (one in-flight call at a time,
-  // human-paced between turns) -- the actual risk here is several teammates' P03 sessions
-  // overlapping against the same shared proxy/key, invisible to each other without this
-  // check. Reuses DebugTraffic's own already-throttled rolling count (no extra server
-  // load from calling this before every turn) and, if it's elevated, asks the worker for
-  // more retry budget via the SAME x-max-attempts mechanism D169 built for P01, rather than
-  // inventing a second retry system. ELEVATED_RATE_THRESHOLD/ELEVATED_MAX_ATTEMPTS (top of
+  // D181: shared 40rpm ceiling has real prior incidents from concurrent burst traffic
+  // (D163-171). P03's own calls are never a burst by themselves (one in-flight call at a
+  // time, human-paced between turns) -- the actual risk here is several teammates' P03
+  // sessions overlapping against the same shared proxy/key, invisible to each other
+  // without this check. Reuses DebugTraffic's own already-throttled rolling count (no
+  // extra server load from calling this before every turn) and, if it's elevated, asks
+  // the worker for more retry budget via the SAME x-max-attempts mechanism D169 built,
+  // rather than inventing a second retry system. ELEVATED_RATE_THRESHOLD/ELEVATED_MAX_ATTEMPTS (top of
   // file) are both unmeasured/provisional -- 75% of the documented ~40rpm ceiling, and one
   // more than the worker's own MAX_ATTEMPTS=3 default -- flagged as such, not derived from
   // real incident data the way D169's numbers eventually were.
@@ -432,9 +431,9 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
 
   // D199: dropped the separate `classification` param -- see buildVerdictTrail() above.
   async function generateQuestion(level, finding, codeContext, transcript, maxAttempts) {
-    // D182: falls through to the top-level toggle (selectedModel) now, same precedence as
-    // P01's model resolution -- p03-1 has no manifest `model` param at all (never did), so
-    // this was already effectively "shared default only" before; now it's "toggle" instead.
+    // D182: falls through to the top-level toggle (selectedModel) now -- p03-1 has no
+    // manifest `model` param at all (never did), so this was already effectively "shared
+    // default only" before; now it's "toggle" instead.
     const model = LabApp.resolveParam("p03", "p03-1", "model") || selectedModel;
     const tool = { name: "ask_question", description: "학생에게 던질 질문 하나를 생성한다.", input_schema: { type: "object", properties: { question: { type: "string" } }, required: ["question"] } };
     const priorQuestions = transcript.map((t) => t.question);
@@ -525,7 +524,7 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     // D182: p03-7's manifest `model` param was removed (see prompt_manifest.json) so this
     // falls through to the top-level toggle -- previously the manifest's fixed default would
     // have won here every time via resolveParam's precedence, making a toggle pointless
-    // (same lesson D154 already applied to P01's stage-level model param).
+    // (same lesson D154 already applied elsewhere to a stage-level model param).
     const model = LabApp.resolveParam("p03", "p03-7", "model") || selectedModel;
     const llmGrades = gradable.length
       ? await LabLLM.chatTool({ model, messages: [{ role: "user", content: userMsg }], tool, maxTokens: 2048, maxAttempts })

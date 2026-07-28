@@ -105,7 +105,7 @@ const LabConfig = (() => {
     const el = document.getElementById("auth-status");
     if (!el) return;
     const parts = [];
-    parts.push(state["nvidia-key"] && state["proxy-url"] ? "P01/P03 실행 가능" : "P01/P03: NVIDIA 키 + 프록시 URL 필요");
+    parts.push(state["nvidia-key"] && state["proxy-url"] ? "P03 실행 가능" : "P03: NVIDIA 키 + 프록시 URL 필요");
 
     const loginBtn = document.getElementById("google-login-btn");
     const logoutBtn = document.getElementById("logout-btn");
