@@ -1,5 +1,5 @@
 // D1 (2026-07-21): curriculum-manager's runs were landing in the SAME public.runs/
-// public.artifacts tables the whole team's P01/P02/P03 traffic writes to, making this
+// public.artifacts tables the whole team's pipeline traffic writes to, making this
 // tool's data hard to tell apart from everything else. Considered a whole new Supabase
 // project first, but that needs a manual Google Cloud Console step (authorizing the new
 // project's OAuth callback URL) and splits auth into a separate login session -- neither

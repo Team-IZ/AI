@@ -139,12 +139,12 @@ const LabDB = (() => {
     return run;
   }
 
-  // D193 (2026-07-16): P03's turn loop used to keep every answered turn in a plain JS
+  // D193 (2026-07-16): an interview turn loop used to keep every answered turn in a plain JS
   // array and write it to `artifacts` only once, after the whole loop (all turns) plus
-  // grading finished (see p03-engine.js's old single maybeSaveRun() call). Any error
+  // grading finished (a single maybeSaveRun() call at the end). Any error
   // partway through -- including turn 3 of 4 -- discarded every turn already answered,
   // because the catch-block fallback (LabApp.saveFailedRun) hardcodes `artifacts: []`.
-  // Root-caused live: a team member's P03 run errored on NVIDIA auth; happened to be 0
+  // Root-caused live: a team member's interview run errored on NVIDIA auth; happened to be 0
   // turns in so nothing was actually lost that time, but the structural risk is real for
   // a multi-turn flow a human answers by hand.
   //   WHY: `stage_events` already existed in the schema for exactly this (0 rows anywhere
@@ -153,7 +153,7 @@ const LabDB = (() => {
   //   COST: one extra DB round-trip per turn (max 4) plus one at session start -- text
   //         payloads, not a real latency concern next to the LLM calls already in the loop.
   //   EXIT: if `stage_events` gets a different primary use later, split into a dedicated
-  //         table; the read side (p03_progress_view) would just repoint its JOIN.
+  //         table; the read side (the progress view) would just repoint its JOIN.
   async function startRun({ pipeline, model, input_meta, overrides }) {
     const c = await ensureClient();
     const user = await currentMember();
@@ -226,7 +226,7 @@ const LabDB = (() => {
     if (error) throw error;
   }
 
-  // D196 (2026-07-17): arm a best-effort "abandoned" marker for an in-flight P03 run.
+  // D196 (2026-07-17): arm a best-effort "abandoned" marker for an in-flight run.
   //   WHY: startRun() opens the runs row as "running" and logTurn() banks each answered turn,
   //        but if the trainee just closes the tab mid-interview, neither the done-path
   //        (maybeSaveRun) nor the error-path (saveRun status:"error") ever runs -- the row is
@@ -243,7 +243,7 @@ const LabDB = (() => {
   //        is not actually a blocker.
   //   EXIT: for guaranteed closure, replace this with a server-side reaper that sweeps runs
   //        stuck at "running" past a TTL; this client beacon is the cheap ~90% version. To
-  //        disable entirely, stop calling armAbandonBeacon() from p03-engine.js/p03-runner.js
+  //        disable entirely, stop calling armAbandonBeacon() from the runner
   //        -- db.js then stays inert (nothing else references it).
   async function armAbandonBeacon(run_id) {
     const c = await ensureClient();

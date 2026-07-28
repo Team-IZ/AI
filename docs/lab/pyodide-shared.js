@@ -1,9 +1,9 @@
-// Shared Pyodide instance across P02/P03 runners so the ~10MB WASM runtime is only
+// Shared Pyodide instance across runners so the ~10MB WASM runtime is only
 // ever fetched once per page load, regardless of which pipelines a session touches.
 const LabPyodide = (() => {
   let instance = null;
   let loadingPromise = null;
-  const loadedFileSets = new Set(); // e.g. "p02", "p03" -- avoid re-fetching the same source twice
+  const loadedFileSets = new Set(); // keyed per pipeline -- avoid re-fetching the same source twice
 
   async function get(onProgress) {
     if (instance) return instance;

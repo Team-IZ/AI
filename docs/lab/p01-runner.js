@@ -1,8 +1,8 @@
-// P01 needs the NVIDIA key + proxy (unlike P02). PDF text extraction uses pdf.js instead
+// P01 needs the NVIDIA key + proxy. PDF text extraction uses pdf.js instead
 // of the real pipeline's `pdftotext -layout` -- every run is tagged extractor:"pdfjs" so
 // results are never silently treated as byte-comparable with a CLI run (PLAN.md P01
 // caveat). The prompts themselves are identical to the real pipeline (read from the
-// same manifest P02/P03 use, editable the same way).
+// same manifest, editable the same way).
 const P01Runner = (() => {
   let pdfBytes = null;
   let pdfPassword = "";
@@ -25,7 +25,7 @@ const P01Runner = (() => {
   // NVIDIA key) in the same instant. nvidia-keypool-guard.py's documented ~40rpm free-tier
   // ceiling / worker's (then-)MAX_ATTEMPTS=3 ≈ 13.3 -- originally capped at 8 (well under
   // that) to cover the pathological every-chunk-retries-3-times-within-the-same-burst
-  // case (8*3=24 under 40). Same pattern p02-runner.js's fetchGithubRepo() already uses
+  // case (8*3=24 under 40). Same concurrency-capped batching pattern used elsewhere
   // for GitHub's own rate limit (CONCURRENCY=6 there) -- reused here, not a new one-off
   // idea, just derived from THIS API's own documented ceiling instead of copying that
   // unrelated constant.
@@ -41,7 +41,7 @@ const P01Runner = (() => {
   //     cheap -- any 429s a 40-wide burst causes just become retryable failures the round
   //     loop above already retries 60s later, not a hard failure. The ~40 is still labeled
   //     an approximation (observed 429 history, not a documented contractual limit) and a
-  //     teammate's tab or P03 sharing this same key isn't visible to this number -- but the
+  //     teammate's tab sharing this same key isn't visible to this number -- but the
   //     user weighed that and chose to spend the whole documented budget on this burst
   //     rather than reserve headroom for a scenario (concurrent same-key usage) that isn't
   //     happening in this tool's actual current usage.
@@ -80,7 +80,7 @@ const P01Runner = (() => {
   const ROUND_RETRY_DELAY_MS = 60_000;
 
   // D182: MODEL_CHOICES + the toggle-rendering logic moved to app.js (LabApp.MODEL_CHOICES/
-  // renderModelToggle) so P03 can use the identical selector -- see app.js for the full
+  // renderModelToggle) so any page can use the identical selector -- see app.js for the full
   // rationale comment (D116/D119/D120/D-G tier evidence), unchanged here, just relocated.
 
   function renderInput(container) {

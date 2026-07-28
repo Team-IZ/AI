@@ -58,7 +58,7 @@ const LabLLM = (() => {
   // to the client (this file + p01-runner.js), which can see all chunks' outcomes at once
   // and retry them together in coordinated, concurrency-capped rounds instead. opts.maxAttempts
   // is forwarded as the x-max-attempts header -- worker/nvidia-proxy.js falls back to its
-  // existing MAX_ATTEMPTS=3 auto-retry when this header is absent, so P03 and P01's own
+  // existing MAX_ATTEMPTS=3 auto-retry when this header is absent, so P01's own
   // refine/question-gen calls (which never set it) are completely unaffected.
   async function submitAndPoll(proxyUrl, apiKey, body, opts = {}) {
     recordRequest();
@@ -155,9 +155,9 @@ const LabLLM = (() => {
 
   // D181: maxAttempts wasn't threaded through here even though submitAndPoll/the worker
   // have supported it since D169 -- chatJSON (P01's chunk-analysis) was the only caller
-  // that ever needed it before now. P03's interview calls all go through this function, so
+  // that ever needed it before now. Interview-style calls all go through this function, so
   // without this they had no way to opt into more retry budget under elevated shared
-  // traffic (see debug-traffic.js's getCurrentRate(), used by p03-runner.js).
+  // traffic (see the traffic-rate helper's getCurrentRate()).
   async function chatTool({ model, messages, tool, maxTokens, temperature = 0.0, maxAttempts }) {
     const proxyUrl = LabConfig.get("proxy-url");
     const apiKey = LabConfig.get("nvidia-key");
@@ -176,7 +176,7 @@ const LabLLM = (() => {
     return JSON.parse(call.function.arguments);
   }
 
-  // D200: P03's L2/L3/Reflection follow-up questions used to be pure completions against a
+  // D200: L2/L3/Reflection follow-up questions used to be pure completions against a
   // static code snippet chosen once at session start -- never re-verified against the real
   // repo mid-interview (the gap exposed by comparing against a reference "grounded
   // fact-check" interview transcript; user directed adopting the high-cost structural fix).
@@ -192,7 +192,7 @@ const LabLLM = (() => {
   //   once it does.
   //   COST: up to maxRounds+1 full submitAndPoll round trips (each a real job-queue
   //   submit+poll cycle, not instant) instead of chatTool()'s always-1. Callers must budget
-  //   for this explicitly (see p03-engine.js's FACT_CHECK_MAX_ROUNDS comment for how P03
+  //   for this explicitly (see the interview engine's FACT_CHECK_MAX_ROUNDS comment for how it
   //   bounds it: fact-check only on the first dedup attempt, not every retry).
   //   EXIT: if a model ever returns >1 tool_calls in one round, only the first is acted on
   //   (documented v1 scope limit, not a bug) -- if that turns out to matter, execute all
@@ -243,7 +243,7 @@ const LabLLM = (() => {
       if (onProgress) onProgress(`⚙ ${call.function.name} 호출 중...`);
       // Deliberately not caught here -- a tool executor throwing (e.g. a GitHub rate-limit
       // error) is the caller's decision to handle (fall back, warn, etc.), not this generic
-      // primitive's. See p03-engine.js's generateQuestion() for the fallback this enables.
+      // primitive's. See the interview engine's generateQuestion() for the fallback this enables.
       const args = JSON.parse(call.function.arguments);
       const toolResult = await executor(args);
 

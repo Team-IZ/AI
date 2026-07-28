@@ -1,11 +1,11 @@
 // This page reuses p01-runner.js completely unmodified (see index.html script order:
 // config.js -> db.js -> lab-core.js -> THIS FILE -> llm.js -> pyodide-shared.js ->
-// pdfjs-loader.js -> p01-runner.js -> p02-engine.js). lab-core.js already provides 13 of
+// pdfjs-loader.js -> p01-runner.js). lab-core.js already provides 13 of
 // the 17 `LabApp.*` members p01-runner.js calls (it was extracted from the original
 // docs/lab/app.js specifically to support DOM-independent reuse -- see its own header
-// comment and docs/lab/trainee/*.html, which already reuses it for P02Engine/P03Engine).
+// comment).
 // It deliberately does NOT port the 7 members that were DOM-bound in the original
-// app.js, because P02Engine/P03Engine don't need them (they take explicit hooks
+// app.js, because the newer engines don't need them (they take explicit hooks
 // instead). p01-runner.js was never ported to that hooks style, so it still calls all 7:
 // log, setStatus, startTimer, stopTimer, showResults, registerRunner, renderModelToggle.
 // Without them, `LabApp.registerRunner("p01", {renderInput, run})` at the bottom of
@@ -76,7 +76,7 @@
   }
 
   // Also stashes the last status text/kind in module state -- p01-runner.js's run()
-  // never rethrows on failure (unlike p02-engine.js's run(), which does), so this is the
+  // never rethrows on failure (unlike the newer engines' run(), which does), so this is the
   // only way for the page to learn *why* takeP01Result() came back null after a failed
   // run. setStatus("...", "error") is always called in run()'s catch block right before
   // saveFailedRun(), so lastStatus is guaranteed set by the time run()'s promise settles.
@@ -258,8 +258,8 @@
 
   // Intentional override of lab-core.js's own jsonResultBlock -- see file header. Only
   // p01-runner.js's private renderResults() ever calls this (grep-confirmed:
-  // p02-engine.js/p03-engine.js never call it, they return data directly), so this
-  // doesn't affect P02Engine's behavior at all. Returns "" since the HTML is discarded
+  // the newer engines never call it, they return data directly), so this
+  // doesn't affect their behavior at all. Returns "" since the HTML is discarded
   // anyway (showResults() above is a no-op).
   function jsonResultBlock(title, obj) {
     capturedP01Result = obj;
