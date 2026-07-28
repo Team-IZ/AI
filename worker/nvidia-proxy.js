@@ -86,7 +86,31 @@ const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 //   DEPLOY NOTE: this repo has no CI/CD for the Worker (no .github/workflows) -- pushing
 //   this source change does NOT update the live Cloudflare Worker by itself. Requires a
 //   manual `wrangler deploy` from worker/ with Cloudflare credentials.
+//
+// D-cors-local (2026-07-27): D-fix15's single fixed ALLOWED_ORIGIN broke local dev
+// entirely -- testing via `python -m http.server` on localhost got every Worker call
+// silently CORS-blocked (corsHeaders() always echoed the GitHub Pages origin, which never
+// matches localhost, so the browser rejects the response and fetch() throws). Confirmed
+// live: refreshModelChoices()'s catch-all swallowed that throw and left MODEL_CHOICES on
+// its static CURATED_MODELS fallback -- the model bar looked fine but was never actually
+// hitting the live catalog; the deployed catalog already excludes qwen3.5-122b/
+// mistral-large-3/qwen3-next-80b, yet all three kept rendering.
+//   WHY: local dev origins vary by port (`python -m http.server <port>` picks whatever
+//   port you pass) -- matching by pattern (any http(s)://localhost|127.0.0.1[:port])
+//   survives a different port next session instead of needing a second exact-string
+//   constant kept in sync by hand.
+//   COST: broadens the allowed-origin surface past the exact GitHub Pages URL -- judged
+//   acceptable since a `localhost`/`127.0.0.1` origin is only reachable from the same
+//   machine, so this grants no new capability to a remote attacker; the Worker was
+//   already reachable from any local dev server on this machine before this change too.
+//   EXIT: if local-origin access is ever unwanted, delete LOCAL_ORIGIN_RE and
+//   isAllowedOrigin()'s localhost branch, and have corsHeaders() go back to
+//   unconditionally returning ALLOWED_ORIGIN.
 const ALLOWED_ORIGIN = "https://team-iz.github.io";
+const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+function isAllowedOrigin(origin) {
+  return origin === ALLOWED_ORIGIN || LOCAL_ORIGIN_RE.test(origin || "");
+}
 
 const JOB_TTL_SECONDS = 3600; // 1 hour -- generous for an actively-polling client, not indefinite
 
@@ -154,7 +178,7 @@ async function recordTrafficSample(env) {
 
 function corsHeaders(origin) {
   return {
-    "access-control-allow-origin": ALLOWED_ORIGIN === "*" ? "*" : ALLOWED_ORIGIN,
+    "access-control-allow-origin": ALLOWED_ORIGIN === "*" ? "*" : (isAllowedOrigin(origin) ? origin : ALLOWED_ORIGIN),
     "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-allow-headers": "content-type, x-nvidia-api-key, x-max-attempts",
     "access-control-max-age": "86400",
