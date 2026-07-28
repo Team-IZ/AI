@@ -1,0 +1,131 @@
+# D-split2 (2026-07-28): GitHub Pages moved from a legacy single-source build
+# (branch=feat/pdf_analysis, path=/docs) to this workflow, which assembles ONE site
+# from TWO source branches so each tool is owned by exactly one branch.
+#
+#   feat/pdf_analysis  -> docs/            -> /lab/**            (P01, 교안 분석)
+#   feat/code_Q&A      -> repo root        -> /lab/code-qna/**   (P02/P03, 코드 Q&A)
+#
+#   WHY: both tools were being served out of feat/pdf_analysis, which meant
+#   feat/pdf_analysis carried a full duplicate copy of the code-qna tool under
+#   docs/lab/code-qna/. That copy drifted from feat/code_Q&A (shared/db.js and
+#   trainee/session.html already differed) and every code-qna fix had to be applied
+#   twice or it silently did not ship. GitHub Pages allows exactly ONE source per
+#   repository, so "point each branch at Pages" is not possible -- assembling both in
+#   one build is the closest structure that still gives each branch sole ownership of
+#   its own tool, and it keeps every existing URL byte-identical.
+#
+#   COST: a push to either branch rebuilds the WHOLE site, so a broken commit on one
+#   branch blocks the other branch's deploy until it is fixed. The smoke-check step
+#   below is what makes that failure loud instead of silent. Also, deploys are no
+#   longer "push and Pages picks it up" -- they depend on Actions minutes and on this
+#   workflow file existing on BOTH branches (push events run the workflow file from
+#   the pushed branch, so the two copies must stay in sync).
+#
+#   EXIT: to go back to single-branch Pages, set the repo's Pages source back to
+#   {branch: feat/pdf_analysis, path: /docs} (build_type "legacy"), restore
+#   docs/lab/code-qna/ on feat/pdf_analysis from feat/code_Q&A, and delete this file
+#   from both branches.
+name: Deploy Pages (P01 + code-qna)
+
+on:
+  push:
+    branches:
+      - "feat/pdf_analysis"
+      - "feat/code_Q&A"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One site, two possible triggers -- never let two assemblies race each other.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout P01 source (feat/pdf_analysis)
+        uses: actions/checkout@v4
+        with:
+          ref: feat/pdf_analysis
+          path: src-p01
+          fetch-depth: 1
+
+      - name: Checkout code-qna source (feat/code_Q&A)
+        uses: actions/checkout@v4
+        with:
+          ref: "feat/code_Q&A"
+          path: src-codeqna
+          fetch-depth: 1
+
+      - name: Assemble site
+        run: |
+          set -euo pipefail
+          mkdir -p site
+
+          # P01 half: everything feat/pdf_analysis publishes under docs/, minus the
+          # stale code-qna duplicate -- that path is filled from its own branch below.
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            --exclude='lab/code-qna' \
+            src-p01/docs/ site/
+
+          # code-qna half: the whole feat/code_Q&A tree. cognition/, judgment/ and
+          # feedback/ are NOT dev-only -- p02-engine.js and p03-engine.js fetch those
+          # .py files at runtime through REPO_RAW_BASE="../", so they must ship.
+          mkdir -p site/lab/code-qna
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            src-codeqna/ site/lab/code-qna/
+
+      - name: Show assembled tree
+        run: find site -maxdepth 3 | sort
+
+      # Fail the build loudly rather than publishing a half-assembled site -- a missing
+      # runtime .py or a mis-rooted copy would otherwise only surface as a broken page.
+      - name: Smoke-check assembled artifact
+        run: |
+          set -uo pipefail
+          fail=0
+          for f in \
+            "site/lab/curriculum-manager/index.html" \
+            "site/lab/p01-runner.js" \
+            "site/lab/prompt_manifest.json" \
+            "site/lab/code-qna/trainee/submission.html" \
+            "site/lab/code-qna/trainee/session.html" \
+            "site/lab/code-qna/shared/lab-core.js" \
+            "site/lab/code-qna/prompt_manifest.json" \
+            "site/lab/code-qna/cognition/two_tier_scan.py" \
+            "site/lab/code-qna/judgment/isolation_classifier.py" \
+          ; do
+            if [ -f "$f" ]; then echo "  OK   $f"; else echo "  MISS $f"; fail=1; fi
+          done
+
+          # Ownership assertion: the code-qna half must come from feat/code_Q&A, which
+          # no longer defines a p01 pipeline. If p01 shows up here, the rsync above
+          # picked up feat/pdf_analysis's old duplicate instead.
+          if grep -q '"p01"' site/lab/code-qna/prompt_manifest.json; then
+            echo "  FAIL site/lab/code-qna sourced from the wrong branch (p01 present)"
+            fail=1
+          fi
+          exit $fail
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
