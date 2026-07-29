@@ -84,6 +84,6 @@ class AnalysisJobStatus(BaseSchema):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     result: AnalysisResult | None = Field(default=None, description="SUCCEEDED·PARTIAL일 때만")
-    # P02는 규칙 기반이라 LLM을 호출하지 않는다. 항상 빈 배열이며,
-    # 엔진에 LLM이 들어오면 그때 채워진다(PLAN §4).
+    # 스텁 단계에서는 항상 빈 배열이다. P02가 LLM 파이프라인으로 교체되는 중이라
+    # (2026-07-29, PLAN §4) 실물 엔진이 붙으면 호출 기록이 채워진다.
     ai_usage: list[dict[str, Any]] = Field(default_factory=list)

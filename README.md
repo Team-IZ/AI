@@ -1,6 +1,6 @@
 # AI 서비스 (FastAPI)
 
-교육생이 제출한 코드를 분석해 **Decision Point**를 뽑고(P02), 그 지점을 두고 **소크라틱 문답 세션**을 진행한 뒤(P03), 세션이 끝나면 전사(transcript) 전체를 대상으로 **5축 루브릭 후채점**(코드이해·설계논리·대안비교·반례대응·자기수정, 축당 1~5점·총 5~25점)을 수행한다. 채점은 세션 중이 아니라 세션 종료 후 1회 이루어진다.
+교육생이 제출한 코드를 분석해 **문답 문제를 뽑고**, 학생과 **문답을 진행하며 채점**하고, 끝나면 **보고서**를 내는 서비스. Spring Boot가 호출하는 내부 서비스다.
 
 ```
 React(Frontend) ──▶ Spring Boot(Backend) ──▶ FastAPI(이 저장소) ──▶ NVIDIA LLM
@@ -8,99 +8,113 @@ React(Frontend) ──▶ Spring Boot(Backend) ──▶ FastAPI(이 저장소) 
                           └── DB (단일 소유자)
 ```
 
-React는 FastAPI를 직접 호출하지 않는다. **FastAPI의 호출자는 Spring뿐이다.**
-
-**FastAPI는 DB를 갖지 않는다.** 결과를 응답이나 콜백으로 돌려줄 뿐이고 저장은 전부 Spring이 한다. 코드 원문도 임시 작업공간에만 두고 TTL로 지운다.
-
-> **상태: 재구축 중 — 8단계 완료, 엔드포인트 9/9 (36 passed). 남은 건 9단계 엔진 이식.**
-> 기존 구현은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났고, 지금은 빈 FastAPI 골격부터 다시 쌓는 중이다.
-> 단계별 상세·미결 항목은 **`PLAN_FASTAPI_MIGRATION.md`**가 단일 기준이다.
-
-### 지금 동작하는 것 — 엔드포인트 9/9 (전부 스텁)
-
-```
-GET  /api/health                        서비스 상태. 인증 면제
-POST /api/v0/analyses                   분석 요청(202). JSON + multipart(ZIP), 멱등성 키
-GET  /api/v0/analyses/{job_id}          분석 상태·결과 조회. 폴링
-POST /api/v0/sessions                   세션 시작 → 첫 질문(201). 동기
-POST /api/v0/sessions/{id}/answers      답변 제출 → 다음 질문/종료. 멱등(clientRequestId)
-GET  /api/v0/sessions/{id}              세션 상태 조회
-POST /api/v0/sessions/{id}/restore      유실 세션 복원
-POST /api/v0/gradings                   5축 후채점 요청(202). 비동기
-GET  /api/v0/gradings/{job_id}          채점 상태·5축 점수 조회. 폴링
-```
-
-인증(`X-Internal-Key`), 계약 에러 형식, camelCase 직렬화, Swagger 문서화까지 붙어 있다. **응답은 전부 고정 스텁**이지만 계약 모양은 확정 — 백엔드는 9개 전부 지금 바로 붙여볼 수 있다. 기계용 스펙은 `openapi.json`(Postman Import용).
+- React는 FastAPI를 직접 부르지 않는다. **FastAPI의 호출자는 Spring뿐이다.**
+- **FastAPI는 DB를 갖지 않는다.** 결과를 응답으로 돌려줄 뿐이고 저장은 전부 Spring이 한다. 코드 원문도 임시 작업공간에만 두고 지운다.
 
 ---
 
-## 1. 이 저장소의 역할 분담
+## 1. 서비스 흐름
 
-여기에는 성격이 다른 두 종류의 코드가 들어온다. 섞이면 유지보수가 무너지므로 경계를 먼저 이해할 것.
+```
+0. 교안 분석    교안 PDF → teaches 추출              교안당 1회. LMS 업로드 시점
+1. 코드 제출    ZIP 또는 GitHub URL + 요구사항 + teaches 3개
+2. 코드 분석    → 분석 문서 · 요구사항 P/F · 문제 3개 · 코드 파편
+                                                     제출 마감 후 배치. 1시간 예산
+3. 문답         문제 3개 × 레벨 L1~L4                실시간. 학생이 화면에서 대기
+4. 보고서       점수 매트릭스 · 교안 참조 · 재시험 대상
+```
 
-| 구분 | 내용 | 담당 |
+**셋의 시간축이 겹치지 않는다.** 교안 분석·코드 분석·문답이 동시에 도는 일이 없다.
+
+### 문답 규칙
+
+```
+레벨마다 답변을 0~5점으로 즉시 채점
+  3점 이상 → 다음 레벨
+  3점 미만 → 미리 준비된 힌트를 주고 같은 레벨 재질의 (레벨당 최대 2회)
+            힌트 2회 소진 후에도 미달 → 그 문제 종료, 다음 문제의 L1로
+
+힌트를 쓰면 그 레벨의 점수 상한이 내려간다
+  무힌트 5점 / 힌트1 후 4점 / 힌트2 후 3점
+  기록 점수 = min(LLM 원점수, 상한)
+```
+
+| 축 | 이름 | 무엇을 묻나 |
 |---|---|---|
-| **골격** | FastAPI 앱, HTTP 계약, 인증, job 수명주기, 에러 형식 | 이 브랜치 |
-| **엔진** | 코드 분석·문답·채점·교안 분석의 실제 알고리즘 | 팀원 PoC 브랜치에서 이식 |
+| L1 | 코드 기술 | 이 코드가 무엇을 어떻게 하는가 |
+| L2 | 설계 논리 | 왜 이렇게 설계했는가 |
+| L3 | 반례·한계 | 이 설계가 깨지는 조건은 |
+| L4 | 대안 | 다른 선택지와 비교해 왜 이것인가 |
 
-골격은 **엔진이 없어도 동작해야 한다.** 백엔드 팀원이 엔진 완성을 기다리지 않고 붙여볼 수 있어야 하기 때문이다. 그래서 모든 엔드포인트는 스텁 응답을 먼저 갖추고, 엔진은 나중에 꽂는다.
+**채점이 세션 진행을 제어한다.** 점수가 다음 턴을 결정하므로 매 턴 Spring으로 나가 저장된다.
 
-### 팀원 PoC 브랜치
-
-| 브랜치 | 내용 | 형태 |
-|---|---|---|
-| `feat/code_Q&A` | 코드 업로드 → 분석 → 문답 → 보고서 | 분석부 Python, 문답부 JavaScript(`shared/p03-engine.js`) |
-| `feat/pdf_analysis` | 교안 PDF 분석 → 보고서에 "교안 어디를 복습하라" 표시 | Python 파이프라인 + JS 오케스트레이션 + 브라우저 pdf.js |
-
-두 브랜치 모두 **브라우저에서 도는 PoC**다. 임시 프론트엔드가 붙어 있고, LLM 호출은 Cloudflare Worker 프록시(`worker/nvidia-proxy.js`)를 거친다.
-
-> `feat/pdf_analysis`는 `feat/code_Q&A`의 내용을 `docs/lab/code-qna/` 아래에 통째로 품고 있다. 같은 파일이 경로만 다르게 두 브랜치에 존재하므로 병합 시 충돌한다.
-
-### 이식할 때 유의할 점
-
-- **JS는 설계 선택이 아니라 브라우저 제약의 결과다.** LLM 호출이 CORS·키 노출 때문에 프록시를 거쳐야 했고 UI가 얽혀 있어서 JS로 갔다. 서버에는 그 제약이 없으므로 **전부 Python으로 이식한다.** Node를 띄우지 않는다.
-- **프롬프트와 파라미터는 `prompt_manifest.json`이 계약이다.** p01(6단계)·p02(5단계)·p03(7단계)의 프롬프트·기본값이 선언적으로 들어 있고 팀원이 유지보수한다. 프롬프트만 바뀌면 이 파일만 다시 가져오면 되고, 제어 흐름이 바뀔 때만 코드를 손댄다.
-- **PDF 추출은 그대로 옮길 수 없다.** PoC는 브라우저 pdf.js를 쓴다. 서버에서는 다른 라이브러리로 바꿔야 하고 결과가 완전히 동일하지 않다.
+**질문과 힌트는 분석 단계에서 미리 만들어 동결한다.** 답변을 보고 힌트를 만들면 학생마다 힌트가 달라져, "몇 번째 힌트에서 통과했는가"가 학생 실력이 아니라 생성 결과의 차이를 재게 되기 때문이다.
 
 ---
 
-## 2. 백엔드와의 계약
+## 2. 실행
 
-전체 명세는 `../docs/AI-Backend_API_명세서_v0.1.md`(내용은 v0.2). 아래는 요약이다.
+```bash
+# 최초 1회
+python -m venv .venv
+./.venv/Scripts/python.exe -m pip install -r requirements.txt
+cp .env.example .env        # 값을 채운다. .env는 절대 커밋하지 않는다
 
-| 그룹 | 메서드·경로 | 역할 | 방식 |
-|---|---|---|---|
-| 공통 | `GET /api/health` | 서비스 상태 | 동기 |
-| 분석 | `POST /api/v0/analyses` | 코드 분석 요청 (P02) | 비동기 job (202) |
-| 분석 | `GET /api/v0/analyses/{job_id}` | 분석 상태·결과 | 폴링 |
-| 세션 | `POST /api/v0/sessions` | 검증 세션 시작 → 첫 질문 | 동기 |
-| 세션 | `POST /api/v0/sessions/{id}/answers` | 답변 제출 → 다음 질문/종료 | 동기 (멱등키) |
-| 세션 | `GET /api/v0/sessions/{id}` | 세션 현재 상태 | 동기 |
-| 세션 | `POST /api/v0/sessions/{id}/restore` | 유실 세션 복원 | 동기 |
-| 채점 | `POST /api/v0/gradings` | transcript 5축 후채점 | 비동기 job (202) |
-| 채점 | `GET /api/v0/gradings/{job_id}` | 채점 상태·점수·근거 | 폴링 |
+# 개발 서버
+./.venv/Scripts/python.exe -m uvicorn app.main:app --reload
 
-### 동기와 비동기를 나누는 기준
+# 테스트
+./.venv/Scripts/python.exe -m pytest -q
+```
 
-사람이 화면 앞에서 기다리면 동기, 아니면 job이다. 답변 제출은 학생이 대기하므로 동기여야 하고, 분석·채점은 수초~수분이 걸리므로 202를 주고 폴링시킨다.
+Swagger UI: **http://127.0.0.1:8000/docs** — 여기서 엔드포인트를 직접 클릭 테스트할 수 있다.
+기계용 스펙: **`openapi.json`** — Postman에 Import하면 바로 요청이 만들어진다.
 
-비동기 job은 생성 시 `202 Accepted` + `{"jobId": "...", "status": "QUEUED"}`를 반환한다. 요청에 `callbackUrl`이 있으면 완료·실패 시 그 주소로 결과를 `POST`하고, `GET` 폴링은 콜백 유실 대비 폴백으로 유지한다.
+> **워커는 1개로 유지한다.** job·세션 저장소가 인메모리라 `--workers 2` 이상이면 만든 프로세스와 조회 프로세스가 달라져 404가 난다. 시연 규모(동시 10~20명)에서는 제약이 아니다 — 병목은 FastAPI가 아니라 NVIDIA 무료 티어의 분당 40회다.
 
-### 요청 헤더 3종
+### 백엔드와 통신 테스트 (배포 없이)
+
+Spring이 Railway에 떠 있으면 로컬 FastAPI를 터널로 노출해 확인한다.
+
+```bash
+./.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+# 다른 터미널 (cloudflared — 가입·토큰 불필요)
+cloudflared tunnel --url http://localhost:8000
+#   → https://xxxx.trycloudflare.com 발급 → 백엔드에 전달 (prefix /api/v0)
+```
+
+- `.env`의 `INTERNAL_API_KEY`에 값이 있으면 헤더 `X-Internal-Key`가 필요하다(health만 면제). 비우면 인증이 꺼진다.
+- quick tunnel은 실행마다 URL이 바뀌고, 창을 닫거나 PC가 절전에 들어가면 끊긴다.
+- 상세 절차: `../output_docs/AI-Backend_통신테스트_계획_2026-07-24.md`
+
+### 계약이 바뀌면 openapi.json 갱신
+
+```bash
+./.venv/Scripts/python.exe -c "from app.main import app; import json,io; io.open('openapi.json','w',encoding='utf-8').write(json.dumps(app.openapi(),ensure_ascii=False,indent=2))"
+```
+
+---
+
+## 3. API 명세
+
+### 공통 규약
+
+| 항목 | 값 |
+|---|---|
+| 경로 prefix | `/api/v0` — 서비스 버전이 아니라 "개발 단계 API"라는 성숙도 표시. 계약이 안정되면 양쪽이 함께 v1으로 올린다 |
+| 필드 표기 | **camelCase** (`jobId`, `snapshotId`). 파이썬 내부는 snake_case로 쓰고 직렬화만 변환한다 |
+| 동기/비동기 | 사람이 화면 앞에서 기다리면 동기, 아니면 202 + 폴링 |
+
+**요청 헤더 3종**
 
 | 헤더 | 값 | 용도 |
 |---|---|---|
 | `X-Internal-Key` | 공유 비밀 | 서비스 간 인증. `GET /api/health`만 면제 |
-| `Idempotency-Key` | `submissionId:attemptNo` | 중복 요청 판별. 같은 키면 처음 만든 `jobId`를 `202`로 그대로 반환하고 재분석하지 않는다 |
+| `Idempotency-Key` | `submissionId:attemptNo` | 중복 요청 판별. 같은 키면 처음 만든 `jobId`를 그대로 반환하고 재분석하지 않는다 |
 | `X-Trace-Id` | 추적 ID | Spring이 `analysis_job.trace_id`로 저장 |
 
-### 표기 규약 (2026-07-22 확정)
-
-| 항목 | 확정 |
-|---|---|
-| 경로 prefix | **`/api/v0`** — 서비스 버전이 아니라 "개발 단계 API"라는 성숙도 표시. 계약이 안정되면 양쪽이 함께 v1으로 올린다 |
-| 필드 표기 | **camelCase** (`jobId`, `snapshotId`). 파이썬 내부는 snake_case로 쓰고 직렬화만 변환한다 |
-| 에러 형식 | **평탄 구조 `{error, message, retryable}`** |
+**에러 형식** — 평탄 구조. `timestamp`·`path`는 쓰지 않는다.
 
 ```json
 {
@@ -110,42 +124,161 @@ GET  /api/v0/gradings/{job_id}          채점 상태·5축 점수 조회. 폴�
 }
 ```
 
-`error`는 기계가 분기하는 코드 문자열, `message`는 사람이 읽는 설명, `retryable`은 Spring의 재시도 판단용이다. `timestamp`·`path`는 쓰지 않는다.
+`error`는 기계가 분기하는 코드 문자열, `message`는 사람이 읽는 설명, `retryable`은 Spring의 재시도 판단용이다.
 
-**`analysisId`는 Spring이 발급하며 AI는 만들지도 받지도 않는다.** Spring이 `jobId`로 연결한다.
+**`analysisId`는 Spring이 발급한다.** AI는 만들지도 받지도 않고, Spring이 `jobId`로 연결한다.
 
-응답 본문의 세부 구조(특히 `findings[]` 내부)는 팀원 PoC 결과에 따라 바뀐다. **엔드포인트·상태코드·최상위 필드까지만 고정하고 내부는 열어둔다.**
+### 엔드포인트
 
-미결 항목은 `../qna/2026-07-22/backend-api-questions.md` 참고.
+| 그룹 | 메서드·경로 | 역할 | 방식 |
+|---|---|---|---|
+| 공통 | `GET /api/health` | 서비스 상태 | 동기 |
+| 분석 | `POST /api/v0/analyses` | 코드 분석 요청 | 202 + 폴링 |
+| 분석 | `GET /api/v0/analyses/{jobId}` | 분석 상태·결과 | 동기 |
+| 세션 | `POST /api/v0/sessions` | 세션 시작 → 첫 질문 | 동기 |
+| 세션 | `POST /api/v0/sessions/{id}/answers` | 답변 제출 → 채점 + 다음 질문/힌트 | 동기 |
+| 세션 | `GET /api/v0/sessions/{id}` | 세션 현재 상태 | 동기 |
+| 세션 | `POST /api/v0/sessions/{id}/restore` | 유실 세션 복원 | 동기 |
+| 채점 | `POST /api/v0/gradings` | 후채점 → **`/reports`로 변경 예정** | 202 + 폴링 |
+| 채점 | `GET /api/v0/gradings/{jobId}` | → **`/reports/{jobId}`로 변경 예정** | 동기 |
+
+**신설 예정**: `POST /api/v0/curricula`, `GET /api/v0/curricula/{jobId}` (교안 PDF → teaches)
+
+### 분석
+
+```jsonc
+// POST /api/v0/analyses          Content-Type: application/json 또는 multipart/form-data
+{
+  "attemptId": "att-1", "submissionId": "sub-1",
+  "method": "GITHUB_URL",                    // 또는 ZIP_WITH_GITLOG (multipart로 ZIP 첨부)
+  "source": { "repoUrl": "https://github.com/...", "branch": "main" },
+  "extractionScope": "TOTAL",                // 또는 OWN_COMMIT (이때 commitEmail 필수)
+  "questionBudget": 3,
+  "callbackUrl": "https://.../internal/ai-callbacks"   // 선택. 현재 수용만 하고 전송 미구현
+}
+// → 202
+{ "jobId": "1b40467e-...", "status": "QUEUED" }
+```
+
+```jsonc
+// GET /api/v0/analyses/{jobId}   → 200
+{
+  "jobId": "1b40467e-...", "attemptId": "att-1", "submissionId": "sub-1",
+  "status": "SUCCEEDED",                     // QUEUED|RUNNING|SUCCEEDED|PARTIAL|FAILED
+  "failureReason": null,
+  "startedAt": "2026-07-29T05:00:00Z", "completedAt": "2026-07-29T05:00:12Z",
+  "result": {
+    "snapshotId": "snap-1",
+    "snapshotMeta": { "contentHash": "…64자…", "fileCount": 42, "byteCount": 183920 },
+    "appliedScope": "TOTAL", "scopeFallback": false, "fallbackReason": null,
+    "commitSha": null,
+    "findings": [ /* decision_point 컬럼명 그대로. 아래 설명 */ ],
+    "questionCountPlanned": 3
+  },
+  "aiUsage": []
+}
+```
+
+`findings[]`는 DB `decision_point`(+ `dp_reference`) 테이블에 대응하므로 **컬럼 이름을 그대로 쓴다.**
+
+```
+dpId, type, status, priority, focusCode, sourcePath, lineStart, lineEnd,
+evidenceHash, extractorVersion,
+references[{ path, lineStart, lineEnd, evidenceHash, referenceType }]
+```
+
+`status` 허용값은 DB CHECK를 따른다: `CANDIDATE / READY / USED / SKIPPED / INVALID`.
+
+### 세션
+
+```jsonc
+// POST /api/v0/sessions          → 201
+{ "attemptId": "att-1", "analysisJobId": "1b40467e-...",
+  "selectedFindingIds": ["dp-1","dp-2","dp-3"],   // 생략 시 전체
+  "timeLimitSec": 2400 }
+
+// POST /api/v0/sessions/{id}/answers
+{ "clientRequestId": "turn-7", "answerText": "재귀 대신 반복문으로 바꿨습니다" }
+
+// 양쪽 응답 모두 → SessionView
+{
+  "sessionId": "sess-abc",
+  "state": "IN_PROGRESS",                    // IN_PROGRESS|COMPLETED|TIMEOUT|FAILED
+  "current": {
+    "dpId": "dp-1", "depthLevel": "L3", "sequenceNo": 5,
+    "questionText": "…",
+    "codeContext": { "path": "src/Solver.java", "lineStart": 42, "lineEnd": 58, "snippet": "…" }
+  },
+  "progress": { "dpIndex": 1, "dpTotal": 3 },
+  "transcript": [ { "dpId": "dp-1", "depthLevel": "L1",
+                    "questionText": "…", "answerText": "…", "answeredAt": "…" } ],
+  "aiUsage": []
+}
+```
+
+`clientRequestId`는 세션 내 유일한 멱등키다. 같은 키로 재요청하면 처음 돌려준 응답을 그대로 반환한다.
+
+`POST /sessions/{id}/restore`는 Spring이 저장해둔 transcript로 유실된 세션을 재구성하고 이어질 질문을 돌려준다.
+
+### aiUsage — 모든 응답에 붙는다
+
+DB `ai_usage`(기관별 AI 호출·토큰·비용 원장)에 대응한다. **LLM 호출 1건 = 배열 원소 1개**이므로, 코드 분석 응답에는 6개가 들어간다.
+
+```jsonc
+"aiUsage": [
+  {
+    "callId": "9f2c1e3a-…",          // uuid4. 호출마다 새로 발급 → DB idempotency_key
+    "featureCode": "SESSION_DIALOG",  // CODE_ANALYSIS | QUESTION_GENERATION | GRADING
+                                      // | SESSION_DIALOG | SUMMARY_DRAFT | CURRICULUM_ANALYSIS
+    "modelCode": "glm-5.2",           // Spring이 ai_model 조회해 model_id 확보
+    "inputTokenCount": 3200, "outputTokenCount": 180, "cachedTokenCount": 0,
+    "status": "SUCCEEDED",            // SUCCEEDED | FAILED | PARTIAL
+    "failureCode": null,              // FAILED·PARTIAL이면 필수
+    "latencyMs": 1840,
+    "occurredAt": "2026-07-29T05:00:12.331Z"
+  }
+]
+```
+
+**단가·비용은 AI가 보내지 않는다.** AI가 모델 단가표를 들고 있으면 단가가 바뀔 때마다 재배포해야 한다. `ai_model` 테이블을 가진 Spring이 토큰 수에 곱한다.
+
+**실패한 호출도 기록한다.** 실패해도 토큰·비용이 발생하고 재시도 통계에 필요하다.
+
+### 채점 (변경 예정)
+
+```jsonc
+// POST /api/v0/gradings          → 202
+{ "sessionId": "sess-abc", "scoreRunId": "run-1", "transcript": [ … ] }
+{ "jobId": "…", "status": "QUEUED" }
+```
+
+현재 코드는 5축 후채점 계약이다. **P04 도입으로 4축 + 보고서 생성으로 바뀔 예정**이며, 백엔드 회신 후 반영한다(§5).
 
 ---
 
-## 3. 코드 구조
+## 4. 코드 구조
 
 ```
 app/
 ├─ main.py          앱 조립. 라우터 등록만. 로직 없음
 ├─ config.py        Settings — 환경변수 (engine_mode 포함)
 ├─ jobs.py          분석 job 인메모리 저장소 + 수명주기(상태 전이)
-├─ sessions.py      문답 세션 인메모리 저장소 + 스텁 진행(멱등)
-├─ gradings.py      채점 job 인메모리 저장소 + 스텁(jobs.py와 형제)
+├─ sessions.py      문답 세션 인메모리 저장소 + 진행(멱등)
+├─ gradings.py      채점 job 인메모리 저장소 (jobs.py와 형제)
 ├─ api/             HTTP 계층 — 백엔드가 보는 면
 │  ├─ deps.py         인증
-│  ├─ health.py
-│  ├─ analyses.py     P02        2개
-│  ├─ sessions.py     P03        4개
-│  └─ gradings.py     채점       2개
+│  ├─ errors.py       예외 핸들러
+│  ├─ health.py · analyses.py · sessions.py · gradings.py
 ├─ schemas/         계약의 실체 — 요청·응답 모델
-│  ├─ common.py       에러 형식, 공통 enum
-│  ├─ analysis.py
-│  ├─ session.py
-│  └─ grading.py
-└─ engines/         팀원 PoC가 들어오는 자리
+│  └─ common.py · analysis.py · session.py · grading.py
+└─ engines/         팀원 PoC 코드가 들어오는 자리
    ├─ __init__.py     get_analysis_engine() 팩토리 — 설정 보고 구현 선택
    ├─ base.py         계약(Protocol)
    └─ stub.py         엔진 없을 때 고정 응답
 tests/
 ```
+
+**파일명 규칙**: `schemas/`는 단수(`analysis.py`), `api/`·저장소 모듈은 복수(`analyses.py`·`jobs.py`).
 
 층은 셋뿐이다.
 
@@ -171,114 +304,105 @@ class AnalysisEngine(Protocol):
 
 `api/`가 결과 dict를 pydantic 모델로 감싸 응답한다. 그 변환이 유일한 접착점이다.
 
-### 스텁 전환
-
 ```python
 engine_mode: Literal["stub", "real"] = "stub"
 ```
 
-`stub`이면 스키마에 맞는 고정 응답을 돌려준다. 엔진이 하나도 없어도 9개 엔드포인트가 전부 살아 있고, 백엔드가 Swagger·Postman으로 계약을 검증할 수 있다.
+`stub`이면 스키마에 맞는 고정 응답을 돌려준다. **엔진이 하나도 없어도 모든 엔드포인트가 살아 있어서** 백엔드가 엔진 완성을 기다리지 않고 붙여볼 수 있다.
 
 ---
 
-## 4. 작업 방식
+## 5. 현재 상태와 앞으로
 
-### 쌓는 순서
+### 지금
 
-| # | 만드는 것 | 배우는 것 | |
-|---|---|---|---|
-| 1 | `main.py` + `health.py` + `pytest.ini` | 앱 생성, `APIRouter` | ✅ |
-| 2 | `config.py` + `deps.py` | `Settings`, `Depends`, `Header` | ✅ |
-| 3 | `schemas/` + `POST /analyses` 스텁 | pydantic 모델, 202, 422, 예외 핸들러, multipart | ✅ |
-| 4 | `GET /analyses/{job_id}` 스텁 | 경로 파라미터, `response_model`, 404 | ✅ |
-| 5 | `engines/base.py` + `stub.py` | Protocol, 의존성 주입 | ✅ |
-| 6 | `jobs.py` 수명주기 | `BackgroundTasks`, 상태 전이 | ✅ |
-| 7 | `sessions.py` 4개 스텁 | 세션 리소스, 하위 리소스, 멱등 | ✅ |
-| 8 | `gradings.py` 2개 스텁 | 9개 완성 | ✅ |
-| 9 | 팀원 엔진 이식 | 실제 모듈화 | ← 다음 |
-
-1~8은 엔진 없이 전부 가능하다. 8단계가 끝나면 백엔드가 붙일 수 있다.
-
-구간이 셋으로 갈린다. **1~4**는 분석 API 하나로 FastAPI 기본기를 훑는 구간. **5~6**은 엔진 교체 지점과 비동기 job이라는 뼈대를 세우는 구간이고 이 계획에서 제일 무겁다(완료). **7~8**은 그 위에 세션·채점을 얹는 반복 작업이라 빠르다. **9**부터는 FastAPI 공부가 아니라 팀원 JS 코드를 Python으로 옮기는 작업이며 팀원 진행에 따라간다.
-
-### 검증 방법
-
-**이 브랜치에서는 PoC를 만들지 않는다.** Swagger(`/docs`)와 Postman으로 API 통신만 확인한다.
-
-### 엔진 이식 절차
-
-1. 팀원 브랜치를 `git fetch` 후 해당 파일을 읽는다
-2. 프롬프트·파라미터는 `prompt_manifest.json`에서 가져온다
-3. 제어 흐름만 Python 순수 함수로 옮겨 `app/engines/`에 넣는다
-4. `engine_mode`를 `real`로 바꿔 스텁을 대체한다
-5. 계약이 바뀌었으면 `schemas/`와 명세서를 함께 고친다
-
----
-
-## 5. 실행
-
-```bash
-# 최초 1회
-python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r requirements.txt
-
-# 개발 서버 (로컬 확인용)
-./.venv/Scripts/python.exe -m uvicorn app.main:app --reload
-
-# 테스트 (현재 36 passed)
-./.venv/Scripts/python.exe -m pytest -q
-```
-
-Swagger UI: http://127.0.0.1:8000/docs — 여기서 9개 엔드포인트 직접 클릭 테스트.
-
-> **워커는 1개로 유지한다.** job·세션 저장소가 인메모리라 `--workers 2` 이상이면 만든 프로세스와 조회 프로세스가 달라져 404가 난다. 스케일이 필요해지면 Redis나 DB로 옮긴다.
-
-### 백엔드와 통신 테스트 (배포 전, 터널)
-
-Spring이 Railway(공인)에 떠 있으면, 로컬 FastAPI를 터널로 노출해 통신 확인한다. **배포 불필요.**
-
-```bash
-# 1) 외부 노출용으로 서버 실행 (--host 0.0.0.0)
-./.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# 2) 다른 터미널에서 터널 (cloudflared — 가입·토큰 불필요)
-cloudflared tunnel --url http://localhost:8000
-#   → https://xxxx.trycloudflare.com 발급 → 백엔드에 이 URL 전달(prefix /api/v0)
-```
-
-- 인증: `.env`의 `INTERNAL_API_KEY`에 값 있으면 헤더 `X-Internal-Key` 필요(health 면제). 비우면 인증 꺼짐.
-- 창 닫거나 PC 절전 들어가면 터널 끊김. quick tunnel은 URL이 실행마다 바뀜.
-- 상세 절차·스모크 테스트 순서: `../output_docs/AI-Backend_통신테스트_계획_2026-07-24.md`
-
-### openapi.json 갱신 (계약 바뀌면)
-
-```bash
-./.venv/Scripts/python.exe -c "from app.main import app; import json,io; io.open('openapi.json','w',encoding='utf-8').write(json.dumps(app.openapi(),ensure_ascii=False,indent=2))"
-```
-
-### 설정
-
-`.env.example`을 `.env`로 복사해 채운다. **`.env`는 절대 커밋하지 않는다.**
-
----
-
-## 6. 참고
-
-| 문서 | 내용 |
+| | |
 |---|---|
-| `../docs/AI-Backend_API_명세서_v0.1.md` | AI↔Backend 전체 계약 |
-| `../docs/docs_for_read/` | 기획·요구사항 문서 Markdown 변환본 |
-| `../rule/개발/이슈 O/` | 커밋·PR 규칙, 협업 규칙 |
-| `PLAN_FASTAPI_MIGRATION.md` | 진행 상황 기록 |
+| 엔드포인트 | **9/9 동작 (전부 스텁)** |
+| 테스트 | **36 passed** |
+| 붙일 수 있나 | **예.** 인증·에러 형식·camelCase·Swagger·`openapi.json`까지 완성 |
 
-`../docs/`의 문서는 확정 스펙이 아니라 바뀔 수 있는 기획 자료다. 실제 코드나 최근 논의와 어긋나면 문서를 맹신하지 말고 확인 후 진행한다.
+응답은 고정 스텁이지만 **계약 모양은 확정**이다. 백엔드는 9개 전부 지금 바로 붙여볼 수 있다.
 
-`_legacy/`는 재구축 이전 구현의 로컬 사본이다. `.gitignore` 대상이라 커밋되지 않으며 모듈화 참고용으로만 둔다. 이력에는 남아 있으므로 `git show <commit>:app/...`로 꺼낼 수 있다.
+### 앞으로
 
-### 커밋 규칙
+**1단계 — 백엔드 스키마 회신 대기 (지금 막혀 있음)**
+
+P04 도입으로 채점부 계약이 바뀌었다. 회신 전에 스키마를 고치면 두 번 고치게 된다.
+질문지: `../qna/2026-07-29/backend-schema-questions.md`
+
+**2단계 — 계약 반영**
+
+```
+4축(L1~L4)·0~5점으로 채점 스키마 수정
+/gradings → /reports 전환 (5축 후채점 → 보고서 생성)
+POST/GET /curricula 신설 (교안 분석)
+분석 요청·응답 확장 (requirements · teaches · analysisDocuments · preparedQuestions)
+세션 턴에 점수 필드 추가 (rawScore · score · hintsUsed · retryNo · hintText · autonomy)
+openapi.json 재생성 → 백엔드 전달
+```
+
+**3단계 — 엔진 이식**
+
+팀원 PoC를 Python으로 옮긴다. 브랜치는 `feat/poc_full`.
+
+세부 순서·방법은 **`PLAN_FASTAPI_MIGRATION.md`**에 있다.
+
+---
+
+## 6. 팀원 PoC 브랜치
+
+엔진은 여기서 이식한다. 브라우저에서 도는 PoC이고 LLM 호출은 Cloudflare Worker 프록시를 거친다.
+
+| 브랜치 | 내용 | 워크트리 |
+|---|---|---|
+| **`feat/poc_full`** | **통합 PoC(P04).** 이식 대상 | `../ai_poc/poc_full` |
+| `feat/code_Q&A` | 구 P02 코드분석 / P03 문답 | `../ai_poc/qna` |
+| `feat/pdf_analysis` | P01 교안 분석 | `../ai_poc/pdf` |
+
+워크트리는 **읽기 전용(detached HEAD)** 이다. 절대 수정·커밋하지 않는다. 팀원 코드를 고쳐야 하면 팀원에게 요청한다.
+
+### 이식할 때
+
+- **JS는 설계 선택이 아니라 브라우저 제약의 결과다.** CORS·키 노출 때문에 프록시를 거쳐야 했고 UI가 얽혀 있었다. 서버에는 그 제약이 없으므로 **전부 Python으로 옮긴다.** Node를 띄우지 않는다
+- **프롬프트·파라미터는 매니페스트가 계약이다.** P04는 `app/prompt_manifest.json` + `app/scoring-config.js` 두 파일. 프롬프트만 바뀌면 이 파일들만 다시 가져오면 되고, 제어 흐름이 바뀔 때만 코드를 손댄다
+- **잘라낼 것**: Supabase 저장(DB 주인은 Spring), Worker LLM 프록시(서버는 직접 호출), IndexedDB·sessionStorage, UI·타이머, 브라우저 pdf.js(서버 라이브러리로 교체 — 결과가 동일하지 않다)
+- **규칙 스캔부는 CPU라 이벤트 루프를 막을 수 있다.** `async def` 안에서 동기로 돌리면 문답 중인 학생까지 굳는다. `def`(threadpool)나 `run_in_executor`로 뺀다
+
+---
+
+## 7. 개발 규칙
+
+**브랜치**: `feature/*` → 동작·테스트 완료 후 `main` → `main` 기준 `develop` 생성 → 이후 `develop`에서 수정·테스트 후 `main` 병합. 기본 브랜치는 `develop`.
+
+**커밋**
 
 ```
 type: short description (#issue)
 ```
 
-`feat` `fix` `refactor` `style` `docs` `chore` `remove` 중 하나. 동사원형 소문자로 시작, 마침표 없음, 50자 이내, 이슈 있으면 번호 필수. PR은 제목 `[feat] add login page UI`, 본문에 `closes #번호`, 1PR=1기능. 자세한 내용은 `../rule/개발/이슈 O/Git 커밋 & PR 가이드.docx`.
+`feat` `fix` `refactor` `style` `docs` `chore` `remove` 중 하나. 동사원형 소문자로 시작, 마침표 없음, 50자 이내, 이슈가 있으면 번호 필수.
+
+**PR**: 제목 `[feat] add login page UI`, 본문에 `closes #번호`. 1 PR = 1 기능, 파일 10개 이내 권장, 최소 1인 승인.
+
+**커밋 전 확인**: `.env` 스테이징 금지, 브랜치 확인, 빌드 통과, 디버그 로그 제거, `main`/`develop` 직접 작업 금지.
+
+상세는 `../rule/개발/이슈 O/Git 커밋 & PR 가이드.docx`.
+
+---
+
+## 8. 참고 문서
+
+| 문서 | 내용 |
+|---|---|
+| `PLAN_FASTAPI_MIGRATION.md` | AI 파트 작업 계획·진행 (내부용) |
+| `../output_docs/AI파트_현황.md` | 팀 공유용 현황 요약 |
+| `../output_docs/미결_논의사항.md` | 아직 안 정해진 것 |
+| `../qna/2026-07-29/backend-schema-questions.md` | 백엔드에 던진 스키마 질문 |
+| `../docs/AI-Backend_API_명세서_v0.1.md` | AI↔Backend 전체 계약 (내용은 v0.2) |
+| `../docs/docs_for_read/` | 기획·요구사항 문서 Markdown 변환본 |
+| `../rule/개발/이슈 O/` | 커밋·PR 규칙 |
+
+`../docs/`의 문서는 확정 스펙이 아니라 바뀔 수 있는 기획 자료다. 실제 코드나 최근 논의와 어긋나면 문서를 맹신하지 말고 확인 후 진행한다.
+
+`_legacy/`는 재구축 이전 구현의 로컬 사본이다. `.gitignore` 대상이라 커밋되지 않으며 모듈화 참고용으로만 둔다.
