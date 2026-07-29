@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>문답 · P04 통합 검증</title>
+<link rel="stylesheet" href="../shared/iz-tokens.css">
+<link rel="stylesheet" href="poc.css">
+<style>
+  .wrap { max-width: 1080px; }
+  .layout { display: grid; grid-template-columns: 320px 1fr; gap: var(--sp-4); align-items: start; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+  .side { position: sticky; top: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+  .topiclist { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-4); }
+  .tprow { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; font-size: var(--fs-xs); }
+  .tprow.cur { font-weight: 700; color: var(--c-primary); }
+  .dots { display: flex; gap: 4px; margin-left: auto; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: #e5e7eb; flex: 0 0 auto; }
+  .dot.pass { background: var(--c-success); }
+  .dot.fail { background: var(--c-danger); }
+  .dot.now { background: var(--c-primary); }
+  .codepanel { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-4); }
+  .codepanel .ref { font-family: var(--mono); font-size: 11px; color: var(--c-text-3); margin-bottom: var(--sp-2); }
+  .codepanel .frag { background: var(--c-code); border-radius: var(--r-md); padding: var(--sp-3); font-family: var(--mono); font-size: 12px; overflow-x: auto; white-space: pre; color: var(--c-code-text); max-height: 60vh; }
+
+  .chat { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); display: flex; flex-direction: column; height: 78vh; }
+  .transcript { flex: 1; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+  .bubble { max-width: 88%; padding: var(--sp-3) var(--sp-4); border-radius: var(--r-md); font-size: var(--fs-sm); line-height: 1.6; }
+  .bubble.bot { background: var(--c-surface-2); align-self: flex-start; }
+  .bubble.bot .axis { font-size: 11px; font-weight: 700; color: var(--c-primary); margin-bottom: 4px; }
+  .bubble.bot .hint { font-size: var(--fs-xs); color: var(--c-warning); margin-top: 6px; }
+  .bubble.user { background: var(--c-primary); color: #fff; align-self: flex-end; white-space: pre-wrap; }
+  .bubble.score { align-self: center; font-size: var(--fs-xs); color: var(--c-text-3); background: transparent; padding: 4px; }
+  .bubble.score.pass { color: var(--c-success); }
+  .bubble.score.fail { color: var(--c-danger); }
+  .bubble.system { align-self: center; font-size: var(--fs-xs); color: var(--c-text-3); text-align: center; }
+  .inputbar { border-top: 1px solid var(--c-border); padding: var(--sp-3); display: flex; gap: var(--sp-2); }
+  .inputbar textarea { flex: 1; resize: none; height: 52px; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); padding: var(--sp-2) var(--sp-3); font-family: inherit; font-size: var(--fs-sm); }
+  .inputbar button { width: 80px; border: 0; background: var(--c-primary); color: #fff; border-radius: var(--r-md); font-weight: 600; cursor: pointer; }
+  .inputbar button:disabled { opacity: .5; cursor: default; }
+</style>
+</head>
+<body>
+<div class="tapp">
+  <div class="ttop">
+    <div class="l">
+      <div class="brand"><span class="mk">◆</span>IZ 통합 검증 PoC</div>
+      <div class="tnav"><a href="index.html">1 제출</a><a href="analysis.html">2 코드 분석</a><a class="on">3 문답</a><a>4 보고서</a></div>
+    </div>
+    <div class="r"><span id="user-indicator">-</span></div>
+  </div>
+  <div class="wrap">
+    <div id="error-box" class="alertwarn hidden"></div>
+    <div class="layout" id="layout" style="display:none">
+      <div class="side">
+        <div class="topiclist" id="topic-list"></div>
+        <div class="codepanel">
+          <div class="ref" id="code-ref"></div>
+          <div class="frag" id="code-frag"></div>
+        </div>
+      </div>
+      <div class="chat">
+        <div class="transcript" id="transcript"></div>
+        <div class="inputbar">
+          <textarea id="answer-input" placeholder="답변을 입력하세요 (Enter로 제출, Shift+Enter로 줄바꿈)"></textarea>
+          <button id="submit-btn" disabled>제출</button>
+        </div>
+      </div>
+    </div>
+    <div id="done-box" class="step hidden">
+      <div class="sh"><span class="n">✓</span> 문답 완료</div>
+      <p style="font-size:var(--fs-sm);color:var(--c-text-2)">모든 문제를 마쳤습니다.</p>
+      <button class="cta" id="report-btn">보고서 보기 →</button>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/config.js"></script>
+<script src="../shared/db.js"></script>
+<script src="../shared/lab-core.js"></script>
+<script src="../shared/llm.js"></script>
+<script src="scoring-config.js"></script>
+<script src="poc-state.js"></script>
+<script src="code-fragment.js"></script>
+<script src="llm-stage.js"></script>
+<script src="poc-engine.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => LabApp.escapeHtml(v);
+  const transcriptEl = $("transcript");
+  const inputEl = $("answer-input");
+  const submitBtn = $("submit-btn");
+
+  let answerResolver = null;
+  let analysis = null;
+
+  function appendBubble(html, cls) {
+    const div = document.createElement("div");
+    div.className = `bubble ${cls}`;
+    div.innerHTML = html;
+    transcriptEl.appendChild(div);
+    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+  }
+
+  function renderTopicList(currentTopicIndex, currentAxis, levelState) {
+    // levelState: { [topicIndex]: { [axis]: "now"|"pass"|"fail"|undefined } }
+    $("topic-list").innerHTML = analysis.questionSets.map((qs, ti) => {
+      const dots = POCScoring.AXIS_IDS.map((axis) => {
+        const st = (levelState[ti] || {})[axis];
+        return `<span class="dot ${st || ""}" title="${esc(POCScoring.AXES[axis].label)}"></span>`;
+      }).join("");
+      const cur = ti === currentTopicIndex ? "cur" : "";
+      return `<div class="tprow ${cur}"><span>${ti + 1}. ${esc(qs.topic.title)}</span><span class="dots">${dots}</span></div>`;
+    }).join("");
+  }
+
+  function renderCodePanel(qs) {
+    $("code-ref").textContent = CodeFragment.formatRef(qs.code_ref);
+    $("code-frag").textContent = qs.code_block || "(근거 코드 없음)";
+  }
+
+  function getAnswer({ topic, axis, question, hintsUsed, hintText }) {
+    const axisLabel = POCScoring.AXES[axis].label;
+    const hintHtml = hintText ? `<div class="hint">힌트 ${hintsUsed}: ${esc(hintText)}</div>` : "";
+    appendBubble(`<div class="axis">${esc(axisLabel)}</div>${esc(question)}${hintHtml}`, "bot");
+    submitBtn.disabled = false;
+    inputEl.disabled = false;
+    inputEl.focus();
+    return new Promise((resolve) => { answerResolver = resolve; });
+  }
+
+  function submitAnswer() {
+    const val = inputEl.value.trim();
+    if (!val || !answerResolver) return;
+    inputEl.value = "";
+    submitBtn.disabled = true;
+    inputEl.disabled = true;
+    appendBubble(esc(val), "user");
+    const r = answerResolver;
+    answerResolver = null;
+    r(val);
+  }
+  submitBtn.addEventListener("click", submitAnswer);
+  inputEl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitAnswer(); }
+  });
+
+  async function run() {
+    analysis = POCState.loadAnalysis();
+    if (!analysis) {
+      $("error-box").textContent = "코드 분석 결과가 없습니다 -- 2단계부터 다시 진행하세요.";
+      $("error-box").classList.remove("hidden");
+      return;
+    }
+    await POCStage.ensureManifestLoaded();
+    $("layout").style.display = "grid";
+
+    const levelState = {};
+    analysis.questionSets.forEach((_, i) => { levelState[i] = {}; });
+    renderTopicList(0, null, levelState);
+
+    const session = await POCEngine.runSessionStage(analysis, {
+      onProgress: () => {},
+      onStatus: () => {},
+      onTopicStart: ({ index, topic }) => {
+        renderCodePanel(analysis.questionSets[index]);
+        appendBubble(`문제 ${index + 1}: ${esc(topic.title)}`, "system");
+        renderTopicList(index, null, levelState);
+      },
+      onLevelResult: ({ topicIndex, axis, hintsUsed, score, passed }) => {
+        levelState[topicIndex][axis] = passed ? "pass" : (hintsUsed >= POCScoring.thresholds.maxHintsPerLevel ? "fail" : "now");
+        renderTopicList(topicIndex, axis, levelState);
+        const cls = passed ? "pass" : "fail-pending";
+        const label = passed
+          ? `✓ ${score}점 (통과, 힌트 ${hintsUsed}개 사용)`
+          : (hintsUsed >= POCScoring.thresholds.maxHintsPerLevel
+              ? `✕ ${score}점 (힌트 소진, 미달)`
+              : `${score}점 (미달 -- 힌트 제공 후 재시도)`);
+        appendBubble(label, `score ${passed ? "pass" : hintsUsed >= POCScoring.thresholds.maxHintsPerLevel ? "fail" : ""}`);
+      },
+      onTopicEnd: ({ index, outcome, failedAxis }) => {
+        if (outcome === "flagged_skipped") {
+          appendBubble(`이 문제는 질문 검증 실패로 건너뜁니다.`, "system");
+        } else if (failedAxis) {
+          appendBubble(`이 문제는 ${esc(POCScoring.AXES[failedAxis].label)}에서 종료됩니다 -- 다음 문제로 이동합니다.`, "system");
+        } else {
+          appendBubble(`문제 ${index + 1} 완료.`, "system");
+        }
+      },
+      getAnswer,
+    });
+
+    POCState.saveSession(session);
+    $("layout").style.display = "none";
+    $("done-box").classList.remove("hidden");
+  }
+
+  $("report-btn").addEventListener("click", () => { location.href = "report.html"; });
+
+  (async function init() {
+    try {
+      const member = await LabDB.currentMemberOrNull();
+      $("user-indicator").textContent = member ? member.email : "로그인 안 됨";
+    } catch (_) { $("user-indicator").textContent = "로그인 안 됨"; }
+    try {
+      await run();
+    } catch (err) {
+      console.error(err);
+      $("error-box").textContent = `오류: ${err.message}`;
+      $("error-box").classList.remove("hidden");
+    }
+  })();
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>보고서 · P04 통합 검증</title>
+<link rel="stylesheet" href="../shared/iz-tokens.css">
+<link rel="stylesheet" href="poc.css">
+<style>
+  .wrap { max-width: 900px; }
+  .card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-5); margin-bottom: var(--sp-4); }
+  .card h3 { font-size: var(--fs-base); margin-bottom: var(--sp-3); }
+  .matrix { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  .matrix th, .matrix td { border: 1px solid var(--c-border); padding: var(--sp-2) var(--sp-3); text-align: center; }
+  .matrix th { background: var(--c-surface-2); font-size: var(--fs-xs); }
+  .matrix td.title { text-align: left; font-weight: 600; }
+  .matrix .cell.pass { background: var(--c-success-soft); color: var(--c-success); }
+  .matrix .cell.fail { background: var(--c-danger-soft); color: var(--c-danger); }
+  .matrix .cell.na { color: var(--c-text-3); }
+  .gap { border-left: 3px solid var(--c-warning); padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); background: var(--c-warning-soft); border-radius: 0 var(--r-md) var(--r-md) 0; }
+  .strength { border-left: 3px solid var(--c-success); padding: var(--sp-2) var(--sp-3); margin-bottom: var(--sp-3); background: var(--c-success-soft); border-radius: 0 var(--r-md) var(--r-md) 0; }
+  .retest-item { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) 0; }
+</style>
+</head>
+<body>
+<div class="tapp">
+  <div class="ttop">
+    <div class="l">
+      <div class="brand"><span class="mk">◆</span>IZ 통합 검증 PoC</div>
+      <div class="tnav"><a href="index.html">1 제출</a><a href="analysis.html">2 코드 분석</a><a href="session.html">3 문답</a><a class="on">4 보고서</a></div>
+    </div>
+    <div class="r"><span id="user-indicator">-</span></div>
+  </div>
+  <div class="wrap">
+    <div id="error-box" class="alertwarn hidden"></div>
+    <div id="loading" style="text-align:center;padding:var(--sp-8);color:var(--c-text-3)">보고서 작성 중...</div>
+
+    <div id="results" class="hidden">
+      <div class="card">
+        <h3>요약</h3>
+        <p id="summary" style="font-size:var(--fs-sm);line-height:1.7;color:var(--c-text-2)"></p>
+      </div>
+
+      <div class="card">
+        <h3>문제 × 레벨 매트릭스</h3>
+        <div style="overflow-x:auto"><table class="matrix" id="matrix"></table></div>
+        <div class="fwarn" style="margin-top:var(--sp-2)">점수 뒤 괄호는 사용한 힌트 횟수. 미시도 레벨은 앞 레벨 실패로 건너뜀(X).</div>
+      </div>
+
+      <div class="card">
+        <h3>재시험 대상</h3>
+        <div id="retest"></div>
+      </div>
+
+      <div class="card">
+        <h3>잘한 점</h3>
+        <div id="strengths"></div>
+      </div>
+
+      <div class="card">
+        <h3>부족한 점 · 교안 참조</h3>
+        <div id="gaps"></div>
+      </div>
+
+      <div class="card">
+        <h3>요구사항 P/F</h3>
+        <div id="req-results"></div>
+      </div>
+
+      <div class="card">
+        <h3>자력 / 보조 해석</h3>
+        <p id="autonomy-note" style="font-size:var(--fs-sm);line-height:1.7;color:var(--c-text-2)"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="../shared/config.js"></script>
+<script src="../shared/db.js"></script>
+<script src="../shared/lab-core.js"></script>
+<script src="../shared/llm.js"></script>
+<script src="scoring-config.js"></script>
+<script src="teaches-source.js"></script>
+<script src="poc-state.js"></script>
+<script src="code-fragment.js"></script>
+<script src="llm-stage.js"></script>
+<script src="poc-engine.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => LabApp.escapeHtml(v);
+
+  function renderMatrix(matrix) {
+    const head = `<tr><th>문제</th>${POCScoring.AXIS_IDS.map((a) => `<th>${esc(POCScoring.AXES[a].label)}</th>`).join("")}</tr>`;
+    const rows = matrix.map((row) => {
+      const cells = row.cells.map((c) => {
+        if (!c.attempted) return `<td class="cell na">X</td>`;
+        return `<td class="cell ${c.passed ? "pass" : "fail"}">${c.score}점 (${c.hints})</td>`;
+      }).join("");
+      return `<tr><td class="title">${row.index + 1}. ${esc(row.title)}</td>${cells}</tr>`;
+    }).join("");
+    $("matrix").innerHTML = head + rows;
+  }
+
+  function renderRetest(retestTopics) {
+    if (!retestTopics.length) {
+      $("retest").innerHTML = `<div class="fwarn">재시험 대상 없음.</div>`;
+      return;
+    }
+    $("retest").innerHTML = retestTopics.map((r) =>
+      `<div class="retest-item"><span class="badge bad">재시험</span><b>${r.index + 1}. ${esc(r.title)}</b>
+        <span style="color:var(--c-text-3);font-size:var(--fs-xs)">${esc(POCScoring.AXES[r.failedAxis].label)}에서 힌트 소진 후 미달</span></div>`
+    ).join("");
+  }
+
+  function renderList(el, items, cls, render) {
+    if (!items || !items.length) { el.innerHTML = `<div class="fwarn">없음.</div>`; return; }
+    el.innerHTML = items.map((it) => `<div class="${cls}">${render(it)}</div>`).join("");
+  }
+
+  function renderResults(report) {
+    $("summary").textContent = report.llm.summary || "";
+    renderMatrix(report.matrix);
+    renderRetest(report.retestTopics);
+    renderList($("strengths"), report.llm.strengths, "strength", (s) =>
+      `<b>${esc(POCScoring.AXES[s.axis] ? POCScoring.AXES[s.axis].label : s.axis)}</b> — ${esc(s.detail)}`);
+    renderList($("gaps"), report.llm.gaps, "gap", (g) =>
+      `<b>${esc(POCScoring.AXES[g.axis] ? POCScoring.AXES[g.axis].label : g.axis)}</b> — ${esc(g.detail)}
+       ${g.study_pointer ? `<div style="margin-top:4px;font-size:var(--fs-xs);color:var(--c-text-3)">📖 참조: ${esc(g.study_pointer)}</div>` : ""}`);
+    const reqEl = $("req-results");
+    if (!report.requirementsResult.length) {
+      reqEl.innerHTML = `<div class="fwarn">요구사항 없음</div>`;
+    } else {
+      reqEl.innerHTML = report.requirementsResult.map((r) =>
+        `<div class="reqline" style="display:flex;gap:var(--sp-2);padding:4px 0"><span class="badge ${r.verdict === "P" ? "ok" : "bad"}">${r.verdict}</span>${esc(r.requirement)}</div>`
+      ).join("");
+    }
+    $("autonomy-note").textContent = report.llm.autonomy_note || "";
+
+    $("loading").classList.add("hidden");
+    $("results").classList.remove("hidden");
+  }
+
+  function showError(msg) {
+    $("loading").classList.add("hidden");
+    $("error-box").textContent = msg;
+    $("error-box").classList.remove("hidden");
+  }
+
+  async function run() {
+    const setup = POCState.loadSetup();
+    const analysis = POCState.loadAnalysis();
+    const session = POCState.loadSession();
+    if (!setup || !analysis || !session) {
+      showError("이전 단계 데이터가 없습니다 -- 1단계부터 다시 진행하세요.");
+      return;
+    }
+    await POCStage.ensureManifestLoaded();
+    try {
+      const report = await POCEngine.runReportStage(setup, analysis, session, { onProgress: (m) => { $("loading").textContent = m; } });
+      renderResults(report);
+    } catch (err) {
+      console.error(err);
+      showError(`오류: ${err.message}`);
+    }
+  }
+
+  (async function init() {
+    try {
+      const member = await LabDB.currentMemberOrNull();
+      $("user-indicator").textContent = member ? member.email : "로그인 안 됨";
+    } catch (_) { $("user-indicator").textContent = "로그인 안 됨"; }
+    run();
+  })();
+})();
+</script>
+</body>
+</html>
