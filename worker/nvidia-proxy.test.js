@@ -139,6 +139,8 @@ test("successful NVIDIA attempt records sanitized LangSmith usage metadata", asy
         NVIDIA_RATE_LIMITER: limiterBinding(),
         LANGSMITH_API_KEY: "langsmith-secret",
         LANGSMITH_PROJECT: "team-iz-nvidia-usage",
+        MODEL_INPUT_USD_PER_MILLION: "0.30",
+        MODEL_OUTPUT_USD_PER_MILLION: "1.20",
       },
       { waitUntil(promise) { waits.push(promise); } }
     );
@@ -156,6 +158,9 @@ test("successful NVIDIA attempt records sanitized LangSmith usage metadata", asy
   assert.equal(trace.outputs.usage_metadata.input_tokens, 120);
   assert.equal(trace.outputs.usage_metadata.output_tokens, 30);
   assert.equal(trace.outputs.usage_metadata.total_tokens, 150);
+  assert.equal(trace.outputs.usage_metadata.input_cost, 0.000036);
+  assert.equal(trace.outputs.usage_metadata.output_cost, 0.000036);
+  assert.equal(trace.outputs.usage_metadata.total_cost, 0.000072);
   assert.equal(trace.extra.metadata.ls_model_name, "minimaxai/minimax-m3");
   assert.equal(langSmithRequest.options.body.includes("private prompt"), false);
   assert.equal(langSmithRequest.options.body.includes("private response"), false);

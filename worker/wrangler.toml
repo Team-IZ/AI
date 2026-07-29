@@ -50,3 +50,8 @@ NVIDIA_RPM_LIMIT = "36"
 LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 LANGSMITH_PROJECT = "team-iz-nvidia-usage"
 LANGSMITH_ORGANIZATION_ID = "63acea55-f27c-429b-850f-63fb363f56b1"
+# MiniMax M3 serverless standard rate shown by Bitdeer/Deep Infra/OpenRouter/Together.
+# GMI Cloud alternative: 0.24 input / 0.96 output per 1M tokens.
+MODEL_INPUT_USD_PER_MILLION = "0.30"
+MODEL_OUTPUT_USD_PER_MILLION = "1.20"
+MODEL_PRICING_BASIS = "serverless-standard-2026-07-29"

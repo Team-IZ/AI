@@ -135,6 +135,11 @@ function nvidiaRpmLimit(env) {
   return Math.min(positiveInt(env.NVIDIA_RPM_LIMIT, DEFAULT_NVIDIA_RPM_LIMIT), MAX_NVIDIA_RPM_LIMIT);
 }
 
+function nonNegativeNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -214,7 +219,7 @@ function parseNvidiaRequest(body) {
   }
 }
 
-function parseNvidiaUsage(responseText) {
+function parseNvidiaUsage(responseText, env) {
   try {
     const parsed = JSON.parse(responseText);
     const usage = parsed && parsed.usage;
@@ -228,6 +233,15 @@ function parseNvidiaUsage(responseText) {
     if (Number.isFinite(totalTokens)) metadata.total_tokens = totalTokens;
     else if (Number.isFinite(inputTokens) && Number.isFinite(outputTokens)) {
       metadata.total_tokens = inputTokens + outputTokens;
+    }
+    // Screenshot-confirmed serverless benchmark rate for MiniMax M3. Keep the prices in
+    // Worker vars so switching to GMI Cloud's lower $0.24/$0.96 tier does not need code.
+    const inputUsdPerMillion = nonNegativeNumber(env.MODEL_INPUT_USD_PER_MILLION, 0.30);
+    const outputUsdPerMillion = nonNegativeNumber(env.MODEL_OUTPUT_USD_PER_MILLION, 1.20);
+    if (Number.isFinite(inputTokens)) metadata.input_cost = (inputTokens / 1_000_000) * inputUsdPerMillion;
+    if (Number.isFinite(outputTokens)) metadata.output_cost = (outputTokens / 1_000_000) * outputUsdPerMillion;
+    if (Number.isFinite(metadata.input_cost) && Number.isFinite(metadata.output_cost)) {
+      metadata.total_cost = metadata.input_cost + metadata.output_cost;
     }
     return Object.keys(metadata).length ? metadata : null;
   } catch (e) {
@@ -280,6 +294,9 @@ async function sendLangSmithTrace(env, trace) {
         limiter_wait_ms: trace.limiterWaitMs,
         limiter_scope: "proxy-global",
         nvidia_key_fingerprint: trace.keyFingerprint,
+        model_pricing_basis: env.MODEL_PRICING_BASIS || "serverless-standard",
+        model_input_usd_per_million: nonNegativeNumber(env.MODEL_INPUT_USD_PER_MILLION, 0.30),
+        model_output_usd_per_million: nonNegativeNumber(env.MODEL_OUTPUT_USD_PER_MILLION, 1.20),
         ...(usageMetadata ? { usage_metadata: usageMetadata } : {}),
       },
     },
@@ -612,7 +629,7 @@ export default {
             finishedAt: Date.now(),
             httpStatus: upstream.status,
             status: "success",
-            usage: parseNvidiaUsage(text),
+            usage: parseNvidiaUsage(text, env),
           });
           await putIfNotTerminal(env, jobId, { status: "done", result: text });
           message.ack();
