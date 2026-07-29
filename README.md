@@ -172,17 +172,17 @@ cloudflared tunnel --url http://localhost:8000
     "snapshotMeta": { "contentHash": "…64자…", "fileCount": 42, "byteCount": 183920 },
     "appliedScope": "TOTAL", "scopeFallback": false, "fallbackReason": null,
     "commitSha": null,
-    "findings": [ /* decision_point 컬럼명 그대로. 아래 설명 */ ],
+    "problems": [ /* assessment_problem 컬럼명 그대로. 아래 설명 */ ],
     "questionCountPlanned": 3
   },
   "aiUsage": []
 }
 ```
 
-`findings[]`는 DB `decision_point`(+ `dp_reference`) 테이블에 대응하므로 **컬럼 이름을 그대로 쓴다.**
+`problems[]`는 DB `assessment_problem`(+ `problem_reference`) 테이블에 대응하므로 **컬럼 이름을 그대로 쓴다.**
 
 ```
-dpId, type, status, priority, focusCode, sourcePath, lineStart, lineEnd,
+problemId, type, status, priority, focusCode, sourcePath, lineStart, lineEnd,
 evidenceHash, extractorVersion,
 references[{ path, lineStart, lineEnd, evidenceHash, referenceType }]
 ```
@@ -194,7 +194,7 @@ references[{ path, lineStart, lineEnd, evidenceHash, referenceType }]
 ```jsonc
 // POST /api/v0/sessions          → 201
 { "attemptId": "att-1", "analysisJobId": "1b40467e-...",
-  "selectedFindingIds": ["dp-1","dp-2","dp-3"],   // 생략 시 전체
+  "selectedProblemIds": ["prob-1","prob-2","prob-3"],   // 생략 시 전체
   "timeLimitSec": 2400 }
 
 // POST /api/v0/sessions/{id}/answers
@@ -205,12 +205,12 @@ references[{ path, lineStart, lineEnd, evidenceHash, referenceType }]
   "sessionId": "sess-abc",
   "state": "IN_PROGRESS",                    // IN_PROGRESS|COMPLETED|TIMEOUT|FAILED
   "current": {
-    "dpId": "dp-1", "depthLevel": "L3", "sequenceNo": 5,
+    "problemId": "prob-1", "axisCode": "L3_COUNTEREXAMPLE", "sequenceNo": 5,
     "questionText": "…",
     "codeContext": { "path": "src/Solver.java", "lineStart": 42, "lineEnd": 58, "snippet": "…" }
   },
-  "progress": { "dpIndex": 1, "dpTotal": 3 },
-  "transcript": [ { "dpId": "dp-1", "depthLevel": "L1",
+  "progress": { "problemIndex": 1, "problemTotal": 3 },
+  "transcript": [ { "problemId": "prob-1", "axisCode": "L1_CODE_DESCRIPTION",
                     "questionText": "…", "answerText": "…", "answeredAt": "…" } ],
   "aiUsage": []
 }

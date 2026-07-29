@@ -23,16 +23,17 @@ class StubAnalysisEngine:
             "scope_fallback": False,
             "fallback_reason": None,
             "commit_sha": "0123456789abcdef0123456789abcdef01234567",
-            # findings 각 항목은 DB decision_point 테이블 컬럼명을 쓴다.
-            # (예전 findingId/sourcePath 같은 임의 이름 → 실제 컬럼명으로 교정)
+            # problems 각 항목은 DB assessment_problem 테이블 컬럼명을 쓴다.
+            # (예전 finding/dp 어휘 → assessment_problem 컬럼명으로 교정)
             # type/reference_type 문자열 값은 카탈로그 미정(B-3)이라 잠정값.
-            "findings": [
+            "problems": [
                 {
-                    "dp_id": "00000000-0000-0000-0000-0000000000dp",
+                    "problem_id": "00000000-0000-0000-0000-000000000002",
                     "type": "CODE_RISK",        # 잠정값
                     "status": "OPEN",
                     "priority": 1,
-                    "focus_code": "hardcoded-secret",
+                    # 코드 서식은 영문 대문자·숫자·밑줄 (DB 코드 컬럼 규약)
+                    "focus_code": "HARDCODED_SECRET",
                     "source_path": "app/main.py",
                     "line_start": 12,
                     "line_end": 14,

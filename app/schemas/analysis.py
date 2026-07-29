@@ -56,7 +56,7 @@ class SnapshotMeta(BaseSchema):
 class AnalysisResult(BaseSchema):
     """분석이 성공했을 때의 결과 본문.
 
-    findings 각 항목의 내부 구조는 팀원 엔진 결과에 따라 바뀌므로
+    problems 각 항목의 내부 구조는 팀원 엔진 결과에 따라 바뀌므로
     dict로 열어둔다(PLAN §3 C7). 최상위 필드만 계약으로 고정한다.
     """
 
@@ -66,8 +66,8 @@ class AnalysisResult(BaseSchema):
     scope_fallback: bool = Field(description="요청 범위를 못 지켜 TOTAL로 물러났는지")
     fallback_reason: str | None = None
     commit_sha: str | None = None
-    findings: list[dict[str, Any]] = Field(default_factory=list)
-    question_count_planned: int = Field(description="계획된 질문 수. 유효 DP가 적으면 축소된다")
+    problems: list[dict[str, Any]] = Field(default_factory=list)
+    question_count_planned: int = Field(description="계획된 질문 수. 유효 문제가 적으면 축소된다")
     
 class AnalysisJobStatus(BaseSchema):
     """GET /analyses/{jobId} 응답.

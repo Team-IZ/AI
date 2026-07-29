@@ -62,7 +62,7 @@ def test_hint_cap_lowers_recorded_score():
 
 def test_unreached_level_has_no_score():
     """도달 못 한 레벨은 reached=false이고 점수가 비어 있다."""
-    # dp-stub-3은 L1에서 끝난다 → L2~L4 미도달
+    # prob-stub-3은 L1에서 끝난다 → L2~L4 미도달
     levels = _result()["summary"]["questions"][2]["levels"]
 
     assert levels[0]["reached"] is True
@@ -80,7 +80,7 @@ def test_retest_targets_match_l1_failures():
     assert questions[0]["needsRetest"] is False   # 완주
     assert questions[1]["needsRetest"] is False   # L2에서 종료
     assert questions[2]["needsRetest"] is True    # L1에서 종료
-    assert result["retestTargets"] == ["dp-stub-3"]
+    assert result["retestTargets"] == ["prob-stub-3"]
 
 
 def test_failed_at_marks_where_question_ended():

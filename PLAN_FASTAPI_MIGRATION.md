@@ -47,7 +47,7 @@
 | # | 내용 | 막는 것 |
 |---|---|---|
 | **Q0-1** | AI 연동을 새 bounded context로 열 것인가 | 백엔드 쪽 착수 구조. 아래 §백엔드 현황 |
-| **Q4-1** | `decision_point` 1:N 질문 — `dp_question` 신설 가능한가 | 사전 생성 질문·힌트(L1~L4 × 힌트 2)를 실을 자리. T2 |
+| **Q4-1** | `assessment_problem` 1:N 질문 — `problem_stage` 신설 가능한가 | 사전 생성 질문·힌트(L1~L4 × 힌트 2)를 실을 자리. T2 |
 | **Q7-1** | `ai_usage.feature_code` CHECK에 `CODE_ANALYSIS`·`QUESTION_GENERATION` 추가 가능한가 | 현재 허용값 4개에 **코드 분석·질문 생성이 없다.** T3b |
 | **Q7-3** | `idempotency_key`에 AI가 호출마다 발급한 uuid4를 쓸 것인가 | UNIQUE 제약. 한 요청에 LLM 호출이 6번이라 헤더 키를 그대로 쓰면 충돌. DDL 변경은 없다. T3b |
 
@@ -73,7 +73,7 @@ operations    AI 사용량·비용·스토리지·운영 설정      ← ai_usag
 **우리 계획에 영향 주는 것 셋**
 
 1. **`ai_usage`는 이미 있다.** `operations/domain/AiUsage.java`·`AiModel.java`, `infrastructure/AiUsageRepository.java`·`OrgAiCostTotal.java`. 조회는 구현돼 있고 **쓰기 경로만 없다.** `AiModel`이 있으므로 `modelCode → model_id` 조회가 실제로 가능하고, 단가·비용을 Spring이 계산하자는 제안도 `OrgAiCostTotal`이 이미 비용을 집계하고 있어 자연스럽게 맞는다
-2. **`analysis_job`·`decision_point`·`assessment_session`·`session_turn`·보고서 도메인이 통째로 없다.** 새 컨텍스트를 여는 작업이라 백엔드 착수 비용이 작지 않다 — 우리 요청을 최소로 유지하고 제안 DDL을 그대로 붙여준 판단이 맞았다
+2. **`analysis_job`·`assessment_problem`·`assessment_session`·`session_turn`·보고서 도메인이 통째로 없다.** 새 컨텍스트를 여는 작업이라 백엔드 착수 비용이 작지 않다 — 우리 요청을 최소로 유지하고 제안 DDL을 그대로 붙여준 판단이 맞았다
 3. **JDBC 직접 사용(JPA 자동 DDL 아님).** 테이블마다 DDL과 `Jdbc*Repository`를 손으로 써야 한다. 컬럼을 하나 늘리는 것도 공짜가 아니므로 **스키마 요청을 늘리지 않는다**
 
 `GlobalExceptionHandler` + `ErrorResponse`가 이미 있는 것도 확인됐다. 우리 에러 계약(`{error, message, retryable}` 평탄 구조)이 그 DTO로 그대로 역직렬화되도록 맞춰둔 것이 유효하다.
@@ -103,7 +103,7 @@ operations    AI 사용량·비용·스토리지·운영 설정      ← ai_usag
 ```python
 report_markdown: str
 curriculum_refs: list[dict]   # [{teachId, unitId, sourcePages}] 부족 파트 → 교안 위치
-retest_targets: list[str]     # [dpId]
+retest_targets: list[str]     # [problemId]
 summary: dict                 # 문제×레벨 점수 매트릭스
 ```
 
@@ -121,7 +121,7 @@ summary: dict                 # 문제×레벨 점수 매트릭스
 requirements: list[dict] = []      # [{id, text}] 구현 P/F 체크리스트
 teaches: list[dict] = []           # [{id, label, unitId, sourcePages}] 3개
 curriculum_id: str | None = None
-question_budget: int = 3           # 의미 변경: "뽑을 DP 후보 수"
+question_budget: int = 3           # 의미 변경: "뽑을 문제 후보 수"
 ```
 
 응답에 추가
@@ -129,8 +129,8 @@ question_budget: int = 3           # 의미 변경: "뽑을 DP 후보 수"
 ```python
 analysis_documents: list[dict]     # [{kind, content}]  ← 처음부터 배열로 둔다
 requirement_results: list[dict]    # [{id, status: PASS|FAIL, evidence}]
-# findings[] 각 항목에
-#   prepared_questions: [{depthLevel, questionText, hints: [{level, text}] , flagged}]
+# problems[] 각 항목에
+#   prepared_questions: [{axisCode, questionText, hints: [{level, text}] , flagged}]
 ```
 
 **`analysis_documents`를 배열로 두는 이유**: 현재 PoC는 문서 1개지만 4종 고도화가 예고돼 있다. 나중에 단수→복수로 바꾸면 계약이 깨진다.
@@ -281,7 +281,7 @@ GET  /api/v0/curricula/{jobId}  → {teaches: [{id, label, unitId, sourcePages}]
 **스테이지 구성** (전부 LLM)
 
 ```
-p04-1  코드 분석 문서        입력: teaches + findings + code
+p04-1  코드 분석 문서        입력: teaches + problems + code
 p04-2  요구사항 P/F 판정
 p04-3  문제 3개 선정
 p04-4  L1~L4 질문 + 고정 힌트 생성   문제당 1콜
@@ -303,7 +303,7 @@ p04-6  보고서
 
 백엔드가 매 턴 저장한다면 FastAPI가 세션을 또 들고 있을 이유가 약하다. 전환하면 `app/sessions.py` 저장소와 `POST /sessions/{id}/restore`가 통째로 사라진다(모든 요청이 곧 restore가 되므로).
 
-대가는 payload다. `/answers` 요청에 `transcript` + `findings` + 분석 문서를 매번 실어야 해서 후반 턴이 약 32KB로 커진다. 서비스 간 내부 통신이라 무시할 수준이지만 **계약이 바뀌므로 백엔드 합의가 필요하다.**
+대가는 payload다. `/answers` 요청에 `transcript` + `problems` + 분석 문서를 매번 실어야 해서 후반 턴이 약 32KB로 커진다. 서비스 간 내부 통신이라 무시할 수준이지만 **계약이 바뀌므로 백엔드 합의가 필요하다.**
 
 `../output_docs/미결_논의사항.md` §2에 올려뒀다. 합의 전에는 착수하지 않는다.
 
@@ -318,7 +318,7 @@ p04-6  보고서
 ```
 경로 prefix   /api/v0
 필드 표기     camelCase (내부는 snake_case, 직렬화만 변환)
-              단 findings[] 내부는 DB 컬럼명을 그대로 쓴다
+              단 problems[] 내부는 DB 컬럼명을 그대로 쓴다
 에러          {error, message, retryable}  평탄 구조. timestamp·path 안 씀
 헤더 3종      X-Internal-Key(인증, health 면제) · Idempotency-Key(submissionId:attemptNo) · X-Trace-Id
 analysisId    Spring이 발급. AI는 만들지도 받지도 않는다
@@ -330,7 +330,7 @@ analysisId    Spring이 발급. AI는 만들지도 받지도 않는다
 
 ```
 analysis_job.status        QUEUED, RUNNING, SUCCEEDED, PARTIAL, FAILED
-decision_point.status      CANDIDATE, READY, USED, SKIPPED, INVALID
+assessment_problem.status  CANDIDATE, READY, USED, SKIPPED, INVALID
 assessment_session.status  READY, IN_PROGRESS, PAUSED, TIMEOUT, COMPLETED, ABANDONED, FAILED
 session_turn.state         PENDING, ANSWERED, SKIPPED, SAVED
 submission.method          GITHUB_URL, ZIP_WITH_GITLOG
@@ -344,7 +344,7 @@ submission.method          GITHUB_URL, ZIP_WITH_GITLOG
 | `code_snapshot` | `content_hash`, `file_count`, `byte_count` |
 | `commit_attribution` | `commit_hash`, `authored_at`, `changed_line_count`, `contribution_ratio` |
 | `file_attribution` | `path`, `attribution_type`, `commit_count`, `changed_line_count`, `changed_function_count`, `confidence` |
-| `decision_point` | `source_path`, `line_start`, `line_end`, `evidence_hash`, `priority`, `extractor_version` |
+| `assessment_problem` | `source_path`, `line_start`, `line_end`, `evidence_hash`, `priority`, `extractor_version` |
 
 ### 채점 (P04, `scoring-config.js` 실측)
 

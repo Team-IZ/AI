@@ -618,14 +618,14 @@
         }
       }
     },
-    "/api/v0/gradings": {
+    "/api/v0/reports": {
       "post": {
         "tags": [
-          "gradings"
+          "reports"
         ],
-        "summary": "세션 transcript 5축 후채점 요청",
-        "description": "채점 요청 접수하고 즉시 202. 실제 채점은 백그라운드에서",
-        "operationId": "create_grading_api_v0_gradings_post",
+        "summary": "세션 결과로 보고서 생성 요청",
+        "description": "요청을 접수하고 즉시 202. 실제 생성은 백그라운드에서.",
+        "operationId": "create_report_api_v0_reports_post",
         "parameters": [
           {
             "name": "x-internal-key",
@@ -649,7 +649,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GradingRequest"
+                "$ref": "#/components/schemas/ReportRequest"
               }
             }
           }
@@ -660,7 +660,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GradingAccepted"
+                  "$ref": "#/components/schemas/ReportAccepted"
                 }
               }
             }
@@ -678,13 +678,13 @@
         }
       }
     },
-    "/api/v0/gradings/{job_id}": {
+    "/api/v0/reports/{job_id}": {
       "get": {
         "tags": [
-          "gradings"
+          "reports"
         ],
-        "summary": "채점 상태·점수·근거 조회",
-        "operationId": "get_grading_api_v0_gradings__job_id__get",
+        "summary": "보고서 상태·점수 매트릭스·교안 참조 조회",
+        "operationId": "get_report_api_v0_reports__job_id__get",
         "parameters": [
           {
             "name": "job_id",
@@ -718,7 +718,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GradingJobStatus"
+                  "$ref": "#/components/schemas/ReportJobStatus"
                 }
               }
             }
@@ -917,18 +917,18 @@
             ],
             "title": "Commitsha"
           },
-          "findings": {
+          "problems": {
             "items": {
               "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
-            "title": "Findings"
+            "title": "Problems"
           },
           "questionCountPlanned": {
             "type": "integer",
             "title": "Questioncountplanned",
-            "description": "계획된 질문 수. 유효 DP가 적으면 축소된다"
+            "description": "계획된 질문 수. 유효 문제가 적으면 축소된다"
           }
         },
         "type": "object",
@@ -940,7 +940,7 @@
           "questionCountPlanned"
         ],
         "title": "AnalysisResult",
-        "description": "분석이 성공했을 때의 결과 본문.\n\nfindings 각 항목의 내부 구조는 팀원 엔진 결과에 따라 바뀌므로\ndict로 열어둔다(PLAN §3 C7). 최상위 필드만 계약으로 고정한다."
+        "description": "분석이 성공했을 때의 결과 본문.\n\nproblems 각 항목의 내부 구조는 팀원 엔진 결과에 따라 바뀌므로\ndict로 열어둔다(PLAN §3 C7). 최상위 필드만 계약으로 고정한다."
       },
       "AnswerSubmit": {
         "properties": {
@@ -961,64 +961,6 @@
         ],
         "title": "AnswerSubmit",
         "description": "POST /sessions/{id}/answers 요청."
-      },
-      "AxisEvidence": {
-        "properties": {
-          "turnRef": {
-            "type": "integer",
-            "title": "Turnref"
-          },
-          "quoteText": {
-            "type": "string",
-            "title": "Quotetext"
-          },
-          "reason": {
-            "type": "string",
-            "title": "Reason"
-          }
-        },
-        "type": "object",
-        "required": [
-          "turnRef",
-          "quoteText",
-          "reason"
-        ],
-        "title": "AxisEvidence",
-        "description": "점수 근거. 답변 인용 필수 "
-      },
-      "AxisScore": {
-        "properties": {
-          "axisCode": {
-            "type": "string",
-            "enum": [
-              "CODE_UNDERSTANDING",
-              "DESIGN_LOGIC",
-              "ALTERNATIVE_COMPARISION",
-              "COUNTEREXAMPLE_RESPONSE",
-              "SELF_CORRECTION"
-            ],
-            "title": "Axiscode"
-          },
-          "score": {
-            "type": "integer",
-            "maximum": 5.0,
-            "minimum": 1.0,
-            "title": "Score"
-          },
-          "evidence": {
-            "items": {
-              "$ref": "#/components/schemas/AxisEvidence"
-            },
-            "type": "array",
-            "title": "Evidence"
-          }
-        },
-        "type": "object",
-        "required": [
-          "axisCode",
-          "score"
-        ],
-        "title": "AxisScore"
       },
       "CodeContext": {
         "properties": {
@@ -1067,7 +1009,206 @@
         ],
         "title": "ErrorResponse"
       },
-      "GradingAccepted": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "LevelScore": {
+        "properties": {
+          "axisCode": {
+            "type": "string",
+            "enum": [
+              "L1_CODE_DESCRIPTION",
+              "L2_DESIGN_LOGIC",
+              "L3_COUNTEREXAMPLE",
+              "L4_ALTERNATIVE"
+            ],
+            "title": "Axiscode"
+          },
+          "reached": {
+            "type": "boolean",
+            "title": "Reached",
+            "description": "이 레벨까지 진행했는지. false면 앞 레벨에서 끝났다"
+          },
+          "rawScore": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rawscore",
+            "description": "LLM 원점수"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score",
+            "description": "힌트 상한을 적용한 기록 점수"
+          },
+          "hintsUsed": {
+            "type": "integer",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Hintsused",
+            "default": 0
+          },
+          "autonomy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "SELF",
+                  "SELF_MAINTAINED",
+                  "PARTIAL"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autonomy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "axisCode",
+          "reached"
+        ],
+        "title": "LevelScore",
+        "description": "문제 하나의 레벨 하나. 도달하지 못한 레벨은 reached=false에 점수가 없다."
+      },
+      "Progress": {
+        "properties": {
+          "problemIndex": {
+            "type": "integer",
+            "title": "Problemindex"
+          },
+          "problemTotal": {
+            "type": "integer",
+            "title": "Problemtotal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemIndex",
+          "problemTotal"
+        ],
+        "title": "Progress"
+      },
+      "Question": {
+        "properties": {
+          "problemId": {
+            "type": "string",
+            "title": "Problemid"
+          },
+          "axisCode": {
+            "type": "string",
+            "enum": [
+              "L1_CODE_DESCRIPTION",
+              "L2_DESIGN_LOGIC",
+              "L3_COUNTEREXAMPLE",
+              "L4_ALTERNATIVE"
+            ],
+            "title": "Axiscode"
+          },
+          "sequenceNo": {
+            "type": "integer",
+            "title": "Sequenceno"
+          },
+          "questionText": {
+            "type": "string",
+            "title": "Questiontext"
+          },
+          "codeContext": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemId",
+          "axisCode",
+          "sequenceNo",
+          "questionText"
+        ],
+        "title": "Question",
+        "description": "지금 물어보는 질문 하나 "
+      },
+      "QuestionResult": {
+        "properties": {
+          "problemId": {
+            "type": "string",
+            "title": "Problemid"
+          },
+          "levels": {
+            "items": {
+              "$ref": "#/components/schemas/LevelScore"
+            },
+            "type": "array",
+            "title": "Levels"
+          },
+          "failedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "L1_CODE_DESCRIPTION",
+                  "L2_DESIGN_LOGIC",
+                  "L3_COUNTEREXAMPLE",
+                  "L4_ALTERNATIVE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failedat",
+            "description": "힌트를 소진하고도 미달로 끝난 축. 완주면 null"
+          },
+          "needsRetest": {
+            "type": "boolean",
+            "title": "Needsretest",
+            "description": "재시험 대상인지. 판정 기준은 AI 설정값"
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemId",
+          "levels",
+          "needsRetest"
+        ],
+        "title": "QuestionResult",
+        "description": "문제(DB assessment_problem) 하나의 결과. 레벨 4개를 순서대로 담는다."
+      },
+      "ReportAccepted": {
         "properties": {
           "jobId": {
             "type": "string",
@@ -1084,10 +1225,10 @@
           "jobId",
           "status"
         ],
-        "title": "GradingAccepted",
-        "description": "202 응답 "
+        "title": "ReportAccepted",
+        "description": "202 응답. 결과는 폴링으로 가져간다."
       },
-      "GradingJobStatus": {
+      "ReportJobStatus": {
         "properties": {
           "jobId": {
             "type": "string",
@@ -1108,8 +1249,8 @@
             "type": "string",
             "enum": [
               "QUEUED",
-              "GRADING",
-              "COMPELETED",
+              "RUNNING",
+              "SUCCEEDED",
               "PARTIAL",
               "FAILED"
             ],
@@ -1124,7 +1265,8 @@
                 "type": "null"
               }
             ],
-            "title": "Failurereason"
+            "title": "Failurereason",
+            "description": "FAILED일 때만 채워진다"
           },
           "startedAt": {
             "anyOf": [
@@ -1153,12 +1295,13 @@
           "result": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/GradingResult"
+                "$ref": "#/components/schemas/ReportResult"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "SUCCEEDED·PARTIAL일 때만"
           },
           "aiUsage": {
             "items": {
@@ -1174,10 +1317,10 @@
           "jobId",
           "status"
         ],
-        "title": "GradingJobStatus",
-        "description": "GET /gradings/{jobId} 응답\n\nstatus 분석 job과 다름: RUNNING 아니라 GRADING\nPARTIAL =  일부 축만 실패"
+        "title": "ReportJobStatus",
+        "description": "GET /reports/{jobId} 응답.\n\nstatus 값은 analysis_job.status와 같은 집합을 쓴다. 별도 어휘를 만들면\nSpring이 enum을 하나 더 들어야 하고 DB CHECK와도 어긋난다."
       },
-      "GradingRequest": {
+      "ReportRequest": {
         "properties": {
           "sessionId": {
             "anyOf": [
@@ -1208,44 +1351,110 @@
               "type": "object"
             },
             "type": "array",
-            "title": "Transcript"
+            "title": "Transcript",
+            "description": "점수가 이미 확정된 턴 기록"
+          },
+          "analysisDocuments": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Analysisdocuments",
+            "description": "[{kind, content}] 코드 분석 문서"
+          },
+          "teaches": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Teaches",
+            "description": "[{id, label, unitId, sourcePages}] 교안 참조용"
           }
         },
         "type": "object",
-        "title": "GradingRequest",
-        "description": "POST /gradings 요청. 세션 종료 후 transcript 전체를 채점 "
+        "title": "ReportRequest",
+        "description": "POST /reports 요청. 세션이 끝난 뒤 전사와 재료를 함께 넘긴다."
       },
-      "GradingResult": {
+      "ReportResult": {
         "properties": {
-          "axisScores": {
+          "reportMarkdown": {
+            "type": "string",
+            "title": "Reportmarkdown"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/ReportSummary"
+          },
+          "curriculumRefs": {
             "items": {
-              "$ref": "#/components/schemas/AxisScore"
+              "additionalProperties": true,
+              "type": "object"
             },
             "type": "array",
-            "title": "Axisscores"
+            "title": "Curriculumrefs",
+            "description": "[{teachId, unitId, sourcePages}] 부족한 파트 → 교안 위치"
           },
-          "totalScore": {
-            "type": "integer",
-            "title": "Totalscore"
-          },
-          "averageScore": {
-            "type": "number",
-            "title": "Averagescore"
+          "retestTargets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Retesttargets",
+            "description": "재시험 대상 problemId 목록"
           },
           "versions": {
-            "$ref": "#/components/schemas/GradingVersions"
+            "$ref": "#/components/schemas/ReportVersions"
           }
         },
         "type": "object",
         "required": [
-          "axisScores",
-          "totalScore",
-          "averageScore",
+          "reportMarkdown",
+          "summary",
           "versions"
         ],
-        "title": "GradingResult"
+        "title": "ReportResult",
+        "description": "보고서가 완성됐을 때의 본문."
       },
-      "GradingVersions": {
+      "ReportSummary": {
+        "properties": {
+          "questions": {
+            "items": {
+              "$ref": "#/components/schemas/QuestionResult"
+            },
+            "type": "array",
+            "title": "Questions"
+          },
+          "totalScore": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Totalscore",
+            "description": "기록 점수 합계"
+          },
+          "maxScore": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Maxscore",
+            "description": "문제 수 × 4레벨 × 5점"
+          },
+          "completedQuestions": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Completedquestions",
+            "description": "L4까지 완주한 문제 수"
+          }
+        },
+        "type": "object",
+        "required": [
+          "questions",
+          "totalScore",
+          "maxScore",
+          "completedQuestions"
+        ],
+        "title": "ReportSummary",
+        "description": "문제 × 레벨 점수 매트릭스와 총계. Spring의 report.summary에 대응."
+      },
+      "ReportVersions": {
         "properties": {
           "modelCode": {
             "type": "string",
@@ -1266,78 +1475,8 @@
           "promptVersion",
           "rubricVersion"
         ],
-        "title": "GradingVersions",
-        "description": "어떤 모델,프롬프트,루브릭으로 채점했는지. "
-      },
-      "HTTPValidationError": {
-        "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "type": "array",
-            "title": "Detail"
-          }
-        },
-        "type": "object",
-        "title": "HTTPValidationError"
-      },
-      "Progress": {
-        "properties": {
-          "dpIndex": {
-            "type": "integer",
-            "title": "Dpindex"
-          },
-          "dpTotal": {
-            "type": "integer",
-            "title": "Dptotal"
-          }
-        },
-        "type": "object",
-        "required": [
-          "dpIndex",
-          "dpTotal"
-        ],
-        "title": "Progress"
-      },
-      "Question": {
-        "properties": {
-          "dpId": {
-            "type": "string",
-            "title": "Dpid"
-          },
-          "depthLevel": {
-            "type": "string",
-            "title": "Depthlevel"
-          },
-          "sequenceNo": {
-            "type": "integer",
-            "title": "Sequenceno"
-          },
-          "questionText": {
-            "type": "string",
-            "title": "Questiontext"
-          },
-          "codeContext": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/CodeContext"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "type": "object",
-        "required": [
-          "dpId",
-          "depthLevel",
-          "sequenceNo",
-          "questionText"
-        ],
-        "title": "Question",
-        "description": "지금 물어보는 질문 하나 "
+        "title": "ReportVersions",
+        "description": "어떤 모델·프롬프트·루브릭으로 만들었는지. 재현성 근거."
       },
       "SessionRestore": {
         "properties": {
@@ -1380,13 +1519,13 @@
             "type": "array",
             "title": "Transcript"
           },
-          "findings": {
+          "problems": {
             "items": {
               "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
-            "title": "Findings"
+            "title": "Problems"
           },
           "source": {
             "anyOf": [
@@ -1441,13 +1580,13 @@
             "title": "Sessionid",
             "description": "Spring AssessmentSession 키(에코용)"
           },
-          "selectedFindingIds": {
+          "selectedProblemIds": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Selectedfindingids",
-            "description": "세션에 포함할 DP. 생략 시 전체"
+            "title": "Selectedproblemids",
+            "description": "세션에 포함할 문제. 생략 시 전체"
           },
           "timeLimitSec": {
             "type": "integer",
@@ -1547,13 +1686,19 @@
       },
       "TranscriptTurn": {
         "properties": {
-          "dpId": {
+          "problemId": {
             "type": "string",
-            "title": "Dpid"
+            "title": "Problemid"
           },
-          "depthLevel": {
+          "axisCode": {
             "type": "string",
-            "title": "Depthlevel"
+            "enum": [
+              "L1_CODE_DESCRIPTION",
+              "L2_DESIGN_LOGIC",
+              "L3_COUNTEREXAMPLE",
+              "L4_ALTERNATIVE"
+            ],
+            "title": "Axiscode"
           },
           "questionText": {
             "type": "string",
@@ -1570,8 +1715,8 @@
         },
         "type": "object",
         "required": [
-          "dpId",
-          "depthLevel",
+          "problemId",
+          "axisCode",
           "questionText",
           "answerText",
           "answeredAt"

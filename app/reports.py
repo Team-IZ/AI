@@ -49,9 +49,9 @@ def _stub_summary() -> ReportSummary:
 
     # (원점수, 힌트사용) — 도달한 레벨만. 나머지는 reached=false로 채운다.
     scripts: list[tuple[str, list[tuple[int, int]]]] = [
-        ("dp-stub-1", [(4, 0), (4, 1), (3, 0), (5, 2)]),  # 완주. L4는 상한 3에 걸린다
-        ("dp-stub-2", [(3, 0), (2, 2)]),                  # L2에서 힌트 소진 후 미달
-        ("dp-stub-3", [(2, 2)]),                          # L1에서 종료 → 재시험
+        ("prob-stub-1", [(4, 0), (4, 1), (3, 0), (5, 2)]),  # 완주. L4는 상한 3에 걸린다
+        ("prob-stub-2", [(3, 0), (2, 2)]),                  # L2에서 힌트 소진 후 미달
+        ("prob-stub-3", [(2, 2)]),                          # L1에서 종료 → 재시험
     ]
     caps = {0: 5, 1: 4, 2: 3}
     autonomy = {0: "SELF", 1: "SELF_MAINTAINED", 2: "PARTIAL"}
@@ -60,7 +60,7 @@ def _stub_summary() -> ReportSummary:
     total = 0
     completed = 0
 
-    for dp_id, reached in scripts:
+    for problem_id, reached in scripts:
         levels = []
         for i, axis in enumerate(axes):
             if i < len(reached):
@@ -89,7 +89,7 @@ def _stub_summary() -> ReportSummary:
 
         questions.append(
             {
-                "dp_id": dp_id, "levels": levels, "failed_at": failed_at,
+                "problem_id": problem_id, "levels": levels, "failed_at": failed_at,
                 # 재시험 기준: L1에서 막힌 문제만. scoring-config.js의 triggerAxis.
                 "needs_retest": failed_at == axes[0],
             }
@@ -107,7 +107,7 @@ def _stub_summary() -> ReportSummary:
 
 def _stub_result() -> ReportResult:
     summary = _stub_summary()
-    retest = [q.dp_id for q in summary.questions if q.needs_retest]
+    retest = [q.problem_id for q in summary.questions if q.needs_retest]
     return ReportResult(
         report_markdown="# [stub] 검증 보고서\n\n실제 보고서는 엔진 이식 후 생성됩니다.",
         summary=summary,

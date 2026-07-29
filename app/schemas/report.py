@@ -54,9 +54,9 @@ class LevelScore(BaseSchema):
 
 
 class QuestionResult(BaseSchema):
-    """문제(decision_point) 하나의 결과. 레벨 4개를 순서대로 담는다."""
+    """문제(DB assessment_problem) 하나의 결과. 레벨 4개를 순서대로 담는다."""
 
-    dp_id: str
+    problem_id: str
     levels: list[LevelScore]
     failed_at: AxisCode | None = Field(
         default=None, description="힌트를 소진하고도 미달로 끝난 축. 완주면 null"
@@ -91,7 +91,7 @@ class ReportResult(BaseSchema):
         description="[{teachId, unitId, sourcePages}] 부족한 파트 → 교안 위치",
     )
     retest_targets: list[str] = Field(
-        default_factory=list, description="재시험 대상 dpId 목록"
+        default_factory=list, description="재시험 대상 problemId 목록"
     )
     versions: ReportVersions
 

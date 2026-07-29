@@ -4,6 +4,7 @@
 라우터가 그걸 그대로 쓰는지 확인. 통과 = 9단계에서 라우터 안 건드리고 엔진 교체 가능.
 """
 
+import re
 from typing import Any
 
 import pytest
@@ -47,14 +48,16 @@ def test_stub_reflects_request_values():
     assert raw["snapshot_meta"]["byte_count"] == 10  # len(zip_bytes)
 
 
-def test_findings_use_decision_point_columns():
-    """finding이 DB 컬럼명(dp_id, source_path 등)을 쓰는지. 임의 이름이면 실패."""
+def test_problems_use_db_columns():
+    """problem이 DB 컬럼명(problem_id, source_path 등)을 쓰는지. 임의 이름이면 실패."""
     raw = StubAnalysisEngine().analyze({"extraction_scope": "TOTAL", "question_budget": 1})
-    finding = raw["findings"][0]
+    problem = raw["problems"][0]
 
-    assert "dp_id" in finding
-    assert "source_path" in finding
-    assert finding["references"][0]["reference_type"] == "PRIMARY"
+    assert "problem_id" in problem
+    assert "source_path" in problem
+    assert problem["references"][0]["reference_type"] == "PRIMARY"
+    # 코드 서식: 영문 대문자·숫자·밑줄. 소문자·하이픈이 다시 새어들어오면 실패한다.
+    assert re.fullmatch(r"[A-Z][A-Z0-9_]*", problem["focus_code"])
 
 
 def test_real_mode_raises_not_implemented(monkeypatch):
@@ -82,7 +85,7 @@ def test_router_uses_injected_engine():
                 "scope_fallback": False,
                 "fallback_reason": None,
                 "commit_sha": None,
-                "findings": [],
+                "problems": [],
                 "question_count_planned": 0,
             }
 
