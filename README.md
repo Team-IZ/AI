@@ -227,7 +227,7 @@ DB `ai_usage`(기관별 AI 호출·토큰·비용 원장)에 대응한다. **LLM
 ```jsonc
 "aiUsage": [
   {
-    "callId": "9f2c1e3a-…",          // uuid4. 호출마다 새로 발급 → DB idempotency_key
+    "idempotencyKey": "9f2c1e3a-…",   // uuid4. 호출마다 발급, 재시도 시 재사용
     "featureCode": "SESSION_DIALOG",  // CODE_ANALYSIS | QUESTION_GENERATION | GRADING
                                       // | SESSION_DIALOG | SUMMARY_DRAFT | CURRICULUM_ANALYSIS
     "modelCode": "glm-5.2",           // Spring이 ai_model 조회해 model_id 확보
@@ -239,6 +239,10 @@ DB `ai_usage`(기관별 AI 호출·토큰·비용 원장)에 대응한다. **LLM
   }
 ]
 ```
+
+**필드 이름이 DB 컬럼명과 1:1이다.** Spring은 매핑 고민 없이 그대로 INSERT하면 된다.
+
+DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputTokenCount`, 그리고 `status`가 `SUCCEEDED`면 `failureCode`는 null이고 `FAILED`·`PARTIAL`이면 반드시 채워진다.
 
 **단가·비용은 AI가 보내지 않는다.** AI가 모델 단가표를 들고 있으면 단가가 바뀔 때마다 재배포해야 한다. `ai_model` 테이블을 가진 Spring이 토큰 수에 곱한다.
 

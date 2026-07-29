@@ -12,8 +12,8 @@
 |---|---|
 | 엔드포인트 | 9/9 동작 (전부 스텁) |
 | 테스트 | 36 passed |
-| 다음 | **T1~T5 (계약 반영)** — 단 T1·T3은 백엔드 회신이 선행 조건 |
-| 막힌 것 | 백엔드 스키마 회신 (`../qna/2026-07-29/backend-schema-questions.md` S1·S2) |
+| 다음 | **T1~T5 (계약 반영).** 백엔드 회신을 기다리지 않고 진행한다 |
+| 막힌 것 | **T3b의 `featureCode` 값 확정뿐** — `ai_usage`는 이미 존재하는 테이블이라 CHECK 제약이 실제로 막는다 (Team-IZ/Backend#31) |
 
 ### 완료된 것
 
@@ -32,11 +32,15 @@
 
 ## 할 일
 
-### T0 — 백엔드 회신 받기 🔴 (T1·T3·T3b를 막고 있음)
+### T0 — 백엔드 회신 받기 (T3b만 막는다)
 
-**질문지**: `../qna/2026-07-29/backend-schema-questions.md`
+**이슈**: `Team-IZ/Backend#31` · 원본 질문지 `../qna/2026-07-29/backend-schema-questions.md`
 
 백엔드는 **AI 연동부를 아직 구현하지 않았다.** 그래서 질문지는 "이미 만들었나?"가 아니라 **"이 모양으로 만들어 달라"**는 스펙 요청 형태로 써 뒀다. 제안 DDL을 그대로 붙여 놓아서 백엔드가 판단만 하면 된다.
+
+> **회신 대기가 T1~T5를 막지 않는다.** 처음에는 "백엔드가 이미 5축 테이블을 만들었을 수 있다"는 전제로 전면 대기를 걸었으나, 코드 확인 결과 **AI 연동 도메인이 통째로 없다.** 아직 없는 테이블에 대한 항목은 우리가 먼저 확정하고 `openapi.json`을 주는 쪽이 순서상 맞다 — 백엔드는 그 스펙을 보고 만들면 된다.
+>
+> **진짜로 막히는 건 `ai_usage` 관련 둘(Q7-1·Q7-3)뿐이다.** 그 테이블은 이미 존재하므로 CHECK 제약과 UNIQUE 제약이 실제로 INSERT를 막는다. 나머지 8건은 제안대로 진행한다.
 
 **급한 것 넷**
 
@@ -45,13 +49,15 @@
 | **Q0-1** | AI 연동을 새 bounded context로 열 것인가 | 백엔드 쪽 착수 구조. 아래 §백엔드 현황 |
 | **Q4-1** | `decision_point` 1:N 질문 — `dp_question` 신설 가능한가 | 사전 생성 질문·힌트(L1~L4 × 힌트 2)를 실을 자리. T2 |
 | **Q7-1** | `ai_usage.feature_code` CHECK에 `CODE_ANALYSIS`·`QUESTION_GENERATION` 추가 가능한가 | 현재 허용값 4개에 **코드 분석·질문 생성이 없다.** T3b |
-| **Q7-3** | `idempotency_key`에 AI가 발급한 `callId`(uuid4)를 쓸 것인가 | UNIQUE 제약. 한 요청에 LLM 호출이 6번이라 헤더 키를 그대로 쓰면 충돌. T3b |
+| **Q7-3** | `idempotency_key`에 AI가 호출마다 발급한 uuid4를 쓸 것인가 | UNIQUE 제약. 한 요청에 LLM 호출이 6번이라 헤더 키를 그대로 쓰면 충돌. DDL 변경은 없다. T3b |
 
 나머지 7개(Q2-1 분석문서 저장 구조 · Q3-1 요구사항 테이블 · Q5-1 턴 점수 컬럼 · Q6-1 교안 테이블 · Q7-2 채점의 feature_code · Q7-4 failure_code 목록 · Q9-1 채점 결과 테이블)는 🟡.
 
 ### 백엔드 현황 (2026-07-29, 코드 분석 문서 기준)
 
-**AI 연동 도메인은 아직 없다.** bounded context 6개가 전부 사용자·조직·반·기수 관리다.
+> ⚠️ **이건 스냅샷이지 현재 상태가 아니다.** 근거는 코드 분석 문서 한 장이고 `develop` 기준으로 보인다. 백엔드는 **진행 중인 feature 브랜치가 따로 여러 개** 있고, 팀원 본인이 **명세서·구조 일부가 낡았다**고 말했다. 아래 판단(특히 "AI 연동 도메인이 없다")을 확정 사실로 쓰지 말고, 중요한 결정 전에는 최신 브랜치를 다시 확인하거나 팀원에게 물어라.
+
+**AI 연동 도메인은 아직 없다(스냅샷 기준).** bounded context 6개가 전부 사용자·조직·반·기수 관리다.
 
 ```
 auth          로그인·JWT·리프레시 토큰·계정 활성화·초대 수락
@@ -176,16 +182,33 @@ line_end: int | None = None
 
 ```python
 class AiUsage(BaseSchema):
-    call_id: str                  # uuid4. 호출마다 새로 발급 → DB idempotency_key
+    idempotency_key: str          # uuid4. 호출마다 새로 발급. 재시도 시에는 재사용
     feature_code: str             # 아래 매핑표
     model_code: str               # Spring이 ai_model 조회해 model_id 확보
-    input_token_count: int
-    output_token_count: int
-    cached_token_count: int = 0
+    input_token_count: int = Field(ge=0)
+    output_token_count: int = Field(ge=0)
+    cached_token_count: int = Field(default=0, ge=0)
     status: Literal["SUCCEEDED", "FAILED", "PARTIAL"]
     failure_code: str | None = None   # FAILED·PARTIAL이면 필수
-    latency_ms: int
+    latency_ms: int = Field(ge=0)
     occurred_at: datetime
+```
+
+**필드 이름을 DB 컬럼명과 1:1로 맞춘다.** 처음에 `callId`라는 이름을 새로 지었다가 백엔드가 "정의서에 없는 컬럼"으로 오해했다. 새 어휘를 만들 이유가 없다.
+
+**DB CHECK 제약 둘을 스키마가 강제해야 한다.** 어기면 Spring INSERT가 실패한다.
+
+```python
+@model_validator(mode="after")
+def _check_db_constraints(self):
+    # CHECK (cached_token_count >= 0 AND cached_token_count <= input_token_count)
+    if self.cached_token_count > self.input_token_count:
+        raise ValueError("cachedTokenCount는 inputTokenCount를 넘을 수 없습니다")
+    # CHECK ((status='SUCCEEDED' AND failure_code IS NULL)
+    #     OR (status IN ('FAILED','PARTIAL') AND failure_code IS NOT NULL))
+    if (self.status == "SUCCEEDED") != (self.failure_code is None):
+        raise ValueError("status와 failureCode가 짝이 맞지 않습니다")
+    return self
 ```
 
 **LLM 호출 1건 = 배열 원소 1개.** 코드 분석 응답이면 6개가 들어간다.
@@ -344,7 +367,7 @@ AI가 채우는 값과 Spring이 채우는 값이 갈린다. **경계를 넘지 
 
 | AI가 준다 | Spring이 채운다 |
 |---|---|
-| `callId` · `featureCode` · `modelCode` | `usage_id` · `org_id` · `actor_user_id` |
+| `idempotencyKey` · `featureCode` · `modelCode` | `usage_id` · `org_id` · `actor_user_id` |
 | `inputTokenCount` · `outputTokenCount` · `cachedTokenCount` | `source_type` · `source_id` · `request_id` · `trace_id` |
 | `status` · `failureCode` | `input_unit_price` · `output_unit_price` · `currency_code` |
 | `latencyMs` · `occurredAt` | `estimated_cost` · `actual_cost` · `created_at` |
@@ -360,7 +383,9 @@ AI가 채우는 값과 Spring이 채우는 값이 갈린다. **경계를 넘지 
 | 보고서 (p04-6) | `SUMMARY_DRAFT` | 있음 |
 | 교안 분석 (p01) | `CURRICULUM_ANALYSIS` | 있음 |
 
-**`idempotency_key`는 UNIQUE다.** 헤더의 `Idempotency-Key`(`submissionId:attemptNo`)는 요청 단위인데 한 요청에 LLM 호출이 6번이라 그대로 쓰면 충돌한다. **호출마다 `callId`를 uuid4로 새로 발급**해 그걸 쓰게 한다(Q7-3).
+**`idempotency_key`는 UNIQUE다.** 헤더의 `Idempotency-Key`(`submissionId:attemptNo`)는 요청 단위인데 한 요청에 LLM 호출이 6번이라 그대로 쓰면 충돌한다. **호출마다 uuid4를 새로 발급**해 그걸 보낸다(Q7-3). 재시도할 때는 **이미 만든 키를 재사용**해야 중복 판별이 성립한다.
+
+**`ai_model.model_code` 초기 목록에 `glm-5.2`가 이미 있다.** 별도 등록 없이 `modelCode`로 `model_id` 조회가 된다.
 
 **`failure_code` 초안** — `RATE_LIMITED` · `TIMEOUT` · `INVALID_JSON` · `CONTEXT_OVERFLOW` · `UPSTREAM_ERROR` (Q7-4로 승인 요청)
 
