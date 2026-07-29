@@ -3,24 +3,413 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>제출 · P04 통합 검증 PoC</title>
+<title>제출 · P04 통합 검증</title>
 <link rel="stylesheet" href="../shared/iz-tokens.css">
+<link rel="stylesheet" href="poc.css">
+<style>
+  .wrap { max-width: 760px; }
+  .teach-empty { font-size: var(--fs-xs); color: var(--c-text-3); padding: var(--sp-4); text-align: center; }
+  .teach-count { font-size: var(--fs-xs); font-weight: 600; }
+  .teach-count.over { color: var(--c-danger); }
+  .manual-toggle { background: transparent; border: 0; color: var(--c-primary); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; padding: 0; }
+</style>
 </head>
 <body>
-  <div class="viewport">
-    <div class="wrap" style="max-width:760px">
-      <h1 style="font-size:var(--fs-xl); margin-bottom:var(--sp-4)">P04 통합 검증 PoC</h1>
-      <p style="font-size:var(--fs-sm); color:var(--c-text-2); line-height:1.7">
-        교안 teaches → 코드 제출 → 코드 분석 → 문답(L1~L4) → 보고서 파이프라인.
-        <br>배포 배선 확인용 스켈레톤입니다 — 각 단계 화면은 순차적으로 채워집니다.
-      </p>
-      <ol style="font-size:var(--fs-sm); color:var(--c-text-2); line-height:2; margin-top:var(--sp-4); padding-left:1.2em">
-        <li>교안 teaches 선택 · 요구사항 P/F · 코드 제출 <span style="color:var(--c-text-3)">(이 페이지)</span></li>
-        <li>코드 분석 → 분석 문서 · P/F 결과 · 문제 3개 · 코드 파편 <span style="color:var(--c-text-3)">(analysis.html)</span></li>
-        <li>문답 — 문제당 L1→L2→L3→L4, 레벨당 힌트 최대 2회 <span style="color:var(--c-text-3)">(session.html)</span></li>
-        <li>보고서 — 교안 참조 · 재시험 대상 <span style="color:var(--c-text-3)">(report.html)</span></li>
-      </ol>
+<div class="tapp">
+  <div class="ttop">
+    <div class="l">
+      <div class="brand"><span class="mk">◆</span>IZ 통합 검증 PoC</div>
+      <div class="tnav"><a class="on">1 제출</a><a>2 코드 분석</a><a>3 문답</a><a>4 보고서</a></div>
     </div>
+    <div class="r"><span id="user-indicator">-</span></div>
   </div>
+  <div class="wrap">
+
+    <details class="settings" id="settings-panel">
+      <summary><span class="gear">⚙</span> 연결 설정 <span class="auth-status" id="auth-status" style="margin-left:auto;"></span></summary>
+      <div class="body">
+        <div class="field"><label>NVIDIA API 키 (코드 분석 문서·문답·채점에 사용)</label><input type="password" id="nvidia-key" placeholder="nvapi-..."></div>
+        <div class="field"><label>프록시 URL</label><input type="text" id="proxy-url"></div>
+        <div class="field">
+          <label>GitHub PAT (비공개 저장소만 필요)</label>
+          <input type="password" id="github-pat" placeholder="ghp_...">
+          <div class="hint" style="font-size:var(--fs-xs);color:var(--c-text-3);margin-top:var(--sp-2)">
+            발급: <a href="https://github.com/settings/tokens/new?scopes=repo&description=IZ%20P04" target="_blank" rel="noopener noreferrer" style="color:var(--c-primary);text-decoration:underline">github.com/settings/tokens/new</a>
+            — <b>repo</b>(공개 저장소만이면 <b>public_repo</b>) 스코프. API 한도도 60회/시간 → 5,000회/시간이 됩니다.
+          </div>
+        </div>
+        <label class="remember"><input type="checkbox" id="remember-session" checked> 이 탭에서 기억하기(다음 페이지로 넘어갈 때 필요)</label>
+        <div class="login-row">
+          <button class="login-btn hidden" id="google-login-btn" type="button">Google로 로그인</button>
+          <button class="logout-btn hidden" id="logout-btn" type="button">로그아웃</button>
+          <span class="login-status" id="login-status"></span>
+        </div>
+      </div>
+    </details>
+
+    <!-- ── 0단계 산출물 들여오기 ────────────────────────────────────────────── -->
+    <div class="step">
+      <div class="sh"><span class="n">0</span> 교안 <span class="meta">· 이미 분석된 교안에서 이번에 검증할 teaches를 고릅니다</span></div>
+
+      <div class="fld">
+        <div class="fl">교안 선택 <span class="hint">· 0단계(교안 분석) 결과</span></div>
+        <select class="inp" id="curriculum-select"><option value="">불러오는 중…</option></select>
+        <div class="fwarn" id="curriculum-note">
+          아직 분석된 교안이 없다면
+          <a href="../../curriculum-manager/" target="_blank" rel="noopener noreferrer" style="color:var(--c-primary);text-decoration:underline">교안 분석 도구</a>에서 먼저 PDF를 올려 분석하세요.
+          목록은 로그인해야 보입니다(팀 DB).
+        </div>
+      </div>
+
+      <div class="fld">
+        <div class="fl">
+          질문에 사용할 teaches <span class="req">필수</span>
+          <span class="hint">· 정확히 <b id="teach-required">3</b>개</span>
+          <span class="teach-count" id="teach-count" style="margin-left:auto">0 / 3</span>
+        </div>
+        <div class="curpick" id="teach-pick"><div class="teach-empty">교안을 먼저 선택하세요.</div></div>
+        <div class="fwarn">
+          고른 teach 하나가 문제 하나가 됩니다. 각 문제는 L1 코드기술 → L2 설계논리 → L3 반례·한계 → L4 대안 순으로 진행됩니다.
+          <button class="manual-toggle" id="manual-toggle" type="button">DB 없이 직접 입력</button>
+        </div>
+        <div id="manual-box" class="hidden" style="margin-top:var(--sp-3)">
+          <textarea class="inp" id="manual-teaches" placeholder='P01의 unit_map JSON을 그대로 붙여넣거나, [{"id":"...","name":"...","summary":"...","source_pages":[4,5]}] 형태의 배열을 붙여넣으세요'></textarea>
+          <button class="ghost" id="manual-apply" type="button" style="margin-top:var(--sp-2)">불러오기</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 요구사항 ──────────────────────────────────────────────────────────── -->
+    <div class="step">
+      <div class="sh"><span class="n">1</span> 요구사항 <span class="meta">· 제출 코드에 대해 P/F로 판정합니다 · 선택</span></div>
+      <div class="fld">
+        <div class="fl">필수 조건 <span class="hint">· 한 줄에 하나 · 실행 후 자동 판정</span></div>
+        <div class="reqrows" id="req-rows"></div>
+        <button class="addrow" id="req-add" type="button">+ 요구사항 추가</button>
+        <div class="fwarn">
+          "목적대로 제대로 했는가"를 조건별 P/F로 검증합니다. 근거를 코드에서 못 찾으면 F입니다 —
+          대체 구현(예: 지정한 DB 대신 다른 DB)도 F로 두고 비고에 무엇으로 대체됐는지 남깁니다.
+          비워도 진행됩니다(요구사항 검증만 생략).
+        </div>
+      </div>
+    </div>
+
+    <!-- ── 코드 제출 ─────────────────────────────────────────────────────────── -->
+    <div class="step">
+      <div class="sh"><span class="n">2</span> 코드 제출</div>
+      <div class="toggle" id="method-toggle">
+        <button type="button" class="on" data-method="pat">GitHub URL</button>
+        <button type="button" data-method="zip">ZIP</button>
+      </div>
+
+      <div id="method-pat">
+        <div class="fld"><div class="fl">저장소</div><input class="inp" type="text" id="repo-input" placeholder="owner/repo 또는 https://github.com/owner/repo"></div>
+        <div class="fld"><div class="fl">브랜치 <span class="hint">· 선택</span></div><input class="inp" type="text" id="branch-input" placeholder="비우면 기본 브랜치"></div>
+      </div>
+      <div id="method-zip" class="hidden">
+        <div class="dropzone" id="dropzone">여기로 .zip 파일을 드래그하거나 클릭해서 선택</div>
+        <input type="file" id="zip-input" accept=".zip" class="hidden">
+        <div class="fwarn" id="zip-status"></div>
+      </div>
+
+      <div class="fld" style="margin-top:var(--sp-4)">
+        <div class="fl">모델 <span class="hint">· 분석·질문 생성·채점 전부에 쓰입니다</span></div>
+        <div class="modelchips" id="model-chips"></div>
+        <div class="fwarn" id="model-note"></div>
+      </div>
+
+      <div id="submit-error" class="alertwarn hidden"></div>
+      <button class="cta" id="submit-btn">코드 분석 시작</button>
+    </div>
+
+  </div>
+</div>
+
+<script src="../shared/config.js"></script>
+<script src="../shared/db.js"></script>
+<script src="../shared/lab-core.js"></script>
+<script src="teaches-source.js"></script>
+<script src="poc-state.js"></script>
+<script src="llm-stage.js"></script>
+<script>
+(function () {
+  const REQUIRED_TEACHES = 3;
+
+  let curricula = [];
+  let teaches = [];               // 현재 교안의 전체 teach 목록
+  let selectedTeachIds = new Set();
+  let selectedCurriculum = null;  // {run_id, schema, ...} 또는 null(수동 입력)
+  let currentMethod = "pat";
+  let zipFiles = null;
+  let zipName = null;
+  let selectedModel = null;
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => LabApp.escapeHtml(v);
+
+  // ── 교안 ────────────────────────────────────────────────────────────────────
+  async function loadCurricula() {
+    const sel = $("curriculum-select");
+    try {
+      curricula = await TeachesSource.listCurricula();
+    } catch (err) {
+      curricula = [];
+    }
+    if (!curricula.length) {
+      sel.innerHTML = `<option value="">(분석된 교안 없음 — 로그인했는지 확인하세요)</option>`;
+      return;
+    }
+    sel.innerHTML = `<option value="">교안을 선택하세요</option>` + curricula.map((c, i) => {
+      const when = c.started_at ? String(c.started_at).slice(0, 10) : "";
+      const name = c.source_filename || "(파일명 미기록)";
+      return `<option value="${i}">${esc(name)} · ${esc(when)} · ${esc(c.source_label)}</option>`;
+    }).join("");
+  }
+
+  $("curriculum-select").addEventListener("change", async (e) => {
+    const idx = e.target.value;
+    selectedTeachIds.clear();
+    if (idx === "") { selectedCurriculum = null; teaches = []; renderTeaches(); return; }
+    selectedCurriculum = curricula[Number(idx)];
+    $("teach-pick").innerHTML = `<div class="teach-empty">교안 내용을 불러오는 중…</div>`;
+    try {
+      const unitMap = await TeachesSource.loadUnitMap(selectedCurriculum);
+      teaches = TeachesSource.toTeaches(unitMap);
+      if (!teaches.length) {
+        $("teach-pick").innerHTML = `<div class="teach-empty">이 교안에는 추출된 teach가 없습니다 — 교안 분석 도구에서 재분석이 필요합니다.</div>`;
+        return;
+      }
+    } catch (err) {
+      teaches = [];
+      $("teach-pick").innerHTML = `<div class="teach-empty">불러오기 실패: ${esc(err.message)}</div>`;
+      return;
+    }
+    renderTeaches();
+  });
+
+  function renderTeaches() {
+    const box = $("teach-pick");
+    if (!teaches.length) {
+      box.innerHTML = `<div class="teach-empty">교안을 먼저 선택하세요.</div>`;
+      updateTeachCount();
+      return;
+    }
+    const atLimit = selectedTeachIds.size >= REQUIRED_TEACHES;
+    box.innerHTML = teaches.map((t) => {
+      const on = selectedTeachIds.has(t.id);
+      // 상한에 도달하면 미선택 항목을 비활성 표시 -- 와이어프레임의 .dis와 같은 처리.
+      const dis = !on && atLimit;
+      const pages = TeachesSource.formatPages(t.source_pages.length ? t.source_pages : t.unit_pages);
+      return `<label class="curopt ${on ? "on" : ""} ${dis ? "dis" : ""}" data-teach="${esc(t.id)}">
+        <span class="ck">✓</span>
+        <div class="ci">
+          <b>${esc(t.name)}</b><span class="cv">Unit ${esc(t.unit_id)} · ${esc(pages)}</span>
+          <div class="cc">${esc(t.summary || t.unit_title || "")}</div>
+        </div>
+      </label>`;
+    }).join("");
+    updateTeachCount();
+  }
+
+  $("teach-pick").addEventListener("click", (e) => {
+    const el = e.target.closest("[data-teach]");
+    if (!el || el.classList.contains("dis")) return;
+    const id = el.dataset.teach;
+    if (selectedTeachIds.has(id)) selectedTeachIds.delete(id);
+    else if (selectedTeachIds.size < REQUIRED_TEACHES) selectedTeachIds.add(id);
+    renderTeaches();
+  });
+
+  function updateTeachCount() {
+    const el = $("teach-count");
+    el.textContent = `${selectedTeachIds.size} / ${REQUIRED_TEACHES}`;
+    el.classList.toggle("over", selectedTeachIds.size !== REQUIRED_TEACHES);
+  }
+
+  $("manual-toggle").addEventListener("click", () => $("manual-box").classList.toggle("hidden"));
+  $("manual-apply").addEventListener("click", () => {
+    const raw = $("manual-teaches").value.trim();
+    if (!raw) return;
+    try {
+      teaches = TeachesSource.parseManualTeaches(raw);
+      selectedCurriculum = null;
+      selectedTeachIds.clear();
+      $("curriculum-select").value = "";
+      renderTeaches();
+    } catch (err) {
+      showError(`teaches JSON 파싱 실패: ${err.message}`);
+    }
+  });
+
+  // ── 요구사항 ────────────────────────────────────────────────────────────────
+  function addReqRow(value = "") {
+    const row = document.createElement("div");
+    row.className = "reqrow";
+    row.innerHTML = `<input class="inp rk" type="text" placeholder="예: JWT 토큰 인증 사용">
+      <div class="rv">P / F 판정 대상</div>
+      <button class="del" type="button" title="삭제">✕</button>`;
+    row.querySelector(".rk").value = value;
+    row.querySelector(".del").addEventListener("click", () => row.remove());
+    $("req-rows").appendChild(row);
+  }
+  $("req-add").addEventListener("click", () => addReqRow());
+  addReqRow();
+
+  function collectRequirements() {
+    return [...$("req-rows").querySelectorAll(".rk")]
+      .map((el) => el.value.trim())
+      .filter(Boolean);
+  }
+
+  // ── 제출 방식 ───────────────────────────────────────────────────────────────
+  $("method-toggle").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-method]");
+    if (!btn) return;
+    currentMethod = btn.dataset.method;
+    document.querySelectorAll("#method-toggle button").forEach((b) => b.classList.toggle("on", b === btn));
+    $("method-pat").classList.toggle("hidden", currentMethod !== "pat");
+    $("method-zip").classList.toggle("hidden", currentMethod !== "zip");
+  });
+
+  const dropzone = $("dropzone");
+  const zipInput = $("zip-input");
+  dropzone.addEventListener("click", () => zipInput.click());
+  dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("drag-over"); });
+  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag-over"));
+  dropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    dropzone.classList.remove("drag-over");
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleZip(e.dataTransfer.files[0]);
+  });
+  zipInput.addEventListener("change", () => { if (zipInput.files[0]) handleZip(zipInput.files[0]); });
+
+  // ZIP 파싱은 P02Engine이 소유한다(vendored, 무수정). 여기서는 그 결과만 받아 IndexedDB에
+  // 넘긴다 -- 파싱 로직을 이 파일에 복제하면 그쪽이 고쳐져도 이쪽은 안 따라간다.
+  async function handleZip(file) {
+    zipName = file.name;
+    $("zip-status").textContent = `${file.name} 읽는 중…`;
+    try {
+      await ensureJsZip();
+      const parsed = await P02Engine.parseZipFile(file);
+      zipFiles = parsed.files;
+      $("zip-status").textContent = P02Engine.formatZipStatus(parsed, file.name);
+      const saved = await SessionState.saveZipFileMap(zipFiles);
+      if (saved && saved.ok === false) $("zip-status").textContent += " · 파일 캐시 저장 실패(문답 중 실시간 재확인 불가)";
+    } catch (err) {
+      zipFiles = null;
+      $("zip-status").textContent = `ZIP 읽기 실패: ${err.message}`;
+    }
+  }
+
+  // p02-engine.js/session-state.js는 이 페이지에서 ZIP 처리에만 필요하다 -- 미리 로드하지
+  // 않고 실제로 ZIP을 올릴 때 가져온다(GitHub 경로만 쓰는 사용자는 받을 이유가 없다).
+  let depsPromise = null;
+  function ensureJsZip() {
+    if (depsPromise) return depsPromise;
+    depsPromise = (async () => {
+      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
+        "sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG");
+      await loadScript("../shared/pyodide-shared.js");
+      await loadScript("../shared/session-state.js");
+      await loadScript("../shared/p02-engine.js");
+    })();
+    return depsPromise;
+  }
+  function loadScript(src, integrity) {
+    return new Promise((resolve, reject) => {
+      const el = document.createElement("script");
+      el.src = src;
+      if (integrity) { el.integrity = integrity; el.crossOrigin = "anonymous"; }
+      el.onload = resolve;
+      el.onerror = () => reject(new Error(`스크립트 로드 실패: ${src}`));
+      document.head.appendChild(el);
+    });
+  }
+
+  // ── 모델 ────────────────────────────────────────────────────────────────────
+  function renderModelChips() {
+    const box = $("model-chips");
+    if (!selectedModel) selectedModel = LabApp.MODEL_CHOICES[0] && LabApp.MODEL_CHOICES[0].id;
+    box.innerHTML = LabApp.MODEL_CHOICES.map((m) =>
+      `<button type="button" class="mchip ${m.id === selectedModel ? "on" : ""}" data-model="${esc(m.id)}">${esc(m.label)}<span class="tier">${esc(m.tier)}</span></button>`
+    ).join("");
+    const cur = LabApp.MODEL_CHOICES.find((m) => m.id === selectedModel);
+    $("model-note").textContent = cur ? cur.note : "";
+  }
+  $("model-chips").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-model]");
+    if (!btn) return;
+    selectedModel = btn.dataset.model;
+    renderModelChips();
+  });
+
+  // ── 제출 ────────────────────────────────────────────────────────────────────
+  function showError(msg) {
+    const el = $("submit-error");
+    el.textContent = msg;
+    el.classList.remove("hidden");
+  }
+  function clearError() { $("submit-error").classList.add("hidden"); }
+
+  $("submit-btn").addEventListener("click", async () => {
+    clearError();
+    if (selectedTeachIds.size !== REQUIRED_TEACHES) {
+      return showError(`teaches를 정확히 ${REQUIRED_TEACHES}개 선택하세요 (현재 ${selectedTeachIds.size}개).`);
+    }
+    if (!LabConfig.get("nvidia-key") || !LabConfig.get("proxy-url")) {
+      return showError("연결 설정에 NVIDIA API 키와 프록시 URL을 입력하세요 — 코드 분석 문서 생성부터 필요합니다.");
+    }
+    const submission = { method: currentMethod };
+    if (currentMethod === "pat") {
+      const repoInput = $("repo-input").value.trim();
+      if (!repoInput) return showError("저장소를 입력하세요 (owner/repo).");
+      submission.repoInput = repoInput;
+      submission.branch = $("branch-input").value.trim() || null;
+    } else {
+      if (!zipFiles) return showError("ZIP 파일을 먼저 올리세요.");
+      submission.zipName = zipName;
+    }
+
+    const chosen = teaches.filter((t) => selectedTeachIds.has(t.id));
+    const saved = POCState.saveSetup({
+      teaches: chosen,
+      curriculum: selectedCurriculum,
+      requirements: collectRequirements(),
+      submission,
+      model: selectedModel,
+    });
+    if (!saved.ok) return showError(saved.hint || `설정 저장 실패: ${saved.error && saved.error.message}`);
+    location.href = "analysis.html";
+  });
+
+  // ── 초기화 ──────────────────────────────────────────────────────────────────
+  (async function init() {
+    // P02Engine의 SKIP_DIRS 등 p02 파라미터 해석(LabApp.resolveParam)이 이 매니페스트를
+    // 필요로 한다 -- ZIP 파싱 단계에서부터 이미 쓰인다(isSkippedPath). 로드 전에 ZIP을
+    // 올리면 "Cannot read properties of null (reading 'pipelines')"로 죽는다.
+    // ensureManifestLoaded()를 쓰는 이유는 llm-stage.js의 D-poc8 주석 참고 -- 루트
+    // prompt_manifest.json(p02)과 app/prompt_manifest.json(p04)을 한 매니페스트로 합친다.
+    await POCStage.ensureManifestLoaded();
+    // config.js의 persistIfRemembered()는 checkbox의 "change" 이벤트에만 반응한다.
+    // "기억하기"가 마크업에서부터 checked라 사용자가 손대지 않으면 change가 한 번도 안
+    // 일어나 다음 페이지(analysis.html)로 넘어갈 때 키/URL이 비어 보인다 -- 원본
+    // trainee/submission.html의 동일 처리(제출 성공 조건 없음) 그대로 가져옴.
+    const rememberBox = document.getElementById("remember-session");
+    if (rememberBox && rememberBox.checked && !sessionStorage.getItem("lab_cfg_remember")) {
+      rememberBox.dispatchEvent(new Event("change"));
+    }
+    renderModelChips();
+    try {
+      const member = await LabDB.currentMemberOrNull();
+      $("user-indicator").textContent = member ? member.email : "로그인 안 됨";
+    } catch (_) {
+      $("user-indicator").textContent = "로그인 안 됨";
+    }
+    await loadCurricula();
+    // 카탈로그 갱신은 키가 있을 때만 의미가 있고 실패해도 무해하다(CURATED가 그대로 남음).
+    LabApp.refreshModelChoices().then(renderModelChips).catch(() => {});
+  })();
+})();
+</script>
 </body>
 </html>
