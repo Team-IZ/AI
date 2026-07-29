@@ -99,12 +99,22 @@ const POCScoring = (() => {
   // 레벨 실패 시 동작. "endQuestion" = 남은 레벨을 X로 남기고 다음 문제의 L1로.
   const onLevelFail = "endQuestion";
 
-  // 재시험 판정: 어느 레벨에서든 실패로 끝난 문제를 재시험 대상으로 표시한다.
-  // (명세의 "1번(완주)/2번(L2 실패)/3번(L1 실패) -> 3번 재시험"에서, 가장 이른 레벨에서
-  //  막힌 문제가 우선순위 1이 되도록 정렬 기준을 함께 둔다.)
+  // 재시험 판정: L1(코드 기술)에서 힌트를 소진하고도 실패로 끝난 문제만 재시험 대상이다.
+  //
+  // 사용자 원 예시로 역산한 규칙 (2026-07-28):
+  //   1번문제 (4,0/4,1/3,0/2,2) -- L1~L3 통과, L4는 힌트 소진 후 미달이지만 L4가 마지막
+  //     레벨이라 "다음 레벨을 건너뛴다"는 효과가 아예 없다 -- 자연 종료. 재시험 대상 아님.
+  //   2번문제 (3,0/2,2/X/X) -- L2에서 힌트 소진 후 미달, L3/L4는 X(건너뜀). 그래도
+  //     재시험 대상 아님 -- L1(코드를 설명하는 최소 단계)은 통과했다.
+  //   3번문제 (2,2/X/X/X) -- L1 자체에서 힌트 소진 후 미달. -> 재시험.
+  //   결론: "완주 못 함"이 재시험 기준이 아니라 "L1(가장 기초 단계)에서도 막힘"이 기준이다.
+  //   L2~L4 실패는 "상위 단계 미달"로 보고서에 남기되 재시험까지 요구하지 않는다.
+  //
+  // ★ 이 규칙은 사용자가 준 단일 예시에서 역산한 것이라 확정 사실이 아니라 가설이다 --
+  //   실제 세션이 쌓이면(예: L2에서 반복적으로 막히는 학생들의 재응시 성과) 재검증할 것.
   const retest = {
-    markFailedQuestions: true,
-    prioritizeBy: "earliestFailedLevel",
+    triggerAxis: "L1_코드기술",
+    note: "이 축에서 힌트 소진 후 미달로 끝난 문제만 재시험 대상. L2~L4 실패는 보고서에만 표시.",
   };
 
   // ★ 미측정 -- 실제 세션이 쌓이기 전에는 축별 변별력을 알 수 없어 균등으로 둔다.
@@ -154,9 +164,14 @@ const POCScoring = (() => {
     return i >= 0 && i < AXIS_IDS.length - 1 ? AXIS_IDS[i + 1] : null;
   }
 
+  /** @param {string|null} failedAxis  문제를 끝낸 축(끝까지 다 통과했으면 null) */
+  function needsRetest(failedAxis) {
+    return failedAxis === retest.triggerAxis;
+  }
+
   return {
     AXES, AXIS_IDS, thresholds, hintCaps, autonomy, onLevelFail, retest,
     axisWeights, axisWeightsProvenance,
-    capForHints, applyCap, autonomyFor, passed, buildRubricBlock, nextAxis,
+    capForHints, applyCap, autonomyFor, passed, buildRubricBlock, nextAxis, needsRetest,
   };
 })();

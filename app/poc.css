@@ -1,0 +1,109 @@
+/* P04 4개 페이지 공용 스타일.
+ *
+ * 토큰(--c-*, --sp-*, --fs-*, --r-*)은 shared/iz-tokens.css가 정의한다. 이 파일은 그 위에
+ * 얹는 컴포넌트만 갖는다 -- iz-tokens.css는 vendored(드리프트 검사 대상)라 고칠 수 없다.
+ *
+ * 컴포넌트 문법은 Team-IZ/Frontend의 매니저 화면 와이어프레임
+ * (docs/plan/screen/wireframe/manager/project-workspace.html)에서 가져왔다:
+ *   .fld/.fl/.inp        필드
+ *   .reqrows/.reqrow     요구사항 행 편집 + .addrow
+ *   .curpick/.curopt     교안 다중 선택 카드 (.on 선택됨 / .dis 선택 불가)
+ *   .fwarn               필드 하단 보조 설명
+ * 그 화면에만 있는 --c-nav* 토큰은 좌측 네비를 쓰지 않으므로 옮기지 않았다.
+ */
+
+/* ── 설정 패널 (code-qna submission.html과 동일 구조) ───────────────────────── */
+.settings { background: var(--c-surface-2); border: 1px solid var(--c-border); border-radius: var(--r-lg); margin-bottom: var(--sp-4); }
+.settings > summary { list-style: none; cursor: pointer; padding: var(--sp-3) var(--sp-4); display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); font-weight: 600; color: var(--c-text-2); }
+.settings > summary::-webkit-details-marker { display: none; }
+.settings[open] > summary { border-bottom: 1px solid var(--c-border); }
+.settings .body { padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
+.settings .field label { display: block; font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-2); margin-bottom: var(--sp-2); }
+.settings .field input[type="text"], .settings .field input[type="password"] {
+  width: 100%; height: 38px; border: 1px solid var(--c-border-strong); border-radius: var(--r-md);
+  padding: 0 var(--sp-3); font-size: var(--fs-sm); color: var(--c-text); background: #fff;
+}
+.settings .remember { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); color: var(--c-text-2); }
+.auth-status { font-size: var(--fs-xs); color: var(--c-text-3); }
+.auth-status.ok { color: var(--c-success); }
+.login-row { display: flex; align-items: center; gap: var(--sp-2); }
+.login-btn, .logout-btn { border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); border-radius: var(--r-md); padding: 7px 12px; font-size: var(--fs-xs); cursor: pointer; }
+.login-status { font-size: var(--fs-xs); color: var(--c-text-3); }
+
+/* ── 단계 카드 ──────────────────────────────────────────────────────────────── */
+.step { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-5); margin-bottom: var(--sp-4); }
+.step .sh { display: flex; align-items: center; gap: var(--sp-2); font-weight: 700; margin-bottom: var(--sp-4); }
+.step .sh .n { width: 22px; height: 22px; border-radius: 50%; background: var(--c-primary); color: #fff; font-size: 12px; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; }
+.step .sh .meta { font-weight: 400; font-size: var(--fs-xs); color: var(--c-text-3); }
+
+/* ── 필드 (와이어프레임 .fld/.fl/.inp) ──────────────────────────────────────── */
+.fld { margin-bottom: var(--sp-4); }
+.fl { font-size: var(--fs-xs); font-weight: 600; color: var(--c-text-2); margin-bottom: var(--sp-2); display: flex; align-items: center; gap: var(--sp-2); }
+.fl .hint { font-weight: 400; color: var(--c-text-3); }
+.fl .req { font-weight: 600; color: var(--c-danger); font-size: 11px; }
+.inp, select.inp { width: 100%; height: 40px; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); padding: 0 var(--sp-3); font-size: var(--fs-sm); color: var(--c-text); background: #fff; font-family: inherit; }
+textarea.inp { height: auto; min-height: 92px; padding: var(--sp-3); line-height: 1.6; resize: vertical; }
+.fwarn { font-size: var(--fs-xs); color: var(--c-text-3); line-height: 1.6; margin-top: var(--sp-2); }
+.fwarn.info { color: var(--c-info); }
+.fwarn.danger { color: var(--c-danger); }
+
+/* ── 교안 다중 선택 (와이어프레임 .curpick/.curopt) ─────────────────────────── */
+.curpick { display: flex; flex-direction: column; gap: var(--sp-2); max-height: 320px; overflow-y: auto; border: 1px solid var(--c-border); border-radius: var(--r-md); padding: var(--sp-3); background: var(--c-surface-2); }
+.curopt { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--c-border); border-radius: var(--r-md); background: #fff; cursor: pointer; }
+.curopt:hover { border-color: var(--c-border-strong); }
+.curopt.on { border-color: var(--c-primary); background: var(--c-primary-soft); }
+.curopt.dis { opacity: .55; cursor: not-allowed; }
+.curopt .ck { width: 18px; height: 18px; border-radius: 5px; border: 1px solid var(--c-border-strong); background: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 12px; color: transparent; flex: 0 0 auto; margin-top: 1px; }
+.curopt.on .ck { background: var(--c-primary); border-color: var(--c-primary); color: #fff; }
+.curopt .ci { min-width: 0; }
+.curopt .ci b { font-size: var(--fs-sm); }
+.curopt .cv { font-size: 11px; color: var(--c-text-3); font-family: var(--mono); margin-left: var(--sp-2); }
+.curopt .cc { font-size: var(--fs-xs); color: var(--c-text-3); line-height: 1.5; margin-top: 3px; }
+
+/* ── 요구사항 행 편집 (와이어프레임 .reqrows/.reqrow/.addrow) ───────────────── */
+.reqrows { display: flex; flex-direction: column; gap: var(--sp-2); }
+.reqrow { display: flex; align-items: center; gap: var(--sp-2); }
+.reqrow .rk { flex: 1; }
+.reqrow .rv { width: 150px; font-size: var(--fs-xs); color: var(--c-text-3); display: flex; align-items: center; justify-content: center; height: 40px; border: 1px dashed var(--c-border-strong); border-radius: var(--r-md); flex: 0 0 auto; }
+.reqrow .del { width: 28px; height: 28px; border-radius: var(--r-sm); border: 0; background: transparent; color: var(--c-text-3); cursor: pointer; font-size: 14px; flex: 0 0 auto; }
+.reqrow .del:hover { background: var(--c-danger-soft); color: var(--c-danger); }
+.addrow { align-self: flex-start; background: transparent; border: 0; color: var(--c-primary); font-size: var(--fs-xs); font-weight: 600; cursor: pointer; padding: var(--sp-2) 0; }
+
+/* ── 제출 방식 토글 · 드롭존 ────────────────────────────────────────────────── */
+.toggle { display: inline-flex; border: 1px solid var(--c-border-strong); border-radius: var(--r-md); overflow: hidden; font-size: var(--fs-sm); margin-bottom: var(--sp-3); }
+.toggle button { padding: 8px 16px; color: var(--c-text-2); background: #fff; border: 0; cursor: pointer; font-family: inherit; }
+.toggle button.on { background: var(--c-primary); color: #fff; font-weight: 600; }
+.dropzone { border: 1px dashed var(--c-border-strong); border-radius: var(--r-md); padding: var(--sp-6); text-align: center; font-size: var(--fs-sm); color: var(--c-text-2); cursor: pointer; background: var(--c-surface-2); }
+.dropzone.drag-over { border-color: var(--c-primary); background: var(--c-primary-soft); }
+
+/* ── 모델 칩 ────────────────────────────────────────────────────────────────── */
+.modelchips { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.mchip { border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); border-radius: 20px; padding: 5px 12px; font-size: var(--fs-xs); cursor: pointer; font-family: inherit; }
+.mchip.on { background: var(--c-primary); border-color: var(--c-primary); color: #fff; font-weight: 600; }
+.mchip .tier { font-size: 10px; opacity: .75; margin-left: 4px; }
+
+/* ── 버튼 ───────────────────────────────────────────────────────────────────── */
+.cta { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 46px; background: var(--c-primary); color: #fff; border: 0; border-radius: var(--r-md); font-size: var(--fs-base); font-weight: 600; cursor: pointer; margin-top: var(--sp-2); font-family: inherit; }
+.cta:disabled { opacity: .5; cursor: default; }
+.ghost { border: 1px solid var(--c-border-strong); background: #fff; color: var(--c-text-2); border-radius: var(--r-md); padding: 8px 12px; font-size: var(--fs-xs); cursor: pointer; font-family: inherit; }
+.alertwarn { background: var(--c-danger-soft); border-radius: var(--r-md); padding: var(--sp-3); font-size: var(--fs-sm); color: var(--c-danger); margin-bottom: var(--sp-3); }
+
+/* ── 진행 체크리스트 ────────────────────────────────────────────────────────── */
+.prog { display: flex; flex-direction: column; gap: var(--sp-3); }
+.pstep { display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-sm); }
+.pstep .ic { width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; flex: 0 0 auto; }
+.pstep.done .ic { background: var(--c-success-soft); color: var(--c-success); }
+.pstep.now .ic { background: var(--c-primary-soft); color: var(--c-primary); }
+.pstep.wait .ic { background: #eef0f3; color: var(--c-text-3); }
+.pstep.wait { color: var(--c-text-3); }
+.pstep.error .ic { background: var(--c-danger-soft); color: var(--c-danger); }
+.pstep .sub { font-size: var(--fs-xs); color: var(--c-text-3); }
+.pstep.error .sub { color: var(--c-danger); }
+
+/* ── 공용 뱃지/코드 ─────────────────────────────────────────────────────────── */
+.badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 20px; }
+.badge.ok { background: var(--c-success-soft); color: var(--c-success); }
+.badge.warn { background: var(--c-warning-soft); color: var(--c-warning); }
+.badge.bad { background: var(--c-danger-soft); color: var(--c-danger); }
+.badge.mute { background: #eef0f3; color: var(--c-text-3); }
+code, .mono { font-family: var(--mono); font-size: var(--fs-xs); }

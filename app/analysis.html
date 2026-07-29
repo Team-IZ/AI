@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>코드 분석 · P04 통합 검증</title>
+<link rel="stylesheet" href="../shared/iz-tokens.css">
+<link rel="stylesheet" href="poc.css">
+<style>
+  .wrap { max-width: 860px; }
+  .card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-5); margin-bottom: var(--sp-4); }
+  .card h3 { font-size: var(--fs-base); margin-bottom: var(--sp-3); }
+  .frag { background: var(--c-code); border-radius: var(--r-md); padding: var(--sp-3); font-family: var(--mono); font-size: 12px; overflow-x: auto; white-space: pre; color: var(--c-code-text); margin-top: var(--sp-2); }
+  .dp { border: 1px solid var(--c-border); border-radius: var(--r-md); padding: var(--sp-3); margin-bottom: var(--sp-3); }
+  .dp .ref { font-family: var(--mono); font-size: 11px; color: var(--c-text-3); }
+  .reqline { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-2) 0; border-bottom: 1px solid var(--c-border); font-size: var(--fs-sm); }
+  .reqline:last-child { border-bottom: 0; }
+  .topic { border: 1px solid var(--c-border); border-radius: var(--r-md); padding: var(--sp-4); margin-bottom: var(--sp-3); }
+  .topic .th { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+  .lvl { font-size: var(--fs-xs); color: var(--c-text-2); padding: 4px 0; }
+</style>
+</head>
+<body>
+<div class="tapp">
+  <div class="ttop">
+    <div class="l">
+      <div class="brand"><span class="mk">◆</span>IZ 통합 검증 PoC</div>
+      <div class="tnav"><a href="index.html">1 제출</a><a class="on">2 코드 분석</a><a>3 문답</a><a>4 보고서</a></div>
+    </div>
+    <div class="r"><span id="user-indicator">-</span></div>
+  </div>
+  <div class="wrap">
+
+    <div class="step" id="step-progress">
+      <div class="sh"><span class="n" id="progress-n">…</span> 코드 분석 진행</div>
+      <div class="prog" id="prog-list"></div>
+    </div>
+
+    <div id="results" class="hidden">
+      <div class="card">
+        <h3>분석 문서</h3>
+        <p id="doc-overview" style="font-size:var(--fs-sm);color:var(--c-text-2);line-height:1.7"></p>
+        <div id="doc-decision-points" style="margin-top:var(--sp-4)"></div>
+      </div>
+
+      <div class="card">
+        <h3>요구사항 P/F</h3>
+        <div id="req-results"></div>
+      </div>
+
+      <div class="card">
+        <h3>문제 <span id="topic-count"></span>개</h3>
+        <div id="topics"></div>
+      </div>
+
+      <button class="cta" id="next-btn">문답 시작하기 →</button>
+    </div>
+
+    <div id="error-box" class="alertwarn hidden"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"
+  integrity="sha384-tVslJOEkg7nVRW3Y3/ReGX0NnonNrbcmt1R5qFbQXQdGa2chRkoJYHAjAsv3zoTq"
+  crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"
+  integrity="sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG"
+  crossorigin="anonymous"></script>
+<script src="../shared/config.js"></script>
+<script src="../shared/db.js"></script>
+<script src="../shared/lab-core.js"></script>
+<script src="../shared/llm.js"></script>
+<script src="../shared/pyodide-shared.js"></script>
+<script src="../shared/session-state.js"></script>
+<script src="../shared/p02-engine.js"></script>
+<script src="scoring-config.js"></script>
+<script src="teaches-source.js"></script>
+<script src="poc-state.js"></script>
+<script src="code-fragment.js"></script>
+<script src="question-guard.js"></script>
+<script src="llm-stage.js"></script>
+<script src="requirements.js"></script>
+<script src="hint-ladder.js"></script>
+<script src="poc-engine.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const esc = (v) => LabApp.escapeHtml(v);
+  const STEPS = [
+    { key: "fetch", label: "코드 가져오기 · 구조 스캔" },
+    { key: "doc", label: "분석 문서 작성" },
+    { key: "req", label: "요구사항 P/F 판정" },
+    { key: "topics", label: "문제 선정" },
+    { key: "hints", label: "질문·힌트 생성 (레벨당 2회 힌트 고정)" },
+  ];
+  let currentStepIdx = -1;
+
+  function renderProgList() {
+    $("prog-list").innerHTML = STEPS.map((s) =>
+      `<div class="pstep wait" data-key="${s.key}"><span class="ic">•</span><div>${esc(s.label)}<div class="sub"></div></div></div>`
+    ).join("");
+  }
+
+  function setStep(key, status, sub) {
+    const el = document.querySelector(`.pstep[data-key="${key}"]`);
+    if (!el) return;
+    el.className = `pstep ${status}`;
+    el.querySelector(".ic").textContent = status === "done" ? "✓" : status === "error" ? "✕" : status === "now" ? "◔" : "•";
+    if (sub !== undefined) el.querySelector(".sub").textContent = sub;
+  }
+
+  // hooks.onProgress 메시지의 접두 태그로 어느 STEPS 항목인지 추정해 체크리스트를 갱신한다.
+  // 정확한 스테이지 콜백을 엔진에 새로 만들지 않고, 이미 있는 텍스트 로그를 재사용한다.
+  function routeProgress(msg) {
+    let key = null;
+    if (msg.includes("[코드 스캔]") || msg.includes("가져오는 중")) key = "fetch";
+    else if (msg.includes("분석 문서")) key = "doc";
+    else if (msg.includes("요구사항")) key = "req";
+    else if (msg.includes("문제 선정") || msg.includes("문제 ") && msg.includes("확보")) key = "topics";
+    else if (msg.includes("질문") || msg.includes("힌트")) key = "hints";
+    if (!key) return;
+    const idx = STEPS.findIndex((s) => s.key === key);
+    if (idx < currentStepIdx) return; // 이미 지난 단계로 역행하지 않음
+    for (let i = 0; i < idx; i++) setStep(STEPS[i].key, "done");
+    setStep(key, "now", msg);
+    currentStepIdx = idx;
+  }
+
+  function finishAllDone() {
+    STEPS.forEach((s) => setStep(s.key, "done"));
+    $("progress-n").textContent = "✓";
+  }
+
+  function showFatalError(msg) {
+    $("error-box").textContent = msg;
+    $("error-box").classList.remove("hidden");
+    const cur = STEPS[Math.max(0, currentStepIdx)];
+    if (cur) setStep(cur.key, "error", msg);
+  }
+
+  // ── 렌더 ────────────────────────────────────────────────────────────────────
+  function renderResults(analysis) {
+    $("doc-overview").textContent = analysis.analysisDoc.overview || "";
+    $("doc-decision-points").innerHTML = (analysis.decisionPoints || []).map((dp) => {
+      const badge = dp.fragment.valid ? `<span class="badge ok">근거 확인됨</span>` : `<span class="badge bad">근거 무효</span>`;
+      const ref = dp.fragment.valid ? CodeFragment.formatRef(dp.fragment) : `${dp.file || "?"}:${(dp.lines || []).join("-")}`;
+      const body = dp.fragment.valid ? `<div class="frag">${esc(dp.fragment.text)}</div>` : "";
+      return `<div class="dp"><div class="th"><b>${esc(dp.title || "")}</b> ${badge}</div>
+        <div class="ref">${esc(ref)}</div>
+        <div style="font-size:var(--fs-xs);color:var(--c-text-2);margin-top:4px">${esc(dp.why_it_matters || "")}</div>
+        ${body}</div>`;
+    }).join("") || `<div class="fwarn">근거 있는 decision point가 없습니다.</div>`;
+
+    const reqEl = $("req-results");
+    if (!analysis.requirementsResult.length) {
+      reqEl.innerHTML = `<div class="fwarn">요구사항 없음(1단계에서 비워둠)</div>`;
+    } else {
+      reqEl.innerHTML = analysis.requirementsResult.map((r) => {
+        const badge = r.verdict === "P" ? `<span class="badge ok">P</span>` : `<span class="badge bad">F</span>`;
+        return `<div class="reqline">${badge}<div><b>${esc(r.requirement)}</b>
+          ${r.evidence && r.evidence.file ? `<div class="ref mono">${esc(r.evidence.file)}${r.evidence.lines ? ":" + r.evidence.lines.join("-") : ""}</div>` : ""}
+          ${r.note ? `<div style="font-size:var(--fs-xs);color:var(--c-text-3)">${esc(r.note)}</div>` : ""}
+          </div></div>`;
+      }).join("");
+    }
+
+    $("topic-count").textContent = analysis.questionSets.length;
+    $("topics").innerHTML = analysis.questionSets.map((qs, i) => {
+      if (qs.flagged) {
+        return `<div class="topic"><div class="th"><b>${i + 1}. ${esc(qs.topic.title)}</b><span class="badge warn">flagged</span></div>
+          <div class="fwarn danger">질문 생성이 선택지 금지 규칙을 계속 위반했습니다. 이 문제는 검토가 필요합니다.</div></div>`;
+      }
+      const levels = qs.levels.map((l) => {
+        const axis = POCScoring.AXES[l.axis];
+        return `<div class="lvl"><b>${esc(axis.label)}</b> — ${esc(l.question)}</div>`;
+      }).join("");
+      return `<div class="topic"><div class="th"><b>${i + 1}. ${esc(qs.topic.title)}</b>
+        <span class="badge mute mono">${esc(CodeFragment.formatRef(qs.code_ref))}</span></div>${levels}</div>`;
+    }).join("");
+
+    $("results").classList.remove("hidden");
+  }
+
+  // ── 실행 ────────────────────────────────────────────────────────────────────
+  async function run() {
+    renderProgList();
+    const setup = POCState.loadSetup();
+    if (!setup) { showFatalError("제출 정보가 없습니다 — 1단계부터 다시 시작하세요."); return; }
+
+    setStep("fetch", "now");
+    try {
+      const analysis = await POCEngine.runAnalysisStage(setup, {
+        onProgress: routeProgress,
+        onStatus: (text, kind) => { if (kind === "error") showFatalError(text); },
+      });
+      finishAllDone();
+      renderResults(analysis);
+      POCState.saveAnalysis(analysis);
+      $("next-btn").addEventListener("click", () => { location.href = "session.html"; });
+    } catch (err) {
+      console.error(err);
+      showFatalError(`오류: ${err.message}`);
+    }
+  }
+
+  (async function init() {
+    try {
+      const member = await LabDB.currentMemberOrNull();
+      $("user-indicator").textContent = member ? member.email : "로그인 안 됨";
+    } catch (_) { $("user-indicator").textContent = "로그인 안 됨"; }
+    try {
+      await POCStage.ensureManifestLoaded();
+    } catch (err) {
+      showFatalError(`매니페스트 로드 실패: ${err.message}`);
+      return;
+    }
+    run();
+  })();
+})();
+</script>
+</body>
+</html>
