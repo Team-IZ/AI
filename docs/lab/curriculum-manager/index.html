@@ -392,6 +392,12 @@
       model: row.model || null, // D6 (2026-07-23)
       durationMs: row.finished_at ? (new Date(row.finished_at) - new Date(row.started_at)) : null, // D6
       title: meta.source_filename ? String(meta.source_filename).replace(/\.pdf$/i, "") : `교안 (${String(row.id).slice(0, 8)})`,
+      progress: {
+        totalChunks: Number(meta.chunk_count) || 0,
+        completedChunks: Number(meta.completed_chunk_count) || 0,
+        incompleteChunks: Number(meta.incomplete_chunk_count) || 0,
+        retryRound: Number(meta.chunk_retry_round) || null,
+      },
       result: {
         unit_map: byKind.unit_map || {},
         graph: byKind.graph || null,
@@ -621,7 +627,18 @@
     el.innerHTML = `<div class="inprog-list">${inProgress.map((c) => {
       const live = liveStatus[c.id];
       const label = c.status === "queued" ? "대기 중" : c.status === "running" ? "분석 중" : c.status;
-      const roundLabel = live ? ` (라운드 ${live.round}/${live.maxRounds})` : "";
+      const progress = c.progress || {};
+      const liveRound = Number(live && live.round);
+      const round = Number.isFinite(liveRound) && liveRound > 0 ? liveRound : progress.retryRound;
+      // Chunk retries intentionally have no terminal max round. Showing the old
+      // `round/maxRounds` shape produced values such as "6/undefined" after that cap
+      // was removed, so display the current round only.
+      const roundLabel = round ? ` (라운드 ${round})` : "";
+      const liveTotal = Number(live && live.chunksTotal);
+      const liveDone = Number(live && live.chunksDone);
+      const totalChunks = Number.isFinite(liveTotal) && liveTotal > 0 ? liveTotal : progress.totalChunks;
+      const completedChunks = Number.isFinite(liveDone) && liveDone >= 0 ? liveDone : progress.completedChunks;
+      const chunkProgress = totalChunks ? `완료 청크 ${completedChunks}/${totalChunks}` : null;
       const unitCount = Object.keys((c.result && c.result.unit_map) || {}).length;
       const elapsed = LabApp.formatElapsed(Date.now() - c.analyzedAt.getTime());
       const metaLine = [
@@ -629,6 +646,7 @@
         `모델: ${c.model || "—"}`,
         `경과 ${elapsed}`,
         `${label}${roundLabel}`,
+        chunkProgress,
         unitCount ? `지금까지 유닛 ${unitCount}개` : null,
       ].filter(Boolean).join(" · ");
       // D-debug-panel: 이 파이프라인엔 숫자 에러코드가 없음(HTTP 상태가 message
