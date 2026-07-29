@@ -1,173 +1,128 @@
-# Team-IZ 스타일 검증 파이프라인 (`feat/code_Q&A`)
+# P04 통합 검증 PoC (`feat/poc_full`)
 
-> D207 (2026-07-21): `feature/verification-ui`(D176~D184 스냅샷)를 원본 D206 상태로 최신화한
-> 브랜치입니다. `feature/verification-ui`는 그 시점 그대로 별도 유지되며 이 브랜치가 대체하지
-> 않습니다 — 최신 상태가 필요하면 이 브랜치(`feat/code_Q&A`)를 보세요.
->
-> D185~D206 사이 반영된 주요 변경(전부 아래 "이식 방법론"과 동일한 diff-기반 재적용으로 반영됨):
-> - **D197**: P03 채점이 "루브릭 전체를 마지막 한 턴만 보고 채점"하던 버그 수정 — 실제
->   진행된 레벨(`transcript`)에 매핑된 축만 채점하고, 도달하지 못한 축은 "미검증"으로 표시.
-> - **D198**: 근거 코드 패널 좌우 스크롤, 답변 Enter 제출, 결과 리포트 "문답 원문 보기".
-> - **D199**: 중복 질문 탐지에 overlap coefficient 보강(짧은 질문이 긴 질문의 완전
->   부분집합인 경우까지 탐지) + 턴별 누적 판정(verdict_note)을 매 질문 생성에 반영.
-> - **D200**: L2/L3/Reflection 후속 질문 생성에 실시간 GitHub `list_files`/`read_file` 도구
->   접근 추가 — 학생 답변을 저장된 스니펫이 아니라 실제 최신 코드로 재확인 후 질문.
-> - **D201/D202**: 답변 제출 확인 팝업(취소 시 이어서 수정 가능), 결과 리포트의 문답
->   원문을 실시간 채팅 버블 스타일로 재사용 + 토글 강조.
-> - **D203**: 마지막 턴 제출 후 채점/리포트 생성 중임을 보여주는 스피너 오버레이.
-> - **D204~D206**: D200의 실시간 재확인이 확률적으로 스킵되던 문제를 구조적으로 강제(첫
->   시도는 GitHub 도구 호출 없이는 질문 생성 불가), 중복 질문 재생성 시에도 이미 확보한
->   근거를 재사용(재조회 없이), 중복 판정 시 "겹치는 이전 질문"을 직접 인용해 모델이
->   비교하도록 개선, 저장소 정보 없음/실시간 확인 중 상태를 채팅 버블로 가시화.
->
-> **D208 (2026-07-21, 이 브랜치 자체 변경)**: P02/P03가 매 실행마다
-> `raw.githubusercontent.com/popixoxipop-collab/Code_reviewer_with_feedback`에서 파이썬
-> 원본(`cognition/`, `judgment/`, `feedback/`)을 실시간으로 가져오던 구조를 제거했습니다.
-> 이제 그 31개 파일을 이 저장소(`feat/code_Q&A`)에 그대로 복사해두고,
-> `shared/p02-engine.js`/`shared/p03-engine.js`의 `REPO_RAW_BASE`를 절대 URL 대신
-> 상대경로(`"../"`)로 바꿔 이 저장소 자신에서 로드합니다 — 다른 팀 저장소가 사라지거나
-> private로 바뀌거나 브랜치가 정리돼도 이 브랜치는 영향받지 않습니다. 대신 원본이
-> `cognition/`/`judgment`/`feedback`을 고치면 이 사본은 자동으로 안 따라가므로, 필요하면
-> 아래 "이식 방법론"과 같은 방식으로 수동으로 다시 가져와야 합니다. Playwright로 실제
-> ZIP 제출 → Pyodide 스캔 전 과정을 구동하면서 `raw.githubusercontent.com`/
-> `api.github.com`으로 나가는 요청이 0건임을 직접 확인했습니다(요청이 발생하면 실패하도록
-> 차단 설정한 상태로 테스트).
->
-> **D208 후속 (같은 날, 원본 팀 인프라 의존성도 제거)**: 코드뿐 아니라 이 branch가 기대는
-> 백엔드 인프라(NVIDIA 프록시 Worker, Supabase DB)도 원본 팀(popixoxipop-collab) 소유였던
-> 걸 확인하고 Team-IZ 자체 자원으로 옮겼습니다.
-> - **Cloudflare Worker**: `worker/nvidia-proxy.js`(무수정)를 `team-iz-code-qna-proxy`라는
->   새 이름으로, 전용 KV 네임스페이스(`team_iz_code_qna_nvidia_jobs`)+전용 큐
->   (`team-iz-code-qna-jobs-queue`)로 독립 배포했습니다(`worker/wrangler.toml` 참고) —
->   원본 `nvidia-proxy`나 커리큘럼 매니저 작업의 `team-iz-nvidia-proxy`와 자원을 전혀
->   공유하지 않아, 한쪽 장애/설정 변경이 이쪽에 영향을 주지 않습니다. 배포 직후
->   `x-nvidia-api-key` 헤더 없는 요청이 정상적으로 401을 반환하는 것으로 라이브 확인.
-> - **Supabase**: 커리큘럼 매니저 작업 때 이미 만들어둔 `team-iz-curriculum-manager`
->   프로젝트(ref `tjmviobhxplucuwoibaj`)를 재사용하기로 결정(사용자 선택) — 이 프로젝트에
->   이미 있던 `members` 테이블/정책/트리거는 그대로 두고, 이 branch가 필요로 하는
->   `runs`/`stage_events`/`artifacts`/`presets` 테이블 + RLS 정책만 추가 적용(멱등,
->   `supabase_schema.sql`과 동일 스키마). 적용 후 Management API로 5개 테이블 전부와
->   정책 개수(runs 3, stage_events 2, artifacts 2, presets 3, members 2)를 직접 조회해
->   확인.
-> - `shared/config.js`의 `TEAM_SUPABASE_URL`/`TEAM_SUPABASE_ANON_KEY`/`DEFAULT_PROXY_URL`
->   세 값 모두 위 새 자원을 가리키도록 교체.
->
-> **D213 (2026-07-22, Supabase 다시 교체 + 알려진 리스크 수용)**: D208에서 고른
-> `team-iz-curriculum-manager`는 갓 만든 사실상 빈 프로젝트(멤버 2명)였음이 드러났습니다.
-> `code-reviewer-pipeline-lab`(원본 popixoxipop-collab repo 자신의 Supabase 프로젝트)에
-> 이 팀의 **실제** 사용 이력이 이미 있었습니다 — 실제 팀원 7명(사용자 확인,
-> 개발/테스트 계정 아님), p02 176건, p03 30건, 그리고 `team-iz-curriculum-manager`엔
-> 없던 편의 뷰(`p03_progress_view`, `p03_turns_view`, `runs_with_email` 등)까지. 두
-> 프로젝트 다 같은 Supabase organization(같은 계정) 소속이라 D208의 "다른 팀 소유
-> 인프라" 문제와는 결이 다릅니다 — `shared/config.js`의 `TEAM_SUPABASE_URL`/
-> `TEAM_SUPABASE_ANON_KEY`만 재교체.
->
-> **알려진 리스크 (수용, 사용자 확정)**: 백그라운드 보안 리뷰가 두 가지를 지적했고 둘 다
-> 실측으로 확인된 진짜 리스크입니다 —
->   1. **cross-tenant-signup**: `code-reviewer-pipeline-lab`의 `disable_signup=False`,
->      도메인/allowlist 제한 없음 — code-qna URL을 아는 누구든 구글 로그인만으로
->      `members` row가 자동 생성되고(`on_auth_user_created` 트리거) RLS `read all`
->      정책으로 전체 이력을 읽을 수 있습니다. "우리 팀만 안다"는 사회적 합의일 뿐 실제
->      접근 제어가 아닙니다.
->   2. **trust-boundary/data-cotenancy**: 원본 Pipeline Lab 사용자와 code-qna 트레이니가
->      이제 완전히 같은 테이블·같은 `read all` 정책을 공유 — 서로 다른 두 앱의 사용자
->      데이터가 한 신뢰 경계 안에 섞입니다.
->   사용자가 명시적으로 "감수" 결정(우선순위: 로그인 정상 작동 > 리스크 제거) — 이후
->   더 강화하고 싶으면 Supabase Auth 설정에서 `disable_signup=true` + 이메일 도메인
->   allowlist 추가를 고려(단, 이건 원본 Pipeline Lab의 가입 흐름도 함께 바뀌므로 그쪽과
->   조율 필요).
->   **로그인 리디렉트**: `uri_allow_list`에 `team-iz.github.io` 관련 항목이 원래
->   없었는데, 확인 시점에 이미 `https://team-iz.github.io/AI/lab/**`가 추가돼 있었음
->   (동시 진행 중인 curriculum-manager 작업이 넣어둔 것으로 보이며, code-qna 경로도
->   함께 커버함) — 추가 조치 불필요, 라이브 값으로 직접 확인함.
->   **EXIT (2026-07-22 수정)**: 원래는 "`team-iz-curriculum-manager`(ref
->   `tjmviobhxplucuwoibaj`)로 `TEAM_SUPABASE_URL`/`TEAM_SUPABASE_ANON_KEY`만 되돌리면
->   된다"고 적었으나, 그 프로젝트는 사용자가 **의도적으로 삭제**했습니다(Management API
->   확인 — 프로젝트 목록에서 사라짐). 이 되돌리기 경로는 더 이상 존재하지 않습니다 —
->   코드/설정 어디에도 그 프로젝트를 참조하는 부분은 없었음을 확인했으니(grep 검증)
->   기능적으로 끊어진 건 없지만, 정말 되돌려야 한다면 `code-reviewer-pipeline-lab` 안에
->   code-qna 전용 스키마를 새로 파거나 완전히 새 프로젝트를 만들어야 함.
+교안 teaches → 코드 제출 → 코드 분석 → 문답(L1~L4) → 보고서를 한 줄기로 잇는 통합 PoC.
+`feat/pdf_analysis`(P01 교안분석)와 `feat/code_Q&A`(P02 코드분석/P03 검증세션) 둘 다와
+관계있지만, 문답 루프의 채점 시점·힌트 규칙이 P03과 근본적으로 달라(아래 참고) 별도
+브랜치/도구로 분리했다.
 
-이 브랜치는 [`popixoxipop-collab/Code_reviewer_with_feedback`](https://github.com/popixoxipop-collab/Code_reviewer_with_feedback)의 Pipeline Lab(`docs/lab/`)에서 실제로 동작 중인 **P02(코드 분석) → P03(소크라틱 검증 세션) → 결과 리포트** 기능을, Team-IZ/Frontend의 실제 화면정의(`team-iz.github.io/Frontend/`, `gh-pages` 브랜치)와 동일한 UI/UX로 다시 입힌 것입니다.
-
-**기능은 원본 그대로, 스타일/페이지 구조만 다릅니다.** 새 백엔드 기능은 추가하지 않았습니다 — 아래 "범위" 참고.
+**배포**: `https://team-iz.github.io/AI/lab/poc/` (`.github/workflows/pages.yml`이 이
+브랜치를 세 번째 소스로 조립한다 — 세부는 워크플로 파일의 D-poc1 주석 참고)
 
 ## 실행 방법
 
-빌드 스텝 없는 바닐라 HTML/CSS/JS입니다. 정적 서버로 `trainee/` 아래 3개 페이지를 띄우면 됩니다:
+빌드 스텝 없는 바닐라 HTML/CSS/JS. 이 저장소 루트에서:
 
 ```bash
-python3 -m http.server 8813   # 이 저장소 루트에서
-# http://localhost:8813/trainee/submission.html 접속
+python3 -m http.server 8813
+# http://localhost:8813/app/index.html
 ```
 
-GitHub Pages에 그대로 배포해도 동일하게 동작합니다(상대 경로만 사용, 빌드 불필요).
-
-**시작하려면**: `submission.html`의 "⚙ 연결 설정"에 NVIDIA API 키를 입력하세요(팀원 각자 자기 키 사용, D137). 프록시 URL은 팀 공용 배포본이 기본값으로 채워집니다. P02(코드 분석) 자체는 LLM 호출이 없어 키가 없어도 동작하지만, P03(검증 세션)에는 필수입니다.
+**시작하려면**: `app/index.html`의 "⚙ 연결 설정"에 NVIDIA API 키 + 프록시 URL 입력
+(code-qna와 동일한 `worker/nvidia-proxy.js` 재사용, 이 브랜치도 vendored). 교안 목록은
+로그인해야 보인다(팀 DB) — 아직 로그인 전이거나 DB에 분석된 교안이 없으면 "DB 없이 직접
+입력" 경로로 P01의 unit_map JSON을 붙여넣어도 된다.
 
 ## 페이지 구조
 
 ```
-trainee/
-  submission.html   -- 코드 제출(GitHub URL/ZIP) + 연결 설정 패널 + finding 목록
-  session.html       -- 소크라틱 검증 세션(4턴: L1/L2/L3/Reflection)
-  result.html         -- 5축 채점 결과 리포트
-shared/
-  iz-tokens.css       -- Team-IZ 디자인 토큰(:root 변수) + 페이지 공통 컴포넌트(.viewport/.ttop/.wrap)
-  config.js/db.js/llm.js/pyodide-shared.js  -- 원본 Pipeline Lab에서 무수정 이식
-  lab-core.js         -- app.js에서 순수 매니페스트/템플릿 계층만 축출(탭 전환 UI 등은 제외)
-  traffic-rate.js     -- debug-traffic.js에서 순수 rate-check 로직만 축출(SVG 차트 UI는 제외)
-  p02-engine.js       -- p02-runner.js를 복사 후 DOM 접점만 훅으로 치환
-  p03-engine.js       -- p03-runner.js를 복사 후 DOM 접점만 훅으로 치환(가장 정교한 이식 대상)
-  session-state.js    -- 페이지 간 sessionStorage 핸드오프(신규 코드, 원본엔 없음)
-prompt_manifest.json / webtool_driver.py  -- 원본에서 무수정 이식
-reference/            -- 이식 작업 중 대조용으로 둔 원본 p02-runner.js/p03-runner.js/app.js 사본
-cognition/ judgment/ feedback/  -- D208: P02/P03가 Pyodide로 실행하는 실제 파이썬 원본
-  (구조/판단 스캔, 5축 채점용 규칙, 격리 판정기, 자기수정 신호 등) 사본. 원본에서
-  무수정 이식이며, shared/p02-engine.js·p03-engine.js가 raw.githubusercontent.com 대신
-  이 저장소 자신에서(상대경로로) 읽어들입니다 -- 다른 팀 저장소에 대한 런타임 의존성 제거.
+index.html      -- 0+1단계: 교안 teaches 선택(정확히 3개) · 요구사항 P/F 입력 · 코드 제출
+app/
+  index.html      실제 1단계 페이지(vendored 파일의 "../" 상대경로 때문에 한 단계 깊이 필요,
+                   아래 "왜 app/ 아래인가" 참고)
+  analysis.html   2단계: 코드 분석 문서 · 요구사항 P/F 판정 · 문제 3개 선정 · L1~L4+힌트 동결
+  session.html    3단계: 문답 (문제당 최대 4레벨, 레벨당 힌트 최대 2회)
+  report.html     4단계: 보고서 (문제×레벨 매트릭스 · 재시험 대상 · 교안 참조)
+
+  scoring-config.js    ★ 축(L1~L4)×값(0~5) 루브릭 + 임계값(pass=3) + 힌트 상한(5/4/3) + 재시험 규칙
+  prompt_manifest.json ★ p04 6개 스테이지 프롬프트/파라미터 (단일 소스)
+  llm-stage.js         매니페스트 스테이지 1개 호출(fillTemplate -> chatJSON -> JSON 파싱) 공용 경로
+  teaches-source.js    P01이 DB에 남긴 unit_map을 teach 목록으로 읽어옴(교안 분석 자체는 재구현 안 함)
+  code-fragment.js     LLM이 지목한 {file,lines}를 실제 파일과 대조해 코드 파편 추출/검증
+  question-guard.js    질문·힌트에 선택지가 섞이는 걸 정규식으로 탐지(실측 사고 재발 방지)
+  hint-ladder.js       문제 1개의 L1~L4 질문+힌트 2단을 한 번에 생성해 동결(D4)
+  requirements.js      요구사항 P/F 판정
+  poc-engine.js         전체 오케스트레이션(2/3/4단계) -- 페이지는 DOM을 안 만지고 이 파일의 hooks만 받음
+  poc-state.js          페이지 간 sessionStorage 핸드오프(teamiz_p04_* 키, code-qna와 분리)
+  p04_schema.sql        ★ public.runs/presets의 pipeline CHECK 제약에 'p04' 추가(사람이 한 번 실행)
+
+shared/ cognition/ judgment/ feedback/  feat/code_Q&A에서 무수정 이식(vendored, 드리프트 검사 대상)
+worker/                동일 프록시 설정 재사용(재배포 불필요)
 ```
 
-## 이식 방법론
+## 왜 이 구조인가 (결정 기록)
 
-원본 `p02-runner.js`/`p03-runner.js`는 로직과 DOM 렌더링이 한 파일에 섞여 있습니다. 이번 포팅은 "이해한 내용을 바탕으로 재작성"이 아니라 **원본을 통째로 복사한 뒤, DOM 접점만 훅 호출로 기계적으로 치환**하는 방식으로 진행했습니다(`p02-engine.js`/`p03-engine.js` 상단 주석에 각 파일의 정확한 변경 목록이 있습니다). `reference/`의 원본과 diff하면 훅 치환으로 명시한 줄 외에는 100% 동일합니다.
+**D-poc1** (pages.yml): 세 번째 소스 브랜치로 조립. P03(문답)의 턴 루프는 "방어 성공 시
+조기 종료 + 끝에서 한 번 5축 채점"인데, 명세는 "레벨마다 즉시 0~5점 채점 + 3점 미만이면
+힌트 2회 재질의 + 실패 시 그 문제 종료"로 근본적으로 다르다. P03을 이 모양으로 고치면 팀이
+쓰는 도구가 깨지므로 별도 도구로 분리했다. 세 브랜치 모두 워크플로 파일을 동일하게 유지해야
+하고(push 이벤트는 push된 브랜치의 워크플로로 실행됨), 한 브랜치가 깨지면 세 도구 배포가
+전부 막힌다.
 
-`run()`은 이제 훅 객체를 받는 고차 함수입니다:
-```js
-P03Engine.run({ finding, codeContexts, model }, {
-  onStatus, onProgress, onRunStart, onRunEnd,
-  onQuestion, getAnswer, onAnswerRecorded, countdown,
-});
-```
-이건 새 설계가 아니라, 원본 Python `feedback/turn_engine.py`의 `run_decision_point(..., answer_fn)` 시임을 그대로 복원한 것입니다(JS 포팅 과정에서 DOM Promise로 변형됐던 걸 원래 모양으로 되돌림).
+**D2**: `trainee/`, `reference/`, `shared/p03-engine.js`를 이 브랜치에서 삭제. 안 지우면
+`/lab/poc/`에 code-qna 도구의 두 번째 사본이 배포되는데, 이건 D-split2가 이미 겪고 없앤
+문제(`docs/lab/code-qna/` 중복본 드리프트)의 재발이다.
+
+**D-poc2**: `shared/`·`cognition/`·`judgment/`·`feedback/`은 feat/code_Q&A에서 무수정
+이식 — P02 스캐너를 다시 구현하지 않기 위해서다. 두 브랜치의 사본이 어긋나지 않도록
+`.github/workflows/pages.yml`에 드리프트 검사를 넣었다(byte-diff, 어긋나면 빌드 실패).
+
+**D3**: 채점 임계값·루브릭을 `app/scoring-config.js` 한 파일로 외화(축×값 표). 사용자
+요구("채점 임계값 하이퍼파라미터·채점 로직은 모듈화로 빼놓고 설정 가능하게") 반영.
+
+**D4**: 힌트는 문제 시작 시 4개 레벨 질문과 함께 한 번에 생성해 동결한다(답변을 본 뒤
+생성하지 않음). graduated prompting(Campione & Brown, 1987) — 답변을 보고 힌트를 만들면
+같은 실력의 두 학생이 다른 힌트를 받게 되어 "몇 번째 힌트에서 통과했는가"가 학생 차이가
+아니라 생성 차이를 재게 된다.
+
+**D-poc6/D-poc7**: 기존 P02 finding에는 라인 번호가 없어 코드 파편(파일+라인)을 만들 수
+없다 — LLM이 분석 문서에서 스스로 `{file,lines}`를 지목하게 하고, `code-fragment.js`가
+실제 파일과 대조해 무효면 버린다. 질문·힌트에 선택지가 섞이는 사고(사용자 실측: 보기 준
+학생이 대안비교 5점 받음 — 대안을 제시한 게 아니라 고른 것)를 `question-guard.js`가
+정규식으로 잡아 재생성시킨다.
+
+**힌트 사다리** (레벨당 최대 2회, 소진 후 미달이면 그 문제 종료 → 다음 문제 L1):
+
+| 단계 | 종류 | 자력 판정 | 점수 상한 |
+|---|---|---|---|
+| 0 | — | 자력 | 5 |
+| 1 | 재진술(정보 추가 없음) | 자력 유지 | 4 |
+| 2 | 재진술·난이도 하향 | 부분 자력 | 3 |
+
+**재시험 판정**: L1(코드 기술)에서 힌트 소진 후 미달로 끝난 문제만 재시험 대상이다.
+사용자가 준 예시(`1번문제(4,0/4,1/3,0/2,2)` `2번문제(3,0/2,2/X/X)` `3번문제(2,2/X/X/X)` →
+`3번 재시험`)를 역산한 규칙 — L4 실패(1번, 마지막 레벨이라 자연 종료)와 L2 실패(2번)는
+재시험 대상이 아니고, L1 실패(3번, 가장 기초 단계에서도 못 넘음)만 재시험이다.
+**★ 이건 단일 예시에서 역산한 가설이다** — 실제 세션이 쌓이면 재검증 대상
+(`app/scoring-config.js`의 `retest` 주석 참고).
+
+**D-poc8** (`app/llm-stage.js`): `LabApp`은 매니페스트를 하나만 들고 있는데
+`LabApp.loadManifest()`는 항상 저장소 루트의 `prompt_manifest.json`(p02용)을 불러온다.
+이 PoC의 p04 스테이지는 별도 파일(`app/prompt_manifest.json`)에 있어서, 페이지 로드 시
+`POCStage.ensureManifestLoaded()`가 두 파일을 fetch해 `manifest.pipelines.p04`를 합쳐
+넣는다. 또한 `LabApp.resolveParam()`은 vendored `shared/lab-core.js`의 `overrides =
+{p02:{}, p03:{}}`를 읽는데 `p04` 키가 없어 그대로 쓰면 죽는다 — p04에는 애초에 프롬프트
+오버라이드 UI가 없으므로(P02/P03의 스테이지카드 에디터는 이 포트들에도 없음), `POCStage`는
+그 함수를 거치지 않고 스테이지 파라미터 기본값을 직접 읽는다.
+
+## 미적용 사항 (사람이 한 번 해야 함)
+
+- **`app/p04_schema.sql`**: `public.runs`/`public.presets`의 `pipeline` CHECK 제약이
+  `('p01','p02','p03')`로만 한정돼 있어(원본 `experiments/web_lab/supabase_schema.sql`),
+  `'p04'`를 추가해야 이 PoC의 실행 기록이 DB에 남는다. 적용 전에도 화면 동작·채점·보고서는
+  전부 정상 동작한다 — 저장만 실패하고 "DB 저장 실패(결과는 화면에 남아있음)"로 로그된다
+  (이 저장소의 기존 best-effort 저장 관용과 동일).
 
 ## 검증
 
-- **소스 diff**: `p02-engine.js`/`p03-engine.js`를 `reference/`의 원본과 비교, 문서화된 변경 외 로직 차이 없음을 확인.
-- **실제 E2E 실행**(Playwright + 실제 NVIDIA API 호출): ZIP 제출 → 실제 Pyodide 스캔 → finding 2건(direct-match 1건 + text-mention 1건, D179/D180 두 커넥터 경로 모두) → 검증 세션 자동 시작 → 4턴 전부 실제 질문 생성+답변 제출+실제 Pyodide 분류 → 5축 채점 → 결과 페이지 렌더링까지 전 과정 실제로 통과. GitHub URL 제출 경로도 별도로 확인(성공/실패 케이스 둘 다).
-- 이 과정에서 실제 버그 3건을 발견·수정: session.html에 Pyodide 스크립트 태그 누락(분류기가 Pyodide를 쓰는데 "재스캔 없음"이라는 이유로 빠뜨렸음), `.hidden` 유틸리티 클래스가 어느 CSS에도 정의되지 않아 시각적으로 안 숨겨짐, 진행 체크리스트 아이콘이 상태 전환 시 색상만 바뀌고 글리프(✓/◔/•)는 안 바뀜.
-- direct-navigation 폴백(세션 데이터 없이 session.html/result.html 직접 접근) 확인 완료.
-- **D207 최신화 검증**: 모든 `shared/*.js`/`reference/*.js` syntax check 통과. `trainee/session.html`+`trainee/result.html`을 대상으로 Playwright E2E 재실행(모킹된 NVIDIA 프록시+GitHub API, 실제 Pyodide 분류기) — 근거 코드 패널 좌우 스크롤(D198), Enter 제출 시 확인 팝업(D201), L2 질문 생성 시 실시간 `⚙ list_files 호출 중...` 버블 노출 및 근거 파일명 인용(D204/D205), 마지막 턴 이후 채점 스피너 오버레이(D203), 결과 리포트의 채팅 버블 문답 원문+턴수 배지(D202) 8개 항목 전부 확인.
-
-## 범위 밖 (Team-IZ 원본엔 있지만 이 포트엔 없는 것)
-
-원본 Pipeline Lab에 없던 기능은 새로 만들지 않았습니다:
-- 커밋 이메일 검증(귀속 분석 자체가 없음)
-- 이의제기 워크플로(매니저 검토 백엔드 없음)
-- 다회차 성장추이 차트(다회차 집계 없음)
-- 교안 위치 안내(매핑 데이터 없음)
-- 비공개/공개범위 잠금 변형(공개범위 개념 없음)
-- 코드 줄 단위 하이라이트(`.hl`) — evidence 줄 번호 추출 로직이 아직 없어 1차는 하이라이트 없이 전체 코드만 표시
-
-반대로, 원본 Pipeline Lab에는 있지만 Team-IZ 원본엔 없는 것(그대로 유지):
-- **채점 결과 숫자 점수 즉시 노출**: Team-IZ 원본은 점수를 절대 노출하지 않지만, 이 도구의 실제 사용자(파이프라인을 직접 테스트하는 팀원)는 채점이 맞게 됐는지 바로 확인해야 해서 유지(팀 프로젝트 컨텍스트에서의 명시적 요구사항).
-
-## 알려진 동작 차이 (의도적, 문서화됨)
-
-- **모델 실시간 전환 불가**: 원본은 인터뷰 도중에도 모델 선택을 바꾸면 다음 턴부터 적용됐지만, 이 포트는 세션 시작 시점에 모델이 고정됩니다(세션 시작 후 모델 선택기는 잠김). 드물게 쓰이는 동작이라 판단해 단순화했습니다 — `p03-engine.js`의 change #9 참고.
-- **Google 로그인 리디렉트**: D213 시점에 `code-reviewer-pipeline-lab`(현재 Supabase 대상)의 `uri_allow_list`에 `https://team-iz.github.io/AI/lab/**`가 이미 포함돼 있는 것을 확인했습니다 — 로그인은 정상 작동합니다. NVIDIA 키 기반 P02/P03 실행 자체는 로그인과 무관하게 동작하며, 로그인이 안 되면 DB 저장만 건너뜁니다(화면 표시는 정상).
-- **Supabase cross-tenant 리스크 (D213, 의도적으로 수용됨)**: `code-reviewer-pipeline-lab`은 가입 제한이 없고(`disable_signup=False`) RLS가 `read all`이라, code-qna URL을 아는 누구나 로그인 한 번으로 원본 Pipeline Lab 사용자 이력을 포함한 전체 데이터를 읽을 수 있습니다. 위 D213 노트 참고 — 강화하려면 Supabase Auth의 가입 제한 설정이 별도로 필요합니다.
-
-## 원본과의 관계
-
-원본 Pipeline Lab(`docs/lab/`)은 계속 `popixoxipop-collab/Code_reviewer_with_feedback`에서 유지보수됩니다. 이 브랜치는 원본의 D206 시점(commit `10246f3`) 스냅샷을 Team-IZ 스타일로 재구성한 것으로, 원본이 이후 업데이트되어도 자동으로 동기화되지 않습니다 — 다시 최신화하려면 이 문서의 "이식 방법론"과 동일하게, 원본 저장소의 새 커밋 diff를 이 브랜치의 대응 파일에 재적용하면 됩니다.
+Playwright로 mocked LLM(system 프롬프트 문자열로 스테이지 식별) + 실제 Pyodide 스캔을 태워
+전 과정을 실행 확인:
+- 1단계: 교안 수동 입력(3개 제한) · 요구사항 행 추가/삭제 · GitHub/ZIP 토글 · 모델 카탈로그.
+- 2단계: 실제 ZIP → 실제 `two_tier_scan.py`/`score_findings.py` 스캔 → 분석 문서(존재하지
+  않는 파일을 지목한 decision_point가 실제로 "근거 무효"로 걸러짐 확인) → 요구사항 P/F →
+  문제 3개(teach 중복 검증) → 질문·힌트 생성. 힌트 가드가 실제로 선택지 포함 응답을 잡아
+  재생성시키는 것(재시도 성공)과, 계속 위반 시 `flagged`로 종료하는 것(3회 시도 후 정지)
+  둘 다 확인.
+- 3단계: 사용자가 원 스펙에 준 예시(`4,0/4,1/3,0/2,2` `3,0/2,2/X/X` `2,2/X/X/X`)를 그대로
+  재현하는 raw score 시퀀스를 주입해, 저장된 세션 결과가 그 예시와 **정확히 일치**함을 확인.
+- 4단계: 매트릭스·재시험 배지(3번만 표시)·잘한점/부족한점/교안참조·요구사항 P/F 렌더 확인.
+- 드리프트 검사: vendored 파일을 일부러 1줄 고쳐 `diff -r`가 실제로 잡는 것 확인 후 되돌림.
