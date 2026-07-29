@@ -26,6 +26,14 @@ kv_namespaces = [
   { binding = "NVIDIA_JOBS", id = "8264aea6898c4d4ca60f1263b62d6a9b" }
 ]
 
+[[durable_objects.bindings]]
+name = "NVIDIA_RATE_LIMITER"
+class_name = "NvidiaRateLimiter"
+
+[[migrations]]
+tag = "v1-nvidia-rate-limiter"
+new_sqlite_classes = ["NvidiaRateLimiter"]
+
 [[queues.producers]]
 queue = "team-iz-nvidia-jobs-queue"
 binding = "NVIDIA_JOBS_QUEUE"
@@ -34,3 +42,11 @@ binding = "NVIDIA_JOBS_QUEUE"
 queue = "team-iz-nvidia-jobs-queue"
 max_batch_size = 1
 max_batch_timeout = 1
+
+[vars]
+# Stay below NVIDIA Build's observed 40 RPM ceiling. The Durable Object enforces one
+# proxy-global schedule across every key and concurrent curriculum run.
+NVIDIA_RPM_LIMIT = "36"
+LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
+LANGSMITH_PROJECT = "team-iz-nvidia-usage"
+LANGSMITH_ORGANIZATION_ID = "63acea55-f27c-429b-850f-63fb363f56b1"
