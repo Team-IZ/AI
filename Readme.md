@@ -104,13 +104,16 @@ worker/                동일 프록시 설정 재사용(재배포 불필요)
 오버라이드 UI가 없으므로(P02/P03의 스테이지카드 에디터는 이 포트들에도 없음), `POCStage`는
 그 함수를 거치지 않고 스테이지 파라미터 기본값을 직접 읽는다.
 
-## 미적용 사항 (사람이 한 번 해야 함)
+## DB 마이그레이션 상태
 
-- **`app/p04_schema.sql`**: `public.runs`/`public.presets`의 `pipeline` CHECK 제약이
-  `('p01','p02','p03')`로만 한정돼 있어(원본 `experiments/web_lab/supabase_schema.sql`),
-  `'p04'`를 추가해야 이 PoC의 실행 기록이 DB에 남는다. 적용 전에도 화면 동작·채점·보고서는
-  전부 정상 동작한다 — 저장만 실패하고 "DB 저장 실패(결과는 화면에 남아있음)"로 로그된다
-  (이 저장소의 기존 best-effort 저장 관용과 동일).
+- **`app/p04_schema.sql`**: **적용 완료** (2026-07-29, Management API PAT으로 직접 실행).
+  `public.runs`의 `pipeline` CHECK 제약이 `('p01','p02','p03')`로만 한정돼 있던 걸
+  `'p04'`까지 허용하도록 변경. 적용 후 `insert ... pipeline='p04' ... rollback`으로
+  실제 통과함을 확인(데이터는 남기지 않음).
+  `public.presets`는 원본 스키마 파일에는 있지만 이 라이브 프로젝트(ref
+  `oziaeqcvrkrqkhwrybfj`)에는 애초에 생성돼 있지 않음을 실측 확인 — 존재 여부를 먼저
+  검사해 없으면 건너뛰도록 파일을 고친 뒤 재적용(1차 시도는 존재하지 않는 presets를
+  참조하다 트랜잭션 전체가 롤백돼 runs 쪽도 같이 실패했었음, 파일 상단 주석에 기록).
 
 ## 검증
 
