@@ -118,6 +118,17 @@
         <div class="fwarn" id="model-note"></div>
       </div>
 
+      <!-- D7 (2026-07-30): 힌트 동결(팀 계약) vs 답변 기반 적응형(사용자 D4 개정 지시)
+           충돌을 하나로 확정하지 않고 버튼으로 전환 가능하게 둘 다 살려둠. -->
+      <div class="fld" style="margin-top:var(--sp-4)">
+        <div class="fl">힌트 방식 <span class="hint">· 언제든 전환 가능, 팀 계약 기본값은 동결</span></div>
+        <div class="toggle" id="hint-mode-toggle">
+          <button type="button" class="on" data-hint-mode="frozen">동결</button>
+          <button type="button" data-hint-mode="adaptive">적응형</button>
+        </div>
+        <div class="fwarn" id="hint-mode-note"></div>
+      </div>
+
       <div id="submit-error" class="alertwarn hidden"></div>
       <button class="cta" id="submit-btn">코드 분석 시작</button>
     </div>
@@ -128,6 +139,7 @@
 <script src="../shared/config.js"></script>
 <script src="../shared/db.js"></script>
 <script src="../shared/lab-core.js"></script>
+<script src="scoring-config.js"></script>
 <script src="teaches-source.js"></script>
 <script src="poc-state.js"></script>
 <script src="llm-stage.js"></script>
@@ -143,6 +155,7 @@
   let zipFiles = null;
   let zipName = null;
   let selectedModel = null;
+  let selectedHintMode = null; // POCScoring 로드 후 init()에서 hintMode.default로 초기화
 
   const $ = (id) => document.getElementById(id);
   const esc = (v) => LabApp.escapeHtml(v);
@@ -393,6 +406,20 @@
     renderModelChips();
   }
 
+  // ── 힌트 방식 (D7) ────────────────────────────────────────────────────────────
+  function renderHintMode() {
+    document.querySelectorAll("#hint-mode-toggle button").forEach((b) => {
+      b.classList.toggle("on", b.dataset.hintMode === selectedHintMode);
+    });
+    $("hint-mode-note").textContent = POCScoring.hintMode.labels[selectedHintMode] || "";
+  }
+  $("hint-mode-toggle").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-hint-mode]");
+    if (!btn) return;
+    selectedHintMode = btn.dataset.hintMode;
+    renderHintMode();
+  });
+
   // ── 제출 ────────────────────────────────────────────────────────────────────
   function showError(msg) {
     const el = $("submit-error");
@@ -427,6 +454,7 @@
       requirements: collectRequirements(),
       submission,
       model: selectedModel,
+      hintMode: selectedHintMode,
     });
     if (!saved.ok) return showError(saved.hint || `설정 저장 실패: ${saved.error && saved.error.message}`);
     location.href = "analysis.html";
@@ -440,6 +468,8 @@
     // ensureManifestLoaded()를 쓰는 이유는 llm-stage.js의 D-poc8 주석 참고 -- 루트
     // prompt_manifest.json(p02)과 app/prompt_manifest.json(p04)을 한 매니페스트로 합친다.
     await POCStage.ensureManifestLoaded();
+    selectedHintMode = POCScoring.hintMode.default;
+    renderHintMode();
     // config.js의 persistIfRemembered()는 checkbox의 "change" 이벤트에만 반응한다.
     // "기억하기"가 마크업에서부터 checked라 사용자가 손대지 않으면 change가 한 번도 안
     // 일어나 다음 페이지(analysis.html)로 넘어갈 때 키/URL이 비어 보인다 -- 원본

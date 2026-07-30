@@ -137,40 +137,83 @@ const POCEngine = (() => {
       hooks.onProgress(`⚠ 문제 ${questionCount}개를 요청했으나 유효한 문제 ${topics.length}개만 확보됨 (teach/코드위치 검증 실패분 제외)`);
     }
 
-    // ── p04-4: 문제별 L1~L4 + 고정 힌트 ─────────────────────────────────────
+    // ── p04-4: 문제별 L1~L4 (+ hintMode==="frozen"이면 힌트도 이 단계에서 동결) ──────
     const teachesById = new Map(setup.teaches.map((t) => [t.id, t]));
+    const hintMode = setup.hintMode || POCScoring.hintMode.default;
     const questionSets = [];
     for (const topic of topics) {
-      hooks.onProgress(`"${topic.title}" 질문·힌트 생성 중...`);
+      hooks.onProgress(`"${topic.title}" 질문 생성 중...`);
       const qs = await HintLadder.freezeQuestionSet(topic, {
-        teach: teachesById.get(topic.teach_id), files, model, onProgress: hooks.onProgress,
+        teach: teachesById.get(topic.teach_id), files, model, onProgress: hooks.onProgress, hintMode,
       });
       if (qs.flagged) hooks.onProgress(`⚠ "${topic.title}" 질문이 선택지 금지 규칙을 계속 위반해 flagged 상태로 남음 -- 검토 필요`);
       questionSets.push(qs);
     }
+
+    // D8: frozen/adaptive 소요시간 비교용 -- 질문 생성은 항상, 힌트 사전생성은 frozen일
+    // 때만 값이 있다(adaptive는 세션 단계에서 발생하므로 여기선 빈 배열).
+    const timing = {
+      hintMode,
+      questionGenMs: questionSets.map((qs) => qs.questionGenMs || 0),
+      frozenHintGenMs: questionSets.flatMap((qs) => qs.frozenHintTimings || []),
+    };
 
     const finishedAt = new Date();
     const analysis = {
       analysisDoc, decisionPoints, requirementsResult, topics, questionSets,
       findings, fileCount, repoRef: repoRef || null,
       submissionMethod: setup.submission.method,
-      model,
+      model, hintMode, timing,
       started_at: startedAt.toISOString(), finished_at: finishedAt.toISOString(),
     };
 
     hooks.onProgress(`결과가 팀 DB에 저장됨(best-effort)`);
-    await saveAnalysisRun(setup, analysis).catch((e) => hooks.onProgress(`DB 저장 실패(결과는 화면에 남아있음): ${e.message}`));
+    await saveAnalysisRun(setup, analysis, hooks.onProgress).catch((e) => hooks.onProgress(`DB 저장 실패(결과는 화면에 남아있음): ${e.message}`));
 
     hooks.onStatus("완료", "done");
     return analysis;
   }
 
+  // D8 (2026-07-30): hint_mode/timing_ms는 vendored shared/db.js가 모르는 컬럼이다 --
+  // startRun()/saveRun()은 고정된 필드 집합만 INSERT/UPDATE한다(그 파일은 드리프트
+  // 검사 대상이라 시그니처를 못 늘림). 대신 이 함수가 같은 프로젝트에 직접 REST PATCH를
+  // 보내 그 run 행에 두 컬럼만 채운다.
+  //   WHY 진짜 컬럼인가(JSONB input_meta 필드가 아니라): "DB에 칼럼 구별 지어서" 요구를
+  //   문자 그대로 만족시키려면 실제 컬럼이 필요하다 -- input_meta에 욱여넣으면 조회할 때
+  //   매번 ->>'hint_mode' 캐스팅이 필요해 "구별"의 편의가 떨어진다.
+  //   COST: RLS의 "update own"(member_id = auth.uid())을 통과하려면 anon key가 아니라
+  //   로그인한 사용자의 실제 세션 access_token이 필요하다 -- 미로그인이면 0행 매칭으로
+  //   조용히 실패한다(기존 관용과 동일하게 non-fatal, best-effort).
+  //   EXIT: app/p04_timing_schema.sql을 되돌리면(컬럼 DROP) 이 함수는 계속 호출은 되지만
+  //   PATCH가 컬럼없음 에러로 실패할 뿐 메인 저장 흐름에는 영향 없다(catch로 감싸져 있음).
+  async function patchTimingColumns(runId, patch) {
+    if (!runId) return;
+    const client = await LabDB.ensureClient();
+    const { data } = await client.auth.getSession();
+    const token = (data && data.session && data.session.access_token) || LabConfig.get("supabase-anon-key");
+    const url = `${LabConfig.get("supabase-url")}/rest/v1/runs?id=eq.${encodeURIComponent(runId)}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "apikey": LabConfig.get("supabase-anon-key"),
+        "Authorization": `Bearer ${token}`,
+        "Prefer": "return=minimal",
+      },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`timing 컬럼 PATCH 실패 (HTTP ${res.status}): ${text.slice(0, 200)}`);
+    }
+  }
+
   // best-effort DB 기록. app/p04_schema.sql이 아직 적용되지 않았으면 CHECK 제약(23514)에
   // 걸려 실패하는데, 그건 이 함수가 아니라 그 마이그레이션의 책임이다 -- 여기서는 실패해도
   // 화면 흐름을 막지 않는다(이 저장소의 saveFailedRun/maybeSaveRun과 동일한 관용).
-  async function saveAnalysisRun(setup, analysis) {
+  async function saveAnalysisRun(setup, analysis, onProgress) {
     if (!LabDB.isConfigured()) return;
-    await LabDB.startRun({
+    const run = await LabDB.startRun({
       pipeline: "p04",
       model: analysis.model,
       input_meta: {
@@ -181,6 +224,11 @@ const POCEngine = (() => {
       },
       overrides: {},
     });
+    try {
+      await patchTimingColumns(run.id, { hint_mode: analysis.hintMode, timing_ms: analysis.timing });
+    } catch (e) {
+      if (onProgress) onProgress(`⚠ 소요시간 컬럼 저장 실패(본 결과 저장은 성공): ${e.message}`);
+    }
   }
 
   // ── 3단계: 문답 ──────────────────────────────────────────────────────────────
@@ -218,6 +266,7 @@ const POCEngine = (() => {
     const model = analysis.model;
     const results = [];
     const teachesById = new Map((setup.teaches || []).map((t) => [t.id, t]));
+    const adaptiveHintGenMs = []; // D8: adaptive 모드에서만 채워짐(frozen은 세션 중 LLM 호출 없음)
 
     // db.js의 startRun()/logTurn() 관용(D193)과 동일: 턴이 실제로 일어나기 전에 run 행을
     // 먼저 열어야 각 턴을 즉시 기록할 수 있다 -- 세션 끝에서야 한 번에 저장하면 중간에
@@ -255,13 +304,14 @@ const POCEngine = (() => {
         const attempts = [];
         let hintsUsed = 0;
         let hintText = null; // 다음 질문과 함께 보여줄 힌트 -- 첫 시도는 없음(자력)
+        let hintMs = null;   // D8: 그 힌트를 얻기까지 걸린 시간(frozen=사전생성 시점 값, adaptive=방금 생성한 값)
         let cappedScore = 0;
         let passed = false;
 
         for (;;) {
           const answer = await hooks.getAnswer({
             topicIndex: ti, topic: qs.topic, axis: lvl.axis, question: lvl.question,
-            hintsUsed, hintText, codeRef: qs.code_ref, codeBlock: qs.code_block,
+            hintsUsed, hintText, hintMs, codeRef: qs.code_ref, codeBlock: qs.code_block,
           });
           hooks.onProgress(`${qs.topic.title} · ${POCScoring.AXES[lvl.axis].label} 채점 중...`);
           const graded = await gradeLevel({
@@ -271,7 +321,7 @@ const POCEngine = (() => {
           const cap = POCScoring.applyCap(graded.score, hintsUsed);
           cappedScore = cap.capped;
           attempts.push({
-            hintsUsed, hint: hintText, question: lvl.question, answer,
+            hintsUsed, hint: hintText, hintMs, question: lvl.question, answer,
             rawScore: cap.raw, cappedScore: cap.capped, capApplied: cap.capApplied,
             evidence: graded.evidence, missing: graded.missing,
           });
@@ -282,15 +332,26 @@ const POCEngine = (() => {
           if (passed) break;
           if (hintsUsed >= POCScoring.thresholds.maxHintsPerLevel) break; // 힌트 소진, 미달 -- 아래에서 처리
 
-          // D4 개정: 오답이 확정된 지금에서야, 방금 답변을 근거로 힌트를 생성한다(답변 전
-          // 동결이 아님 -- app/scoring-config.js의 hintLadder 주석 참고).
           hintsUsed++;
-          if (hooks.onHintPending) hooks.onHintPending({ topicIndex: ti, axis: lvl.axis, hintLevel: hintsUsed });
-          const hint = await HintLadder.generateHint({
-            axis: lvl.axis, hintLevel: hintsUsed, question: lvl.question, attempts,
-            teach, codeBlock: qs.code_block, codeRef: qs.code_ref, model, onProgress: hooks.onProgress,
-          });
-          hintText = hint.text;
+          // D7: hintMode==="frozen"이면 힌트가 이미 2단계법 freezeQuestionSet()에서
+          // 생성돼 lvl.hints에 있다 -- LLM 호출 없이 그대로 읽는다(팀 계약: 턴당 채점
+          // 호출 1개만). "adaptive"면 D4 개정대로 오답이 확정된 지금 방금 답변을 근거로
+          // 힌트를 즉석 생성한다. 근거/트레이드오프는 scoring-config.js의 hintMode 주석.
+          if (Array.isArray(lvl.hints)) {
+            const frozen = lvl.hints.find((h) => h.lv === hintsUsed);
+            hintText = frozen ? frozen.text : HintLadder.fallbackHint(hintsUsed, qs.code_ref);
+            hintMs = frozen ? frozen.ms : null;
+          } else {
+            if (hooks.onHintPending) hooks.onHintPending({ topicIndex: ti, axis: lvl.axis, hintLevel: hintsUsed });
+            const hint = await HintLadder.generateHint({
+              axis: lvl.axis, hintLevel: hintsUsed, question: lvl.question, attempts,
+              teach, codeBlock: qs.code_block, codeRef: qs.code_ref, model, onProgress: hooks.onProgress,
+            });
+            hintText = hint.text;
+            hintMs = hint.ms;
+            adaptiveHintGenMs.push({ topicIndex: ti, axis: lvl.axis, lv: hintsUsed, ms: hint.ms });
+            if (hooks.onHintTiming) hooks.onHintTiming({ topicIndex: ti, axis: lvl.axis, hintLevel: hintsUsed, ms: hint.ms });
+          }
         }
 
         levels.push({
@@ -305,13 +366,14 @@ const POCEngine = (() => {
       hooks.onTopicEnd({ index: ti, outcome, failedAxis });
     }
 
-    const session = { results, model, started_at: new Date().toISOString(), finished_at: new Date().toISOString() };
-    await saveSessionRun(analysis, session).catch((e) => hooks.onProgress(`DB 저장 실패(결과는 화면에 남아있음): ${e.message}`));
+    const timing = { hintMode: analysis.hintMode, adaptiveHintGenMs }; // D8
+    const session = { results, model, hintMode: analysis.hintMode, timing, started_at: new Date().toISOString(), finished_at: new Date().toISOString() };
+    await saveSessionRun(analysis, session, hooks.onProgress).catch((e) => hooks.onProgress(`DB 저장 실패(결과는 화면에 남아있음): ${e.message}`));
     return session;
   }
 
   let sessionDbRun = null;
-  async function saveSessionRun(analysis, session) {
+  async function saveSessionRun(analysis, session, onProgress) {
     if (!LabDB.isConfigured() || !sessionDbRun) return; // 세션 시작조차 실패했으면 마무리 저장도 생략
     await LabDB.saveRun({
       run_id: sessionDbRun.id, pipeline: "p04", model: session.model,
@@ -320,6 +382,11 @@ const POCEngine = (() => {
       artifacts: [{ kind: "session_results", content: session.results }],
       started_at: session.started_at, finished_at: session.finished_at, status: "done",
     });
+    try {
+      await patchTimingColumns(sessionDbRun.id, { hint_mode: session.hintMode, timing_ms: session.timing });
+    } catch (e) {
+      if (onProgress) onProgress(`⚠ 소요시간 컬럼 저장 실패(본 결과 저장은 성공): ${e.message}`);
+    }
   }
 
   async function logSessionTurn(analysis, turn) {

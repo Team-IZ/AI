@@ -49,8 +49,16 @@
       </div>
 
       <div class="card">
-        <h3>문제 <span id="topic-count"></span>개</h3>
+        <h3>문제 <span id="topic-count"></span>개 <span class="badge mute" id="hint-mode-badge" style="font-weight:400"></span></h3>
         <div id="topics"></div>
+      </div>
+
+      <!-- D8: frozen/adaptive 비교를 위한 소요시간 -- 질문 생성은 항상, 힌트 사전생성은
+           frozen일 때만(adaptive는 세션 중 발생하므로 report.html 쪽에서 봐야 함). -->
+      <div class="card">
+        <h3>소요시간 (질문·힌트 생성)</h3>
+        <div id="timing-summary" style="font-size:var(--fs-sm);color:var(--c-text-2);margin-bottom:var(--sp-3)"></div>
+        <div id="timing-detail" style="font-size:var(--fs-xs);color:var(--c-text-3)"></div>
       </div>
 
       <button class="cta" id="next-btn">문답 시작하기 →</button>
@@ -142,6 +150,40 @@
     if (cur) setStep(cur.key, "error", msg);
   }
 
+  // D8: frozen/adaptive 소요시간 비교. 합계·평균은 개수가 0이면 표시하지 않는다(나눗셈
+  // NaN 방지 + "0건인데 0ms"로 오해하지 않게).
+  function summarizeMs(list) {
+    if (!list || !list.length) return null;
+    const vals = list.map((x) => x.ms || 0);
+    const sum = vals.reduce((a, b) => a + b, 0);
+    return { count: vals.length, sum, avg: Math.round(sum / vals.length) };
+  }
+
+  function renderTiming(analysis) {
+    const t = analysis.timing || {};
+    const q = summarizeMs((t.questionGenMs || []).map((ms) => ({ ms })));
+    const h = summarizeMs(t.frozenHintGenMs || []);
+
+    const parts = [];
+    if (q) parts.push(`질문 생성 ${q.count}건 · 합계 ${(q.sum / 1000).toFixed(1)}초 · 평균 ${q.avg}ms`);
+    if (analysis.hintMode === "frozen") {
+      parts.push(h
+        ? `힌트 사전생성 ${h.count}건 · 합계 ${(h.sum / 1000).toFixed(1)}초 · 평균 ${h.avg}ms`
+        : "힌트 사전생성: 기록 없음");
+    } else {
+      parts.push("힌트는 적응형 모드라 세션 중 생성됩니다 -- 소요시간은 문답 화면과 보고서에서 확인.");
+    }
+    $("timing-summary").innerHTML = parts.map((p) => esc(p)).join("<br>");
+
+    if (analysis.hintMode === "frozen" && t.frozenHintGenMs && t.frozenHintGenMs.length) {
+      $("timing-detail").innerHTML = t.frozenHintGenMs
+        .map((x) => `${esc(POCScoring.AXES[x.axis] ? POCScoring.AXES[x.axis].label : x.axis)} · 힌트${x.lv}: ${x.ms}ms`)
+        .join(" &nbsp;·&nbsp; ");
+    } else {
+      $("timing-detail").textContent = "";
+    }
+  }
+
   // ── 렌더 ────────────────────────────────────────────────────────────────────
   function renderResults(analysis) {
     $("doc-overview").textContent = analysis.analysisDoc.overview || "";
@@ -169,6 +211,7 @@
     }
 
     $("topic-count").textContent = analysis.questionSets.length;
+    $("hint-mode-badge").textContent = analysis.hintMode === "adaptive" ? "힌트: 적응형" : "힌트: 동결";
     $("topics").innerHTML = analysis.questionSets.map((qs, i) => {
       if (qs.flagged) {
         return `<div class="topic"><div class="th"><b>${i + 1}. ${esc(qs.topic.title)}</b><span class="badge warn">flagged</span></div>
@@ -182,6 +225,7 @@
         <span class="badge mute mono">${esc(CodeFragment.formatRef(qs.code_ref))}</span></div>${levels}</div>`;
     }).join("");
 
+    renderTiming(analysis);
     $("results").classList.remove("hidden");
   }
 

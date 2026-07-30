@@ -41,11 +41,13 @@ app/
   code-fragment.js     LLM이 지목한 {file,symbol}에서 실제 줄 번호를 우리가 찾아 산정(D-poc10)
   question-guard.js    질문·힌트에 선택지가 섞이는 걸 정규식으로 탐지(실측 사고 재발 방지)
   hint-ladder.js       문제 1개의 L1~L4 질문을 답변 전에 동결(freezeQuestionSet, D4) +
-                         오답 확정 직후 답변 기반 힌트 1개 생성(generateHint, D4 개정)
+                         힌트 1개 생성(generateHint) -- hintMode에 따라 질문 직후 답변 없이
+                         (frozen, D7) 또는 오답 확정 직후 답변 기반(adaptive, D4 개정)으로 호출
   requirements.js      요구사항 P/F 판정
   poc-engine.js         전체 오케스트레이션(2/3/4단계) -- 페이지는 DOM을 안 만지고 이 파일의 hooks만 받음
   poc-state.js          페이지 간 sessionStorage 핸드오프(teamiz_p04_* 키, code-qna와 분리)
   p04_schema.sql        ★ public.runs/presets의 pipeline CHECK 제약에 'p04' 추가(사람이 한 번 실행)
+  p04_timing_schema.sql ★ public.runs에 hint_mode/timing_ms 컬럼 + p04_timing_view 추가(D8)
 
 shared/ cognition/ judgment/ feedback/  feat/code_Q&A에서 무수정 이식(vendored, 드리프트 검사 대상)
 worker/                동일 프록시 설정 재사용(재배포 불필요)
@@ -89,6 +91,25 @@ COST: 오답마다 LLM 호출이 1회 늘어난다 — `session.html`의 타이�
 프롬프트만 고치면 힌트 문구·강도가 바뀌도록 `app/prompt_manifest.json`의 `p04-7` 스테이지
 하나로 모듈화했다(사용자 요구).
 
+**D7 (2026-07-30, 팀 기획서 충돌 절충)**: D4 개정 직후 팀원 기획서(`poc-axis-order-fix.md`)가
+"지금 계약은 동결 기준, 세션 런타임은 채점만(턴당 LLM 호출 1개), 적응형 힌트는 나중에 별도
+반영"이라고 명시하며 정면 충돌했다. 사용자 지시(D4 개정)와 팀 계약(동결) 중 하나를 코드로
+확정하지 않고, **`app/index.html`에 버튼 토글을 둬 언제든 전환 가능**하게 했다 —
+`POCScoring.hintMode`(기본값 `"frozen"`, 팀 계약과 일치). 두 모드가 `HintLadder.generateHint()`
+**같은 함수/프롬프트**를 공유한다: frozen은 질문 생성 직후 `attempts:[]`로(답변 없이) 호출해
+`lvl.hints`에 동결, adaptive는 오답 확정 직후 실제 attempts로 호출. `app/prompt_manifest.json`의
+p04-7 문구를 "답변이 있다면 참고, 없다면(동결) 질문 자체로 판단"으로 일반화해 두 컨텍스트
+모두에서 말이 되게 했다. `analysis.html`에 현재 모드 배지를 표시한다.
+
+**D6 → D6-fix (2026-07-30, 팀 기획서 대조)**: 세부질문 순서 확정 — `L1 코드기술 → L2
+설계논리 → L3 대안 → L4 반례한계`(팀 기획서가 명시한 정확한 축 id/label). 최초 구현은
+`L3=반례한계, L4=대안`이었고, 사용자 지시로 순서(order)만 먼저 맞바꿨는데 축 id를
+`L3_대안비교`/`L4_반례대응`으로 새로 지었더니 팀이 이식할 백엔드(07_ENG의
+`axis_score.axis_code`: `ALTERNATIVE_COMPARISON`/`COUNTEREXAMPLE_RESPONSE`)가 참조하는
+정확한 문자열(`L3_대안`/`L4_반례한계`, label "반례 대응·한계")과 어긋났다 — 팀 문서 대조 후
+키 이름을 다시 고쳤다. 값 단계 서술 내용은 처음부터 안 바뀌었다(각 축이 재는 능력은 동일).
+재시험 판정(`retest.triggerAxis`)은 L1 고정이라 이 변경과 무관.
+
 **D-poc6/D-poc7**: 질문·힌트에 선택지가 섞이는 사고(사용자 실측: 보기 준 학생이 대안비교
 5점 받음 — 대안을 제시한 게 아니라 고른 것)를 `question-guard.js`가 정규식으로 잡아
 재생성시킨다.
@@ -121,13 +142,6 @@ vendored `shared/lab-core.js:200`이 페이지 로드 즉시 `MODEL_CHOICES`를 
 입력(포커스 아웃 시점, p01과 동일하게 "change" 이벤트) 후 실시간 카탈로그로 교체, 조회
 실패 시에만 CURATED로 폴백하고 그 사실을 note에 표시.
 
-**D6 (2026-07-30)**: 세부질문 순서 확정 — `L1 코드기술 → L2 설계논리 → L3 대안비교 →
-L4 반례대응`. 최초 구현은 `L3=반례한계, L4=대안` 순이었는데 사용자가 자리를 맞바꿨다 —
-설계 논리를 밝힌 다음엔 대안과 비교해 그 선택을 정당화시키고, 그래도 답하면 마지막으로
-반례를 들이대 방어시키는 순서. 값 단계 서술 내용은 안 바뀌었다(각 축이 재는 능력은
-동일) — order와 축 id/label만 맞바꿨다(`app/scoring-config.js`의 D6 주석 참고). 재시험
-판정(`retest.triggerAxis`)은 L1 고정이라 이 변경과 무관하다.
-
 **힌트 사다리** (레벨당 최대 2회, 소진 후 미달이면 그 문제 종료 → 다음 문제 L1. 강도 정의는
 `app/scoring-config.js`의 `hintLadder`, 실제 문구는 `app/prompt_manifest.json`의 `p04-7`):
 
@@ -153,6 +167,28 @@ L4 반례대응`. 최초 구현은 `L3=반례한계, L4=대안` 순이었는데 
 오버라이드 UI가 없으므로(P02/P03의 스테이지카드 에디터는 이 포트들에도 없음), `POCStage`는
 그 함수를 거치지 않고 스테이지 파라미터 기본값을 직접 읽는다.
 
+**D8 (2026-07-30, frozen/adaptive 소요시간 비교)**: "적응형과 동결 버전의 질문과 힌트 각각
+소요 시간을 체크해야" 하는 요구 -- `HintLadder.generateHint()`/`freezeQuestionSet()`이 벽시계
+시간(`Date.now()` 전후차, 재시도 포함 총 시간)을 재서 반환하고, `poc-engine.js`가 이걸 모아
+`analysis.timing`(질문 생성 + frozen이면 힌트 사전생성 8건)과 `session.timing`(adaptive면
+힌트 실시간 생성)으로 각 단계 저장 페이로드에 얹는다. `analysis.html`(질문·힌트 사전생성
+소요시간 요약+상세), `session.html`(힌트 버블마다 "(N.N초)" 인라인 표시 -- frozen은 사전생성
+시점 값, adaptive는 방금 생성한 값), `report.html`(세션 종합, frozen이면 "사전생성 8건 중
+실제 세션에서 재사용된 건수"까지 attempts에서 역산)에 표시.
+  - **DB 컬럼**: `app/p04_timing_schema.sql`이 `public.runs`에 `hint_mode text`(CHECK로
+    `'frozen'`/`'adaptive'`만 허용) + `timing_ms jsonb` **실컬럼**을 추가한다(JSONB
+    `input_meta` 필드가 아니라 "DB에 칼럼 구별 지어서"라는 요구를 문자 그대로 만족).
+    vendored `shared/db.js`의 `startRun()`/`saveRun()`은 이 두 필드를 모르므로(고정된
+    필드 집합만 INSERT/UPDATE, 드리프트 검사 대상이라 시그니처를 못 늘림),
+    `poc-engine.js`의 `patchTimingColumns()`가 같은 run 행에 **직접 REST PATCH**를
+    보내 채운다 -- 로그인한 사용자의 실제 session access_token을 써서 RLS
+    `update own`(`member_id = auth.uid()`)을 통과한다(미로그인이면 0행 매칭으로
+    조용히 실패, 기존 best-effort 관용과 동일). 조회 편의를 위해 `p04_timing_view`도
+    같이 만든다(이 저장소의 `p01_questions_view`/`p03_progress_view`와 같은 관례).
+  - COST: 미로그인 세션은 hint_mode/timing_ms가 DB에 안 남는다(화면 표시는 로그인
+    무관하게 항상 됨). REST PATCH 실패는 onProgress로만 알리고 메인 저장 흐름을
+    막지 않는다.
+
 ## DB 마이그레이션 상태
 
 - **`app/p04_schema.sql`**: **적용 완료** (2026-07-29, Management API PAT으로 직접 실행).
@@ -163,6 +199,10 @@ L4 반례대응`. 최초 구현은 `L3=반례한계, L4=대안` 순이었는데 
   `oziaeqcvrkrqkhwrybfj`)에는 애초에 생성돼 있지 않음을 실측 확인 — 존재 여부를 먼저
   검사해 없으면 건너뛰도록 파일을 고친 뒤 재적용(1차 시도는 존재하지 않는 presets를
   참조하다 트랜잭션 전체가 롤백돼 runs 쪽도 같이 실패했었음, 파일 상단 주석에 기록).
+- **`app/p04_timing_schema.sql`**: **적용 완료** (2026-07-30, Management API PAT).
+  `public.runs`에 `hint_mode text`(CHECK 제약 포함) + `timing_ms jsonb` 컬럼과
+  `public.p04_timing_view`를 추가. 적용 후 `information_schema.columns` 조회로 두
+  컬럼이 실제로 생겼음을 확인.
 
 ## 검증
 

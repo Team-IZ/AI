@@ -52,6 +52,7 @@ const POCState = (() => {
    * @param {Array<string>} p.requirements  P/F 판정 대상 요구사항
    * @param {object} p.submission  {method:"pat"|"zip", repoInput?, branch?, zipName?}
    * @param {string} p.model
+   * @param {string} p.hintMode    "frozen"|"adaptive" (D7) -- 미지정 시 POCScoring.hintMode.default
    */
   function saveSetup(p) { return safeSet(KEYS.setup, { ...p, saved_at: new Date().toISOString() }); }
   function loadSetup() { return safeGet(KEYS.setup); }

@@ -71,6 +71,14 @@
         <h3>자력 / 보조 해석</h3>
         <p id="autonomy-note" style="font-size:var(--fs-sm);line-height:1.7;color:var(--c-text-2)"></p>
       </div>
+
+      <!-- D8: frozen(2단계에서 미리 생성) vs adaptive(3단계 세션 중 생성) 소요시간 종합.
+           frozen은 analysis.html에서도 보이지만, 실제 세션에서 그 힌트가 몇 번 쓰였는지는
+           여기서만 알 수 있어 종합 비교는 이 카드가 기준. -->
+      <div class="card">
+        <h3>소요시간 종합 <span class="badge mute" id="report-hint-mode-badge" style="font-weight:400"></span></h3>
+        <div id="timing-summary" style="font-size:var(--fs-sm);color:var(--c-text-2)"></div>
+      </div>
     </div>
   </div>
 </div>
@@ -118,6 +126,47 @@
     el.innerHTML = items.map((it) => `<div class="${cls}">${render(it)}</div>`).join("");
   }
 
+  // D8: frozen vs adaptive 소요시간 종합. analysis.timing(질문 생성 + frozen 힌트
+  // 사전생성)과 session.timing(adaptive 힌트 실시간 생성)을 한 화면에서 비교한다.
+  function renderTimingSummary(analysis, session) {
+    const mode = (session && session.hintMode) || (analysis && analysis.hintMode) || "frozen";
+    $("report-hint-mode-badge").textContent = mode === "adaptive" ? "적응형" : "동결";
+
+    const sum = (list) => (list && list.length ? list.reduce((a, x) => a + (x.ms || 0), 0) : 0);
+    const at = (analysis && analysis.timing) || {};
+    const st = (session && session.timing) || {};
+    const questionMs = sum((at.questionGenMs || []).map((ms) => ({ ms })));
+    const questionCount = (at.questionGenMs || []).length;
+
+    const lines = [`질문 생성: ${questionCount}건 · 합계 ${(questionMs / 1000).toFixed(1)}초`];
+    if (mode === "frozen") {
+      const hintMs = sum(at.frozenHintGenMs);
+      const hintCount = (at.frozenHintGenMs || []).length;
+      lines.push(`힌트 사전생성(2단계): ${hintCount}건 · 합계 ${(hintMs / 1000).toFixed(1)}초${hintCount ? ` · 평균 ${Math.round(hintMs / hintCount)}ms` : ""}`);
+      lines.push(`이번 세션에서 실제로 쓰인 힌트(재사용, 추가 LLM 호출 없음): ${(st.adaptiveHintGenMs || []).length + countUsedFrozenHints(session)}건`);
+    } else {
+      const hintMs = sum(st.adaptiveHintGenMs);
+      const hintCount = (st.adaptiveHintGenMs || []).length;
+      lines.push(`힌트 실시간 생성(3단계, 오답마다): ${hintCount}건 · 합계 ${(hintMs / 1000).toFixed(1)}초${hintCount ? ` · 평균 ${Math.round(hintMs / hintCount)}ms` : ""}`);
+      lines.push(`턴당 총 LLM 소요 = 채점 1회 + (오답 시) 힌트 생성 1회 -- frozen 대비 이 힌트 시간만큼 세션 체감 대기가 늘어남.`);
+    }
+    $("timing-summary").innerHTML = lines.map((l) => esc(l)).join("<br>");
+  }
+
+  // frozen 모드에서 세션 중 실제로 재사용된(=학생이 오답을 내서 보여준) 힌트 개수 --
+  // 사전생성 8개(문제당 4레벨×2) 중 몇 개가 실제로 쓰였는지는 세션 결과의 attempts에서
+  // hintsUsed>0인 시도 수로 역산한다(별도 카운터를 안 만들고 이미 있는 기록에서 유도).
+  function countUsedFrozenHints(session) {
+    if (!session || !session.results) return 0;
+    let n = 0;
+    for (const r of session.results) {
+      for (const lvl of r.levels || []) {
+        n += (lvl.attempts || []).filter((a) => a.hintsUsed > 0).length;
+      }
+    }
+    return n;
+  }
+
   function renderResults(report) {
     $("summary").textContent = report.llm.summary || "";
     renderMatrix(report.matrix);
@@ -159,6 +208,7 @@
     try {
       const report = await POCEngine.runReportStage(setup, analysis, session, { onProgress: (m) => { $("loading").textContent = m; } });
       renderResults(report);
+      renderTimingSummary(analysis, session);
     } catch (err) {
       console.error(err);
       showError(`오류: ${err.message}`);

@@ -179,10 +179,13 @@
     if (hlRow) hlRow.scrollIntoView({ block: "center" });
   }
 
-  function getAnswer({ topic, axis, question, hintsUsed, hintText }) {
+  function getAnswer({ topic, axis, question, hintsUsed, hintText, hintMs }) {
     removeTyping(); // 채점 대기(첫 질문 전엔 no-op) 또는 힌트 생성 대기를 이 질문 버블이 대체
     const axisLabel = POCScoring.AXES[axis].label;
-    const hintHtml = hintText ? `<div class="hint">힌트 ${hintsUsed}: ${esc(hintText)}</div>` : "";
+    // D8: frozen은 사전생성 시점 소요시간, adaptive는 방금 생성한 소요시간 -- 같은 필드를
+    // 공유하되 "언제 쟀는지"만 다르다. ms가 없으면(자력 첫 시도) 아무것도 안 붙인다.
+    const hintTimingHtml = typeof hintMs === "number" ? ` <span style="color:var(--c-text-3)">(${(hintMs / 1000).toFixed(1)}초)</span>` : "";
+    const hintHtml = hintText ? `<div class="hint">힌트 ${hintsUsed}: ${esc(hintText)}${hintTimingHtml}</div>` : "";
     appendBubble(`<div class="axis">${esc(axisLabel)}</div>${esc(question)}${hintHtml}`, "bot");
     submitBtn.disabled = false;
     inputEl.disabled = false;
