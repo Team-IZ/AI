@@ -105,7 +105,11 @@
     const el = document.querySelector(`.pstep[data-key="${key}"]`);
     if (!el) return;
     el.className = `pstep ${status}`;
-    el.querySelector(".ic").textContent = status === "done" ? "✓" : status === "error" ? "✕" : status === "now" ? "◔" : "•";
+    // D-poc11: now 상태는 정적 글리프가 아니라 회전 스피너(poc.css의 .spin) -- 오래 걸리는
+    // LLM 호출 중에도 "멈춘 것"처럼 보이지 않게 한다.
+    const ic = el.querySelector(".ic");
+    if (status === "now") ic.innerHTML = `<span class="spin"></span>`;
+    else ic.textContent = status === "done" ? "✓" : status === "error" ? "✕" : "•";
     if (sub !== undefined) el.querySelector(".sub").textContent = sub;
   }
 

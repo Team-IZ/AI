@@ -1,16 +1,37 @@
-// finding/분석문서가 가리키는 {file, lines} 참조를 실제 소스와 대조해 코드 파편을 뽑는다.
+// finding/분석문서가 가리키는 {file, symbol} 참조를 실제 소스와 대조해 코드 파편을 뽑는다.
 //
 // D-poc6: 기존 P02 finding에는 라인 번호가 없다(cognition/judgment는 파일 단위로만
 // 판단한다) -- 명세의 "코드 파편(질문에 사용한 코드 파일, line 넘버)"을 만들려면 LLM이
-// 분석 문서(p04-1)에서 스스로 {file, lines}를 지목하게 한 뒤, 그 지목이 실제 파일 범위
-// 안에 있는지 여기서 검증한다. LLM이 지어낸 파일/라인을 그대로 믿지 않는다 -- 검증에
+// 코드 위치를 지목해야 한다. LLM이 지어낸 파일/라인을 그대로 믿지 않는다 -- 검증에
 // 실패하면 그 항목은 버려지고(analysis.js가 사용자에게 알림), 화면에는 결코 존재하지
 // 않는 코드를 보여주지 않는다.
+//
+// D-poc10 (2026-07-30, 사용자 실사용 재현): 처음엔 LLM에게 줄 번호([시작,끝])까지
+// 직접 세게 했는데, 실사용에서 코드 조각 조회가 자꾸 깨졌다 -- LLM이 파일을 다시 세면서
+// 줄 번호를 종종 틀렸고(특히 긴 파일), extractFragment는 그걸 "무효"로 버릴 수밖에 없어
+// "코드 조각을 확인할 수 없음"만 계속 떴다. 근본 원인은 "LLM이 세는 것"이라는 설계 자체였다.
+//   WHY symbol로 바꿨는가: LLM은 코드를 그대로 인용하는 건 잘한다(문자열 복사) -- 세는
+//   것만 못한다. 그래서 LLM에게는 실제 코드 한 줄(symbol, 예: "def pay(order, method):")만
+//   그대로 옮겨 적게 하고, 그 문자열이 파일의 몇 번째 줄에 있는지는 우리가 직접 찾는다
+//   (locateSymbol). "산정된 사실"과 "LLM의 주장"을 분리하는 것 -- 이 저장소가 이미
+//   finding 검증에서 쓰던 원칙(D-poc6)을 위치 탐색에도 적용한 것뿐이다.
+//   COST: 심볼이 파일 안에 정확히(또는 공백 정규화 후) 존재해야 한다 -- LLM이 코드를
+//   요약·재구성해서 인용하면(예: 실제론 여러 줄인데 한 줄로 합쳐 인용) 여전히 못 찾는다.
+//   블록 끝(줄 범위의 end) 추정은 들여쓰기 기반 휴리스틱이라 완벽하지 않다(중괄호 언어의
+//   한 줄짜리 조건문 등에서 과소/과대 추정 가능) -- 그래도 "시작 줄은 항상 정확하다"가
+//   보장되므로, 최소한 학생에게 엉뚱한 코드를 보여주는 사고는 구조적으로 막힌다.
+//   EXIT: 언어별 파서를 넣어 블록 끝을 정확히 잡고 싶어지면 locateSymbol의 들여쓰기
+//   휴리스틱 부분만 교체하면 된다 -- 심볼 매칭 자체는 그대로 재사용 가능.
 const CodeFragment = (() => {
   const CONTEXT_LINES = 2; // 지목된 범위 위아래로 몇 줄을 더 보여줄지
+  const BLOCK_MAX_LINES = 40; // 심볼 탐색 시 블록 끝을 추정하는 최대 범위
 
   function splitLines(content) {
     return String(content).split(/\r\n|\r|\n/);
+  }
+
+  function normalizeForMatch(s) {
+    return s.replace(/\s+/g, " ").trim();
   }
 
   /** files 맵에서 ref.file을 찾는다. 정확한 경로 우선, 없으면 P02Engine의 베이스네임 폴백. */
@@ -21,30 +42,77 @@ const CodeFragment = (() => {
   }
 
   /**
-   * @param {object} files  {path: content}
-   * @param {object} ref    {file, lines:[start,end]}
-   * @returns {{valid:true,file,lines:[number,number],text:string}|{valid:false,reason:string}}
+   * 실제 코드 한 줄(symbol)이 파일의 몇 번째 줄에 있는지 우리가 직접 찾는다 -- LLM에게
+   * 세게 하지 않는다(D-poc10).
+   * @returns {{valid:true,file,lines:[start,end],matchedLine:number}|{valid:false,reason:string}}
    */
-  function extractFragment(files, ref) {
-    if (!ref || !ref.file) return { valid: false, reason: "file 없음" };
-    const resolved = resolveFile(files, ref.file);
-    if (!resolved) return { valid: false, reason: `파일을 찾을 수 없음: ${ref.file}` };
+  function locateSymbol(files, refFile, symbol) {
+    const resolved = resolveFile(files, refFile);
+    if (!resolved) return { valid: false, reason: `파일을 찾을 수 없음: ${refFile}` };
+    const needle = String(symbol || "").trim();
+    if (!needle) return { valid: false, reason: "symbol이 비어있음" };
 
     const lines = splitLines(files[resolved]);
-    let [start, end] = Array.isArray(ref.lines) && ref.lines.length === 2 ? ref.lines : [1, Math.min(lines.length, 20)];
-    start = Math.max(1, Math.min(Number(start) || 1, lines.length));
-    end = Math.max(start, Math.min(Number(end) || start, lines.length));
-    // LLM이 지목한 범위가 파일 전체 길이를 넘으면(예: 300줄짜리 파일에 500번째 줄) 클램프된
-    // 값 자체가 이미 원래 지목과 다르다는 뜻 -- 그 경우도 무효로 처리해 잘못된 근거를
-    // "비슷하게 맞았다"고 넘기지 않는다.
-    if (Array.isArray(ref.lines) && (ref.lines[0] > lines.length || ref.lines[1] > lines.length)) {
-      return { valid: false, reason: `줄 범위가 파일 길이(${lines.length}줄)를 벗어남: ${JSON.stringify(ref.lines)}` };
+    let idx = lines.findIndex((l) => l.includes(needle));
+    if (idx === -1) {
+      const normNeedle = normalizeForMatch(needle);
+      idx = lines.findIndex((l) => normalizeForMatch(l).includes(normNeedle));
+    }
+    if (idx === -1) {
+      return { valid: false, reason: `코드에서 찾을 수 없음: "${needle.slice(0, 60)}"` };
     }
 
+    // 블록 끝 추정: 들여쓰기가 시작줄과 같거나 얕아지는 다음 비어있지 않은 줄 전까지.
+    // 시작 줄(idx)은 문자열 매칭으로 확정된 사실이라 항상 정확하다 -- 이 추정은 "얼마나
+    // 더 보여줄지"에만 영향을 준다.
+    const baseIndent = (lines[idx].match(/^\s*/) || [""])[0].length;
+    let endIdx = idx;
+    for (let i = idx + 1; i < lines.length && i - idx < BLOCK_MAX_LINES; i++) {
+      const line = lines[i];
+      if (!line.trim()) { endIdx = i; continue; }
+      const indent = (line.match(/^\s*/) || [""])[0].length;
+      if (indent <= baseIndent) break;
+      endIdx = i;
+    }
+    while (endIdx > idx && !lines[endIdx].trim()) endIdx--; // 끝의 빈 줄 제거
+
+    return { valid: true, file: resolved, lines: [idx + 1, endIdx + 1], matchedLine: idx + 1 };
+  }
+
+  function buildFragmentFromLines(files, resolved, lines, start, end) {
     const ctxStart = Math.max(1, start - CONTEXT_LINES);
     const ctxEnd = Math.min(lines.length, end + CONTEXT_LINES);
     const text = lines.slice(ctxStart - 1, ctxEnd).join("\n");
     return { valid: true, file: resolved, lines: [start, end], contextLines: [ctxStart, ctxEnd], text };
+  }
+
+  /**
+   * @param {object} files  {path: content}
+   * @param {object} ref    {file, symbol} 우선, 없으면 하위호환으로 {file, lines:[start,end]}
+   * @returns {{valid:true,file,lines:[number,number],text:string}|{valid:false,reason:string}}
+   */
+  function extractFragment(files, ref) {
+    if (!ref || !ref.file) return { valid: false, reason: "file 없음" };
+
+    if (ref.symbol) {
+      const located = locateSymbol(files, ref.file, ref.symbol);
+      if (!located.valid) return located;
+      const lines = splitLines(files[located.file]);
+      return buildFragmentFromLines(files, located.file, lines, located.lines[0], located.lines[1]);
+    }
+
+    // 하위호환 경로 -- 이미 산정된(추측 아닌) lines를 직접 넘기는 내부 호출용
+    // (예: HintLadder.freezeQuestionSet이 자기 자신의 이전 결과를 재사용할 때).
+    const resolved = resolveFile(files, ref.file);
+    if (!resolved) return { valid: false, reason: `파일을 찾을 수 없음: ${ref.file}` };
+    const lines = splitLines(files[resolved]);
+    let [start, end] = Array.isArray(ref.lines) && ref.lines.length === 2 ? ref.lines : [1, Math.min(lines.length, 20)];
+    if (Array.isArray(ref.lines) && (ref.lines[0] > lines.length || ref.lines[1] > lines.length)) {
+      return { valid: false, reason: `줄 범위가 파일 길이(${lines.length}줄)를 벗어남: ${JSON.stringify(ref.lines)}` };
+    }
+    start = Math.max(1, Math.min(Number(start) || 1, lines.length));
+    end = Math.max(start, Math.min(Number(end) || start, lines.length));
+    return buildFragmentFromLines(files, resolved, lines, start, end);
   }
 
   /** 사람이 읽는 참조 표기: "path/to/file.py:12-34" */
@@ -86,5 +154,5 @@ const CodeFragment = (() => {
     return block;
   }
 
-  return { extractFragment, formatRef, formatFragmentBlock, buildCodeBlock, resolveFile };
+  return { extractFragment, locateSymbol, formatRef, formatFragmentBlock, buildCodeBlock, resolveFile };
 })();

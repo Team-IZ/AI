@@ -21,7 +21,14 @@
   .dot.now { background: var(--c-primary); }
   .codepanel { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-4); }
   .codepanel .ref { font-family: var(--mono); font-size: 11px; color: var(--c-text-3); margin-bottom: var(--sp-2); }
-  .codepanel .frag { background: var(--c-code); border-radius: var(--r-md); padding: var(--sp-3); font-family: var(--mono); font-size: 12px; overflow-x: auto; white-space: pre; color: var(--c-code-text); max-height: 60vh; }
+  /* D-poc10: 조각(2줄 컨텍스트)이 아니라 전체 파일 + 하이라이트로 보여준다 -- 학생이
+     맥락(주변 함수, import 등)을 볼 수 있어야 L2~L4(설계논리·반례·대안) 답변이 가능하다. */
+  .codepanel .frag { background: var(--c-code); border-radius: var(--r-md); overflow: auto; max-height: 60vh; font-family: var(--mono); font-size: 12px; }
+  .codepanel .frag table { border-collapse: collapse; width: 100%; }
+  .codepanel .frag td { padding: 0 var(--sp-2); white-space: pre; color: var(--c-code-text); vertical-align: top; }
+  .codepanel .frag td.ln { color: var(--c-text-3); text-align: right; user-select: none; padding-right: var(--sp-3); border-right: 1px solid var(--c-border); width: 1%; }
+  .codepanel .frag tr.hl { background: var(--c-warning-soft); }
+  .codepanel .frag tr.hl td.ln { color: var(--c-warning); font-weight: 700; }
 
   .chat { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); display: flex; flex-direction: column; height: 78vh; }
   .transcript { flex: 1; overflow-y: auto; padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); }
@@ -29,6 +36,7 @@
   .bubble.bot { background: var(--c-surface-2); align-self: flex-start; }
   .bubble.bot .axis { font-size: 11px; font-weight: 700; color: var(--c-primary); margin-bottom: 4px; }
   .bubble.bot .hint { font-size: var(--fs-xs); color: var(--c-warning); margin-top: 6px; }
+  .bubble.bot .typing-sub { font-size: 11px; color: var(--c-text-3); margin-top: 4px; min-height: 1em; }
   .bubble.user { background: var(--c-primary); color: #fff; align-self: flex-end; white-space: pre-wrap; }
   .bubble.score { align-self: center; font-size: var(--fs-xs); color: var(--c-text-3); background: transparent; padding: 4px; }
   .bubble.score.pass { color: var(--c-success); }
@@ -79,10 +87,17 @@
 <script src="../shared/db.js"></script>
 <script src="../shared/lab-core.js"></script>
 <script src="../shared/llm.js"></script>
+<!-- pyodide.js/jszip.min.js는 여기서 필요 없다 -- P02Engine.fetchGithubRepo()와
+     SessionState.loadZipFileMap()만 쓴다(재스캔이 아니라 원문 재조회, 아래 D-poc10 참고). -->
+<script src="../shared/session-state.js"></script>
+<script src="../shared/p02-engine.js"></script>
 <script src="scoring-config.js"></script>
 <script src="poc-state.js"></script>
 <script src="code-fragment.js"></script>
+<script src="teaches-source.js"></script>
+<script src="question-guard.js"></script>
 <script src="llm-stage.js"></script>
+<script src="hint-ladder.js"></script>
 <script src="poc-engine.js"></script>
 <script>
 (function () {
@@ -94,6 +109,7 @@
 
   let answerResolver = null;
   let analysis = null;
+  let filesCache = null; // D-poc10: 세션 시작 시 한 번만 재확보(모든 topic이 같은 제출물을 공유)
 
   function appendBubble(html, cls) {
     const div = document.createElement("div");
@@ -101,6 +117,30 @@
     div.innerHTML = html;
     transcriptEl.appendChild(div);
     transcriptEl.scrollTop = transcriptEl.scrollHeight;
+    return div;
+  }
+
+  // D-poc11: "질문 생성 시 … 애니메이션 없음" 실사용 보고 -- 이전엔 onProgress: () => {}로
+  // 진행 신호를 전부 버렸다(채점·힌트 생성 둘 다 LLM 호출인데 학생 화면엔 아무 표시가
+  // 없었음). 채점 대기·힌트 생성 대기 동안 타이핑 인디케이터 버블을 보여주고, 실제 결과
+  // (점수 버블 또는 다음 질문 버블)가 그 자리를 대체한다 -- 인디케이터가 쌓이지 않는다.
+  let typingEl = null;
+  let typingSubEl = null;
+  function appendTyping() {
+    removeTyping();
+    typingEl = appendBubble(
+      `<span class="typing-dots"><span></span><span></span><span></span></span><div class="typing-sub"></div>`,
+      "bot"
+    );
+    typingSubEl = typingEl.querySelector(".typing-sub");
+  }
+  function removeTyping() {
+    if (typingEl) { typingEl.remove(); typingEl = null; typingSubEl = null; }
+  }
+  // 힌트 재생성/폴백 알림, LLM 폴링 경과시간 등 -- 타이핑 인디케이터가 떠 있는 동안에만
+  // 그 아래 보조 텍스트로 표시(새 버블을 쌓지 않는다). 인디케이터가 없을 때는 무시.
+  function updateTypingSub(msg) {
+    if (typingSubEl) typingSubEl.textContent = msg;
   }
 
   function renderTopicList(currentTopicIndex, currentAxis, levelState) {
@@ -115,12 +155,32 @@
     }).join("");
   }
 
+  // D-poc10: 조각(앞뒤 2줄)이 아니라 파일 전체 + 하이라이트. 조각만 보여줄 땐 L2~L4(왜
+  // 이렇게 설계했나/한계/대안)를 묻는데 정작 주변 맥락(다른 함수, import, 호출부)이 안
+  // 보이는 문제가 있었다.
   function renderCodePanel(qs) {
     $("code-ref").textContent = CodeFragment.formatRef(qs.code_ref);
-    $("code-frag").textContent = qs.code_block || "(근거 코드 없음)";
+    const frag = $("code-frag");
+    const file = qs.code_ref && qs.code_ref.file;
+    const content = filesCache && file ? CodeFragment.resolveFile(filesCache, file) : null;
+    if (!content || !filesCache[content]) {
+      frag.textContent = qs.code_block || "(근거 코드 없음 -- 원본 파일을 다시 불러오지 못함)";
+      return;
+    }
+    const lines = String(filesCache[content]).split(/\r\n|\r|\n/);
+    const [hlStart, hlEnd] = (qs.code_ref && qs.code_ref.lines) || [];
+    const rows = lines.map((line, i) => {
+      const n = i + 1;
+      const isHl = hlStart !== undefined && n >= hlStart && n <= hlEnd;
+      return `<tr class="${isHl ? "hl" : ""}" data-ln="${n}"><td class="ln">${n}</td><td>${esc(line)}</td></tr>`;
+    }).join("");
+    frag.innerHTML = `<table>${rows}</table>`;
+    const hlRow = frag.querySelector("tr.hl");
+    if (hlRow) hlRow.scrollIntoView({ block: "center" });
   }
 
   function getAnswer({ topic, axis, question, hintsUsed, hintText }) {
+    removeTyping(); // 채점 대기(첫 질문 전엔 no-op) 또는 힌트 생성 대기를 이 질문 버블이 대체
     const axisLabel = POCScoring.AXES[axis].label;
     const hintHtml = hintText ? `<div class="hint">힌트 ${hintsUsed}: ${esc(hintText)}</div>` : "";
     appendBubble(`<div class="axis">${esc(axisLabel)}</div>${esc(question)}${hintHtml}`, "bot");
@@ -137,6 +197,7 @@
     submitBtn.disabled = true;
     inputEl.disabled = true;
     appendBubble(esc(val), "user");
+    appendTyping(); // 채점 중 -- onLevelResult에서 removeTyping() 후 점수 버블로 대체됨
     const r = answerResolver;
     answerResolver = null;
     r(val);
@@ -147,21 +208,31 @@
   });
 
   async function run() {
+    const setup = POCState.loadSetup();
     analysis = POCState.loadAnalysis();
-    if (!analysis) {
-      $("error-box").textContent = "코드 분석 결과가 없습니다 -- 2단계부터 다시 진행하세요.";
+    if (!setup || !analysis) {
+      $("error-box").textContent = "이전 단계 데이터가 없습니다 -- 1단계부터 다시 진행하세요.";
       $("error-box").classList.remove("hidden");
       return;
     }
     await POCStage.ensureManifestLoaded();
     $("layout").style.display = "grid";
 
+    // D-poc5 유지: 코드 본문은 sessionStorage에 없다 -- ZIP(IndexedDB)/GitHub(재fetch)로
+    // 다시 확보한다. 실패해도 세션 자체는 계속 진행한다(코드 패널만 조각으로 대체 표시).
+    try {
+      filesCache = await POCEngine.resolveFileContents(setup, () => {});
+    } catch (e) {
+      filesCache = null;
+      appendBubble(`⚠ 원본 코드 재조회 실패(${esc(e.message)}) -- 코드 패널은 저장된 조각만 표시됩니다.`, "system");
+    }
+
     const levelState = {};
     analysis.questionSets.forEach((_, i) => { levelState[i] = {}; });
     renderTopicList(0, null, levelState);
 
-    const session = await POCEngine.runSessionStage(analysis, {
-      onProgress: () => {},
+    const session = await POCEngine.runSessionStage(setup, analysis, {
+      onProgress: (msg) => updateTypingSub(msg),
       onStatus: () => {},
       onTopicStart: ({ index, topic }) => {
         renderCodePanel(analysis.questionSets[index]);
@@ -169,16 +240,17 @@
         renderTopicList(index, null, levelState);
       },
       onLevelResult: ({ topicIndex, axis, hintsUsed, score, passed }) => {
+        removeTyping(); // 채점 결과가 왔으니 "채점 중" 인디케이터를 이 점수 버블로 대체
         levelState[topicIndex][axis] = passed ? "pass" : (hintsUsed >= POCScoring.thresholds.maxHintsPerLevel ? "fail" : "now");
         renderTopicList(topicIndex, axis, levelState);
-        const cls = passed ? "pass" : "fail-pending";
         const label = passed
           ? `✓ ${score}점 (통과, 힌트 ${hintsUsed}개 사용)`
           : (hintsUsed >= POCScoring.thresholds.maxHintsPerLevel
               ? `✕ ${score}점 (힌트 소진, 미달)`
-              : `${score}점 (미달 -- 힌트 제공 후 재시도)`);
+              : `${score}점 (미달 -- 힌트 생성 중...)`);
         appendBubble(label, `score ${passed ? "pass" : hintsUsed >= POCScoring.thresholds.maxHintsPerLevel ? "fail" : ""}`);
       },
+      onHintPending: () => { appendTyping(); }, // 힌트를 답변 기반으로 생성하는 동안(D4 개정) 대기 표시
       onTopicEnd: ({ index, outcome, failedAxis }) => {
         if (outcome === "flagged_skipped") {
           appendBubble(`이 문제는 질문 검증 실패로 건너뜁니다.`, "system");

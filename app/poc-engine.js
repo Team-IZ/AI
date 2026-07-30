@@ -23,6 +23,25 @@ const POCEngine = (() => {
     };
   }
 
+  /**
+   * 실제 파일 내용 맵을 다시 확보한다(재스캔은 하지 않는다) -- session.html의 코드 패널처럼
+   * 원문(하이라이트용 전체 파일)이 필요하지만 Pyodide 구조 스캔은 불필요한 경우 전용.
+   * resolveFiles()는 P02Engine.run() 앞단(스캔용) 입력만 만드는 반면, 이건 그 자체로 files를
+   * 반환한다 -- session.html은 pyodide.js/jszip.min.js 스크립트 태그 없이도 이걸 쓸 수 있다
+   * (ZIP 경로는 이미 파싱된 IndexedDB 캐시를 읽기만 하고, GitHub 경로는 fetch만 한다).
+   */
+  async function resolveFileContents(setup, onProgress) {
+    if (setup.submission.method === "zip") {
+      const zipFiles = await SessionState.loadZipFileMap();
+      if (!zipFiles) throw new Error("ZIP 파일 캐시를 찾을 수 없습니다 -- 1단계에서 다시 업로드하세요.");
+      return zipFiles;
+    }
+    const { owner, repo } = P02Engine.parseRepoInput(setup.submission.repoInput);
+    const pat = LabConfig.get("github-pat");
+    const fetched = await P02Engine.fetchGithubRepo(owner, repo, setup.submission.branch || null, pat, onProgress || (() => {}));
+    return fetched.files;
+  }
+
   function findingsBlockFor(findings) {
     const text = JSON.stringify(findings, null, 0);
     return text.length > 6000 ? text.slice(0, 6000) + `\n...(총 ${findings.length}건 중 일부만 표시)` : text;
@@ -64,11 +83,12 @@ const POCEngine = (() => {
       teaches_block: teachesBlock, findings_block: findingsBlock, code_block: docCodeBlock,
     }, { model, onProgress: hooks.onProgress });
 
-    // decision_points는 모델이 스스로 지목한 {file,lines}다 -- 실제 파일과 대조해 검증하고,
+    // decision_points는 모델이 스스로 지목한 {file,symbol}다(D-poc10 -- 줄 번호는 LLM이
+    // 세지 않고 우리가 심볼 문자열로 찾아 산정한다) -- 실제 파일과 대조해 검증하고,
     // 지어낸 위치는 화면에 노출하지 않는다(코드 파편이 곧 근거이므로 여기서 거르지 않으면
     // "존재하지 않는 코드"를 근거라고 보여주게 된다).
     const decisionPoints = (Array.isArray(analysisDoc.decision_points) ? analysisDoc.decision_points : [])
-      .map((dp) => ({ ...dp, fragment: CodeFragment.extractFragment(files, { file: dp.file, lines: dp.lines }) }));
+      .map((dp) => ({ ...dp, fragment: CodeFragment.extractFragment(files, { file: dp.file, symbol: dp.symbol }) }));
     const droppedDecisionPoints = decisionPoints.filter((dp) => !dp.fragment.valid).length;
     if (droppedDecisionPoints) {
       hooks.onProgress(`⚠ 분석 문서의 decision_points 중 ${droppedDecisionPoints}건은 실제 파일 범위와 맞지 않아 근거 없음으로 표시됩니다`);
@@ -89,7 +109,7 @@ const POCEngine = (() => {
     }, { model, onProgress: hooks.onProgress });
 
     let topics = Array.isArray(topicsRaw.topics) ? topicsRaw.topics : [];
-    // 검증: teach_id가 실제로 선택된 teaches 안에 있어야 하고, 서로 달라야 한다. 어긴 topic은
+    // 검증 1: teach_id가 실제로 선택된 teaches 안에 있어야 하고, 서로 달라야 한다. 어긴 topic은
     // 버린다 -- 존재하지 않는 teach를 참조하는 문제를 만들 수는 없다.
     const teachIds = new Set(setup.teaches.map((t) => t.id));
     const seenTeach = new Set();
@@ -97,9 +117,24 @@ const POCEngine = (() => {
       if (!teachIds.has(t.teach_id) || seenTeach.has(t.teach_id)) return false;
       seenTeach.add(t.teach_id);
       return true;
+    });
+    // 검증 2 (D-poc10): code_ref가 실제 파일에서 위치를 못 잡으면 이 단계에서 걸러낸다 --
+    // 안 걸러내면 HintLadder.freezeQuestionSet이 "근거 코드 파편을 확인할 수 없음"인 채로
+    // 질문·힌트 생성을 계속 진행해(LLM 호출만 낭비) 결국 세션에서 조용히 깨졌었다.
+    // 위치가 확정된 lines를 topic.code_ref에 그대로 되먹여, 이후 단계가 symbol을 다시
+    // 찾을 필요 없이 산정된 사실만 쓰게 한다.
+    const unresolvedTopics = [];
+    topics = topics.filter((t) => {
+      const fragment = CodeFragment.extractFragment(files, t.code_ref);
+      if (!fragment.valid) { unresolvedTopics.push({ title: t.title, reason: fragment.reason }); return false; }
+      t.code_ref = { file: fragment.file, lines: fragment.lines };
+      return true;
     }).slice(0, questionCount);
+    if (unresolvedTopics.length) {
+      hooks.onProgress(`⚠ 문제 ${unresolvedTopics.length}건은 코드 위치를 찾지 못해 제외됨: ${unresolvedTopics.map((u) => `"${u.title}"(${u.reason})`).join(", ")}`);
+    }
     if (topics.length < questionCount) {
-      hooks.onProgress(`⚠ 문제 ${questionCount}개를 요청했으나 유효한 문제 ${topics.length}개만 확보됨 (teach 참조 검증 실패분 제외)`);
+      hooks.onProgress(`⚠ 문제 ${questionCount}개를 요청했으나 유효한 문제 ${topics.length}개만 확보됨 (teach/코드위치 검증 실패분 제외)`);
     }
 
     // ── p04-4: 문제별 L1~L4 + 고정 힌트 ─────────────────────────────────────
@@ -169,18 +204,20 @@ const POCEngine = (() => {
    * 3단계: 문제 순서대로 L1~L4를 진행한다. 레벨 실패(힌트 2회 소진 후 미달)는 해당 문제를
    * 즉시 끝내고 다음 문제의 L1로 넘어간다 (D3의 onLevelFail="endQuestion").
    *
+   * @param {object} setup     1단계 산출물(POCState.loadSetup()) -- teaches 조회용
    * @param {object} analysis  2단계 산출물(POCState.loadAnalysis())
    * @param {object} hooks     {
    *   onProgress(msg), onStatus(text,kind),
    *   onTopicStart({index,topic}), onTopicEnd({index,outcome,failedAxis}),
-   *   onLevelResult({topicIndex,axis,hintsUsed,score,passed}),
+   *   onHintPending({topicIndex,axis,hintLevel}), onLevelResult({topicIndex,axis,hintsUsed,score,passed}),
    *   getAnswer({topicIndex,topic,axis,question,hintsUsed,hintText,codeRef,codeBlock}) -> Promise<string>
    * }
    * @returns {Promise<object>} session 페이로드
    */
-  async function runSessionStage(analysis, hooks) {
+  async function runSessionStage(setup, analysis, hooks) {
     const model = analysis.model;
     const results = [];
+    const teachesById = new Map((setup.teaches || []).map((t) => [t.id, t]));
 
     // db.js의 startRun()/logTurn() 관용(D193)과 동일: 턴이 실제로 일어나기 전에 run 행을
     // 먼저 열어야 각 턴을 즉시 기록할 수 있다 -- 세션 끝에서야 한 번에 저장하면 중간에
@@ -212,14 +249,16 @@ const POCEngine = (() => {
       const levels = [];
       let failedAxis = null;
 
+      const teach = teachesById.get(qs.topic.teach_id);
+
       for (const lvl of qs.levels) { // HintLadder.normalizeLevels가 이미 L1~L4 순서로 정렬해둠
         const attempts = [];
         let hintsUsed = 0;
+        let hintText = null; // 다음 질문과 함께 보여줄 힌트 -- 첫 시도는 없음(자력)
         let cappedScore = 0;
         let passed = false;
 
         for (;;) {
-          const hintText = hintsUsed === 0 ? null : lvl.hints[hintsUsed - 1].text;
           const answer = await hooks.getAnswer({
             topicIndex: ti, topic: qs.topic, axis: lvl.axis, question: lvl.question,
             hintsUsed, hintText, codeRef: qs.code_ref, codeBlock: qs.code_block,
@@ -242,7 +281,16 @@ const POCEngine = (() => {
           hooks.onLevelResult({ topicIndex: ti, axis: lvl.axis, hintsUsed, score: cappedScore, passed });
           if (passed) break;
           if (hintsUsed >= POCScoring.thresholds.maxHintsPerLevel) break; // 힌트 소진, 미달 -- 아래에서 처리
+
+          // D4 개정: 오답이 확정된 지금에서야, 방금 답변을 근거로 힌트를 생성한다(답변 전
+          // 동결이 아님 -- app/scoring-config.js의 hintLadder 주석 참고).
           hintsUsed++;
+          if (hooks.onHintPending) hooks.onHintPending({ topicIndex: ti, axis: lvl.axis, hintLevel: hintsUsed });
+          const hint = await HintLadder.generateHint({
+            axis: lvl.axis, hintLevel: hintsUsed, question: lvl.question, attempts,
+            teach, codeBlock: qs.code_block, codeRef: qs.code_ref, model, onProgress: hooks.onProgress,
+          });
+          hintText = hint.text;
         }
 
         levels.push({
@@ -381,5 +429,5 @@ const POCEngine = (() => {
     });
   }
 
-  return { runAnalysisStage, runSessionStage, runReportStage, resolveFiles };
+  return { runAnalysisStage, runSessionStage, runReportStage, resolveFiles, resolveFileContents };
 })();

@@ -327,14 +327,50 @@
   }
 
   // ── 모델 ────────────────────────────────────────────────────────────────────
+  // D-poc12 (2026-07-30, 실사용 재현): "key 미입력 시 default 모델 리스트 존재" 보고.
+  // 원인: vendored shared/lab-core.js:200이 페이지 로드 즉시 MODEL_CHOICES를
+  // CURATED_MODELS(13개, 이미 단종 확인된 모델 포함 -- 그 파일 자신의 주석 참고)로
+  // 채워둔다 -- 키를 넣기 전에도 "13종이 정상 선택지"인 것처럼 보였다. p01 브랜치가
+  // curriculum-manager에서 이미 겪고 고친 문제와 동일(commit b878bd1, 71d48a0)이지만,
+  // 그 수정은 vendored lab-core.js 자체를 고쳤다 -- 이 브랜치는 드리프트 검사 때문에 그
+  // 파일을 못 고치므로, 같은 목표를 이 페이지의 렌더링 쪽에서만 구현한다.
+  //   WHY UI 게이팅(서버측 공용 키 대안 대신): p01의 원래 결정을 그대로 따른다 -- 새
+  //   서버측 비밀을 두지 않는 쪽. lab-core.js의 MODEL_CHOICES 선언부 주석 참고.
+  //   COST: MODEL_CHOICES 자체는 여전히 13개로 채워진 채 메모리에 있다 -- 이 페이지가
+  //   렌더링만 안 할 뿐, 다른 페이지/코드가 그 배열을 직접 읽으면 게이팅이 새어나간다.
+  //   EXIT: vendored 파일을 고칠 수 있게 되면 배열 자체를 비우는 p01 방식으로 옮기고
+  //   이 렌더링 쪽 게이팅은 제거.
+  let modelsReady = false; // 키가 있어서 최소 한 번 실시간 조회를 "시도"했는지
+  let lastCatalogUnchanged = true;
+
   function renderModelChips() {
     const box = $("model-chips");
-    if (!selectedModel) selectedModel = LabApp.MODEL_CHOICES[0] && LabApp.MODEL_CHOICES[0].id;
+    const noteEl = $("model-note");
+    if (!LabConfig.get("nvidia-key")) {
+      box.innerHTML = "";
+      selectedModel = null;
+      noteEl.textContent = "위 \"⚙ 연결 설정\"에서 NVIDIA 키를 입력하면 실시간 모델 목록이 표시됩니다.";
+      return;
+    }
+    if (!modelsReady) {
+      box.innerHTML = "";
+      noteEl.textContent = "모델 목록 불러오는 중...";
+      return;
+    }
+    if (!selectedModel || !LabApp.MODEL_CHOICES.some((m) => m.id === selectedModel)) {
+      selectedModel = LabApp.MODEL_CHOICES[0] && LabApp.MODEL_CHOICES[0].id;
+    }
     box.innerHTML = LabApp.MODEL_CHOICES.map((m) =>
       `<button type="button" class="mchip ${m.id === selectedModel ? "on" : ""}" data-model="${esc(m.id)}">${esc(m.label)}<span class="tier">${esc(m.tier)}</span></button>`
     ).join("");
     const cur = LabApp.MODEL_CHOICES.find((m) => m.id === selectedModel);
-    $("model-note").textContent = cur ? cur.note : "";
+    // lastCatalogUnchanged: LabApp.refreshModelChoices()는 실패해도 예외를 던지지 않고
+    // 조용히 CURATED_MODELS를 그대로 둔다(vendored, 내부에서 catch) -- 그래서 성공/실패를
+    // 밖에서 직접 못 받는다. 대신 "실시간 조회 전후로 목록이 실제로 바뀌었는가"로 간접
+    // 추정한다 -- 이 파일 자신의 주석이 이미 CURATED 안에 단종 모델이 섞여 있다고 밝혀서,
+    // 진짜 조회 성공이면 최소 하나는 걸러지거나 새로 추가될 가능성이 높다.
+    const staleNote = lastCatalogUnchanged ? " ⚠ 실시간 카탈로그 조회에 실패했거나 응답이 없어 검증된 기본 목록을 표시 중입니다." : "";
+    noteEl.textContent = (cur ? cur.note : "") + staleNote;
   }
   $("model-chips").addEventListener("click", (e) => {
     const btn = e.target.closest("[data-model]");
@@ -342,6 +378,20 @@
     selectedModel = btn.dataset.model;
     renderModelChips();
   });
+
+  async function refreshAndRenderModels() {
+    if (!LabConfig.get("nvidia-key") || !LabConfig.get("proxy-url")) {
+      modelsReady = false;
+      renderModelChips();
+      return;
+    }
+    renderModelChips(); // "불러오는 중" 즉시 표시
+    const before = LabApp.MODEL_CHOICES.map((m) => m.id).join(",");
+    await LabApp.refreshModelChoices();
+    lastCatalogUnchanged = LabApp.MODEL_CHOICES.map((m) => m.id).join(",") === before;
+    modelsReady = true;
+    renderModelChips();
+  }
 
   // ── 제출 ────────────────────────────────────────────────────────────────────
   function showError(msg) {
@@ -398,7 +448,14 @@
     if (rememberBox && rememberBox.checked && !sessionStorage.getItem("lab_cfg_remember")) {
       rememberBox.dispatchEvent(new Event("change"));
     }
-    renderModelChips();
+    // D-catalog-refresh 패턴(p01의 71d48a0과 동일): 키/프록시 URL이 바뀔 때마다 다시 조회
+    // -- "기억하기"로 세션 복원된 경우를 포함해 페이지 로드 시점에 이미 키가 있을 수도,
+    // 사용자가 이제 막 입력할 수도 있다. 둘 다 이 한 경로로 처리한다.
+    refreshAndRenderModels();
+    // "change"(포커스 아웃/커밋)에만 반응한다 -- "input"이면 키를 한 글자씩 칠 때마다
+    // 실시간 카탈로그 조회를 스팸하게 된다(p01의 71d48a0과 동일 선택).
+    $("nvidia-key").addEventListener("change", refreshAndRenderModels);
+    $("proxy-url").addEventListener("change", refreshAndRenderModels);
     try {
       const member = await LabDB.currentMemberOrNull();
       $("user-indicator").textContent = member ? member.email : "로그인 안 됨";
@@ -406,8 +463,6 @@
       $("user-indicator").textContent = "로그인 안 됨";
     }
     await loadCurricula();
-    // 카탈로그 갱신은 키가 있을 때만 의미가 있고 실패해도 무해하다(CURATED가 그대로 남음).
-    LabApp.refreshModelChoices().then(renderModelChips).catch(() => {});
   })();
 })();
 </script>
