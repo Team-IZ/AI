@@ -50,14 +50,17 @@ def test_stub_reflects_request_values():
 
 def test_problems_use_db_columns():
     """problem이 DB 컬럼명(problem_id, source_path 등)을 쓰는지. 임의 이름이면 실패."""
-    raw = StubAnalysisEngine().analyze({"extraction_scope": "TOTAL", "question_budget": 1})
+    raw = StubAnalysisEngine().analyze({"extraction_scope": "TOTAL", "question_budget": 3})
     problem = raw["problems"][0]
 
     assert "problem_id" in problem
     assert "source_path" in problem
-    assert problem["references"][0]["reference_type"] == "PRIMARY"
-    # 코드 서식: 영문 대문자·숫자·밑줄. 소문자·하이픈이 다시 새어들어오면 실패한다.
-    assert re.fullmatch(r"[A-Z][A-Z0-9_]*", problem["focus_code"])
+    assert problem["status"] == "READY"          # 4종. OPEN은 DB CHECK에 없다
+    assert problem["references"][0]["reference_type"] == "CALLER"   # PRIMARY 폐기
+
+    # 동결: 단계 4개 × 힌트 2개가 분석 응답에 실려야 세션 중 LLM 호출이 채점뿐이 된다.
+    assert [s["axis_code"] for s in problem["stages"]] == ["L1", "L2", "L3", "L4"]
+    assert all(len(s["hints"]) == 2 for s in problem["stages"])
 
 
 def test_real_mode_raises_not_implemented(monkeypatch):
@@ -85,6 +88,7 @@ def test_router_uses_injected_engine():
                 "scope_fallback": False,
                 "fallback_reason": None,
                 "commit_sha": None,
+                "analysis_document_markdown": "",   # 필수. 못 만들었으면 빈 문자열을 명시적으로
                 "problems": [],
                 "question_count_planned": 0,
             }
@@ -94,8 +98,38 @@ def test_router_uses_injected_engine():
     try:
         post = client.post("/api/v0/analyses", json=VALID_BODY, headers=HEADERS)
         job_id = post.json()["jobId"]
-        result = client.get(f"/api/v0/analyses/{job_id}", headers=HEADERS).json()["result"]
+        body = client.get(f"/api/v0/analyses/{job_id}", headers=HEADERS).json()
 
-        assert result["snapshotId"] == "fake-snap"  # 가짜 엔진 값이 응답까지 흘렀다
+        assert body["status"] == "SUCCEEDED"                  # 계약 위반이면 여기서 먼저 드러난다
+        assert body["result"]["snapshotId"] == "fake-snap"    # 가짜 엔진 값이 응답까지 흘렀다
     finally:
         app.dependency_overrides.clear()  # 다른 테스트에 오염 안 되게 반드시 청소
+        
+def test_stub_echoes_focus_item_ids():
+    """요청 focusItems[].id가 problem에 그대로 돌아오는지 — C-1 계약 배선 확인."""
+    raw = StubAnalysisEngine().analyze(
+        {
+            "extraction_scope": "TOTAL",
+            "question_budget": 3,
+            "focus_items": [{"id": "focus-a", "name": "예외 처리"}],
+        }
+    )
+
+    # 후보가 1개뿐이면 첫 문제만 물고 나머지는 자율 선정(None)
+    assert [p["question_focus_item_id"] for p in raw["problems"]] == ["focus-a", None, None]
+    
+def test_stub_judges_every_requirement():
+    """requirementResults는 요청 requirements와 1:1. 빠뜨리면 미판정이 통과로 기록된다."""
+    raw = StubAnalysisEngine().analyze(
+        {
+            "extraction_scope": "TOTAL",
+            "question_budget": 3,
+            "requirements": [
+                {"requirementId": "req-1", "text": "로그인 구현"},
+                {"requirementId": "req-2", "text": "예외 처리"},
+            ],
+        }
+    )
+
+    assert [r["requirement_id"] for r in raw["requirement_results"]] == ["req-1", "req-2"]
+    assert raw["analysis_document_markdown"]

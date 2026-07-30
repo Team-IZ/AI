@@ -189,3 +189,75 @@ def test_unknown_job_id_returns_404():
     body = response.json()
     assert body["error"] == "JOB_NOT_FOUND"
     assert body["retryable"] is False
+    
+def test_stage_rejects_broken_hint_pair():
+    """힌트 2개·[1,2] 순서가 아니면 스키마에서 막는다. 동결이라 런타임 보정이 없다."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.analysis import ProblemStage
+
+    base = {"axisCode": "L1", "questionText": "무엇을 하는 코드인가"}
+
+    with pytest.raises(ValidationError):   # 1개뿐
+        ProblemStage.model_validate({**base, "hints": [{"hintLevel": 1, "hintText": "a"}]})
+
+    with pytest.raises(ValidationError):   # 순서 뒤집힘
+        ProblemStage.model_validate({
+            **base,
+            "hints": [{"hintLevel": 2, "hintText": "b"}, {"hintLevel": 1, "hintText": "a"}],
+        })
+        
+def test_problem_rejects_wrong_stage_order():
+    """단계는 L1→L4 정확히 4개. 순서가 어긋나면 루브릭이 틀린 축에 붙는다."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.analysis import Problem
+
+    def stage(axis: str) -> dict:
+        return {
+            "axisCode": axis,
+            "questionText": f"{axis} 질문",
+            "hints": [{"hintLevel": 1, "hintText": "h1"}, {"hintLevel": 2, "hintText": "h2"}],
+        }
+
+    base = {
+        "problemId": "p-1", "problemNo": 1, "problemType": "RISK_POINT",
+        "priority": 0.9, "sourcePath": "app/main.py",
+        "lineStart": 10, "lineEnd": 20,
+        "codeSnippet": "x = 1", "evidenceHash": "a" * 64,
+        "extractorVersion": "v0",
+    }
+
+    with pytest.raises(ValidationError):   # L3·L4 뒤집힘
+        Problem.model_validate({**base, "stages": [stage(a) for a in ("L1", "L2", "L4", "L3")]})
+
+    with pytest.raises(ValidationError):   # 3개뿐
+        Problem.model_validate({**base, "stages": [stage(a) for a in ("L1", "L2", "L3")]})
+
+    ok = Problem.model_validate({**base, "stages": [stage(a) for a in ("L1", "L2", "L3", "L4")]})
+    assert ok.status == "READY"
+
+def test_requirement_result_count_mismatch_fails_job():
+    """판정이 빠진 채 SUCCEEDED가 되면 미판정 요구사항이 통과로 기록된다."""
+    from app.engines import get_analysis_engine
+    from app.engines.stub import StubAnalysisEngine
+    from app.main import app
+
+    class LazyEngine:
+        def analyze(self, request, zip_bytes=None):
+            raw = StubAnalysisEngine().analyze(request, zip_bytes)
+            raw["requirement_results"] = []      # 판정을 통째로 빠뜨린다
+            return raw
+
+    app.dependency_overrides[get_analysis_engine] = lambda: LazyEngine()
+    try:
+        payload = {**VALID_BODY, "requirements": [{"requirementId": "req-1", "text": "t"}]}
+        post = client.post("/api/v0/analyses", json=payload, headers=HEADERS)
+        body = client.get(f"/api/v0/analyses/{post.json()['jobId']}", headers=HEADERS).json()
+
+        assert body["status"] == "FAILED"
+        assert body["result"] is None          # 검증 실패면 결과를 남기지 않는다
+    finally:
+        app.dependency_overrides.clear()

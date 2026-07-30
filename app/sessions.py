@@ -52,7 +52,7 @@ def _build_questions(problem_ids: list[str]) -> list[dict[str, Any]]:
     return [
         {
             "problem_id": problem_id,
-            "axis_code": "L1_CODE_DESCRIPTION",
+            "axis_code": "L1",
             "sequence_no": i,
             "question_text": f"[stub] {problem_id}에 대한 당신의 의도를 설명해 주세요.",
             "code_context": {"path": "app/main.py", "snippet": "...", "line_start": 1},

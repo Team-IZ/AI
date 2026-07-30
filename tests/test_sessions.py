@@ -95,7 +95,7 @@ def test_restore_rebuilds_from_transcript():
         json={
             "timeLimitSec": 2400,
             "transcript": [
-                {"problemId": "prob-stub-1", "axisCode": "L1_CODE_DESCRIPTION",
+                {"problemId": "prob-stub-1", "axisCode": "L1",
                  "questionText": "q1", "answerText": "a1", "answeredAt": "2026-07-23T00:00:00Z"}
             ],
         },

@@ -53,7 +53,17 @@ def run_analysis(
     
     try:
         raw = engine.analyze(body.model_dump(), zip_bytes)
-        job.result = AnalysisResult.model_validate(raw)  # 계약 위반은 여기서 예외
+        result = AnalysisResult.model_validate(raw)  # 계약 위반은 여기서 예외
+
+        # 요구사항 판정은 빠짐없이 와야 한다. 모델이 몇 개를 조용히 빠뜨리면
+        # 판정 안 된 요구사항이 통과로 기록된다 — 여기서 막는다.
+        if len(result.requirement_results) != len(body.requirements):
+            raise ValueError(
+                f"requirementResults 개수가 요청 requirements와 다릅니다: "
+                f"{len(result.requirement_results)} != {len(body.requirements)}"
+            )
+
+        job.result = result
         job.status = "SUCCEEDED"
     except Exception as exc:
         # 엔진 터지거나 계약 어기면 job FAILED로. 예외 삼키지 말고 사유 기록

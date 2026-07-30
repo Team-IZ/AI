@@ -12,12 +12,14 @@ from pydantic import Field
 from app.schemas.common import BaseSchema
 
 # 4축. 축이 곧 문답 레벨이다(L1 통과해야 L2로 간다).
+# DB problem_stage.axis_code CHECK와 같은 값이라 그대로 INSERT된다.
+# 나열 순서가 곧 진행 순서다 — reports.py가 get_args()로 이 순서를 읽는다.
 # 점수는 0~5. 0은 무응답이거나 질문과 무관한 답.
 AxisCode = Literal[
-    "L1_CODE_DESCRIPTION",     # 코드 기술 — 무엇을 어떻게 구현했는가
-    "L2_DESIGN_LOGIC",         # 설계 논리 — 왜 이렇게 설계했는가
-    "L3_COUNTEREXAMPLE",       # 반례·한계 — 이 설계가 깨지는 조건은
-    "L4_ALTERNATIVE",          # 대안 — 다른 선택지와 비교해 왜 이것인가
+    "L1",  # 코드 기술 — 무엇을 하는 코드인가
+    "L2",  # 설계 논리 — 왜 그렇게 했는가
+    "L3",  # 대안 비교 — 다른 방법과 비교해 왜 이것인가
+    "L4",  # 반례·한계 — 언제 깨지는가
 ]
 
 # 힌트 사용 횟수에서 파생된다. 0회=SELF, 1회=SELF_MAINTAINED, 2회=PARTIAL.
@@ -40,37 +42,33 @@ class ReportRequest(BaseSchema):
     )
 
 
-class LevelScore(BaseSchema):
-    """문제 하나의 레벨 하나. 도달하지 못한 레벨은 reached=false에 점수가 없다."""
+class StageScore(BaseSchema):
+    """문제 하나의 단계 하나. DB problem_stage 대응."""
 
     axis_code: AxisCode
-    reached: bool = Field(description="이 레벨까지 진행했는지. false면 앞 레벨에서 끝났다")
-    raw_score: int | None = Field(default=None, ge=0, le=5, description="LLM 원점수")
-    score: int | None = Field(
-        default=None, ge=0, le=5, description="힌트 상한을 적용한 기록 점수"
+    attempt_count: int = Field(
+        ge=0, le=3, description="문답 시도 횟수. 0이면 앞 단계에서 끝나 도달하지 못했다"
     )
+    passed: bool = Field(description="confirmedScore가 통과선(3점) 이상인지")
+    best_score: int | None = Field(
+        default=None, ge=0, le=5, description="힌트 상한 적용 전 원점수. 미도달이면 null"
+    )
+    confirmed_score: int | None = Field(
+        default=None, ge=0, le=5, description="힌트 상한 적용 후 기록 점수. 미도달이면 null"
+    )
+    # attemptCount - 1 과 같지만 직접 보낸다. 미도달(0)일 때 -1이 되는 것을 막는다.
     hints_used: int = Field(default=0, ge=0, le=2)
     autonomy: AutonomyCode | None = None
 
 
-class QuestionResult(BaseSchema):
-    """문제(DB assessment_problem) 하나의 결과. 레벨 4개를 순서대로 담는다."""
+class ProblemResult(BaseSchema):
+    """문제(DB assessment_problem) 하나의 결과. 단계 4개를 순서대로 담는다."""
 
+    problem_no: int = Field(ge=1)
     problem_id: str
-    levels: list[LevelScore]
-    failed_at: AxisCode | None = Field(
-        default=None, description="힌트를 소진하고도 미달로 끝난 축. 완주면 null"
-    )
-    needs_retest: bool = Field(description="재시험 대상인지. 판정 기준은 AI 설정값")
-
-
-class ReportSummary(BaseSchema):
-    """문제 × 레벨 점수 매트릭스와 총계. Spring의 report.summary에 대응."""
-
-    questions: list[QuestionResult]
-    total_score: int = Field(ge=0, description="기록 점수 합계")
-    max_score: int = Field(ge=0, description="문제 수 × 4레벨 × 5점")
-    completed_questions: int = Field(ge=0, description="L4까지 완주한 문제 수")
+    total_score: int = Field(ge=0, description="stages의 confirmedScore 합")
+    max_score: int = Field(ge=0, description="4단계 × 5점 = 20")
+    stages: list[StageScore]
 
 
 class ReportVersions(BaseSchema):
@@ -85,14 +83,9 @@ class ReportResult(BaseSchema):
     """보고서가 완성됐을 때의 본문."""
 
     report_markdown: str
-    summary: ReportSummary
-    curriculum_refs: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="[{teachId, unitId, sourcePages}] 부족한 파트 → 교안 위치",
-    )
-    retest_targets: list[str] = Field(
-        default_factory=list, description="재시험 대상 problemId 목록"
-    )
+    problems: list[ProblemResult]          # summary: ReportSummary 였던 자리
+    curriculum_refs: list[dict[str, Any]] = Field(...)   # 그대로
+    retest_targets: list[str] = Field(...)               # 그대로
     versions: ReportVersions
 
 
