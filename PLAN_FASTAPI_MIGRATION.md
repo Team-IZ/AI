@@ -10,10 +10,10 @@
 
 | | |
 |---|---|
-| 엔드포인트 | 9/9 동작 (전부 스텁) |
-| 테스트 | 45 passed |
-| 다음 | **T3 → T4 → T5 재생성 → T6·T7 이식.** 백엔드 회신을 기다리지 않고 진행한다 |
-| 막힌 것 | **C-3(단가 분담) 하나뿐.** 그게 안 오면 `ai_usage` 쓰기 경로가 막히지만 나머지 스키마는 다 진행한다 |
+| 엔드포인트 | 11/11 동작 (전부 스텁) |
+| 테스트 | 58 passed |
+| 다음 | **T5 2차 재생성 → T6·T7 이식.** T8(세션 축소)은 백엔드가 세션 선생성을 구현하는 시점에 맞춘다 |
+| 막힌 것 | **없다.** C-4·C-5는 값 카탈로그라 회신 없이도 진행한다 |
 
 ### 완료된 것
 
@@ -34,15 +34,13 @@
 
 ### 코드가 계약을 아직 못 따라간 곳
 
-**분석(`analysis.py`)·보고서(`report.py`)·스텁은 정렬 완료(T2·T2b).** 남은 것은 세션과 `ai_usage`다.
+**스키마는 전부 정렬됐다(T2·T2b·T3·T3b·T4).** 남은 불일치는 하나뿐이고, 그것도 스키마가 아니라 동작이다.
 
 | 파일:줄 | 지금 | 되어야 할 것 | 처리 |
 |---|---|---|---|
-| `app/sessions.py:49~57` | `_build_questions()`가 세션 시작 시 질문을 만든다 (P03 구조) | 질문은 분석 때 동결돼 DB에 있다. Spring이 읽어 넘겨준 것을 쓴다 — 생성하지 않는다 | T3·T8 |
-| `app/schemas/session.py:56` | `state` Literal에 `TIMEOUT` | `IN_PROGRESS`/`PAUSED`/`COMPLETED`/`FAILED`/`EXPIRED` — `assessment_session.status`에 `TIMEOUT`이 없다 | T3 |
-| `app/schemas/session.py:40~46` | `TranscriptTurn`에 점수 필드 없음 | `best_score`·`confirmed_score`·`attempt_count`·`hint_text`·`autonomy` | T3 |
-| `app/schemas/session.py:69` | `SessionRestore.problems: list[dict]` | `list[Problem]` — 복구 시에도 동결 구조(단계 4·힌트 2)를 검증해야 한다 | T3 |
-| `app/schemas/analysis.py:225` · `session.py:60` · `report.py:113` | `ai_usage: list[dict[str, Any]]` | `list[AiUsage]` — 토큰·모델·지연·상태만. 단가·비용은 Spring | T3b |
+| `app/sessions.py:40~52` | `_build_questions()`가 세션 시작 시 질문을 만든다 (P03 구조) | 질문은 분석 때 동결돼 DB에 있다. Spring이 읽어 넘겨준 것을 쓴다 — 생성하지 않는다 | T8 |
+
+**T8을 지금 하지 않는 이유**: 백엔드가 세션 선생성(`READY` 상태로 미리 만들기)을 아직 구현하지 않았다. 지금 지우면 백엔드가 붙여볼 수 있는 면이 줄어든다. 백엔드 구현 시점에 맞춰 지운다.
 
 ---
 
@@ -78,11 +76,12 @@
 
 `stage_hint` 테이블·`problem_stage.question_text` 컬럼 신설 요청을 철회한 것이 결과적으로 맞았다 — B-3 하나로 동결분을 다 수용한다. **백엔드에 다시 보낼 것은 없다.** B-1·B-2·B-4도 그대로 필요하다.
 
-**답 대기 (1건)**
+**답 대기 (2건)**
 
 | # | 심각도 | 내용 | 우리 작업을 막나 |
 |---|---|---|---|
 | C-4 | 🟢 | `source_type` 값 목록 | 아니다. 형식(`{source_id}:{source_type}:{attempt_no}`)만 지키고 값은 나중에 맞춘다 |
+| C-5 | 🟢 | `curriculum_analysis.extraction_status`·`quality_status` 코드 카탈로그 | 아니다. **CHECK가 없는 확장형 업무 코드**라 `str`로 열어뒀다. 스텁은 `EXTRACTED`/`OK`를 쓴다 |
 
 **회신 완료 (2026-07-30)**
 
@@ -210,7 +209,7 @@ requirement_results: list[dict]          # [{requirementId, verdict: "P"|"F", ev
 
 ---
 
-### T3 — 세션 턴에 점수 필드 추가
+### T3 ✅ — 세션 턴에 점수 필드 추가 (질문 생성 제거는 T8과 함께)
 
 **대상**: `schemas/session.py`, `app/sessions.py`
 
@@ -243,7 +242,7 @@ line_end: int | None = None
 
 ---
 
-### T3b — `aiUsage` 스키마 확정 (지금은 `dict` 열림)
+### T3b ✅ — `aiUsage` 스키마 확정
 
 **대상**: `schemas/common.py`(모델 추가), `schemas/analysis.py`·`session.py`·`report.py`(타입 교체), 엔진 호출부
 
@@ -292,7 +291,7 @@ def _check_db_constraints(self):
 
 ---
 
-### T4 — 교안 분석 엔드포인트 신설
+### T4 ✅ — 교안 분석 엔드포인트 신설
 
 **대상**: `schemas/curriculum.py`(신규), `api/curricula.py`(신규), `app/curricula.py`(신규), `main.py`
 

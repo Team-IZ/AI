@@ -159,7 +159,8 @@ cloudflared tunnel --url http://localhost:8000
 | 보고서 | `POST /api/v0/reports` | 보고서 생성 요청 | 202 + 폴링 |
 | 보고서 | `GET /api/v0/reports/{jobId}` | 보고서 결과 | 동기 |
 
-**신설 예정**: `POST /api/v0/curricula`, `GET /api/v0/curricula/{jobId}` (교안 PDF → teaches)
+| 교안 | `POST /api/v0/curricula` | 교안 PDF(multipart) 분석 요청 | 202 + 폴링 |
+| 교안 | `GET /api/v0/curricula/{jobId}` | 교안 구조·개념 결과 | 동기 |
 
 **"축소 예정"이 무슨 뜻인가**: 백엔드가 문제 3행 + 단계 12행을 분석 직후에 저장하고 세션을 `READY`로 미리 만드는 구조를 골랐다. 그러면 세션 시작 시 AI 호출이 필요 없고 `/answers`만 남는다. 지금은 셋 다 동작하지만 제거될 수 있으니 새로 의존하지 말 것.
 
@@ -364,6 +365,45 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 
 문제당 만점은 20(4단계 × 5). **재시험 판정은 문제 단위**이고, 커트라인은 조직 정책이라 Spring이 정한다 — AI는 `retestTargets`만 낸다.
 
+### 교안 분석
+
+PDF가 항상 필요하므로 **multipart 하나만 받는다**(`payload` 문자열 + `file`).
+
+```jsonc
+// POST /api/v0/curricula        multipart/form-data → 202
+// payload = {"versionId": "ver-1", "modelCode": "glm-5.2"}
+// file    = 교안 PDF
+{ "jobId": "…", "status": "QUEUED" }
+```
+
+```jsonc
+// GET /api/v0/curricula/{jobId}  → 200 (result 부분)
+{
+  "versionId": "ver-1",
+  "analysisVersion": 1, "heuristicVersion": 1, "promptVersion": 1,
+  "extractionStatus": "EXTRACTED", "qualityStatus": "OK", "fallbackUsed": false,
+  "sections": [
+    { "moduleNo": 1, "title": "예외 처리", "pageStart": 1, "pageEnd": 12,
+      "teaches": [
+        { "canonicalName": "try-except", "normalizedName": "try except",
+          "canonicalDescription": "예외를 잡아 처리하는 구문",
+          "descriptionPageStart": 3, "descriptionPageEnd": 5 },
+        { "canonicalName": "finally", "normalizedName": "finally",
+          "canonicalDescription": null,
+          "descriptionPageStart": null, "descriptionPageEnd": null }
+      ] }
+  ]
+}
+```
+
+DB 3계층(`curriculum_analysis` → `curriculum_section` → `teaches`)을 그대로 따른다. **AI는 UUID를 만들지 않는다** — 구조만 돌려주고 Spring이 INSERT하며 키를 발급한다.
+
+**`normalizedName`을 AI가 만든다.** DB에 `PARTIAL UNIQUE (org_id, section_id, normalized_name)`가 걸려 중복 판정 기준이 되므로, Spring이 다시 정규화하면 AI가 본 것과 달라진다(`evidenceHash`와 같은 이유).
+
+**설명이 없는 개념이 정상이다.** 교안에 개념만 등장하고 설명이 없는 경우가 흔해 세 필드가 NULL로 온다. `teaches.status`(ACTIVE/INACTIVE/MERGED)와 병합 처리는 UUID를 알아야 하는 운영 판단이라 Spring 몫이다.
+
+교안 분석은 LLM을 무겁게 쓴다(교안 1개에 1~2분 이상). **수업 중이 아니라 LMS 업로드 시점에 도는 것**이 전제이고, 그래서 `Idempotency-Key`로 중복 실행을 막는다.
+
 ---
 
 ## 4. 코드 구조
@@ -428,8 +468,8 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 | | |
 |---|---|
-| 엔드포인트 | **9/9 동작 (전부 스텁)** |
-| 테스트 | **45 passed** |
+| 엔드포인트 | **11/11 동작 (전부 스텁)** |
+| 테스트 | **58 passed** |
 | 붙일 수 있나 | **예.** 인증·에러 형식·camelCase·Swagger·`openapi.json`까지 완성 |
 
 완료된 것: `/gradings` → `/reports` 전환, 이름 통일(`decision_point`→`problem`, `depth_level`→`axis_code`), **분석·보고서 스키마를 DB 계약에 정렬**.
@@ -438,15 +478,16 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 > ✅ **`/analyses`·`/reports`는 §3 명세대로 코드에 반영됐고 `openapi.json`도 갱신됐다.** 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례 대응), `focusItems`, `codeSnippet`, `requirementResults`, `bestScore`/`confirmedScore`가 전부 스펙에 들어가 있다. `Problem.stages`는 `minItems/maxItems: 4`, `ProblemStage.hints`는 `2`로 나가므로 **동결 구조를 스펙만 보고 알 수 있다.**
 >
-> ⏳ **아직인 것**: `/sessions` 턴 점수 필드, `/curricula` 신설, `aiUsage` 타입(단가 분담 회신 대기). 순서는 `PLAN_FASTAPI_MIGRATION.md`.
+> ⏳ **아직인 것**: 세션 시작 시 질문 생성 제거(동결이라 Spring이 DB에서 읽어 넘겨준다 — 세션 엔드포인트 축소와 함께), 엔진 이식. 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
-### 백엔드 대기 1건
+### 백엔드 대기 2건
 
 이슈 `Team-IZ/Backend#31` 본문이 현재 상태판이다.
 
 | # | 내용 | 우리 작업을 막나 |
 |---|---|---|
 | C-4 | `source_type` 값 목록 | 아니다. 형식만 지키고 값은 나중에 맞춘다 |
+| C-5 | `curriculum_analysis.extraction_status`·`quality_status` 코드 카탈로그 | 아니다. CHECK가 없어 `str`로 두고 나중에 맞춘다 |
 
 C-1~C-3은 **회신 완료**다.
 
@@ -459,14 +500,12 @@ DDL 수정 요청 4건(`attempt_count` 0~3 · `attempt_no=3` 허용 · `stage_an
 ### 앞으로
 
 ```
-세션 턴 점수 필드 추가 (state TIMEOUT→EXPIRED, best/confirmedScore·attemptCount·hintText·autonomy)
-세션 시작 시 질문 생성 제거 — 질문은 분석 때 동결돼 DB에 있다
-POST/GET /curricula 신설 (교안 분석)
-aiUsage 스키마 확정 (지금은 dict로 열려 있다. 단가 분담 회신 대기)
-openapi.json 2차 재생성 → 백엔드·프론트 전달
-엔진 이식 (팀원 PoC feat/poc_full)
+세션 시작 시 질문 생성 제거 — 질문은 분석 때 동결돼 DB에 있다 (세션 엔드포인트 축소와 함께)
+엔진 이식 (팀원 PoC feat/poc_full) — P02 규칙부, P04 LLM 스테이지
 (먼 항목) 적응형 힌트 모듈 대응 — 턴당 2콜, 힌트용 featureCode, 체크포인트 단위 모드 고정
 ```
+
+완료: 세션 턴 점수 필드 · `aiUsage` 스키마 · `/curricula` 신설 · `openapi.json` 갱신.
 
 **미확정값** — 힌트 점수 상한 `{5, 4, 3}`, 재시험 커트라인, `ai_usage.source_type` 값 목록. 세부 순서·방법은 **`PLAN_FASTAPI_MIGRATION.md`**에 있다.
 
