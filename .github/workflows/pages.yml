@@ -183,10 +183,20 @@ jobs:
           set -uo pipefail
           fail=0
           # Deliberately absent from feat/poc_full (see its own D2 note): the code-qna
-          # tool's own pages/engine. Everything else below must be byte-identical.
+          # tool's own pages/engine. worker/wrangler.toml and shared/config.js are
+          # DELIBERATELY forked between the two branches (D-poc-worker, 2026-07-30) --
+          # they carry per-deployment identity: Worker name, KV namespace id, queue name,
+          # LANGSMITH_PROJECT, and the client's default proxy URL pointing at that
+          # Worker. Everything else under worker/ and shared/, including
+          # nvidia-proxy.js itself, must still be byte-identical: the LangSmith
+          # instrumentation is entirely env-driven precisely so that stays true. The
+          # positive assertions below replace the byte-identity check for these two
+          # forked files, so excluding them here cannot silently re-hide the exact
+          # collision this step's exclusion is carved out for.
           for p in cognition judgment feedback shared worker prompt_manifest.json webtool_driver.py; do
             if diff -r -q \
                  --exclude='__pycache__' --exclude='p03-engine.js' \
+                 --exclude='wrangler.toml' --exclude='config.js' \
                  "src-codeqna/$p" "src-poc/$p"; then
               echo "  SAME  $p"
             else
@@ -194,6 +204,39 @@ jobs:
               fail=1
             fi
           done
+
+          # D-poc-worker: the two Workers must NOT collide on name / KV id / queue, and
+          # the two LangSmith projects must differ -- the exact bug this branch's own
+          # wrangler.toml fix was for, now permanently guarded instead of fixed once.
+          grep -q '^name = "team-iz-code-qna-proxy"' src-codeqna/worker/wrangler.toml \
+            || { echo "  FAIL code-qna's Worker name changed unexpectedly"; fail=1; }
+          grep -q '^name = "team-iz-poc-proxy"' src-poc/worker/wrangler.toml \
+            || { echo "  FAIL poc's Worker name changed unexpectedly"; fail=1; }
+          codeqna_kv=$(grep -o 'id = "[0-9a-f]*"' src-codeqna/worker/wrangler.toml | head -1)
+          poc_kv=$(grep -o 'id = "[0-9a-f]*"' src-poc/worker/wrangler.toml | head -1)
+          if [ -z "$codeqna_kv" ] || [ "$codeqna_kv" = "$poc_kv" ]; then
+            echo "  FAIL poc and code-qna share a KV namespace id (or one is missing)"
+            fail=1
+          fi
+          if grep -q 'team-iz-code-qna-jobs-queue' src-poc/worker/wrangler.toml; then
+            echo "  FAIL poc's wrangler.toml still references code-qna's queue"
+            fail=1
+          fi
+          codeqna_project=$(grep '^LANGSMITH_PROJECT' src-codeqna/worker/wrangler.toml || true)
+          poc_project=$(grep '^LANGSMITH_PROJECT' src-poc/worker/wrangler.toml || true)
+          if [ -z "$codeqna_project" ] || [ "$codeqna_project" = "$poc_project" ]; then
+            echo "  FAIL poc and code-qna share a LANGSMITH_PROJECT (or one is missing)"
+            fail=1
+          fi
+          if ! grep -q 'const DEFAULT_PROXY_URL = "https://team-iz-code-qna-proxy' src-codeqna/shared/config.js; then
+            echo "  FAIL code-qna's shared/config.js no longer defaults to its own Worker"
+            fail=1
+          fi
+          if ! grep -q 'const DEFAULT_PROXY_URL = "https://team-iz-poc-proxy' src-poc/shared/config.js; then
+            echo "  FAIL poc's shared/config.js no longer defaults to its own Worker"
+            fail=1
+          fi
+
           if [ "$fail" -ne 0 ]; then
             echo ""
             echo "Fix: apply the change on feat/code_Q&A, then copy the same file(s) to"
