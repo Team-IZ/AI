@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# D9 + D3/D4 로컬 가드 -- 커밋 직전에 두 검사를 돈다.
+#   1) check_no_secrets.py --staged : NVIDIA API 키/키풀 파일이 스테이징됐는지
+#   2) lint_llm_calls.py app        : 우회 LLM 호출/인라인 프롬프트가 새로 생겼는지
+#
+# 이 훅은 opt-in이다: `git config core.hooksPath .githooks`로 활성화해야 한다.
+# CI(.github/workflows/ci.yml)는 이 훅과 무관하게 항상 같은 두 검사를 강제한다 --
+# 훅을 안 켠 사람의 커밋도 CI에서는 걸린다.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+echo "[pre-commit] check_no_secrets.py --staged"
+python3 tools/check_no_secrets.py --staged
+
+echo "[pre-commit] lint_llm_calls.py app"
+python3 tools/lint_llm_calls.py app

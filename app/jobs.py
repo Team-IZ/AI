@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 
 from app.engines.base import AnalysisEngine
 from app.schemas.analysis import AnalysisJobStatus, AnalysisRequest, AnalysisResult
+from app.schemas.usage import AiUsage
 
 # job_id
 _jobs: dict[str, AnalysisJobStatus] = {}
@@ -53,6 +54,10 @@ def run_analysis(
     
     try:
         raw = engine.analyze(body.model_dump(), zip_bytes)
+        # D-timing (2026-07-30): ai_usage는 AnalysisResult 필드가 아니라 엔진이
+        # 얹어 보내는 형제 키다(app/engines/base.py 참고) -- 먼저 꺼내야
+        # AnalysisResult.model_validate가 나머지만 보고 계약 위반을 정확히 잡는다.
+        usage_raw = raw.pop("ai_usage", [])
         result = AnalysisResult.model_validate(raw)  # 계약 위반은 여기서 예외
 
         # 요구사항 판정은 빠짐없이 와야 한다. 모델이 몇 개를 조용히 빠뜨리면
@@ -64,6 +69,7 @@ def run_analysis(
             )
 
         job.result = result
+        job.ai_usage = [AiUsage.model_validate(u) for u in usage_raw]
         job.status = "SUCCEEDED"
     except Exception as exc:
         # 엔진 터지거나 계약 어기면 job FAILED로. 예외 삼키지 말고 사유 기록

@@ -1,0 +1,35 @@
+name: AI service CI
+
+# Phase 0 (2026-07-30): 이 저장소에는 그동안 워크플로가 없었다(이슈/PR 템플릿뿐).
+# code-importance-map 스테이지부터 두 가지 게이트(D3/D4의 AST 린터, D9의 시크릿
+# 가드)가 새로 생기므로 여기서 CI 자체를 만든다. 나중에 prompt-drift job이
+# 추가된다(Phase 6, D5).
+
+on:
+  push:
+    branches: [feature/code-importance-map, feature/contract-p04]
+  pull_request:
+    branches: [feature/code-importance-map, feature/contract-p04]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt
+      - run: pytest
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: AST lint (D3 PROMPT001 / D4 LLM001)
+        run: python3 tools/lint_llm_calls.py app
+      - name: Secret guard (D9)
+        run: python3 tools/check_no_secrets.py --tracked

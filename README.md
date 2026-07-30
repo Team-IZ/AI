@@ -85,6 +85,11 @@ cp .env.example .env        # 값을 채운다. .env는 절대 커밋하지 않�
 Swagger UI: **http://127.0.0.1:8000/docs** — 여기서 엔드포인트를 직접 클릭 테스트할 수 있다.
 기계용 스펙: **`openapi.json`** — Postman에 Import하면 바로 요청이 만들어진다.
 
+**로컬 가드 켜기 (선택, 권장):** `git config core.hooksPath .githooks` 한 번 실행하면
+커밋 전에 `tools/check_no_secrets.py`(D9 — NVIDIA 키 커밋 방지)와
+`tools/lint_llm_calls.py`(D3/D4 — 인라인 프롬프트·LLM 우회 호출 차단)가 자동으로 돈다.
+안 켜도 CI(`.github/workflows/ci.yml`)가 같은 두 검사를 강제한다.
+
 > **워커는 1개로 유지한다.** job·세션 저장소가 인메모리라 `--workers 2` 이상이면 만든 프로세스와 조회 프로세스가 달라져 404가 난다. 시연 규모(동시 10~20명)에서는 제약이 아니다 — 병목은 FastAPI가 아니라 NVIDIA 무료 티어의 분당 40회다.
 
 ### 백엔드와 통신 테스트 (배포 없이)
