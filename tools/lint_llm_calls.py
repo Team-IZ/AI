@@ -35,6 +35,11 @@ from pathlib import Path
 
 ALLOWLIST_LLM001: dict[str, str] = {
     "app/engines/shared/llm.py": "the wrapper itself -- the only module allowed to touch HTTP/SDK primitives",
+    "app/engines/codemap/crew.py": (
+        "constructs the CrewAI Crew/Agent/LLM for Tier 2 reranking; crewai is lazy-imported "
+        "inside _default_kickoff() only, and the Agent is given tools=[] (D12 -- never wired "
+        "to crewai_tools' unrestricted FileReadTool/DirectoryReadTool)"
+    ),
 }
 
 BANNED_IMPORT_MODULES = {
