@@ -121,6 +121,10 @@ shared/
   p03-engine.js       -- p03-runner.js를 복사 후 DOM 접점만 훅으로 치환(가장 정교한 이식 대상)
   session-state.js    -- 페이지 간 sessionStorage 핸드오프(신규 코드, 원본엔 없음)
 prompt_manifest.json / webtool_driver.py  -- 원본에서 무수정 이식
+  (참고: webtool_driver.py 헤더 주석의 "fetched at runtime from raw.githubusercontent.com"은
+   원본 기준 서술입니다 -- 이 저장소에서는 D208 이후 shared/p02-engine.js·p03-engine.js의
+   REPO_RAW_BASE = "../" 로 같은 저장소에서 상대경로로 읽습니다. 무수정 이식 원칙 + pages.yml의
+   바이트 동일성 드리프트 검사 때문에 그 파일 자체는 고치지 않습니다.)
 reference/            -- 이식 작업 중 대조용으로 둔 원본 p02-runner.js/p03-runner.js/app.js 사본
 cognition/ judgment/ feedback/  -- D208: P02/P03가 Pyodide로 실행하는 실제 파이썬 원본
   (구조/판단 스캔, 5축 채점용 규칙, 격리 판정기, 자기수정 신호 등) 사본. 원본에서

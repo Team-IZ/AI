@@ -30,8 +30,9 @@ const LabLLM = (() => {
   // 35min gives headroom for Cloudflare's own redelivery scheduling latency on top of that.
   const MAX_POLL_MS = 35 * 60 * 1000;
 
-  // D159 (2026-07-15): request timestamps for the debug traffic graph (docs/lab/
-  // debug-traffic.js) -- "did this tab's own burst momentarily exceed NVIDIA's ~40rpm
+  // D159 (2026-07-15): request timestamps for the debug traffic graph (debug-traffic.js,
+  // upstream Code_reviewer_with_feedback:docs/lab/debug-traffic.js -- not vendored here)
+  // -- "did this tab's own burst momentarily exceed NVIDIA's ~40rpm
   // free-tier ceiling" (nvidia-keypool-guard.py's own documented figure). Deliberately
   // just an in-memory array, capped and trimmed below -- this is a debugging aid, not a
   // metrics store, and it only sees requests THIS tab initiated (D156's parallel chunk
@@ -187,8 +188,8 @@ const LabLLM = (() => {
   // D181: maxAttempts wasn't threaded through here even though submitAndPoll/the worker
   // have supported it since D169 -- nothing needed it before now. P03's interview calls
   // all go through this function, so without this they had no way to opt into more retry
-  // budget under elevated shared traffic (see debug-traffic.js's getCurrentRate(), used by
-  // p03-runner.js).
+  // budget under elevated shared traffic (see shared/traffic-rate.js's getCurrentRate() --
+  // the ported rate-check half of upstream debug-traffic.js -- used by p03-engine.js).
   async function chatTool({ model, messages, tool, maxTokens, temperature = 0.0, maxAttempts, onProgress }) {
     const proxyUrl = LabConfig.get("proxy-url");
     const apiKey = LabConfig.get("nvidia-key");
