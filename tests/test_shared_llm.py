@@ -161,7 +161,7 @@ def test_never_sends_reasoning_effort_to_unlisted_model():
 
 
 def test_records_ai_usage_entry_via_timer():
-    """ chat()의 반환값이 LlmCallTimer.build()에 그대로 흘러 AiUsageEntry가 되는지 --
+    """ chat()의 반환값이 LlmCallTimer.build()에 그대로 흘러 AiUsage가 되는지 --
     Phase A에서 만든 계측 메커니즘과 실제로 맞물리는지 확인 """
     from app.engines.shared.timing import LlmCallTimer
 

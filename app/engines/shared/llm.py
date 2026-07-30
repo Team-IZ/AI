@@ -49,7 +49,7 @@ REASONING_EFFORT_BY_MODEL: dict[str, str] = {
 
 
 class LlmCallError(Exception):
-    """ failure_code가 AiUsageEntry.failure_code의 5개 값 중 하나와 정확히 일치한다 """
+    """ failure_code가 AiUsage.failure_code의 5개 값 중 하나와 정확히 일치한다 """
 
     failure_code: str = "PROVIDER_ERROR"
 

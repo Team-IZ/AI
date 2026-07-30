@@ -36,7 +36,7 @@ from app.engines.shared.llm import extract_json_object
 from app.engines.shared.prompts import load_stage, param_default, render
 from app.engines.shared.secrets import nvidia_api_key
 from app.engines.shared.timing import LlmCallTimer
-from app.schemas.common import AiUsageEntry
+from app.schemas.usage import AiUsage
 
 NVIDIA_LITELLM_BASE_URL = "https://integrate.api.nvidia.com/v1"
 
@@ -101,15 +101,15 @@ def run_rerank_crew(
     repo_summary_block: str = "",
     attribution_block: str = "",
     kickoff_fn: Callable[..., tuple[str, KickoffUsage]] = _default_kickoff,
-) -> tuple[tuple[CrewClaim, ...], tuple[str, ...], list[AiUsageEntry]]:
-    """ 반환: (채택된 CrewClaim들, ground.py가 거부한 사유들, AiUsageEntry 목록)
+) -> tuple[tuple[CrewClaim, ...], tuple[str, ...], list[AiUsage]]:
+    """ 반환: (채택된 CrewClaim들, ground.py가 거부한 사유들, AiUsage 목록)
 
     호출 실패/예산 소진 시 ((), (), [FAILED 기록 0~1건])을 반환한다 -- 빈 claims는
     merge_rerank에서 Tier 1 순서 그대로 보존으로 이어진다(D6).
     """
     assert not any(p.startswith(".git/") for p in allowed_paths), "D12 위반: .git 경로가 크루에 노출됨"
 
-    ai_usage: list[AiUsageEntry] = []
+    ai_usage: list[AiUsage] = []
     if not candidates_block.strip() or budget.max_llm_calls < 1:
         return (), (), ai_usage
 

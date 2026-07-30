@@ -12,9 +12,9 @@ name: AI service CI
 
 on:
   push:
-    branches: [feature/code-importance-map, feature/contract-p04]
+    branches: [feature/code-importance-map, develop]
   pull_request:
-    branches: [feature/code-importance-map, feature/contract-p04]
+    branches: [feature/code-importance-map, develop]
 
 jobs:
   test:

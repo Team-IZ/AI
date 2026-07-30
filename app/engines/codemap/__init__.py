@@ -18,7 +18,7 @@ from app.engines.codemap import weights as weights_mod
 from app.engines.codemap.models import CodeMapConfig, CollectLimits, RankedFile, RepoFile
 from app.engines.shared.budget import CallBudget, load_budget
 from app.engines.shared.signals import AttributionSignal
-from app.schemas.common import AiUsageEntry
+from app.schemas.usage import AiUsage
 
 _DEFAULT_WEIGHTS_PATH = Path(__file__).parent / "weights" / "codemap_weights.json"
 
@@ -70,7 +70,7 @@ def build_code_map_from_repo(
     selected_set = set(selected)
     shortlisted_ranked = tuple(rf for rf in ranked if rf.path in selected_set)
 
-    ai_usage: list[AiUsageEntry] = []
+    ai_usage: list[AiUsage] = []
     tier2_rejected: tuple[str, ...] = ()
     claims: tuple = ()
     if config.tier2_enabled and selected:
