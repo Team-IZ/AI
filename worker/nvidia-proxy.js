@@ -8,7 +8,8 @@
  *
  * Deploy: `cd worker && wrangler deploy` (needs `wrangler.toml`'s kv_namespaces/queues
  * bindings, which need a KV namespace + Queue created once per account -- see
- * experiments/web_lab/SETUP.md). Needs a free Cloudflare account + `wrangler login`.
+ * docs/lab/curriculum-manager/README.md's 자체 배포 -> "2) Cloudflare Worker" section).
+ * Needs a free Cloudflare account + `wrangler login`.
  *
  * D-H (2026-07-14, README D143): async job-queue redesign, replacing D-E's streaming
  * attempt. Cloudflare's free-tier edge gives up after ~100-125s of silence on a single
@@ -96,7 +97,8 @@ const RETRY_DELAY_SECONDS = 5; // brief gap before Cloudflare redelivers -- avoi
 const RATE_LIMIT_RETRY_DELAY_SECONDS = 60;
 const PER_ATTEMPT_TIMEOUT_MS = 600_000; // 600s, == feedback/nvidia_client.py's DEFAULT_TIMEOUT_S (D98-derived, not a new guess)
 
-// D160 (2026-07-15): docs/lab/debug-traffic.js's graph only counted requests one browser
+// D160 (2026-07-15): Pipeline Lab's debug-traffic.js (upstream Code_reviewer_with_feedback:
+// docs/lab/debug-traffic.js -- not vendored here)'s graph only counted requests one browser
 // tab initiated -- it couldn't see server-side retries inside queue() below, so a burst
 // that looked under the 40rpm line there could still be over budget once retries (or
 // other teammates going through this same deployed Worker) are counted. Records the
@@ -114,7 +116,7 @@ const PER_ATTEMPT_TIMEOUT_MS = 600_000; // 600s, == feedback/nvidia_client.py's 
 //     if traffic ever got large enough for list() itself to become the bottleneck.
 //   EXIT: if this KV traffic namespace ever needs its own lifecycle separate from job
 //     records, split it into a second KV binding -- not necessary at this scale.
-const TRAFFIC_SAMPLE_TTL_SECONDS = 300; // matches docs/lab/debug-traffic.js's 5-minute HISTORY_MS
+const TRAFFIC_SAMPLE_TTL_SECONDS = 300; // matches debug-traffic.js (upstream)'s 5-minute HISTORY_MS
 
 // NVIDIA Build currently allows about 40 starts/minute for the key used by this app.
 // The configured production value is 36 RPM, leaving 10% headroom for clock/window
@@ -533,7 +535,7 @@ export default {
     }
 
     // GET /?traffic=1 -- D160: recent actual NVIDIA request timestamps (every attempt,
-    // first + retries, from every client through this Worker) for docs/lab/debug-traffic.js.
+    // first + retries, from every client through this Worker) for debug-traffic.js (upstream).
     // Read-only, best-effort -- never blocks or affects job submission/polling.
     if (request.method === "GET" && url.searchParams.has("traffic")) {
       const list = await env.NVIDIA_JOBS.list({ prefix: "traffic:" });

@@ -30,8 +30,9 @@ const LabLLM = (() => {
   // 35min gives headroom for Cloudflare's own redelivery scheduling latency on top of that.
   const MAX_POLL_MS = 35 * 60 * 1000;
 
-  // D159 (2026-07-15): request timestamps for the debug traffic graph (docs/lab/
-  // debug-traffic.js) -- "did this tab's own burst momentarily exceed NVIDIA's ~40rpm
+  // D159 (2026-07-15): request timestamps for the debug traffic graph (debug-traffic.js,
+  // upstream Code_reviewer_with_feedback:docs/lab/debug-traffic.js -- not vendored here)
+  // -- "did this tab's own burst momentarily exceed NVIDIA's ~40rpm
   // free-tier ceiling" (nvidia-keypool-guard.py's own documented figure). Deliberately
   // just an in-memory array, capped and trimmed below -- this is a debugging aid, not a
   // metrics store, and it only sees requests THIS tab initiated (D156's parallel chunk

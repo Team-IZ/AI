@@ -5,8 +5,10 @@
 // project's OAuth callback URL) and splits auth into a separate login session -- neither
 // necessary just to keep data apart. A dedicated Postgres schema in the SAME project
 // (pdf_analysis.runs / pdf_analysis.artifacts, see the migration SQL run via the
-// Management API, same shape as experiments/web_lab/supabase_schema.sql's public
-// tables) gets the same "not mixed together" outcome for free: same auth realm (a
+// Management API, same shape as the upstream public.runs/public.artifacts tables --
+// Code_reviewer_with_feedback:experiments/web_lab/supabase_schema.sql, not vendored
+// here; this branch's own schema is experiments/web_lab/pdf_analysis_schema.sql)
+// gets the same "not mixed together" outcome for free: same auth realm (a
 // session from any other lab page already works here), same project, structurally
 // separate tables a teammate can't accidentally confuse with public.runs.
 //   WHY: schema-per-domain within one database is the standard way to separate an
