@@ -49,6 +49,24 @@ max_batch_timeout = 1
 NVIDIA_RPM_LIMIT = "36"
 LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 LANGSMITH_PROJECT = "team-iz-nvidia-usage"
+# D-ls-workspace (2026-07-30): considered giving pdf_analysis/code_Q&A/poc_full each
+# their own LangSmith Workspace (stronger isolation than a project name -- separate
+# billing/RBAC boundary) instead of just separate LANGSMITH_PROJECT values in one
+# workspace. Confirmed live against the API: `POST /api/v1/workspaces` on this org
+# returns `{"detail":"Personal organizations cannot create workspaces."}` -- Personal
+# orgs are hard-blocked regardless of the caller's role/permission.
+#   WHY: converting to (or creating) a Shared organization requires adding a credit
+#     card and, per LangSmith's pricing, a paid seat per member -- a billing decision,
+#     not a config change, so it's out of scope here.
+#   COST: three pipelines share one workspace's RBAC/billing boundary instead of each
+#     getting its own -- acceptable since LANGSMITH_PROJECT already gives each pipeline
+#     its own filterable project/dashboard, which was the actual ask (pick a pipeline
+#     and see only its traces).
+#   EXIT: if a Shared org is ever set up (billing added), `POST /api/v1/workspaces`
+#     with an Organization Admin/Operator-scoped Personal Access Token works (verified
+#     schema: {"display_name": "<name>"}) -- create one workspace per pipeline, then add
+#     LANGSMITH_WORKSPACE_ID here (sendLangSmithTrace already reads it and sends
+#     x-tenant-id -- no code change needed, just this var).
 LANGSMITH_ORGANIZATION_ID = "63acea55-f27c-429b-850f-63fb363f56b1"
 # D-ls-tags: per-Worker tag override so the shared nvidia-proxy.js's hardcoded fallback
 # ("nvidia,curriculum-manager,production") doesn't need to change when code_Q&A/poc_full
