@@ -567,6 +567,9 @@ type: short description (#issue)
 
 | 문서 | 내용 |
 |---|---|
+| `docs/code-importance-map/README.md` | codemap 스테이지 구조·프롬프트 수정법·로컬 실행 |
+| `docs/code-importance-map/PARALLEL_RUN_CHECKLIST.md` | 기존 Worker 은퇴 조건(D5) |
+| `docs/code-importance-map/OPEN_QUESTIONS.md` | D8/D10 미결 사항 |
 | `PLAN_FASTAPI_MIGRATION.md` | AI 파트 작업 계획·진행 (내부용) |
 | `../qna/2026-07-30/issue-body-v2.md` | 백엔드 이슈 #31 본문 사본 — **AI↔백엔드 현재 상태판** |
 | `../output_docs/AI파트_현황.md` | 팀 공유용 현황 요약 |
