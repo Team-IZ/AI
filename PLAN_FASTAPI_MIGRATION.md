@@ -1,8 +1,8 @@
 # AI 파트 작업 계획
 
-> 갱신: 2026-07-29 · 작업 브랜치 `feature/engine-transplant` (`develop`에서 분기)
+> 갱신: 2026-07-30 · 작업 브랜치 `feature/engine-transplant` (`develop`에서 분기)
 > **이 문서는 실행용이다.** 무엇을 어떤 순서로, 어떤 방법으로 할지만 적는다.
-> 구조·계약의 설명은 `README.md`(팀원용). 미결 논의는 `../output_docs/미결_논의사항.md`.
+> 구조·계약의 설명은 `README.md`(팀원용). 백엔드와의 현재 상태판은 이슈 `Team-IZ/Backend#31` 본문(사본 `../qna/2026-07-30/issue-body-v2.md`).
 
 ---
 
@@ -11,133 +11,211 @@
 | | |
 |---|---|
 | 엔드포인트 | 9/9 동작 (전부 스텁) |
-| 테스트 | 36 passed |
-| 다음 | **T1~T5 (계약 반영).** 백엔드 회신을 기다리지 않고 진행한다 |
-| 막힌 것 | **T3b의 `featureCode` 값 확정뿐** — `ai_usage`는 이미 존재하는 테이블이라 CHECK 제약이 실제로 막는다 (Team-IZ/Backend#31) |
+| 테스트 | 41 passed |
+| 다음 | **T2 → T2b → T3 → T3b → T4 → T5.** 백엔드 회신을 기다리지 않고 진행한다 |
+| 막힌 것 | **C-3(단가 분담) 하나뿐.** 그게 안 오면 `ai_usage` 쓰기 경로가 막히지만 나머지 스키마는 다 진행한다 |
 
 ### 완료된 것
 
 빈 FastAPI 골격부터 다시 쌓아 **엔드포인트 9개 + 인증 + 에러 형식 + camelCase 직렬화 + Swagger + `openapi.json`**을 만들었다. 엔진이 하나도 없어도 백엔드가 붙일 수 있는 상태다.
 
 - `main.py`·`config.py`·`api/deps.py`·`api/errors.py` — 앱 조립, 설정, 인증(`X-Internal-Key`), 예외 핸들러
-- `schemas/` — `common.py`(camelCase 기반)·`analysis.py`·`session.py`·`grading.py`
-- `api/` — `health.py`·`analyses.py`(2)·`sessions.py`(4)·`gradings.py`(2)
+- `schemas/` — `common.py`(camelCase 기반)·`analysis.py`·`session.py`·`report.py`
+- `api/` — `health.py`·`analyses.py`(2)·`sessions.py`(4)·`reports.py`(2)
 - `engines/` — Protocol + 스텁 + 팩토리. `engine_mode` 설정으로 교체
-- `jobs.py`·`sessions.py`·`gradings.py` — 인메모리 저장소 + 수명주기·멱등
+- `jobs.py`·`sessions.py`·`reports.py` — 인메모리 저장소 + 수명주기·멱등
 - 백엔드 계약 C1~C6 합의(2026-07-22), 로컬 통신 자체검증 통과, cloudflared 터널 준비
+- **T1 완료** — `/gradings` → `/reports` 전환. 파일 3쌍 개명(`schemas/grading.py`→`report.py`, `app/gradings.py`→`reports.py`, `api/gradings.py`→`reports.py`), 기존 결함 3개(`ALTERNATIVE_COMPARISION` 오타·`COMPELETED`·`AxisEvidence` 중복 정의) 정리. 41 tests
+- **S1 완료 (커밋 `4bda015`)** — 이름 통일. `decision_point`/`dp_*` 어휘를 `problem`/`problem_*`로, `depth_level`을 `axis_code`로 교체
 
 기존 구현(`app/` 1,659줄 + 목업 2,550줄 + vendored pipeline 4,815줄)은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났다(`.gitignore` 대상, 커밋 안 됨).
+
+### 코드가 계약을 아직 못 따라간 곳 (2026-07-30 확정분 미반영)
+
+다음 표가 T2·T2b·T3의 실제 작업 목록이다. **문서가 앞서 있고 코드가 뒤에 있다.**
+
+| 파일:줄 | 지금 | 되어야 할 것 | 처리 |
+|---|---|---|---|
+| `app/engines/stub.py:33` | `"status": "OPEN"` | `"READY"` — `assessment_problem.status` 허용값에 `OPEN`이 없다 | T2 |
+| `app/engines/stub.py:32` | `"type": "CODE_RISK"` | `"problem_type": "RISK_POINT"` | T2 |
+| `app/engines/stub.py:36` | `"focus_code": "HARDCODED_SECRET"` | `"question_focus_item_id"` (요청 `focusItems[]`에서 받은 UUID) | T2 |
+| `app/engines/stub.py:48` | `"reference_type": "PRIMARY"` | `PRIMARY` 폐기. `CALLER` 등 6종 중 하나 | T2 |
+| `app/engines/stub.py:29~52` | `problem_no`·`code_snippet`·`stages` 없음 | 셋 다 필수. `stages` 4개 × `hints` 2개를 스텁도 채운다 | T2 |
+| `app/schemas/analysis.py:29` | `focus_areas: list[str]` | `focus_items: list[FocusItem]` | T2 |
+| `app/schemas/analysis.py:28` | `question_budget` 기본값 `4` | `3` | T2 |
+| `app/schemas/analysis.py:64` | `reference_type` 설명이 "PRIMARY 등, 카탈로그 미정(B-3)" | 6종 확정. 설명 교체 | T2 |
+| `app/schemas/analysis.py:66~81` | `Hint` 클래스 + `ProblemStage.hints` | **유지.** 힌트는 분석 때 동결되므로 분석 응답에 실린다 | — |
+| `app/schemas/analysis.py:72~81` | `ProblemStage`에 검증 없음 | `hints`가 정확히 2개이고 `hint_level`이 `[1, 2]` 순서인지 검사하는 validator **추가** | T2 |
+| `app/schemas/analysis.py:83~98` | `Problem`에 검증 없음 | `stages`가 정확히 4개이고 `axis_code`가 `L1`→`L4` 순서인지 검사하는 validator **추가** | T2 |
+| `app/schemas/analysis.py:83~98` | `Problem.status` Literal 5종(`CANDIDATE`…) · `focus_code` | 4종(`READY`/`IN_PROGRESS`/`COMPLETED`/`TERMINATED`) · `question_focus_item_id` | T2 |
+| `app/schemas/analysis.py` | `problem_no`·`code_snippet`·`problem_type`·`extractor_version` 없음 | 추가 | T2 |
+| `app/schemas/report.py:16~21` | `AxisCode` = `L1_CODE_DESCRIPTION`… **그리고 L3/L4가 뒤집혀 있다** | `"L1"`~`"L4"`, L3=대안·L4=반례 | T2b |
+| `app/schemas/report.py:43~74` | `LevelScore.raw_score`/`score`, `ReportSummary.total_score` | `best_score`/`confirmed_score`, 세션 총점 제거 | T2b |
+| `app/schemas/report.py:52` | `hints_used` `le=2` | 유지(힌트 최대 2회). 단 `attempt_count`(0~3)와 별개 필드임을 명시 | T2b |
+| `app/sessions.py:49~57` | `_build_questions()`가 세션 시작 시 질문을 만든다 (P03 구조) | 질문은 분석 때 동결돼 DB에 있다. Spring이 읽어 넘겨준 것을 쓴다 — 생성하지 않는다 | T3·T8 |
+| `app/sessions.py:55` | `"axis_code": "L1_CODE_DESCRIPTION"` | `"L1"` | T3 |
+| `app/schemas/session.py:56` | `state` Literal에 `TIMEOUT` | `IN_PROGRESS`/`PAUSED`/`COMPLETED`/`FAILED`/`EXPIRED` — `assessment_session.status`에 `TIMEOUT`이 없다 | T3 |
+| `app/schemas/session.py` | 턴 점수 필드 없음 | `best_score`·`confirmed_score`·`attempt_count`·`hint_text`·`autonomy` | T3 |
 
 ---
 
 ## 할 일
 
-### T0 — 백엔드 회신 받기 (T3b만 막는다)
+### T0 — 백엔드 대기 상태판
 
-**이슈**: `Team-IZ/Backend#31` · 원본 질문지 `../qna/2026-07-29/backend-schema-questions.md`
+**이슈 `Team-IZ/Backend#31` 본문이 항상 최신 상태다.** 사본: `../qna/2026-07-30/issue-body-v2.md`.
+2026-07-29 질문지(`../qna/2026-07-29/backend-schema-questions.md`)는 이력이며 대부분 해결됐다.
 
-백엔드는 **AI 연동부를 아직 구현하지 않았다.** 그래서 질문지는 "이미 만들었나?"가 아니라 **"이 모양으로 만들어 달라"**는 스펙 요청 형태로 써 뒀다. 제안 DDL을 그대로 붙여 놓아서 백엔드가 판단만 하면 된다.
+남은 것은 **DDL 수정 3건 + 코드값 1건 + 답변 4건.** 신설 테이블·컬럼은 없다.
 
-> **회신 대기가 T1~T5를 막지 않는다.** 처음에는 "백엔드가 이미 5축 테이블을 만들었을 수 있다"는 전제로 전면 대기를 걸었으나, 코드 확인 결과 **AI 연동 도메인이 통째로 없다.** 아직 없는 테이블에 대한 항목은 우리가 먼저 확정하고 `openapi.json`을 주는 쪽이 순서상 맞다 — 백엔드는 그 스펙을 보고 만들면 된다.
->
-> **진짜로 막히는 건 `ai_usage` 관련 둘(Q7-1·Q7-3)뿐이다.** 그 테이블은 이미 존재하므로 CHECK 제약과 UNIQUE 제약이 실제로 INSERT를 막는다. 나머지 8건은 제안대로 진행한다.
+**백엔드가 해줄 것**
 
-**급한 것 넷**
+| # | 내용 |
+|---|---|
+| B-1 | `problem_stage.attempt_count` CHECK `0~2` → `0~3` (힌트 2회 = 답변 3회) |
+| B-2 | `stage_answer_attempt` 마지막 CHECK의 `attempt_no = 2`를 `IN (2, 3)`으로 |
+| B-3 | `stage_answer_attempt` 컬럼 5개(`answer_text`·`score_value`·`score_reason`·`answered_at`·`client_request_id`) NULL 허용 + all-or-nothing CHECK |
+| B-4 | 코드값 `MEAS.PROBLEM_TERMINATION_REASON`에 `TERMINATED_AT_L1` 추가 (DDL 변경 없음) |
 
-| # | 내용 | 막는 것 |
-|---|---|---|
-| **Q0-1** | AI 연동을 새 bounded context로 열 것인가 | 백엔드 쪽 착수 구조. 아래 §백엔드 현황 |
-| **Q4-1** | `assessment_problem` 1:N 질문 — `problem_stage` 신설 가능한가 | 사전 생성 질문·힌트(L1~L4 × 힌트 2)를 실을 자리. T2 |
-| **Q7-1** | `ai_usage.feature_code` CHECK에 `CODE_ANALYSIS`·`QUESTION_GENERATION` 추가 가능한가 | 현재 허용값 4개에 **코드 분석·질문 생성이 없다.** T3b |
-| **Q7-3** | `idempotency_key`에 AI가 호출마다 발급한 uuid4를 쓸 것인가 | UNIQUE 제약. 한 요청에 LLM 호출이 6번이라 헤더 키를 그대로 쓰면 충돌. DDL 변경은 없다. T3b |
+**B-3이 왜 필요한가**: 질문을 보여주는 시점과 저장되는 시점이 어긋나 있다. 행의 의미를 "답변 1건"에서 **"문답 1라운드"**로 바꿔, 질문이 나갈 때(동결된 질문·힌트를 INSERT) 넣고 답이 오면 채운다. NOT NULL이 하던 역할은 all-or-nothing CHECK가 이어받는다.
 
-나머지 7개(Q2-1 분석문서 저장 구조 · Q3-1 요구사항 테이블 · Q5-1 턴 점수 컬럼 · Q6-1 교안 테이블 · Q7-2 채점의 feature_code · Q7-4 failure_code 목록 · Q9-1 채점 결과 테이블)는 🟡.
-
-### 백엔드 현황 (2026-07-29, 코드 분석 문서 기준)
-
-> ⚠️ **이건 스냅샷이지 현재 상태가 아니다.** 근거는 코드 분석 문서 한 장이고 `develop` 기준으로 보인다. 백엔드는 **진행 중인 feature 브랜치가 따로 여러 개** 있고, 팀원 본인이 **명세서·구조 일부가 낡았다**고 말했다. 아래 판단(특히 "AI 연동 도메인이 없다")을 확정 사실로 쓰지 말고, 중요한 결정 전에는 최신 브랜치를 다시 확인하거나 팀원에게 물어라.
-
-**AI 연동 도메인은 아직 없다(스냅샷 기준).** bounded context 6개가 전부 사용자·조직·반·기수 관리다.
+**질문·힌트 동결분이 B-3에 정확히 들어간다.** 분석 단계가 문제당 질문 4개 + 힌트 8개를 동결하므로, 분석 직후 `stage_answer_attempt` 행을 미리 만들어 두면 된다.
 
 ```
-auth          로그인·JWT·리프레시 토큰·계정 활성화·초대 수락
-member        매니저 초대·교육생 CSV 등록·SMTP 발송·멤버 조회
-classroom     반 생성·교육생 배정·매니저 배정
-cohort        기수 생명주기
-organization  기관 관리·정책·통계
-operations    AI 사용량·비용·스토리지·운영 설정      ← ai_usage 여기
+문제 3 × 단계 4 × 시도 3 = 36행   (전부 answer_text NULL)
+  attempt_no 1   question, hint NULL
+  attempt_no 2   question, hint1        ← 힌트 24개가 여기 들어간다
+  attempt_no 3   question, hint2
+질문 12개 + 힌트 24개가 정확히 맞는다
 ```
 
-전역: `JwtFilter` · `CurrentUserResolver` · `GlobalExceptionHandler` + `ErrorResponse` · `ApiPathConfig` · `SwaggerConfig`
+`stage_hint` 테이블·`problem_stage.question_text` 컬럼 신설 요청을 철회한 것이 결과적으로 맞았다 — B-3 하나로 동결분을 다 수용한다. **백엔드에 다시 보낼 것은 없다.** B-1·B-2·B-4도 그대로 필요하다.
 
-**우리 계획에 영향 주는 것 셋**
+**답 대기 (4건)**
 
-1. **`ai_usage`는 이미 있다.** `operations/domain/AiUsage.java`·`AiModel.java`, `infrastructure/AiUsageRepository.java`·`OrgAiCostTotal.java`. 조회는 구현돼 있고 **쓰기 경로만 없다.** `AiModel`이 있으므로 `modelCode → model_id` 조회가 실제로 가능하고, 단가·비용을 Spring이 계산하자는 제안도 `OrgAiCostTotal`이 이미 비용을 집계하고 있어 자연스럽게 맞는다
-2. **`analysis_job`·`assessment_problem`·`assessment_session`·`session_turn`·보고서 도메인이 통째로 없다.** 새 컨텍스트를 여는 작업이라 백엔드 착수 비용이 작지 않다 — 우리 요청을 최소로 유지하고 제안 DDL을 그대로 붙여준 판단이 맞았다
-3. **JDBC 직접 사용(JPA 자동 DDL 아님).** 테이블마다 DDL과 `Jdbc*Repository`를 손으로 써야 한다. 컬럼을 하나 늘리는 것도 공짜가 아니므로 **스키마 요청을 늘리지 않는다**
+| # | 심각도 | 내용 | 우리 작업을 막나 |
+|---|---|---|---|
+| C-1 | 🔴 | `question_focus_item` 지칭 방식 — 요청에 `focusItems[]`를 실어 보내는 안 | 아니다. 그 안으로 진행하고 회신 오면 조정 |
+| C-2 | 🔴 | `score_run`·`axis_score` 유지 여부 | 아니다. **어느 쪽이든 AI 응답은 같다** |
+| C-3 | 🟢 | 단가는 Spring이 채우는가 | **막는다.** 세 컬럼이 NOT NULL인데 AI는 단가를 모른다 |
+| C-4 | 🟢 | `source_type` 값 목록 | 아니다. 형식(`{source_id}:{source_type}:{attempt_no}`)만 지키고 값은 나중에 맞춘다 |
 
-`GlobalExceptionHandler` + `ErrorResponse`가 이미 있는 것도 확인됐다. 우리 에러 계약(`{error, message, retryable}` 평탄 구조)이 그 DTO로 그대로 역직렬화되도록 맞춰둔 것이 유효하다.
+**나중에 여쭐 것** — `/reports`와 `report`·`report_generation_run` 정합 · 재시험 기록 위치 · **힌트용 `feature_code`(적응형 힌트 모듈이 붙는 시점에 다시 필요해진다. 지금 물을 것은 아니다)**.
 
-회신이 오면 그 파일에 기록하고, 확정분을 아래 §계약 기준값으로 옮긴 뒤 T1을 시작한다.
-**회신 전에 스키마를 고치지 않는다** — 두 번 고치게 된다.
+**해소됨(현재 계약 기준)** — "힌트 생성의 `feature_code`"는 지금 물을 필요가 없다. PoC를 직접 읽어 확인한 결과 **힌트는 분석 단계에서 질문과 함께 동결**되므로 `QUESTION_GENERATION`이고, 세션 중 LLM 호출은 채점(`GRADING`) 하나뿐이다. 적응형 힌트가 추가되면 되살아난다(D11).
+
+**팀원 수정 요청 확정 (백엔드 아님)** — PoC `scoring-config.js`의 축 순서가 L3=반례, L4=대안으로 우리 기준과 반대다(§함정). **축 순서는 L3=대안 비교 / L4=반례 대응·한계로 확정됐고 팀원 코드를 고치기로 결정했다.** 요청서: `../qna/2026-07-30/poc-axis-order-fix.md`.
+
+### 백엔드 스키마의 근거
+
+**`../docs/docs_for_read/테이블정의서_v06.md`(2026-07-30 변환)와 이슈 #31 본문을 본다.** 이 문서에 테이블 구조를 복사해 두지 않는다 — 복사하면 곧 낡고, 낡은 사본이 최신 정의서보다 위험하다. 우리가 계약으로 못 박은 값만 아래 §계약 기준값에 남긴다.
+
+로컬 `../Backend/`는 `main` 스캐폴드라 낡았다. 백엔드 코드를 확인할 일이 있으면 `origin/develop`을 본다. AI 연동 도메인(`analysis_job`·`assessment_*`·보고서)은 아직 구현되지 않았고 `ai_usage`만 조회 경로가 있다.
 
 ---
 
-### T1 — 채점 → 보고서 전환 (`/gradings` → `/reports`)
+### T1 ✅ — 채점 → 보고서 전환 (`/gradings` → `/reports`)
 
-**대상**: `schemas/grading.py` → `schemas/report.py`, `app/gradings.py` → `app/reports.py`, `api/gradings.py` → `api/reports.py`, `main.py`, `tests/test_gradings.py`
-
-**왜**: 5축 후채점의 근거가 사라졌다. 점수는 문답 도중 턴마다 확정되므로 세션 후 남는 비동기 작업은 보고서 생성뿐이다.
-
-**방법**
-
-1. 파일 3개를 `report`/`reports` 이름으로 옮긴다. 비동기 job 패턴은 그대로 재사용한다
-2. `AxisCode`를 4축으로 교체 — `L1_CODE_DESCRIPTION`·`L2_DESIGN_LOGIC`·`L3_COUNTEREXAMPLE`·`L4_ALTERNATIVE`
-3. `AxisScore.score`를 `ge=0, le=5`로 (현재 `ge=1`). 총점 범위 주석도 0~25로
-4. **기존 파일의 결함 3개를 여기서 같이 고친다**
-   - `ALTERNATIVE_COMPARISION` → 오타. 4축 교체로 자연 소멸
-   - `COMPELETED` → `COMPLETED` (`GradingJobStatus.status`)
-   - `AxisEvidence` 클래스가 두 번 정의돼 있다(뒤가 앞을 덮음). 하나만 남긴다
-5. 응답에 필드 추가
-
-```python
-report_markdown: str
-curriculum_refs: list[dict]   # [{teachId, unitId, sourcePages}] 부족 파트 → 교안 위치
-retest_targets: list[str]     # [problemId]
-summary: dict                 # 문제×레벨 점수 매트릭스
-```
-
-**DoD**: `POST /api/v0/reports` 202 → `GET /api/v0/reports/{jobId}`로 4축 점수와 보고서가 나온다. 테스트 통과.
+완료. 위 §완료된 것 참조. 남은 정합성 문제는 T2b에서 처리한다.
 
 ---
 
-### T2 — 분석 요청·응답 확장
+### T2 — 분석 요청·응답 재정렬
 
 **대상**: `schemas/analysis.py`, `engines/stub.py`
 
-**방법** — 요청에 추가
+**요청에 추가·교체**
 
 ```python
-requirements: list[dict] = []      # [{id, text}] 구현 P/F 체크리스트
-teaches: list[dict] = []           # [{id, label, unitId, sourcePages}] 3개
+focus_items: list[FocusItem] = []        # [{id, name}] 강사 지정 후보. focus_areas 폐기
+requirements: list[dict] = []            # [{requirementId, text}]
+teaches: list[dict] = []                 # [{id, label, unitId, sourcePages}]
 curriculum_id: str | None = None
-question_budget: int = 3           # 의미 변경: "뽑을 문제 후보 수"
+model_code: str | None = None            # 생략 시 서버 기본값. operator가 고른다
+question_budget: int = 3                 # 기본값 4 → 3
 ```
 
-응답에 추가
+`focusItems`는 Spring이 후보를 보내고 **AI가 그중 하나의 `id`를 그대로 돌려주는** 방식이다(C-1 제안). `question_focus_item`의 PK가 랜덤 UUID여서 AI 코드에 값을 박을 수 없기 때문이다. 결과적으로 AI가 강사 지정 범위를 벗어날 수 없다.
+
+**응답에 추가**
 
 ```python
-analysis_documents: list[dict]     # [{kind, content}]  ← 처음부터 배열로 둔다
-requirement_results: list[dict]    # [{id, status: PASS|FAIL, evidence}]
-# problems[] 각 항목에
-#   prepared_questions: [{axisCode, questionText, hints: [{level, text}] , flagged}]
+analysis_document_markdown: str          # code_analysis.analysis_document_markdown 대응
+requirement_results: list[dict]          # [{requirementId, verdict: "P"|"F", evidence, note}]
 ```
 
-**`analysis_documents`를 배열로 두는 이유**: 현재 PoC는 문서 1개지만 4종 고도화가 예고돼 있다. 나중에 단수→복수로 바꾸면 계약이 깨진다.
+`requirementResults`는 **요청 `requirements`와 길이가 같아야 한다.** 모델이 일부를 빠뜨리면 조용히 채우지 말고 `verdict="F"` + `note="판정 실패"`로 명시하고, 길이가 다르면 에러로 막는다.
 
-`stub.py`도 같이 고쳐 새 필드가 실제로 나오게 한다(배선 확인용).
+**`problems[]` 각 항목** — DB `assessment_problem` + `problem_reference` 컬럼명 그대로
 
-**DoD**: Swagger에 새 필드가 보이고, 스텁 응답에 값이 채워진다.
+```jsonc
+{
+  "problemId": "...",
+  "problemNo": 1,                      // 1~3
+  "status": "READY",                   // READY|IN_PROGRESS|COMPLETED|TERMINATED
+  "problemType": "DESIGN_CHOICE",      // 5종
+  "priority": 0.91,
+  "questionFocusItemId": "uuid",       // 요청 focusItems에서 고른 id
+  "sourcePath": "app/main.py",
+  "lineStart": 12, "lineEnd": 14,
+  "codeSnippet": "...",                // 신규. evidenceHash의 대상
+  "evidenceHash": "...",
+  "extractorVersion": 1,
+  "references": [ { "path": "...", "lineStart": 12, "lineEnd": 14,
+                    "evidenceHash": "...", "referenceType": "CALLER" } ],
+  "stages": [
+    { "axisCode": "L1", "questionText": "...", "flagged": false,
+      "hints": [ { "hintLevel": 1, "hintText": "..." }, { "hintLevel": 2, "hintText": "..." } ] }
+    // L2 · L3 · L4 동일 구조로 총 4개
+  ]
+}
+```
+
+**`stages`는 정확히 4개(L1~L4)이고 각 stage에 `hints` 2개가 실린다.** 질문과 힌트는 분석 단계에서 동결된다(§계약 기준값 → 생성 시점). `Hint` 클래스와 `ProblemStage.hints`는 **그대로 둔다.**
+
+**대신 검증을 추가한다** — 현재 파일에 없다.
+
+```python
+# ProblemStage 에: hints가 정확히 2개이고 hint_level이 [1, 2] 순서인가
+# Problem 에:      stages가 정확히 4개이고 axis_code가 L1→L2→L3→L4 순서인가
+```
+
+동결이 성립하려면 모양이 완전해야 한다. 3단계만 온 문제를 그대로 통과시키면 학생이 L4에서 질문 없는 화면을 보고, 그게 채점 0점으로 기록된다. 스키마에서 막는다.
+
+**`codeSnippet`을 AI가 보내는 이유**: `evidence_hash`가 "code_snippet 기준 해시"이고 해시를 AI가 만든다. Spring이 ZIP을 따로 잘라내면 줄바꿈·BOM이 1바이트만 달라도 해시가 안 맞는다.
+
+`stub.py`도 같이 고쳐 새 필드가 실제로 나오게 한다(배선 확인용). 위 §코드가 계약을 아직 못 따라간 곳의 `stub.py` 5줄이 여기서 처리된다.
+
+**DoD**: Swagger에 새 필드가 보이고, 스텁 응답의 `status`가 `READY`, `stages`가 4개(각 `hints` 2개), `codeSnippet`이 채워진다. 3개짜리 `stages`를 넣은 테스트가 검증 오류로 막힌다.
+
+---
+
+### T2b — 보고서 스키마 교정
+
+**대상**: `schemas/report.py`
+
+1. **`AxisCode`를 `"L1"`~`"L4"`로 교체하고 L3/L4 의미를 바로잡는다.** 기존 값(`L1_CODE_DESCRIPTION` 등)은 DB `problem_stage.axis_code` CHECK(`'L1'`~`'L4'`)와 다르고, **L3=반례·L4=대안으로 뒤집혀 있었다.** 정의서·프론트·PM 기준이 L3=대안, L4=반례다
+2. `raw_score` → `best_score`, `score` → `confirmed_score` (DB 컬럼명과 1:1)
+3. `attempt_count`(0~3) 추가, `passed`(bool) 추가
+4. **세션 총점·축 평균을 응답에서 뺀다.** 점수는 매 턴 `problem_stage`에 이미 저장돼 있고, 요약이 필요하면 Spring이 집계한다. LLM이 아니면 못 만드는 것(서술형 진단·교안 매핑)이 `/reports`의 본체다
+5. `QuestionResult` → `problems[]`로 이름을 맞춘다. 문제 만점은 20(4단계 × 5)
+
+```jsonc
+// GET /reports/{jobId} → result
+{
+  "problems": [
+    { "problemNo": 1, "problemId": "...", "totalScore": 16, "maxScore": 20,
+      "stages": [ { "axisCode": "L1", "confirmedScore": 4, "bestScore": 4,
+                    "attemptCount": 1, "passed": true } ] }
+  ],
+  "reportMarkdown": "...",
+  "curriculumRefs": [ /* {teachId, unitId, sourcePages} */ ],
+  "retestTargets": [ "problemId" ],
+  "versions": { "modelCode": "...", "promptVersion": "...", "rubricVersion": "..." }
+}
+```
+
+**DoD**: `AxisCode`가 4값이고 L3/L4 주석이 대안/반례 순서다. 세션 총점 필드가 없다. 테스트 통과.
 
 ---
 
@@ -145,18 +223,16 @@ requirement_results: list[dict]    # [{id, status: PASS|FAIL, evidence}]
 
 **대상**: `schemas/session.py`, `app/sessions.py`
 
-**방법**
-
 ```python
 # Question 에
 hint_text: str | None = None
-retry_no: int = 0                  # 0=원질문, 1~2=힌트 재질의
+attempt_no: int = 1                # 1=원질문, 2~3=힌트 후 재질의
 
 # TranscriptTurn 에 (Spring이 영속화·restore로 되돌려야 하므로 필수)
-raw_score: int | None = None       # LLM 원점수 0~5
-score: int | None = None           # min(raw_score, hintCap) 기록 점수
-hints_used: int = 0                # 0~2
-retry_no: int = 0
+best_score: int | None = None      # 힌트 상한 적용 "전" LLM 원점수 0~5
+confirmed_score: int | None = None # 상한 적용 "후" 기록 점수
+attempt_count: int = 0             # 0~3. 0은 미도달
+passed: bool | None = None
 hint_text: str | None = None
 autonomy: str | None = None        # SELF | SELF_MAINTAINED | PARTIAL
 
@@ -164,11 +240,15 @@ autonomy: str | None = None        # SELF | SELF_MAINTAINED | PARTIAL
 line_end: int | None = None
 ```
 
-**`raw_score`와 `score`를 둘 다 두는 이유**: 힌트가 점수 상한을 깎는다. 캡 적용 결과만 남기면 상한 정책을 바꿨을 때 재계산이 불가능하고 감사도 안 된다.
+**`best_score`와 `confirmed_score`를 둘 다 두는 이유**: 힌트가 점수 상한을 깎는다. 캡 적용 결과만 남기면 상한 정책을 바꿨을 때 재계산이 불가능하고 감사도 안 된다. 이름은 DB 컬럼(`problem_stage.best_score`·`confirmed_score`)과 1:1로 맞춘다.
 
-`app/sessions.py`의 `_Turn` dataclass와 `_to_view()`도 같이 고친다.
+`hints_used`는 별도 필드로 보내지 않는다 — `attempt_count - 1`이고, `status='NOT_REACHED'`면 0이다.
 
-**DoD**: `/answers` 응답에 방금 턴 점수가 실려 나오고, `restore`가 그 값을 되돌려 받는다.
+`SessionView.state`의 `TIMEOUT`을 `EXPIRED`로 바꾸고 `PAUSED`를 넣는다 — `assessment_session.status` 허용값이 `READY`/`IN_PROGRESS`/`PAUSED`/`COMPLETED`/`FAILED`/`EXPIRED`다.
+
+`app/sessions.py`의 `_Turn` dataclass와 `_to_view()`도 같이 고치고, `_build_questions()`의 `axis_code`를 `"L1"`로 바꾼다. `_build_questions()` 자체의 존재 여부는 T8에서 결정된다.
+
+**DoD**: `/answers` 응답에 방금 턴 점수가 실려 나온다.
 
 ---
 
@@ -176,13 +256,13 @@ line_end: int | None = None
 
 **대상**: `schemas/common.py`(모델 추가), `schemas/analysis.py`·`session.py`·`report.py`(타입 교체), 엔진 호출부
 
-**왜**: 모든 응답에 `ai_usage: list[dict[str, Any]]` 자리가 이미 있지만 **모양이 안 정해져 있다.** DB `ai_usage` 테이블은 기관별 호출·토큰·비용 원장이고 NOT NULL 컬럼이 많아서, AI가 안 주면 Spring이 행을 만들 수 없다.
-
-**방법** — `schemas/common.py`에 공용 모델을 하나 만들고 세 응답이 공유한다.
+**왜**: 모든 응답에 `ai_usage: list[dict[str, Any]]` 자리가 이미 있지만 **모양이 안 정해져 있다.** DB `ai_usage`는 기관별 호출·토큰·비용 원장이고 NOT NULL 컬럼이 많아서, AI가 안 주면 Spring이 행을 만들 수 없다.
 
 ```python
 class AiUsage(BaseSchema):
-    idempotency_key: str          # uuid4. 호출마다 새로 발급. 재시도 시에는 재사용
+    idempotency_key: str          # {source_id}:{source_type}:{attempt_no}
+    source_type: str              # 값 목록 백엔드 확정 대기 (C-4)
+    source_id: str
     feature_code: str             # 아래 매핑표
     model_code: str               # Spring이 ai_model 조회해 model_id 확보
     input_token_count: int = Field(ge=0)
@@ -213,9 +293,9 @@ def _check_db_constraints(self):
 
 **LLM 호출 1건 = 배열 원소 1개.** 코드 분석 응답이면 6개가 들어간다.
 
-**단가·비용은 넣지 않는다.** AI가 모델 단가표를 들고 있으면 단가가 바뀔 때마다 재배포해야 한다. `ai_model` 테이블을 가진 Spring이 토큰 수에 곱하는 쪽이 맞다.
+**단가·비용은 넣지 않는다.** AI가 모델 단가표를 들고 있으면 단가가 바뀔 때마다 재배포해야 한다. `ai_model`을 가진 Spring이 토큰 수에 곱한다(C-3 확인 대기).
 
-**실패한 호출도 기록한다.** 실패해도 토큰·비용이 발생하고 재시도 통계에 필요하다. `status != SUCCEEDED`면 `failure_code`를 반드시 채운다(DB CHECK가 강제한다).
+**실패한 호출도 기록한다.** 실패해도 토큰·비용이 발생하고 재시도 통계에 필요하다.
 
 **DoD**: 스텁이 실제 값이 든 `aiUsage`를 돌려주고, 엔진이 붙으면 실제 호출 기록이 채워진다.
 
@@ -244,7 +324,7 @@ GET  /api/v0/curricula/{jobId}  → {teaches: [{id, label, unitId, sourcePages}]
 ./.venv/Scripts/python.exe -c "from app.main import app; import json,io; io.open('openapi.json','w',encoding='utf-8').write(json.dumps(app.openapi(),ensure_ascii=False,indent=2))"
 ```
 
-커밋하고 백엔드·프론트에 전달한다. **T1~T4를 다 끝내고 한 번에 한다** — 중간에 여러 번 주면 백엔드가 헛작업한다.
+커밋하고 백엔드·프론트에 전달한다. **T2~T4를 다 끝내고 한 번에 한다** — 중간에 여러 번 주면 백엔드가 헛작업한다. 이슈 #31의 완료 조건에 "AI가 `schemas/` 확정 후 `openapi.json` 갱신·공유"가 들어 있다.
 
 ---
 
@@ -272,7 +352,7 @@ GET  /api/v0/curricula/{jobId}  → {teaches: [{id, label, unitId, sourcePages}]
 | `prompt_manifest.json` | — | p04-1~6 프롬프트·파라미터. **계약이다. 문자열을 코드에 박지 않는다** |
 | `scoring-config.js` | 177 | 축×값 루브릭 + 임계값 + 힌트 상한. 선언적이라 그대로 옮김 |
 | `poc-engine.js` | 385 | 3문제 × 4레벨 루프 + 레벨별 즉시 채점 |
-| `hint-ladder.js` | 99 | 질문+힌트 2단을 한 번에 생성해 동결 |
+| `hint-ladder.js` | 99 | 문제 하나의 L1~L4 질문 + 단계별 힌트 2개를 **한 번에 생성해 동결**(`frozen_at`). 그대로 옮긴다 |
 | `question-guard.js` | 56 | 질문·힌트에 선택지가 섞이는 것 차단 → 재생성 |
 | `code-fragment.js` | 90 | `{file, lines}`를 실제 파일과 대조해 파편 추출 |
 | `requirements.js` | 36 | 요구사항 P/F 판정 |
@@ -281,13 +361,18 @@ GET  /api/v0/curricula/{jobId}  → {teaches: [{id, label, unitId, sourcePages}]
 **스테이지 구성** (전부 LLM)
 
 ```
-p04-1  코드 분석 문서        입력: teaches + problems + code
-p04-2  요구사항 P/F 판정
-p04-3  문제 3개 선정
-p04-4  L1~L4 질문 + 고정 힌트 생성   문제당 1콜
-p04-5  답변 채점 (레벨 1개, 0~5점)   턴당 1콜
-p04-6  보고서
+분석 배치
+  p04-1  코드 분석 문서                  입력: teaches + problems + code
+  p04-2  요구사항 P/F 판정
+  p04-3  문제 3개 선정
+  p04-4  L1~L4 질문 + 힌트 2개씩 동결     문제당 1콜 (질문 4 + 힌트 8)
+런타임
+  p04-5  답변 채점 (단계 1개, 0~5점)      턴당 1콜. 세션 중 유일한 LLM 호출
+세션 후
+  p04-6  보고서
 ```
+
+**세션 루프에는 LLM 호출이 하나뿐이다.** `poc-engine.js:218`이 동결된 `lvl.hints[hintsUsed - 1]`을 꺼내 쓰고, 호출은 `gradeLevel`(p04-5)만 한다. 이식할 때 이 구조를 바꾸지 않는다.
 
 **LLM 클라이언트**: `_legacy/pipeline/feedback/nvidia_client.py`·`nvidia_key_pool.py`가 서버용 원본이라 재활용한다. Worker 프록시(`worker/nvidia-proxy.js`)는 브라우저 제약의 산물이므로 옮기지 않는다.
 
@@ -297,15 +382,45 @@ p04-6  보고서
 
 > Supabase 관련 보안 주의: 팀 공용 프로젝트가 open signup + RLS read-all이라 cross-tenant 위험이 있고, 팀원이 **브라우저 PoC 한정으로** 수용했다. 제품 결정이 아니다. 이식 과정에서 Supabase 클라이언트·스키마·인증 흐름을 따라 옮기지 않는다. 애초에 FastAPI는 저장하지 않으므로 옮길 것이 없어야 정상이고, Supabase 호출이 필요해 보이면 설계가 틀린 것이니 멈추고 재검토한다.
 
+### 🔴 이식 중 반드시 할 것 — PoC 축 순서를 뒤집는다
+
+`scoring-config.js:22~77`의 `AXES`가 **L3=반례한계, L4=대안**이다. 우리 기준(백엔드 `axis_score`·프론트·PM)과 **반대다.**
+
+```
+PoC        L1 코드기술 / L2 설계논리 / L3 반례한계 / L4 대안
+우리 기준   L1 코드기술 / L2 설계논리 / L3 대안     / L4 반례·한계
+```
+
+이식할 때 `AXES`의 **`order`·`label`·`question_intent`·`values` 루브릭 텍스트를 L3↔L4로 교환**한다. 루브릭이 축에 붙어 있으므로 순서만 맞추고 텍스트를 그대로 두면 **L3 답변이 L4 기준으로 채점된다.** `axisWeights`(`:124`)와 `prompt_manifest.json` p04-4의 축 열거 순서도 같이 본다.
+
+**팀원 코드를 우리가 고치지 않는다.** 워크트리는 읽기 전용이므로 이식본에서 교환하고, **원본 정정은 팀원에게 요청하기로 확정**했다 — 요청서 `../qna/2026-07-30/poc-axis-order-fix.md`.
+
 ---
 
-### T8 — 세션 무상태 전환 (결정 대기)
+### T8 — 세션 엔드포인트 축소 (방향 확정, 작업 미착수)
 
-백엔드가 매 턴 저장한다면 FastAPI가 세션을 또 들고 있을 이유가 약하다. 전환하면 `app/sessions.py` 저장소와 `POST /sessions/{id}/restore`가 통째로 사라진다(모든 요청이 곧 restore가 되므로).
+**백엔드가 문제·동결 질문·동결 힌트를 분석 직후에 DB에 저장하는 구조를 골랐다.** 세션을 `READY`로 미리 만들고 문제 3행 + 단계 12행 + 문답 라운드 36행을 INSERT해 둔다. 그래서 **세션 시작 시 AI 호출이 필요 없다.**
 
-대가는 payload다. `/answers` 요청에 `transcript` + `problems` + 분석 문서를 매번 실어야 해서 후반 턴이 약 32KB로 커진다. 서비스 간 내부 통신이라 무시할 수준이지만 **계약이 바뀌므로 백엔드 합의가 필요하다.**
+```
+제출 마감 → 코드 분석 배치 → 팀원 수만큼 assessment_session(READY) 생성
+                            → 세션마다 assessment_problem 3행 + problem_stage 12행
+                                       + stage_answer_attempt 36행 (질문 12 + 힌트 24, 답변란 NULL)
+                            ↓
+                  학생 접속 → IN_PROGRESS 전환, 즉시 시작 (AI 호출 없음)
+```
 
-`../output_docs/미결_논의사항.md` §2에 올려뒀다. 합의 전에는 착수하지 않는다.
+근거: `assessment_problem.session_id`가 NOT NULL이고 `UNIQUE (session_id, problem_no)`라 문제 행은 세션마다 생긴다. 분석 시점에는 세션이 없으면 문제를 저장할 곳이 없다. `assessment_session.status` 기본값도 `'READY'`다.
+
+| 엔드포인트 | 처분 |
+|---|---|
+| `POST /sessions` | 없어질 수 있음 |
+| `GET /sessions/{id}` | 없어질 수 있음 |
+| `POST /sessions/{id}/restore` | 없어질 수 있음 — 모든 요청이 곧 restore가 된다 |
+| `POST /sessions/{id}/answers` | **남는다.** 채점 (다음 질문·힌트는 DB에 이미 있다) |
+
+대가는 payload다. `/answers` 요청에 `transcript` + `problems` + 분석 문서를 매번 실어야 해서 후반 턴이 약 32KB로 커진다. 서비스 간 내부 통신이라 무시할 수준이다.
+
+**실제 제거는 아직 하지 않았다.** T2~T5로 계약을 굳히고 `openapi.json`을 넘긴 뒤, 백엔드가 세션 선생성을 구현하는 시점에 맞춰 지운다. 지금 지우면 백엔드가 붙여볼 수 있는 면이 줄어든다.
 
 ---
 
@@ -318,24 +433,128 @@ p04-6  보고서
 ```
 경로 prefix   /api/v0
 필드 표기     camelCase (내부는 snake_case, 직렬화만 변환)
-              단 problems[] 내부는 DB 컬럼명을 그대로 쓴다
+              단 problems[]·stages[] 내부는 DB 컬럼명을 그대로 쓴다
 에러          {error, message, retryable}  평탄 구조. timestamp·path 안 씀
 헤더 3종      X-Internal-Key(인증, health 면제) · Idempotency-Key(submissionId:attemptNo) · X-Trace-Id
 analysisId    Spring이 발급. AI는 만들지도 받지도 않는다
+modelCode     UUID(model_id) 대신 문자열로 주고받는다. 기본값은 서버 설정
 ```
 
-### DB CHECK 제약 (테이블정의서 v06, 06_MEAS)
-
-이 값을 어기면 Spring INSERT가 깨진다.
+### 이름 (2026-07-30 개명 완료 — 옛 이름을 쓰지 않는다)
 
 ```
-analysis_job.status        QUEUED, RUNNING, SUCCEEDED, PARTIAL, FAILED
-assessment_problem.status  CANDIDATE, READY, USED, SKIPPED, INVALID
-assessment_session.status  READY, IN_PROGRESS, PAUSED, TIMEOUT, COMPLETED, ABANDONED, FAILED
-session_turn.state         PENDING, ANSWERED, SKIPPED, SAVED
-submission.method          GITHUB_URL, ZIP_WITH_GITLOG
-*_scope_code               TOTAL, OWN_COMMIT
+assessment_problem       구 decision_point       PK problem_id
+problem_reference        구 dp_reference         PK reference_id
+problem_stage            단계 테이블              PK problem_stage_id, UNIQUE(problem_id, axis_code)
+stage_answer_attempt     답변 이력                PK answer_attempt_id, attempt_no 1~3
+question_focus_item      구 focus_area_code
+project_requirement / project_requirement_assessment   요구사항·판정 결과
+curriculum_section / teaches                            교안
+code_analysis.analysis_document_markdown (TEXT)         분석 문서
+
+폐기: session_turn · dp_question · question_candidate(안 씀) · depth_level
+     score_run / axis_score — AI가 값을 만들지 않는다 (유지 여부는 백엔드 몫, C-2)
 ```
+
+### 축 — L3/L4 순서에 주의
+
+값은 **`"L1"` `"L2"` `"L3"` `"L4"`** (DB `problem_stage.axis_code` CHECK와 동일).
+
+| 단계 | 무엇을 묻나 | 백엔드 `axis_score.axis_code` 대응 |
+|---|---|---|
+| L1 | 무엇을 하는 코드인가 | `CODE_UNDERSTANDING` |
+| L2 | 왜 그렇게 했는가 | `DESIGN_LOGIC` |
+| L3 | **다른 방법과 비교 (대안)** | `ALTERNATIVE_COMPARISON` |
+| L4 | **언제 깨지는가 (반례·한계)** | `COUNTEREXAMPLE_RESPONSE` |
+
+> 우리가 L3=반례, L4=대안으로 뒤집어 쓰고 있었다. 정의서·프론트·PM 기준이 위 표다. `schemas/report.py`는 아직 옛 순서다(T2b).
+
+### 질문·힌트 생성 시점 — 분석 배치에서 전부 동결한다
+
+```
+분석 배치   문제 3개 + 문제별 L1~L4 질문 12개 + 단계별 힌트 2개씩 24개
+런타임      채점만
+```
+
+**질문과 힌트는 학생 답변을 보기 전에 만들어져 동결된다.** 근거: 답변을 보고 힌트를 만들면 학생마다 힌트가 달라져, "몇 번째 힌트에서 통과했는가"가 학생 실력이 아니라 생성 결과의 차이를 재게 된다. 같은 문제를 받은 두 학생은 글자 단위로 같은 질문과 같은 힌트를 받아야 한다.
+
+PoC 구현이 이미 그렇다 — `poc-engine.js:110`이 분석 단계에서 `HintLadder.freezeQuestionSet()`을 호출하고, `hint-ladder.js:86,94`가 `frozen_at`을 찍는다. 세션 루프(`poc-engine.js:218`)는 동결된 `lvl.hints[hintsUsed - 1]`을 꺼내 쓸 뿐이다.
+
+그래서 **`AnalysisResult`의 `problems[].stages[]`는 4개(L1~L4)이고 각 stage에 `hints` 2개가 실린다.**
+
+세션 중 LLM 호출: **채점 1콜뿐.** 질문 생성도 힌트 생성도 세션 중에 없다.
+
+### 채점
+
+```
+단계당 0~5점, 통과선 3점
+힌트 상한   {0회: 5, 1회: 4, 2회: 3}     ← 미확정. 완주 30건 후 재보정
+문제당 만점 20 (4단계 × 5)               ← 세션 총점(60)은 AI가 보내지 않는다
+attempt_count  0~3  (0 = 미도달)
+hints_used     = attempt_count - 1       단 status='NOT_REACHED'면 0
+자력도         0회=SELF / 1회=SELF_MAINTAINED / 2회=PARTIAL
+실패 시        그 문제 종료, 다음 문제의 L1로
+가중치         축별 균등 1.0 (미확정 — 완주 세션 30건 후 재보정)
+재시험         문제 단위. 축 평균은 쓰이지 않는다 (기준값 미확정)
+```
+
+DB 컬럼 대응 — 우리 `rawScore`/`score`를 이 이름으로 맞춘다.
+
+```
+best_score        힌트 상한 적용 "전" 원점수   (구 rawScore)
+confirmed_score   상한 적용 "후" 기록 점수     (구 score)
+passed            BOOLEAN
+status            LOCKED / READY / IN_PROGRESS / PASSED / FAILED / NOT_REACHED / COMPLETED
+```
+
+**코드 파편은 연속 범위 하나다** — `lines: [start, end]` 2원소(`code-fragment.js`). `line_start`/`line_end`로 그대로 매핑된다.
+
+### `problem_type` 5종
+
+"왜 이 지점을 골랐나" — `questionFocusItem`의 "무엇을 묻나"와 다른 축이다.
+
+```
+DESIGN_CHOICE          대안이 있었는데 이것을 택한 지점
+RISK_POINT             규칙 스캔이 잡은 잠재 결함
+COMPLEXITY_HOTSPOT     분기·중첩·길이가 몰린 곳
+REQUIREMENT_IMPL       특정 요구사항을 구현한 부분
+EXTERNAL_INTEGRATION   외부 라이브러리·API 사용 결정
+```
+
+### `reference_type` 6종
+
+추가 근거의 역할. **`PRIMARY`는 안 쓴다** — 주 코드 지점이 `assessment_problem`으로 옮겨졌다.
+
+```
+CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
+```
+
+`problem_type`·`reference_type` 둘 다 DB에 CHECK가 없어 형식(영문 대문자 스네이크 케이스)만 맞으면 된다.
+
+### DB CHECK 제약 (테이블정의서 v06 기준)
+
+이 값을 어기면 Spring INSERT가 깨진다. **전체는 정의서를 보고, 여기에는 AI가 실제로 채우는 컬럼만 남긴다.**
+
+```
+analysis_job.status         QUEUED, RUNNING, SUCCEEDED, PARTIAL, FAILED
+assessment_problem.status   READY, IN_PROGRESS, COMPLETED, TERMINATED   ← 기본값 READY
+assessment_problem.problem_no        BETWEEN 1 AND 3
+assessment_problem.line_end          >= line_start
+assessment_problem.extractor_version > 0
+assessment_session.status   READY, IN_PROGRESS, PAUSED, COMPLETED, FAILED, EXPIRED
+problem_stage.axis_code     L1, L2, L3, L4
+problem_stage.status        LOCKED, READY, IN_PROGRESS, PASSED, FAILED, NOT_REACHED, COMPLETED
+problem_stage.attempt_count BETWEEN 0 AND 2   ← B-1로 0~3 요청 중. 회신 전에는 0~2가 진짜 한계
+problem_stage.best_score / confirmed_score    NULL 또는 0~5
+stage_answer_attempt.attempt_no      IN (1, 2, 3)
+stage_answer_attempt.score_value     BETWEEN 0 AND 5
+submission.method           GITHUB_URL, ZIP_WITH_GITLOG
+*_scope_code                TOTAL, OWN_COMMIT
+termination_reason          COMPLETED_L4, TERMINATED_AT_L2, TERMINATED_AT_L3
+                            (+ TERMINATED_AT_L1 요청 중 — B-4. CHECK는 없어 값 자체는 통과한다)
+```
+
+**폐기된 값** — 쓰면 INSERT가 깨진다: `assessment_problem.status`의 `OPEN`·`CANDIDATE`·`USED`·`SKIPPED`·`INVALID`, `assessment_session.status`의 `TIMEOUT`·`ABANDONED`, `session_turn.state` 전체.
 
 **AI만 아는 NOT NULL 값** — 응답에 없으면 Spring이 행을 만들 수 없다.
 
@@ -344,56 +563,50 @@ submission.method          GITHUB_URL, ZIP_WITH_GITLOG
 | `code_snapshot` | `content_hash`, `file_count`, `byte_count` |
 | `commit_attribution` | `commit_hash`, `authored_at`, `changed_line_count`, `contribution_ratio` |
 | `file_attribution` | `path`, `attribution_type`, `commit_count`, `changed_line_count`, `changed_function_count`, `confidence` |
-| `assessment_problem` | `source_path`, `line_start`, `line_end`, `evidence_hash`, `priority`, `extractor_version` |
+| `assessment_problem` | `problem_no`, `problem_type`, `source_path`, `line_start`, `line_end`, `code_snippet`, `evidence_hash`, `extractor_version` |
+| `problem_reference` | `source_path`, `line_start`, `line_end`, `evidence_hash`, `reference_type` |
 
-### 채점 (P04, `scoring-config.js` 실측)
-
-```
-축       L1 코드기술 · L2 설계논리 · L3 반례·한계 · L4 대안     4축, 각 0~5점
-통과선   3점
-힌트     레벨당 최대 2회. 점수 상한 {0회: 5, 1회: 4, 2회: 3}
-기록점수 min(LLM 원점수, 상한)
-자력도   0회=SELF / 1회=SELF_MAINTAINED / 2회=PARTIAL
-문제 수  제출당 3개
-가중치   축별 균등 1.0 (미측정 — 완주 세션 30건 후 재보정)
-실패 시  그 문제 종료, 다음 문제의 L1로
-```
-
-**코드 파편은 연속 범위 하나다** — `lines: [start, end]` 2원소(`code-fragment.js`). `line_start`/`line_end`로 그대로 매핑되고 스키마 변경이 없다.
-
-### `ai_usage` 매핑 (DB 테이블정의서 기준)
+### `ai_usage` 매핑
 
 AI가 채우는 값과 Spring이 채우는 값이 갈린다. **경계를 넘지 않는다.**
 
 | AI가 준다 | Spring이 채운다 |
 |---|---|
-| `idempotencyKey` · `featureCode` · `modelCode` | `usage_id` · `org_id` · `actor_user_id` |
-| `inputTokenCount` · `outputTokenCount` · `cachedTokenCount` | `source_type` · `source_id` · `request_id` · `trace_id` |
+| `idempotencyKey` · `sourceType` · `sourceId` | `usage_id` · `org_id` · `actor_user_id` |
+| `featureCode` · `modelCode` | `model_id` (modelCode로 `ai_model` 조회) |
+| `inputTokenCount` · `outputTokenCount` · `cachedTokenCount` | `request_id` · `trace_id` |
 | `status` · `failureCode` | `input_unit_price` · `output_unit_price` · `currency_code` |
 | `latencyMs` · `occurredAt` | `estimated_cost` · `actual_cost` · `created_at` |
 
-**단계별 `featureCode`** — 현재 DB CHECK 허용값은 `GRADING`·`SESSION_DIALOG`·`SUMMARY_DRAFT`·`CURRICULUM_ANALYSIS` 넷뿐이라 **코드 분석·질문 생성에 쓸 값이 없다**(Q7-1로 추가 요청).
+**단가는 Spring이 채운다** — AI는 단가를 모른다. 단가표를 AI에 두면 단가가 바뀔 때마다 재배포다. (C-3 확인 대기. 이게 안 오면 `ai_usage` 쓰기 경로가 통째로 막힌다.)
 
-| AI 단계 | 제안 값 | 상태 |
-|---|---|---|
-| 코드 분석 문서 (p04-1) | `CODE_ANALYSIS` | 추가 필요 |
-| 요구사항 P/F (p04-2) | `CODE_ANALYSIS` | 추가 필요 |
-| 문제 선정·질문 생성 (p04-3·4) | `QUESTION_GENERATION` | 추가 필요 |
-| 답변 채점 (p04-5) | `GRADING` | 있음 (Q7-2 확인) |
-| 보고서 (p04-6) | `SUMMARY_DRAFT` | 있음 |
-| 교안 분석 (p01) | `CURRICULUM_ANALYSIS` | 있음 |
+**`featureCode`** — DB CHECK에 `CODE_ANALYSIS`·`QUESTION_GENERATION`이 추가돼 있다(Q7-1 반영 완료).
 
-**`idempotency_key`는 UNIQUE다.** 헤더의 `Idempotency-Key`(`submissionId:attemptNo`)는 요청 단위인데 한 요청에 LLM 호출이 6번이라 그대로 쓰면 충돌한다. **호출마다 uuid4를 새로 발급**해 그걸 보낸다(Q7-3). 재시도할 때는 **이미 만든 키를 재사용**해야 중복 판별이 성립한다.
+| AI 단계 | 값 |
+|---|---|
+| 코드 분석 문서 (p04-1) | `CODE_ANALYSIS` |
+| 요구사항 P/F (p04-2) | `CODE_ANALYSIS` |
+| 문제 선정 (p04-3) | `QUESTION_GENERATION` |
+| 질문·힌트 동결 (p04-4) | `QUESTION_GENERATION` |
+| 답변 채점 (p04-5) | `GRADING` |
+| 보고서 (p04-6) | `SUMMARY_DRAFT` |
+| 교안 분석 (p01) | `CURRICULUM_ANALYSIS` |
+
+**힌트 생성용 값은 필요 없다.** 힌트는 p04-4에서 질문과 함께 동결되므로 `QUESTION_GENERATION`이고, 세션 중 호출은 `GRADING` 하나뿐이다.
+
+`SESSION_DIALOG`는 DB CHECK에 아직 남아 있지만 코드 정의서 목록에서 빠졌다. **쓰지 않는다.**
+
+**`failure_code` 5종 (확정)**: `TIMEOUT` · `RATE_LIMITED` · `PROVIDER_ERROR` · `INVALID_JSON` · `CONTEXT_OVERFLOW`. `UPSTREAM_ERROR`는 폐기 — `PROVIDER_ERROR`로 쓴다.
+
+**`idempotency_key` = `{source_id}:{source_type}:{attempt_no}`.** UNIQUE 제약은 제거됐다. `source_type`이 호출 종류를 구분하므로 한 요청의 6콜이 서로 다른 키를 갖는다. `source_type` 값 목록은 백엔드 확정 대기(C-4).
 
 **`ai_model.model_code` 초기 목록에 `glm-5.2`가 이미 있다.** 별도 등록 없이 `modelCode`로 `model_id` 조회가 된다.
-
-**`failure_code` 초안** — `RATE_LIMITED` · `TIMEOUT` · `INVALID_JSON` · `CONTEXT_OVERFLOW` · `UPSTREAM_ERROR` (Q7-4로 승인 요청)
 
 ### 규모
 
 ```
 NVIDIA 무료 티어   분당 40회
-코드 분석 배치      팀당 6콜 (분석문서 1 + 요구사항 1 + 문제선정 1 + 질문·힌트 3)
+코드 분석 배치      팀당 6콜 (분석문서 1 + 요구사항 1 + 문제선정 1 + 질문·힌트 동결 3)
                    30팀 = 180콜 = 약 4.5분. 1시간 예산에 여유
 문답 실시간         턴당 1콜(채점만). 동시 10~20명 = 13~27 RPM
 결론               Redis 불필요. 워커 1개 유지
@@ -414,10 +627,19 @@ NVIDIA 무료 티어   분당 40회
 | D5 | 이 브랜치에서 PoC를 만들지 않는다 | 역할 분담. 검증은 Swagger·Postman으로만 |
 | D6 | 기존 구현은 `_legacy/`로 물리되 삭제하지 않는다 | 모듈화 참고용. `.gitignore` 대상이라 커밋 오염 없음 |
 | D7 | 워커 1개 전제 | 인메모리 저장소. 40 RPM이 병목이라 워커를 늘려도 처리량이 안 늘고, 오히려 레이트리밋 카운터가 갈라진다 |
-| D8 | 턴 점수를 wire에 노출한다 | Spring이 매 턴 저장한다. 점수·힌트 사용횟수가 wire에 없으면 복구된 세션이 "힌트를 몇 번 썼는지" 모른 채 재개돼 `restore`가 성립하지 않는다 |
-| D9 | `rawScore`·`score`를 둘 다 보낸다 | 힌트가 점수 상한을 깎는다. 캡 적용 결과만 남기면 상한 정책 변경 시 재계산 불가, 감사도 불가 |
+| D8 | 턴 점수를 wire에 노출한다 | Spring이 매 턴 저장한다. 점수·시도 횟수가 wire에 없으면 복구된 세션이 "힌트를 몇 번 썼는지" 모른 채 재개된다 |
+| D9 | `bestScore`·`confirmedScore`를 둘 다 보낸다 | 힌트가 점수 상한을 깎는다. 캡 적용 결과만 남기면 상한 정책 변경 시 재계산 불가, 감사도 불가 |
 | D10 | 재시험·문제배정 판정은 Spring이 한다 | AI는 점수와 `retestTargets`만 낸다. 커트라인·배정은 조직 정책이라 DB 주인이 갖는다 |
-| D11 | 힌트는 질문과 함께 미리 만들어 동결한다 | 답변을 보고 만들면 학생마다 힌트가 달라져 "몇 번째 힌트에서 통과했는가"가 측정값이 못 된다. 이식할 때 이 성질을 깨지 않는다 |
+| D11 | **질문·힌트는 분석 때 미리 만들어 동결한다** | 답변을 보고 힌트를 만들면 학생마다 힌트가 달라져, "몇 번째 힌트에서 통과했는가"가 학생 실력이 아니라 생성 결과의 차이를 재게 된다. 같은 문제를 받은 두 학생은 글자 단위로 같은 질문·힌트를 받아야 한다. PoC가 이미 그 구조다(`freezeQuestionSet`·`frozen_at`). **이식할 때 이 성질을 깨지 않는다** |
+
+> **D11 보충 — 적응형 힌트는 폐기가 아니라 후속이다.** 팀원이 **적응형 힌트 모듈을 개발 중이고 나중에 추가할 예정**이다. **현재 계약은 동결 기준**이고, 붙는 시점에 셋이 따라온다.
+>
+> 1. 세션 중 LLM 호출이 하나 늘어 **턴당 2콜**이 된다 (§규모의 RPM 계산을 다시 한다)
+> 2. `feature_code`에 **힌트용 값이 필요해진다** — 지금은 불필요하지만 그때 백엔드에 요청한다
+> 3. **한 기수 안에서 두 모드가 섞이면 점수를 나란히 비교할 수 없다.** 동결 힌트로 받은 4점과 적응형 힌트로 받은 4점은 같은 값이 아니다. **체크포인트 단위로 모드를 고정**해야 한다 (`checkpoint`에 모드 컬럼이 필요할 수 있다 — 그때 백엔드와 논의)
+| D12 | 세션 총점·축 평균을 AI가 만들지 않는다 | 점수는 매 턴 `problem_stage`에 저장돼 있다. 집계는 Spring이 SQL로 하면 되고, LLM이 아니면 못 만드는 것만 `/reports`에 담는다 |
+| D13 | `codeSnippet`을 AI가 보낸다 | `evidence_hash`가 code_snippet 기준 해시이고 해시를 AI가 만든다. Spring이 따로 잘라내면 줄바꿈·BOM 차이로 해시가 안 맞는다 |
+| D14 | 값 이름은 DB 컬럼명을 그대로 쓴다 | 새 어휘를 만들면 백엔드가 "정의서에 없는 컬럼"으로 읽는다. 실제로 `callId`로 한 번 겪었다 |
 
 ---
 
@@ -429,7 +651,11 @@ NVIDIA 무료 티어   분당 40회
 |---|---|
 | `pytest`가 `_legacy/tests/`를 수집해 깨진다 | `pytest.ini`에 `norecursedirs = _legacy .venv` 필수 |
 | Swagger가 중첩 모델 `$ref`를 해석 못 한다 | `$defs` 인라인 펼치기로 해결됨. 새 중첩 모델을 넣을 때 `/docs`를 눈으로 확인 |
-| DB CHECK에 없는 상태값을 보낸다 | 위 §계약 기준값의 목록만 쓴다. `ANALYZING`·`READY`는 다른 테이블 값이다 |
+| DB CHECK에 없는 상태값을 보낸다 | 위 §DB CHECK 제약의 목록만 쓴다. `OPEN`·`CANDIDATE`·`TIMEOUT`은 전부 폐기값이다 |
+| L3/L4를 뒤집어 쓴다 | L3=대안, L4=반례. 옛 문서·옛 코드가 반대로 적고 있다 |
+| **PoC 축 순서가 우리와 반대다** | `scoring-config.js`가 L3=반례, L4=대안이다. 이식할 때 `AXES`의 `order`·`label`·루브릭 텍스트를 L3↔L4 교환한다(§T7). 순서만 맞추고 루브릭을 그대로 두면 L3 답변이 L4 기준으로 채점된다 |
+| `cachedTokenCount > inputTokenCount` | DB CHECK가 막는다. `model_validator`로 먼저 잡는다 |
+| `requirementResults` 길이가 요청과 다르다 | 조용히 채우지 말고 에러. 빠뜨린 항목은 `verdict="F"` + `note` |
 | 워크트리 경로에 백슬래시 | Bash에서 `..\ai_poc\x`는 이스케이프로 먹혀 엉뚱한 폴더가 생긴다. `/`를 쓴다 |
 | develop 병합 경로가 갈린다 | 팀은 GitHub PR로, 로컬은 직접 push하면 갈라진다. 방식을 팀과 통일할 것 |
 | 분석 CPU가 이벤트 루프를 막는다 | T6 참조. `def` 또는 `run_in_executor` |

@@ -1,6 +1,7 @@
 """ 코드 분석 API(P02)의 요청 응답 스키마"""
 from datetime import datetime
 from typing import Any, Literal
+from app.schemas.report import AxisCode
 
 from pydantic import Field, model_validator
 
@@ -52,6 +53,49 @@ class SnapshotMeta(BaseSchema):
     content_hash: str = Field(description="sha256 hex 64자")
     file_count: int
     byte_count: int
+
+class ProblemReference(BaseSchema):
+    """문제가 가리키는 코드 위치. DB problem_reference 대응."""
+
+    path: str
+    line_start: int
+    line_end: int
+    evidence_hash: str = Field(description="sha256 hex 64자")
+    reference_type: str = Field(description="PRIMARY 등. 카탈로그 미정(B-3)")
+    
+class Hint(BaseSchema):
+    """단계 하나에 딸린 힌트. 분석 때 미리 만들어 동결한다."""
+
+    hint_level: int = Field(ge=1, le=2)
+    hint_text: str
+    
+class ProblemStage(BaseSchema):
+    """문제 하나의 레벨 하나. 4축이 곧 4단계다."""
+
+    axis_code: AxisCode
+    question_text: str
+    flagged: bool = Field(
+        default=False,
+        description="보기형(①②③ 등)이 섞여 재생성에도 실패한 질문. 화면에 '검수 필요'",
+    )
+    hints: list[Hint]
+
+class Problem(BaseSchema):
+    """출제 대상 코드 지점. DB assessment_problem 대응.
+
+    후보와 채택본을 status로 구분한다. 별도 타입을 두지 않는다.
+    """
+
+    problem_id: str
+    status: Literal["CANDIDATE", "READY", "USED", "SKIPPED", "INVALID"]
+    priority: float
+    focus_code: str
+    source_path: str
+    line_start: int
+    line_end: int
+    evidence_hash: str
+    references: list[ProblemReference] = Field(default_factory=list)
+    stages: list[ProblemStage] = Field(default_factory=list)
     
 class AnalysisResult(BaseSchema):
     """분석이 성공했을 때의 결과 본문.
