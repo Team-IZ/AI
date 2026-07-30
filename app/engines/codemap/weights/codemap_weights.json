@@ -1,0 +1,10 @@
+{
+  "weights": {
+    "fan_in": 1.0,
+    "entry_point": 1.0,
+    "path_depth": 1.0,
+    "size": 1.0,
+    "own_commit": 1.0
+  },
+  "provenance": "provisional-equal -- unmeasured, no labeler data yet (D6/D194와 같은 패턴: rank.py의 로직과 이 수치를 분리해 재보정을 파일 교체 하나로 끝낸다, git revert가 롤백 경로)"
+}
