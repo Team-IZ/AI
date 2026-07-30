@@ -50,6 +50,10 @@ NVIDIA_RPM_LIMIT = "36"
 LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 LANGSMITH_PROJECT = "team-iz-nvidia-usage"
 LANGSMITH_ORGANIZATION_ID = "63acea55-f27c-429b-850f-63fb363f56b1"
+# D-ls-tags: per-Worker tag override so the shared nvidia-proxy.js's hardcoded fallback
+# ("nvidia,curriculum-manager,production") doesn't need to change when code_Q&A/poc_full
+# each set their own here instead.
+LANGSMITH_TAGS = "nvidia,curriculum-manager,production"
 # MiniMax M3 GMI Cloud serverless rate shown in the deployment pricing table.
 MODEL_INPUT_USD_PER_MILLION = "0.24"
 MODEL_OUTPUT_USD_PER_MILLION = "0.96"

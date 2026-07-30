@@ -155,6 +155,14 @@ test("successful NVIDIA attempt records sanitized LangSmith usage metadata", asy
   assert.ok(langSmithRequest);
   const trace = JSON.parse(langSmithRequest.options.body);
   assert.equal(trace.session_name, "team-iz-nvidia-usage");
+  assert.equal(trace.trace_id, trace.id);
+  assert.match(trace.dotted_order, /^\d{8}T\d{12}Z.+$/);
+  assert.deepEqual(trace.tags, ["nvidia", "curriculum-manager", "production"]);
+  // D-ls-t3: the field the backend actually reads (extra.metadata.usage_metadata), not
+  // just its SDK-parity mirror under outputs.
+  assert.equal(trace.extra.metadata.usage_metadata.input_tokens, 120);
+  assert.equal(trace.extra.metadata.usage_metadata.output_tokens, 30);
+  assert.equal(trace.extra.metadata.usage_metadata.total_tokens, 150);
   assert.equal(trace.outputs.usage_metadata.input_tokens, 120);
   assert.equal(trace.outputs.usage_metadata.output_tokens, 30);
   assert.equal(trace.outputs.usage_metadata.total_tokens, 150);
@@ -165,6 +173,142 @@ test("successful NVIDIA attempt records sanitized LangSmith usage metadata", asy
   assert.equal(langSmithRequest.options.body.includes("private prompt"), false);
   assert.equal(langSmithRequest.options.body.includes("private response"), false);
   assert.equal(langSmithRequest.options.body.includes("nvapi-super-secret"), false);
+});
+
+test("LangSmith usage metadata surfaces reasoning/cached token subtypes", async () => {
+  const kv = new MemoryKv();
+  await kv.put("job-2", JSON.stringify({ status: "pending" }));
+  const message = queueMessage({
+    jobId: "job-2",
+    apiKey: "nvapi-test-2",
+    body: JSON.stringify({ model: "minimaxai/minimax-m3", messages: [{ role: "user", content: "hi" }] }),
+    maxAttempts: 1,
+  });
+  const requests = [];
+  const waits = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (String(url).includes("integrate.api.nvidia.com")) {
+      return Response.json({
+        id: "completion-2",
+        choices: [{ message: { role: "assistant", content: "ok" } }],
+        usage: {
+          prompt_tokens: 200,
+          completion_tokens: 80,
+          total_tokens: 280,
+          prompt_tokens_details: { cached_tokens: 50 },
+          completion_tokens_details: { reasoning_tokens: 40 },
+        },
+      });
+    }
+    if (String(url).endsWith("/runs")) return new Response(null, { status: 202 });
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+  try {
+    await worker.queue(
+      { messages: [message] },
+      {
+        NVIDIA_JOBS: kv,
+        NVIDIA_RATE_LIMITER: limiterBinding(),
+        LANGSMITH_API_KEY: "langsmith-secret",
+        LANGSMITH_PROJECT: "team-iz-nvidia-usage",
+      },
+      { waitUntil(promise) { waits.push(promise); } }
+    );
+    await Promise.all(waits);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const trace = JSON.parse(requests.find((entry) => entry.url.endsWith("/runs")).options.body);
+  assert.deepEqual(trace.outputs.usage_metadata.input_token_details, { cache_read: 50 });
+  assert.deepEqual(trace.outputs.usage_metadata.output_token_details, { reasoning: 40 });
+});
+
+test("LangSmith usage metadata still emits all three token counts when NVIDIA omits completion_tokens", async () => {
+  const kv = new MemoryKv();
+  await kv.put("job-3", JSON.stringify({ status: "pending" }));
+  const message = queueMessage({
+    jobId: "job-3",
+    apiKey: "nvapi-test-3",
+    body: JSON.stringify({ model: "minimaxai/minimax-m3", messages: [{ role: "user", content: "hi" }] }),
+    maxAttempts: 1,
+  });
+  const requests = [];
+  const waits = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (String(url).includes("integrate.api.nvidia.com")) {
+      return Response.json({
+        id: "completion-3",
+        choices: [{ message: { role: "assistant", content: "ok" } }],
+        usage: { prompt_tokens: 100, total_tokens: 100 }, // no completion_tokens
+      });
+    }
+    if (String(url).endsWith("/runs")) return new Response(null, { status: 202 });
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+  try {
+    await worker.queue(
+      { messages: [message] },
+      {
+        NVIDIA_JOBS: kv,
+        NVIDIA_RATE_LIMITER: limiterBinding(),
+        LANGSMITH_API_KEY: "langsmith-secret",
+        LANGSMITH_PROJECT: "team-iz-nvidia-usage",
+      },
+      { waitUntil(promise) { waits.push(promise); } }
+    );
+    await Promise.all(waits);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const trace = JSON.parse(requests.find((entry) => entry.url.endsWith("/runs")).options.body);
+  assert.equal(trace.outputs.usage_metadata.input_tokens, 100);
+  assert.equal(trace.outputs.usage_metadata.output_tokens, 0);
+  assert.equal(trace.outputs.usage_metadata.total_tokens, 100);
+});
+
+test("LANGSMITH_TAGS overrides the default tag list", async () => {
+  const kv = new MemoryKv();
+  await kv.put("job-4", JSON.stringify({ status: "pending" }));
+  const message = queueMessage({
+    jobId: "job-4",
+    apiKey: "nvapi-test-4",
+    body: JSON.stringify({ model: "minimaxai/minimax-m3", messages: [] }),
+    maxAttempts: 1,
+  });
+  const requests = [];
+  const waits = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (String(url).includes("integrate.api.nvidia.com")) {
+      return Response.json({ id: "completion-4", choices: [{ message: { role: "assistant", content: "ok" } }] });
+    }
+    if (String(url).endsWith("/runs")) return new Response(null, { status: 202 });
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+  try {
+    await worker.queue(
+      { messages: [message] },
+      {
+        NVIDIA_JOBS: kv,
+        NVIDIA_RATE_LIMITER: limiterBinding(),
+        LANGSMITH_API_KEY: "langsmith-secret",
+        LANGSMITH_PROJECT: "team-iz-nvidia-usage-code-qna",
+        LANGSMITH_TAGS: "nvidia,code-qna,production",
+      },
+      { waitUntil(promise) { waits.push(promise); } }
+    );
+    await Promise.all(waits);
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const trace = JSON.parse(requests.find((entry) => entry.url.endsWith("/runs")).options.body);
+  assert.equal(trace.session_name, "team-iz-nvidia-usage-code-qna");
+  assert.deepEqual(trace.tags, ["nvidia", "code-qna", "production"]);
 });
 
 test("terminal 429 is explicitly exposed to the orchestrator", async () => {

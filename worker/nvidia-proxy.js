@@ -224,29 +224,72 @@ function parseNvidiaUsage(responseText, env) {
     const parsed = JSON.parse(responseText);
     const usage = parsed && parsed.usage;
     if (!usage || typeof usage !== "object") return null;
-    const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens);
-    const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens);
-    const totalTokens = Number(usage.total_tokens);
-    const metadata = {};
-    if (Number.isFinite(inputTokens)) metadata.input_tokens = inputTokens;
-    if (Number.isFinite(outputTokens)) metadata.output_tokens = outputTokens;
-    if (Number.isFinite(totalTokens)) metadata.total_tokens = totalTokens;
-    else if (Number.isFinite(inputTokens) && Number.isFinite(outputTokens)) {
-      metadata.total_tokens = inputTokens + outputTokens;
+
+    // D-ls-t1: LangSmith's UsageMetadata schema (api.smith.langchain.com/openapi.json)
+    // requires input_tokens/output_tokens/total_tokens TOGETHER. Emitting them
+    // conditionally (old behavior) meant a response missing just one -- e.g. no
+    // completion_tokens -- silently dropped the WHOLE usage record server-side instead
+    // of degrading gracefully. Once `usage` exists at all, always emit all three,
+    // coercing an absent value to 0 rather than omitting the key.
+    const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens) || 0;
+    const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens) || 0;
+    const totalTokensRaw = Number(usage.total_tokens);
+    const totalTokens = Number.isFinite(totalTokensRaw) ? totalTokensRaw : inputTokens + outputTokens;
+    const metadata = { input_tokens: inputTokens, output_tokens: outputTokens, total_tokens: totalTokens };
+
+    // D-ls-t2: this -- not the runs-table "Tokens" column, which only ever shows one
+    // number -- is the actual input/output breakdown LangSmith renders (hover on the
+    // token/cost cell in the trace tree; docs.langchain.com/langsmith/cost-tracking).
+    // minimax-m3 is a reasoning model and returns
+    // usage.completion_tokens_details.reasoning_tokens; NVIDIA's OpenAI-compatible usage
+    // block can also carry usage.prompt_tokens_details.cached_tokens.
+    const cachedTokens = Number(usage.prompt_tokens_details?.cached_tokens);
+    if (Number.isFinite(cachedTokens) && cachedTokens > 0) {
+      metadata.input_token_details = { cache_read: cachedTokens };
     }
+    const reasoningTokens = Number(usage.completion_tokens_details?.reasoning_tokens);
+    if (Number.isFinite(reasoningTokens) && reasoningTokens > 0) {
+      metadata.output_token_details = { reasoning: reasoningTokens };
+    }
+
     // Screenshot-confirmed GMI Cloud serverless rate for MiniMax M3. Worker vars remain
     // authoritative, while these matching fallbacks keep accounting stable if omitted.
     const inputUsdPerMillion = nonNegativeNumber(env.MODEL_INPUT_USD_PER_MILLION, 0.24);
     const outputUsdPerMillion = nonNegativeNumber(env.MODEL_OUTPUT_USD_PER_MILLION, 0.96);
-    if (Number.isFinite(inputTokens)) metadata.input_cost = (inputTokens / 1_000_000) * inputUsdPerMillion;
-    if (Number.isFinite(outputTokens)) metadata.output_cost = (outputTokens / 1_000_000) * outputUsdPerMillion;
-    if (Number.isFinite(metadata.input_cost) && Number.isFinite(metadata.output_cost)) {
-      metadata.total_cost = metadata.input_cost + metadata.output_cost;
-    }
-    return Object.keys(metadata).length ? metadata : null;
+    metadata.input_cost = (inputTokens / 1_000_000) * inputUsdPerMillion;
+    metadata.output_cost = (outputTokens / 1_000_000) * outputUsdPerMillion;
+    metadata.total_cost = metadata.input_cost + metadata.output_cost;
+
+    return metadata;
   } catch (e) {
     return null;
   }
+}
+
+// D-ls-t3: SDK parity hardening -- RunTree always populates trace_id/dotted_order, and
+// LangSmith's own changelog notes root-run identification is load-bearing for some
+// token/cost stat surfaces ("Comparison view now loads token and cost stats from SmithDB
+// for root runs"). Cheap to add, and this proxy's traces are always root runs (run_type
+// "llm", no parent_run_id), so trace_id == id and dotted_order has a single segment.
+function dottedOrderTimestamp(epochMs) {
+  const d = new Date(epochMs);
+  const pad = (n, len = 2) => String(n).padStart(len, "0");
+  const micros = String(d.getUTCMilliseconds() * 1000).padStart(6, "0");
+  return (
+    `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T` +
+    `${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}${micros}Z`
+  );
+}
+
+// D-ls-tags: tags were hardcoded to this pipeline's own name. Per-branch LangSmith
+// project separation (LANGSMITH_PROJECT) still lets tags overlap across projects, so
+// this stays configurable per Worker deployment via LANGSMITH_TAGS (comma-separated),
+// falling back to today's literal when the var is absent -- unchanged behavior for any
+// deployment that doesn't set it.
+function langsmithTags(env) {
+  const raw = String(env.LANGSMITH_TAGS || "").trim();
+  if (!raw) return ["nvidia", "curriculum-manager", "production"];
+  return raw.split(",").map((t) => t.trim()).filter(Boolean);
 }
 
 async function sendLangSmithTrace(env, trace) {
@@ -262,12 +305,16 @@ async function sendLangSmithTrace(env, trace) {
   const usageMetadata = trace.usage || undefined;
   const payload = {
     id: trace.id,
+    // D-ls-t3: this proxy's traces are always root runs (no parent_run_id), so trace_id
+    // is just the run's own id and dotted_order has a single segment.
+    trace_id: trace.id,
+    dotted_order: `${dottedOrderTimestamp(trace.startedAt)}${trace.id}`,
     name: "NVIDIA chat completion",
     run_type: "llm",
     start_time: new Date(trace.startedAt).toISOString(),
     end_time: new Date(trace.finishedAt).toISOString(),
     session_name: env.LANGSMITH_PROJECT || LANGSMITH_DEFAULT_PROJECT,
-    tags: ["nvidia", "curriculum-manager", "production"],
+    tags: langsmithTags(env),
     // Deliberately omit prompt and completion content. Usage/accounting does not need it.
     inputs: {
       model: trace.request.model,
