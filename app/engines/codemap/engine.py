@@ -1,4 +1,4 @@
-""" AnalysisEngine 프로토콜 구현체 -- Tier 1(+옵션 Tier 2) 코드 중요도 선별 엔진
+""" AnalysisEngine 프로토콜 구현체 -- Tier 1(+옵션 Tier 2) 코드 중요도 선별 + 코드 분석 문서 생성
 
 app/engines/base.py::AnalysisEngine은 구조적 타이핑(Protocol)이라 상속이 필요
 없다 -- analyze(request, zip_bytes) -> dict 시그니처만 맞으면 된다.
@@ -8,6 +8,13 @@ feature_code), 요구사항 P/F 실제 판정. AnalysisResult 계약은 4개의 
 stage와 요청 requirements 개수만큼의 RequirementResult를 요구하므로, 그 자리를
 "아직 판정/생성되지 않았음"을 명시하는 placeholder로 채운다(flagged=True,
 verdict="F"+note) -- 조용히 통과로 기록하는 대신 검수 필요 상태로 남긴다.
+
+D7 (2026-07-31): problems는 두 원천을 합친다 -- 1순위는 analysis_doc.run_analysis_doc()이
+만든 실제 decision_points(코드 분석 문서 생성 스테이지, p05-3), 부족하면(호출 실패,
+또는 decision_points가 question_budget보다 적게 grounding됨) codemap의 Tier1/2
+랭킹만으로 만든 placeholder problem으로 채운다 -- 이 강등도 D6(크루 실패시 Tier1
+순위로 강등)과 같은 철학: 코드 분석 문서 생성이 실패해도 job 전체가 FAILED로
+떨어지지 않고 최소한 "어떤 파일이 중요한지"는 항상 응답에 남는다.
 """
 from __future__ import annotations
 
@@ -17,8 +24,11 @@ from typing import Any, Mapping
 
 from app.config import get_settings
 from app.engines.codemap import build_code_map_from_repo
+from app.engines.codemap.analysis_doc import build_problems as build_problems_from_decision_points
+from app.engines.codemap.analysis_doc import render_markdown, run_analysis_doc
 from app.engines.codemap.materialize import Materializer, default_materialize_repo
 from app.engines.codemap.models import CodeMapConfig
+from app.engines.shared.budget import load_budget
 from app.engines.shared.signals import AttributionSignal
 
 EXTRACTOR_VERSION = "codemap-0.1.0"
@@ -52,16 +62,19 @@ class CodeMapAnalysisEngine:
         materializer: Materializer = default_materialize_repo,
         attribution: Mapping[str, AttributionSignal] | None = None,
         weights_path=None,
+        analysis_doc_chat_fn=None,
     ) -> None:
         self._tier2_enabled = tier2_enabled
         self._materializer = materializer
         self._attribution = attribution
         self._weights_path = weights_path
+        self._analysis_doc_chat_fn = analysis_doc_chat_fn  # 테스트 주입 지점. None이면 실제 chat() 사용
 
     def analyze(self, request: dict[str, Any], zip_bytes: bytes | None = None) -> dict[str, Any]:
         """ 동기 def(코루틴 아님) -- BackgroundTasks가 스레드풀에서 돌리므로 이벤트
         루프를 막지 않는다(README §4 함정 표, jobs.py의 실행 방식과 대응). """
         settings = get_settings()
+        job_id = request.get("submission_id") or request.get("attempt_id") or "unknown"
 
         with self._materializer(request, zip_bytes, settings.workspace_dir or None) as repo_dir:
             code_map = build_code_map_from_repo(
@@ -69,12 +82,31 @@ class CodeMapAnalysisEngine:
                 config=CodeMapConfig(tier2_enabled=self._tier2_enabled, model_code=request.get("model_code")),
                 attribution=self._attribution,
                 weights_path=self._weights_path,
-                job_id=request.get("submission_id") or request.get("attempt_id") or "unknown",
+                job_id=job_id,
             )
 
         applied_scope, scope_fallback, fallback_reason = self._resolve_scope(request)
-        problems = self._build_problems(code_map, request)
+        question_budget = request.get("question_budget", 4)
+        model_code = request.get("model_code") or settings.default_model_code
+
+        doc_kwargs = {"chat_fn": self._analysis_doc_chat_fn} if self._analysis_doc_chat_fn is not None else {}
+        doc, _doc_rejected, doc_ai_usage = run_analysis_doc(
+            files_by_path=code_map["files_by_path"],
+            selected_paths=code_map["shortlist"],
+            teaches=request.get("teaches", []),
+            model_code=model_code,
+            budget=load_budget("ANALYSIS_DOC"),
+            job_id=job_id,
+            **doc_kwargs,
+        )
+        doc_problems, _ungrounded = build_problems_from_decision_points(
+            doc.decision_points, code_map["files_by_path"],
+            extractor_version=EXTRACTOR_VERSION, question_budget=question_budget,
+        )
+        problems = self._fill_problems(doc_problems, code_map, question_budget)
         requirement_results = self._build_requirement_results(request)
+
+        all_ai_usage = list(code_map["ai_usage"]) + doc_ai_usage
 
         return {
             "snapshot_id": str(uuid.uuid4()),
@@ -87,11 +119,11 @@ class CodeMapAnalysisEngine:
             "scope_fallback": scope_fallback,
             "fallback_reason": fallback_reason,
             "commit_sha": None,
-            "analysis_document_markdown": self._build_analysis_document(code_map),
+            "analysis_document_markdown": self._build_analysis_document(code_map, doc),
             "requirement_results": requirement_results,
             "problems": problems,
             "question_count_planned": len(problems),
-            "ai_usage": [u.model_dump(by_alias=False) for u in code_map["ai_usage"]],
+            "ai_usage": [u.model_dump(by_alias=False) for u in all_ai_usage],
         }
 
     def _resolve_scope(self, request: dict[str, Any]) -> tuple[str, bool, str | None]:
@@ -103,28 +135,43 @@ class CodeMapAnalysisEngine:
             )
         return requested, False, None
 
-    def _build_analysis_document(self, code_map: dict[str, Any]) -> str:
-        lines = ["# 코드 중요도 선별 결과", ""]
-        lines.append(
+    def _build_analysis_document(self, code_map: dict[str, Any], doc) -> str:
+        """ 실제 코드 분석 문서(render_markdown) + codemap의 선정 근거(Tier1/2 표)를
+        이어붙인다 -- 전자는 "무엇을 하는 코드인가", 후자는 "왜 이 파일들을 골랐는가". """
+        parts = [render_markdown(doc), "## codemap 선정 근거 (Tier 1/2)", ""]
+        parts.append(
             "Tier 2(크루 재랭킹) 적용: " + ("예" if code_map["tier2_applied"] else "아니오 (Tier 1 결정론적 순위만 사용)")
         )
         if code_map["tier2_rejected"]:
-            lines.append(f"Tier 2 응답 중 거부된 항목: {len(code_map['tier2_rejected'])}건")
-        lines.append("")
-        lines.append("| 순위 | 경로 | Tier1 순위 | 역할 |")
-        lines.append("|---|---|---|---|")
+            parts.append(f"Tier 2 응답 중 거부된 항목: {len(code_map['tier2_rejected'])}건")
+        parts.append("")
+        parts.append("| 순위 | 경로 | Tier1 순위 | 역할 |")
+        parts.append("|---|---|---|---|")
         for e in code_map["entries"]:
-            lines.append(f"| {e.rank} | {e.path} | {e.tier1_rank} | {e.role or '-'} |")
-        return "\n".join(lines)
+            parts.append(f"| {e.rank} | {e.path} | {e.tier1_rank} | {e.role or '-'} |")
+        return "\n".join(parts)
 
-    def _build_problems(self, code_map: dict[str, Any], request: dict[str, Any]) -> list[dict[str, Any]]:
-        question_budget = request.get("question_budget", 4)
+    def _fill_problems(
+        self, doc_problems: list[dict[str, Any]], code_map: dict[str, Any], question_budget: int
+    ) -> list[dict[str, Any]]:
+        """ D7: 분석 문서의 실제 decision_points에서 만든 problem을 우선 쓰고,
+        모자라면(호출 실패/grounding 실패로 0~N개만 나옴) codemap 랭킹 기반
+        placeholder로 나머지를 채운다 -- 절대 problems=[]로 완전히 비지 않는다. """
+        problems = list(doc_problems[:question_budget])
+        if len(problems) >= question_budget:
+            return problems
+
+        used_paths = {p["source_path"] for p in problems}
         files_by_path = code_map["files_by_path"]
-
-        problems = []
-        for i, entry in enumerate(code_map["entries"][:question_budget], start=1):
+        for entry in code_map["entries"]:
+            if len(problems) >= question_budget:
+                break
+            if entry.path in used_paths:
+                continue
             text = files_by_path.get(entry.path, "")
-            problems.append(self._build_problem(entry, text, problem_no=i))
+            problems.append(self._build_problem(entry, text, problem_no=len(problems) + 1))
+            used_paths.add(entry.path)
+
         return problems
 
     def _build_problem(self, entry, text: str, *, problem_no: int) -> dict[str, Any]:

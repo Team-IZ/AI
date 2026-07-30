@@ -7,6 +7,14 @@
       "max_tool_rounds": 4,
       "max_attempts_per_call": 3,
       "timeout_s": 600
+    },
+    "ANALYSIS_DOC": {
+      "feature_code": "CODE_ANALYSIS",
+      "source_type": "ANALYSIS_DOC",
+      "max_llm_calls": 1,
+      "max_tool_rounds": 0,
+      "max_attempts_per_call": 3,
+      "timeout_s": 600
     }
   },
   "provenance": "provisional -- D6 per-call cap ~8, unmeasured. max_llm_calls와 max_tool_rounds를 일부러 분리했다 -- 도구 호출(tool round)과 실제 모델 완성 호출(llm call)을 한 숫자로 뭉개면 비용/지연 분석이 어긋난다는 게 D8의 지적이다. D8 결론이 나기 전까지 두 숫자를 하나로 합치지 말 것 -- docs/code-importance-map/OPEN_QUESTIONS.md 참고."

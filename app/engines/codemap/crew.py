@@ -32,15 +32,13 @@ from typing import Callable, Protocol
 from app.engines.codemap.ground import parse_rerank
 from app.engines.codemap.models import CrewClaim
 from app.engines.shared.budget import CallBudget
-from app.engines.shared.llm import extract_json_object
+from app.engines.shared.llm import classify_failure_code, extract_json_object
 from app.engines.shared.prompts import load_stage, param_default, render
 from app.engines.shared.secrets import nvidia_api_key
 from app.engines.shared.timing import LlmCallTimer
 from app.schemas.usage import AiUsage
 
 NVIDIA_LITELLM_BASE_URL = "https://integrate.api.nvidia.com/v1"
-
-_KNOWN_FAILURE_CODES = {"TIMEOUT", "RATE_LIMITED", "PROVIDER_ERROR", "INVALID_JSON", "CONTEXT_OVERFLOW"}
 
 
 @dataclass(frozen=True)
@@ -84,11 +82,6 @@ def _default_kickoff(*, system: str, user: str, model_code: str, max_tokens: int
         completion_tokens=usage.completion_tokens,
         cached_prompt_tokens=usage.cached_prompt_tokens,
     )
-
-
-def _classify_failure(exc: Exception) -> str:
-    code = getattr(exc, "failure_code", None)
-    return code if code in _KNOWN_FAILURE_CODES else "PROVIDER_ERROR"
 
 
 def run_rerank_crew(
@@ -136,7 +129,7 @@ def run_rerank_crew(
             )
         parsed = extract_json_object(raw_text)
     except Exception as exc:  # noqa: BLE001 -- D6: Tier 2의 모든 실패는 Tier 1로 강등, job을 안 죽인다
-        ai_usage.append(timer.build(status="FAILED", failure_code=_classify_failure(exc)))
+        ai_usage.append(timer.build(status="FAILED", failure_code=classify_failure_code(exc)))
         return (), (), ai_usage
 
     ai_usage.append(timer.build(

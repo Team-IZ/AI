@@ -25,6 +25,14 @@ _DEFAULT_BUDGETS = {
         "max_attempts_per_call": 3,
         "timeout_s": 600,
     },
+    "ANALYSIS_DOC": {
+        "feature_code": "CODE_ANALYSIS",
+        "source_type": "ANALYSIS_DOC",
+        "max_llm_calls": 1,
+        "max_tool_rounds": 0,
+        "max_attempts_per_call": 3,
+        "timeout_s": 600,
+    },
 }
 
 

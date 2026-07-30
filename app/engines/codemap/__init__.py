@@ -15,6 +15,7 @@ from app.engines.codemap import ground as ground_mod
 from app.engines.codemap import rank as rank_mod
 from app.engines.codemap import shortlist as shortlist_mod
 from app.engines.codemap import weights as weights_mod
+from app.config import get_settings
 from app.engines.codemap.models import CodeMapConfig, CollectLimits, RankedFile, RepoFile
 from app.engines.shared.budget import CallBudget, load_budget
 from app.engines.shared.signals import AttributionSignal
@@ -79,7 +80,7 @@ def build_code_map_from_repo(
         claims, tier2_rejected, call_usage = crew_mod.run_rerank_crew(
             candidates_block=_build_candidates_block(ranked, selected),
             allowed_paths=frozenset(selected),
-            model_code=config.model_code or "z-ai/glm-5.2",
+            model_code=config.model_code or get_settings().default_model_code,
             budget=effective_budget,
             job_id=job_id,
             **kickoff_kwargs,

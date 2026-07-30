@@ -71,6 +71,39 @@
               "note": "재현성 -- 라벨링도 같은 입력엔 같은 출력이 나와야 한다"
             }
           ]
+        },
+        {
+          "id": "p05-3",
+          "title": "코드 분석 문서",
+          "kind": "prompt",
+          "function": "run_analysis_doc() -- app/engines/codemap/analysis_doc.py",
+          "system": "You analyze a student's submitted codebase for an oral code-ownership assessment. Output strict JSON only. Ground every statement in the given files -- never invent files, functions, or behavior that is not shown.\n",
+          "system_note": "D-poc10 원칙 계승: 줄 번호를 세지 말라고 명시한다 -- 실제 코드 한 줄을 인용하면 우리가 그 줄을 찾는다(app/engines/shared/evidence.py::locate_symbol). 이 필드는 문서화 전용이며 LLM에 실제로 전송되지 않는다.\n",
+          "user_template": "아래는 학생이 제출한 코드에서 codemap이 선정한 중요 파일들과 그 원문 일부다.\n이 제출물을 나중에 사람이 읽고 판단할 수 있도록 분석 문서를 작성하라.\n\n## 교안에서 이번에 검증할 teaches\n{teaches_block}\n\n## 소스 코드 (codemap이 선정한 중요 파일)\n{code_block}\n\n다음 JSON만 반환하라:\n{{\n  \"overview\": \"이 제출물이 무엇을 하는 코드인지 3-5문장\",\n  \"structure\": [{{\"area\": \"영역 이름\", \"files\": [\"실제 파일 경로\"], \"role\": \"이 영역이 맡은 일\"}}],\n  \"decision_points\": [{{\"title\": \"판단이 개입된 지점\", \"file\": \"실제 파일 경로\", \"symbol\": \"이 지점을 가리키는 실제 코드 한 줄을 위 소스에서 문자 그대로 복사(함수 시그니처 등)\", \"why_it_matters\": \"왜 이 지점이 이해도 검증에 쓸 만한지\", \"related_teach\": \"위 teaches 중 하나의 id, 없으면 null\"}}],\n  \"risks\": [\"코드에서 실제로 확인되는 위험 요소\"]\n}}\n\n규칙:\n- file 값은 반드시 위 소스 코드에 등장한 실제 경로여야 한다.\n- symbol은 줄 번호를 세지 말고, 위 소스 코드에 실제로 있는 한 줄을 공백까지 그대로 옮겨 적어라(예: \"def pay(order, method):\"). 줄 번호는 우리가 그 문자열을 찾아 직접 산정한다 -- 네가 지어낸 번호는 쓰지 않는다.\n- decision_points는 최소 3개, 서로 다른 파일/영역에서 뽑아라.\n",
+          "required_placeholders": [
+            "code_block"
+          ],
+          "optional_placeholders": [
+            "teaches_block"
+          ],
+          "truncation": {
+            "code_block": 12000,
+            "teaches_block": 2000
+          },
+          "params": [
+            {
+              "key": "max_tokens",
+              "type": "int",
+              "default": 2400
+            },
+            {
+              "key": "temperature",
+              "type": "float",
+              "default": 0.0,
+              "locked": true,
+              "note": "재현성 -- 같은 제출물은 같은 분석 문서가 나와야 비교가 가능하다"
+            }
+          ]
         }
       ]
     }

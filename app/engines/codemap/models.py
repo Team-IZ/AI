@@ -112,3 +112,35 @@ class CodeMapConfig:
 
 
 AttributionMap = Mapping[str, AttributionSignal]
+
+
+@dataclass(frozen=True)
+class StructureArea:
+    """ 분석 문서의 '구조' 항목 한 줄. p05-3 LLM 응답의 structure[] 원소 그대로 """
+
+    area: str
+    files: tuple[str, ...]
+    role: str
+
+
+@dataclass(frozen=True)
+class DecisionPoint:
+    """ 분석 문서가 짚은 '판단이 개입된 지점' 하나. ground.py 검증(analysis_doc.py의
+    parse_analysis_doc_response)을 통과한 것만 이 타입이 된다 -- file은 이미
+    allowed_paths 안에 있고, related_teach는 이미 후보 teach id이거나 None이다. """
+
+    title: str
+    file: str
+    symbol: str
+    why_it_matters: str
+    related_teach: str | None
+
+
+@dataclass(frozen=True)
+class AnalysisDoc:
+    """ p05-3(코드 분석 문서) 스테이지의 검증된 산출물 """
+
+    overview: str
+    structure: tuple[StructureArea, ...]
+    decision_points: tuple[DecisionPoint, ...]
+    risks: tuple[str, ...]

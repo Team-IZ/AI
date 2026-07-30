@@ -1,0 +1,63 @@
+# D1 (2026-07-31): 코드 분석 문서 생성 스테이지. app.engines.shared.llm.chat()을
+# 직접 호출한다(CrewAI 아님) -- 단일 JSON in/out이라 도구 루프가 필요 없다
+# (D12 -- 어차피 도구는 안 준다는 게 이미 이 저장소의 기본값).
+#   WHY: p05-1(Tier 2 재랭킹)은 사용자가 명시적으로 CrewAI를 요구한 스테이지지만,
+#     이 스테이지는 그런 요구가 없었고 poc_full의 p04-1도 원래 단일 호출이다.
+#   COST: p05-1과 호출 방식이 갈린다(하나는 crew.py 경유, 하나는 llm.chat() 직접).
+#   EXIT: 나중에 도구(파일 재조회 등)가 필요해지면 crew.py 패턴으로 옮긴다.
+#
+# 프롬프트 본문은 poc_full의 p04-1(origin/feat/poc_full)과 필드 단위로 동일하게
+# 맞췄다 -- 그쪽에서 이미 검증된 grounding 규칙(D-poc10: 줄 번호 대신 실제 코드
+# 한 줄 인용)을 그대로 물려받기 위함. 다만 findings_block(별도 JS 구조 스캐너의
+# 출력)은 이 스테이지에 없다 -- codemap의 Tier1/2 랭킹이 이미 "무엇이 중요한
+# 코드인가"를 걸러줬으므로 그 역할을 대신한다(D6).
+
+id: p05-3
+pipeline: p05
+title: 코드 분석 문서
+kind: prompt
+function: run_analysis_doc() -- app/engines/codemap/analysis_doc.py
+system: >
+  You analyze a student's submitted codebase for an oral code-ownership assessment.
+  Output strict JSON only. Ground every statement in the given files -- never invent
+  files, functions, or behavior that is not shown.
+system_note: >
+  D-poc10 원칙 계승: 줄 번호를 세지 말라고 명시한다 -- 실제 코드 한 줄을 인용하면
+  우리가 그 줄을 찾는다(app/engines/shared/evidence.py::locate_symbol). 이 필드는
+  문서화 전용이며 LLM에 실제로 전송되지 않는다.
+user_template: |
+  아래는 학생이 제출한 코드에서 codemap이 선정한 중요 파일들과 그 원문 일부다.
+  이 제출물을 나중에 사람이 읽고 판단할 수 있도록 분석 문서를 작성하라.
+
+  ## 교안에서 이번에 검증할 teaches
+  {teaches_block}
+
+  ## 소스 코드 (codemap이 선정한 중요 파일)
+  {code_block}
+
+  다음 JSON만 반환하라:
+  {{
+    "overview": "이 제출물이 무엇을 하는 코드인지 3-5문장",
+    "structure": [{{"area": "영역 이름", "files": ["실제 파일 경로"], "role": "이 영역이 맡은 일"}}],
+    "decision_points": [{{"title": "판단이 개입된 지점", "file": "실제 파일 경로", "symbol": "이 지점을 가리키는 실제 코드 한 줄을 위 소스에서 문자 그대로 복사(함수 시그니처 등)", "why_it_matters": "왜 이 지점이 이해도 검증에 쓸 만한지", "related_teach": "위 teaches 중 하나의 id, 없으면 null"}}],
+    "risks": ["코드에서 실제로 확인되는 위험 요소"]
+  }}
+
+  규칙:
+  - file 값은 반드시 위 소스 코드에 등장한 실제 경로여야 한다.
+  - symbol은 줄 번호를 세지 말고, 위 소스 코드에 실제로 있는 한 줄을 공백까지 그대로 옮겨 적어라(예: "def pay(order, method):"). 줄 번호는 우리가 그 문자열을 찾아 직접 산정한다 -- 네가 지어낸 번호는 쓰지 않는다.
+  - decision_points는 최소 3개, 서로 다른 파일/영역에서 뽑아라.
+required_placeholders: [code_block]
+optional_placeholders: [teaches_block]
+truncation:
+  code_block: 12000
+  teaches_block: 2000
+params:
+  - key: max_tokens
+    type: int
+    default: 2400
+  - key: temperature
+    type: float
+    default: 0.0
+    locked: true
+    note: "재현성 -- 같은 제출물은 같은 분석 문서가 나와야 비교가 가능하다"
