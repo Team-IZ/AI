@@ -20,3 +20,18 @@ binding = "NVIDIA_JOBS_QUEUE"
 queue = "team-iz-code-qna-jobs-queue"
 max_batch_size = 1
 max_batch_timeout = 1
+
+# D-ls1: per-pipeline LangSmith project. LANGSMITH_PROJECT is what isolates this
+# pipeline's traces from team-iz-nvidia-proxy's (curriculum-manager) -- see the
+# per-branch naming table agreed for this work. LANGSMITH_API_KEY is deliberately NOT
+# here: it is a Worker secret (`wrangler secret put LANGSMITH_API_KEY`), never committed.
+# There is no [[durable_objects.bindings]] on this Worker (no proxy-global rate
+# limiter), so NVIDIA_RPM_LIMIT is intentionally absent too.
+[vars]
+LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
+LANGSMITH_PROJECT = "team-iz-nvidia-usage-code-qna"
+LANGSMITH_ORGANIZATION_ID = "63acea55-f27c-429b-850f-63fb363f56b1"
+LANGSMITH_TAGS = "nvidia,code-qna,production"
+MODEL_INPUT_USD_PER_MILLION = "0.24"
+MODEL_OUTPUT_USD_PER_MILLION = "0.96"
+MODEL_PRICING_BASIS = "gmi-cloud-serverless-2026-07-29"
