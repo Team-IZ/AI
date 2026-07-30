@@ -20,26 +20,17 @@ from app.schemas.session import (
     SessionView,
     TranscriptTurn,
 )
-
-
-@dataclass
-class _Turn:
-    """ 내부 저장용 턴. 와이어 모델(TranscriptTurn)과 분리해 둔다. """
-    problem_id: str
-    axis_code: str
-    question_text: str
-    answer_text: str
-    answered_at: str
     
 @dataclass
 class _Session:
     """ 서버가 들고 있는 세션 상태(휘발성) """
     session_id: str
-    state: str                          # IN_PROGRESS | COMPLETED | TIMEOUT | FAILED
+    state: str                          # assessment_session.status 6종
     questions: list[dict[str, Any]]      # 고정 질문 스크립트
     cursor: int                         # 현재 질문 인덱스
     time_limit_sec: int
-    transcript: list[_Turn] = field(default_factory=list)
+    # 와이어 모델을 그대로 담는다. 내부 전용 필드가 생기기 전까지 별도 타입을 두지 않는다.
+    transcript: list[TranscriptTurn] = field(default_factory=list)
     # 멱등키 -> 그때 돌려준 SessionView. 같은 답변 재전송 시 그대로 반환.
     answered: dict[str, SessionView] = field(default_factory=dict)
     
@@ -68,19 +59,9 @@ def _to_view(sess: _Session) -> SessionView:
         current = Question.model_validate(sess.questions[sess.cursor])
         progress = Progress(problem_index=sess.cursor + 1, problem_total=len(sess.questions))
 
-    transcript = [
-        TranscriptTurn(
-            problem_id=t.problem_id,
-            axis_code=t.axis_code,
-            question_text=t.question_text,
-            answer_text=t.answer_text,
-            answered_at=t.answered_at,
-        )
-        for t in sess.transcript
-    ]
     return SessionView(
         session_id=sess.session_id, state=sess.state,
-        current=current, progress=progress, transcript=transcript,
+        current=current, progress=progress, transcript=sess.transcript,
     )
     
 def start_session(req: SessionStart) -> SessionView:
@@ -111,10 +92,14 @@ def submit_answer(session_id: str, req: AnswerSubmit) -> SessionView | None:
     # 현재 질문에 대한 답을 확정 턴으로 기록
     q = sess.questions[sess.cursor]
     sess.transcript.append(
-        _Turn(
+        TranscriptTurn(
             problem_id=q["problem_id"], axis_code=q["axis_code"],
             question_text=q["question_text"], answer_text=req.answer_text,
             answered_at=datetime.now(timezone.utc).isoformat(),
+            # 스텁은 채점하지 않는다. 실제 채점(P04 p04-5)은 엔진 이식 때 붙는다.
+            # 힌트 없이 통과한 모양을 고정으로 낸다.
+            best_score=4, confirmed_score=4, attempt_count=1,
+            hint_text=None, autonomy="SELF",
         )
     )
     sess.cursor += 1
@@ -132,20 +117,14 @@ def restore_session(session_id: str, req: SessionRestore) -> SessionView:
     
     완료된 턴 수만큼 cursor를 밀어 그 다음 질문부터 이어나감
     """
-    problem_ids = [p.get("problem_id", "") for p in req.problems]
+    problem_ids = [p.problem_id for p in req.problems]
     sess = _Session(
         session_id=session_id, state="IN_PROGRESS",
         questions=_build_questions([i for i in problem_ids if i]),
         cursor=len(req.transcript), time_limit_sec=req.time_limit_sec,
     )
-    for t in req.transcript:
-        sess.transcript.append(
-            _Turn(
-                problem_id=t.problem_id, axis_code=t.axis_code,
-                question_text=t.question_text, answer_text=t.answer_text,
-                answered_at=t.answered_at,
-            )
-        )
+    # 받은 것과 내보낼 것이 같은 타입이라 변환이 없다.
+    sess.transcript.extend(req.transcript)
     if sess.cursor >= len(sess.questions):
         sess.state = "COMPLETED"
     _sessions[session_id] = sess

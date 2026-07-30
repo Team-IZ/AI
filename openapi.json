@@ -803,10 +803,289 @@
           }
         }
       }
+    },
+    "/api/v0/curricula": {
+      "post": {
+        "tags": [
+          "curricula"
+        ],
+        "summary": "교안 분석 요청",
+        "description": "교안 분석을 접수하고 즉시 202를 돌려준다. 실제 추출은 백그라운드.\n\n교안 1개에 1~2분 이상 걸리므로 멱등키로 중복 실행을 막는다 — LMS가 재전송하면\n같은 PDF로 LLM을 두 번 돌리게 된다.",
+        "operationId": "create_curriculum_api_v0_curricula_post",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "versionId:analysisVersion 등. 중복 요청 판별",
+              "title": "Idempotency-Key"
+            },
+            "description": "versionId:analysisVersion 등. 중복 요청 판별"
+          },
+          {
+            "name": "x-trace-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "분산 추적 ID",
+              "title": "X-Trace-Id"
+            },
+            "description": "분산 추적 ID"
+          },
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_curriculum_api_v0_curricula_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurriculumAccepted"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "요청 스키마 위반",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/curricula/{job_id}": {
+      "get": {
+        "tags": [
+          "curricula"
+        ],
+        "summary": "교안 분석 상태·결과 조회",
+        "description": "교안 분석 job의 현재 상태와 결과를 돌려준다.\n\n저장소가 인메모리라 프로세스가 재시작되면 404가 난다. 그때는 Spring이\n다시 요청하면 된다(FastAPI는 상태의 소유자가 아니다).",
+        "operationId": "get_curriculum_api_v0_curricula__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurriculumJobStatus"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "모르는 job_id",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "AiUsage": {
+        "properties": {
+          "featureCode": {
+            "type": "string",
+            "enum": [
+              "CODE_ANALYSIS",
+              "QUESTION_GENERATION",
+              "GRADING",
+              "CURRICULUM_ANALYSIS",
+              "SUMMARY_DRAFT"
+            ],
+            "title": "Featurecode"
+          },
+          "modelCode": {
+            "type": "string",
+            "title": "Modelcode",
+            "description": "Spring이 ai_model에서 model_id를 조회한다"
+          },
+          "sourceType": {
+            "type": "string",
+            "title": "Sourcetype",
+            "description": "값 목록은 백엔드 확정 대기(C-4)"
+          },
+          "sourceId": {
+            "type": "string",
+            "title": "Sourceid",
+            "description": "작업 PK. 분석이면 analysisId"
+          },
+          "requestId": {
+            "type": "string",
+            "title": "Requestid"
+          },
+          "traceId": {
+            "type": "string",
+            "title": "Traceid",
+            "description": "요청 헤더 X-Trace-Id를 그대로 잇는다"
+          },
+          "idempotencyKey": {
+            "type": "string",
+            "title": "Idempotencykey",
+            "description": "{sourceId}:{sourceType}:{attemptNo} 형식"
+          },
+          "inputTokenCount": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inputtokencount"
+          },
+          "outputTokenCount": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Outputtokencount"
+          },
+          "cachedTokenCount": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Cachedtokencount",
+            "default": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "SUCCEEDED",
+              "FAILED",
+              "PARTIAL"
+            ],
+            "title": "Status"
+          },
+          "failureCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "TIMEOUT",
+                  "RATE_LIMITED",
+                  "PROVIDER_ERROR",
+                  "INVALID_JSON",
+                  "CONTEXT_OVERFLOW"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failurecode"
+          },
+          "latencyMs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Latencyms"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurredat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "featureCode",
+          "modelCode",
+          "sourceType",
+          "sourceId",
+          "requestId",
+          "traceId",
+          "idempotencyKey",
+          "inputTokenCount",
+          "outputTokenCount",
+          "status",
+          "latencyMs",
+          "occurredAt"
+        ],
+        "title": "AiUsage",
+        "description": "LLM 호출 한 번의 기록. DB ai_usage 한 행에 대응한다."
+      },
       "AnalysisAccepted": {
         "properties": {
           "jobId": {
@@ -915,8 +1194,7 @@
           },
           "aiUsage": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/AiUsage"
             },
             "type": "array",
             "title": "Aiusage"
@@ -1032,6 +1310,27 @@
         "title": "AnswerSubmit",
         "description": "POST /sessions/{id}/answers 요청."
       },
+      "Body_create_curriculum_api_v0_curricula_post": {
+        "properties": {
+          "payload": {
+            "type": "string",
+            "title": "Payload",
+            "description": "요청 JSON을 문자열로. 예: {\"versionId\":\"...\"}"
+          },
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "교안 PDF"
+          }
+        },
+        "type": "object",
+        "required": [
+          "payload",
+          "file"
+        ],
+        "title": "Body_create_curriculum_api_v0_curricula_post"
+      },
       "CodeContext": {
         "properties": {
           "path": {
@@ -1055,6 +1354,232 @@
         ],
         "title": "CodeContext",
         "description": "질문이 가르키는 코드 발췌 "
+      },
+      "CurriculumAccepted": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "status": {
+            "type": "string",
+            "const": "QUEUED",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "title": "CurriculumAccepted",
+        "description": "202 응답. 결과는 폴링으로 가져간다."
+      },
+      "CurriculumJobStatus": {
+        "properties": {
+          "jobId": {
+            "type": "string",
+            "title": "Jobid"
+          },
+          "versionId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Versionid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "QUEUED",
+              "RUNNING",
+              "SUCCEEDED",
+              "PARTIAL",
+              "FAILED"
+            ],
+            "title": "Status"
+          },
+          "failureReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failurereason",
+            "description": "FAILED일 때만 채워진다"
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Startedat"
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completedat"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CurriculumResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SUCCEEDED·PARTIAL일 때만"
+          },
+          "aiUsage": {
+            "items": {
+              "$ref": "#/components/schemas/AiUsage"
+            },
+            "type": "array",
+            "title": "Aiusage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "jobId",
+          "status"
+        ],
+        "title": "CurriculumJobStatus",
+        "description": "GET /curricula/{jobId} 응답. analysis_job과 같은 상태 어휘를 쓴다."
+      },
+      "CurriculumResult": {
+        "properties": {
+          "versionId": {
+            "type": "string",
+            "title": "Versionid"
+          },
+          "analysisVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Analysisversion",
+            "description": "분석 파이프라인 버전. 재현성 근거"
+          },
+          "heuristicVersion": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heuristicversion"
+          },
+          "promptVersion": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promptversion"
+          },
+          "extractionStatus": {
+            "type": "string",
+            "title": "Extractionstatus",
+            "description": "추출 상태 코드"
+          },
+          "qualityStatus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qualitystatus",
+            "description": "분석 완료 전에는 확정되지 않을 수 있다"
+          },
+          "fallbackUsed": {
+            "type": "boolean",
+            "title": "Fallbackused",
+            "description": "LLM 실패로 룰 기반 추출로 물러났는지",
+            "default": false
+          },
+          "sections": {
+            "items": {
+              "$ref": "#/components/schemas/CurriculumSection"
+            },
+            "type": "array",
+            "title": "Sections"
+          }
+        },
+        "type": "object",
+        "required": [
+          "versionId",
+          "analysisVersion",
+          "extractionStatus"
+        ],
+        "title": "CurriculumResult",
+        "description": "교안 분석이 끝났을 때의 결과 본문. DB curriculum_analysis 대응."
+      },
+      "CurriculumSection": {
+        "properties": {
+          "moduleNo": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Moduleno",
+            "description": "교안 안에서의 모듈 순서"
+          },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Title"
+          },
+          "pageStart": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Pagestart"
+          },
+          "pageEnd": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Pageend"
+          },
+          "teaches": {
+            "items": {
+              "$ref": "#/components/schemas/Teach"
+            },
+            "type": "array",
+            "title": "Teaches"
+          }
+        },
+        "type": "object",
+        "required": [
+          "moduleNo",
+          "title",
+          "pageStart",
+          "pageEnd"
+        ],
+        "title": "CurriculumSection",
+        "description": "교안의 모듈 하나. DB curriculum_section 대응."
       },
       "ErrorResponse": {
         "properties": {
@@ -1510,8 +2035,7 @@
           },
           "aiUsage": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/AiUsage"
             },
             "type": "array",
             "title": "Aiusage"
@@ -1739,8 +2263,7 @@
           },
           "problems": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/Problem"
             },
             "type": "array",
             "title": "Problems"
@@ -1826,10 +2349,12 @@
           "state": {
             "type": "string",
             "enum": [
+              "READY",
               "IN_PROGRESS",
+              "PAUSED",
               "COMPLETED",
-              "TIMEOUT",
-              "FAILED"
+              "FAILED",
+              "EXPIRED"
             ],
             "title": "State"
           },
@@ -1862,8 +2387,7 @@
           },
           "aiUsage": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/AiUsage"
             },
             "type": "array",
             "title": "Aiusage"
@@ -1987,6 +2511,65 @@
         "title": "StageScore",
         "description": "문제 하나의 단계 하나. DB problem_stage 대응."
       },
+      "Teach": {
+        "properties": {
+          "canonicalName": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Canonicalname",
+            "description": "표준 개념명"
+          },
+          "normalizedName": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Normalizedname",
+            "description": "중복 판정용 정규화 이름"
+          },
+          "canonicalDescription": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Canonicaldescription",
+            "description": "설명을 못 찾으면 null"
+          },
+          "descriptionPageStart": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descriptionpagestart"
+          },
+          "descriptionPageEnd": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Descriptionpageend"
+          }
+        },
+        "type": "object",
+        "required": [
+          "canonicalName",
+          "normalizedName"
+        ],
+        "title": "Teach",
+        "description": "교안에서 뽑은 학습 개념 하나. DB teaches 대응."
+      },
       "TranscriptTurn": {
         "properties": {
           "problemId": {
@@ -2014,6 +2597,55 @@
           "answeredAt": {
             "type": "string",
             "title": "Answeredat"
+          },
+          "bestScore": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Bestscore",
+            "description": "힌트 상한 적용 전 원점수"
+          },
+          "confirmedScore": {
+            "type": "integer",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Confirmedscore",
+            "description": "힌트 상한 적용 후 기록 점수"
+          },
+          "attemptCount": {
+            "type": "integer",
+            "maximum": 3.0,
+            "minimum": 1.0,
+            "title": "Attemptcount",
+            "description": "이 단계에서 몇 번째 시도인지. 첫 답변이 1"
+          },
+          "hintText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hinttext",
+            "description": "이 턴 직전에 보여준 힌트. 첫 시도면 null"
+          },
+          "autonomy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "SELF",
+                  "SELF_MAINTAINED",
+                  "PARTIAL"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autonomy"
           }
         },
         "type": "object",
@@ -2022,10 +2654,13 @@
           "axisCode",
           "questionText",
           "answerText",
-          "answeredAt"
+          "answeredAt",
+          "bestScore",
+          "confirmedScore",
+          "attemptCount"
         ],
         "title": "TranscriptTurn",
-        "description": "확정된 문답 한 턴. Spring이 즉시 영속화하는 복구 근거."
+        "description": "확정된 문답 한 턴. Spring이 즉시 영속화하는 복구 근거.\n\n한 턴 = 질문 1개 + 답변 1개 + 채점 1개. 힌트 후 재질의는 별도 턴이 되고\nattempt_no가 올라간다(DB stage_answer_attempt 한 행에 대응)."
       },
       "ValidationError": {
         "properties": {

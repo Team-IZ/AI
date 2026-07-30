@@ -96,7 +96,8 @@ def test_restore_rebuilds_from_transcript():
             "timeLimitSec": 2400,
             "transcript": [
                 {"problemId": "prob-stub-1", "axisCode": "L1",
-                 "questionText": "q1", "answerText": "a1", "answeredAt": "2026-07-23T00:00:00Z"}
+                 "questionText": "q1", "answerText": "a1", "answeredAt": "2026-07-23T00:00:00Z",
+                 "bestScore": 4, "confirmedScore": 4, "attemptCount": 1, "autonomy": "SELF"}
             ],
         },
         headers=HEADERS,
@@ -105,3 +106,15 @@ def test_restore_rebuilds_from_transcript():
     body = r.json()
     assert body["state"] == "IN_PROGRESS"
     assert body["current"]["sequenceNo"] == 2
+    
+def test_turn_carries_score():
+    """턴마다 채점 결과가 실려야 Spring이 problem_stage에 쓸 값이 있다."""
+    sid = _start()
+    body = client.post(f"/api/v0/sessions/{sid}/answers",
+                       json={"clientRequestId": "s1", "answerText": "a"},
+                       headers=HEADERS).json()
+
+    turn = body["transcript"][0]
+    assert turn["confirmedScore"] is not None
+    assert turn["attemptCount"] >= 1
+    assert turn["autonomy"] in {"SELF", "SELF_MAINTAINED", "PARTIAL"}
