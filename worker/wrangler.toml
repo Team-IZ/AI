@@ -30,6 +30,11 @@ max_batch_timeout = 1
 [vars]
 LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
 LANGSMITH_PROJECT = "team-iz-nvidia-usage-code-qna"
+# D-ls-workspace (2026-07-30): considered a dedicated LangSmith Workspace per pipeline
+# instead of just a project name in one shared workspace -- confirmed live against the
+# API that this org's type blocks it (`POST /api/v1/workspaces` ->
+# {"detail":"Personal organizations cannot create workspaces."}), unrelated to caller
+# permissions. See feat/pdf_analysis's worker/wrangler.toml for the full WHY/COST/EXIT.
 LANGSMITH_ORGANIZATION_ID = "63acea55-f27c-429b-850f-63fb363f56b1"
 LANGSMITH_TAGS = "nvidia,code-qna,production"
 MODEL_INPUT_USD_PER_MILLION = "0.24"
