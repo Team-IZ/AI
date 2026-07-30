@@ -1,0 +1,11 @@
+# codemap Tier 2(CrewAI 재랭킹, Phase 4)의 무거운 의존성 -- requirements.txt와
+# 의도적으로 분리한다: 기본 FastAPI 서비스와 CI의 test/lint job은 이 파일을 설치하지
+# 않고도 그대로 돌아가야 한다(engine_mode=stub/codemap 중 Tier1-only 경로는 crewai를
+# import조차 하지 않는다 -- app/engines/codemap/crew.py가 함수 안에서 지연 import).
+#
+# 버전은 ~/nvidia-demo(crewAIInc/nvidia-demo 기반 로컬 실행)에서 실제로 동작을
+# 확인한 조합 그대로 고정한다(Python 3.12). 여기서 임의로 올리지 말 것 -- 재현성.
+crewai==0.95.0
+crewai-tools==0.25.8
+litellm==1.57.4
+openai==1.59.8
