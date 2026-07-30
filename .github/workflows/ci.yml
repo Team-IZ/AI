@@ -33,3 +33,14 @@ jobs:
         run: python3 tools/lint_llm_calls.py app
       - name: Secret guard (D9)
         run: python3 tools/check_no_secrets.py --tracked
+
+  prompt-manifest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install PyYAML>=6,<7
+      - name: manifest drift check (D3-2 -- YAML은 소스, JSON은 생성물)
+        run: ./tools/rebuild_codemap_manifest.sh --check

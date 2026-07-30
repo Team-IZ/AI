@@ -1,0 +1,79 @@
+{
+  "manifest_version": "p05-0.1.0",
+  "generated_from_commit_note": "",
+  "pipelines": {
+    "p05": {
+      "label": "코드 중요도 맵",
+      "source_files": [
+        "app/engines/codemap/crew.py"
+      ],
+      "has_llm_calls": true,
+      "stages": [
+        {
+          "id": "p05-1",
+          "title": "코드 중요도 재랭킹",
+          "kind": "prompt",
+          "function": "run_rerank_crew() -- app/engines/codemap/crew.py",
+          "system": "You review a shortlist of source files that a deterministic ranker already ordered by estimated importance for a code-ownership assessment. You may only reorder or relabel files that are already in the given candidate list -- never invent a file path that is not shown to you, and never claim to have seen files outside this list.\n",
+          "system_note": "D-poc10 원칙 계승: 줄 번호를 세지 말라고 명시한다 -- 실제 코드 한 줄을 인용하면 우리가 그 줄을 찾는다(app/engines/shared/evidence.py::locate_symbol). 이 필드는 문서화 전용이며 LLM에 실제로 전송되지 않는다(app/llm-stage.js::POCStage.call()이 system_note를 쓰지 않는 것과 동일한 관행 -- system만 실제 시스템 메시지가 된다).\n",
+          "user_template": "아래는 결정론적 랭커(Tier 1)가 이미 중요도 순으로 정렬한 후보 파일 목록이다.\n각 항목의 순위(rank)와 그 근거(rank_evidence)를 참고해, 정말로 순서를 바꿀\n근거가 있을 때만 소폭 조정하라. 확신이 없으면 changes를 비워 Tier 1 순서를\n그대로 유지하는 것이 항상 안전한 선택이다.\n\n## 저장소 요약\n{repo_summary_block}\n\n## Tier 1 후보 목록 (path, rank, 근거)\n{candidates_block}\n\n## 참고: 이 학생이 직접 작성/수정한 파일 (선택적 -- 없으면 빈 목록)\n{attribution_block}\n\n다음 JSON만 반환하라:\n{{\n  \"changes\": [\n    {{\n      \"path\": \"위 후보 목록에 있는 경로 그대로\",\n      \"role\": \"ENTRY_POINT | ROUTING | DOMAIN_LOGIC | DATA_ACCESS | INTEGRATION | CONFIG | UI | TEST | UTIL 중 하나\",\n      \"delta_rank\": \"정수. 이 파일의 순위를 몇 칸 올릴지(양수) 내릴지(음수)\",\n      \"reason_code\": \"IMPORT_HUB | BUSINESS_LOGIC | RISK_SURFACE | ENTRY_POINT_CONFIRMED | REDUNDANT_WITH_HIGHER_RANK 중 하나\"\n    }}\n  ]\n}}\n\n규칙:\n- path는 반드시 위 후보 목록에 있는 값을 그대로 복사해야 한다. 목록에 없는 경로를\n  쓰면 그 항목은 전부 버려진다.\n- 확신 없는 항목은 changes에 넣지 않는다 -- 빈 배열도 유효한 답이다.\n",
+          "required_placeholders": [
+            "candidates_block"
+          ],
+          "optional_placeholders": [
+            "repo_summary_block",
+            "attribution_block"
+          ],
+          "truncation": {
+            "candidates_block": 12000,
+            "repo_summary_block": 2000
+          },
+          "params": [
+            {
+              "key": "max_tokens",
+              "type": "int",
+              "default": 2000
+            },
+            {
+              "key": "temperature",
+              "type": "float",
+              "default": 0.0,
+              "locked": true,
+              "note": "재현성 -- 같은 제출물은 같은 재랭킹이 나와야 비교가 성립한다"
+            }
+          ]
+        },
+        {
+          "id": "p05-2",
+          "title": "역할 미배정 파일 라벨링",
+          "kind": "prompt",
+          "function": "run_rerank_crew() -- app/engines/codemap/crew.py (p05-1이 role을 비워둔 항목만 대상)",
+          "system": "You assign a short structural role label to each given source file, based only on its path and the brief content preview shown. Choose exactly one role from the fixed list -- never invent a new role name.\n",
+          "user_template": "아래 파일들에 역할 라벨을 하나씩 붙여라. 반드시 다음 중 하나만 골라야 한다:\nENTRY_POINT, ROUTING, DOMAIN_LOGIC, DATA_ACCESS, INTEGRATION, CONFIG, UI, TEST, UTIL\n\n## 라벨이 필요한 파일 (path + 미리보기)\n{unlabeled_files_block}\n\n다음 JSON만 반환하라:\n{{\n  \"labels\": [\n    {{\"path\": \"위 목록에 있는 경로 그대로\", \"role\": \"위 9개 중 하나\"}}\n  ]\n}}\n",
+          "required_placeholders": [
+            "unlabeled_files_block"
+          ],
+          "optional_placeholders": [],
+          "truncation": {
+            "unlabeled_files_block": 8000
+          },
+          "params": [
+            {
+              "key": "max_tokens",
+              "type": "int",
+              "default": 800
+            },
+            {
+              "key": "temperature",
+              "type": "float",
+              "default": 0.0,
+              "locked": true,
+              "note": "재현성 -- 라벨링도 같은 입력엔 같은 출력이 나와야 한다"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "shared": {}
+}

@@ -1,0 +1,38 @@
+# D3 (2026-07-30): 프롬프트 파일 하나 = 스테이지 하나. codemap_rerank.yaml과 같은
+# 규칙을 따른다 -- 자세한 설명은 그 파일 상단 주석 참고.
+
+id: p05-2
+pipeline: p05
+title: 역할 미배정 파일 라벨링
+kind: prompt
+function: run_rerank_crew() -- app/engines/codemap/crew.py (p05-1이 role을 비워둔 항목만 대상)
+system: >
+  You assign a short structural role label to each given source file, based only on its
+  path and the brief content preview shown. Choose exactly one role from the fixed list --
+  never invent a new role name.
+user_template: |
+  아래 파일들에 역할 라벨을 하나씩 붙여라. 반드시 다음 중 하나만 골라야 한다:
+  ENTRY_POINT, ROUTING, DOMAIN_LOGIC, DATA_ACCESS, INTEGRATION, CONFIG, UI, TEST, UTIL
+
+  ## 라벨이 필요한 파일 (path + 미리보기)
+  {unlabeled_files_block}
+
+  다음 JSON만 반환하라:
+  {{
+    "labels": [
+      {{"path": "위 목록에 있는 경로 그대로", "role": "위 9개 중 하나"}}
+    ]
+  }}
+required_placeholders: [unlabeled_files_block]
+optional_placeholders: []
+truncation:
+  unlabeled_files_block: 8000
+params:
+  - key: max_tokens
+    type: int
+    default: 800
+  - key: temperature
+    type: float
+    default: 0.0
+    locked: true
+    note: "재현성 -- 라벨링도 같은 입력엔 같은 출력이 나와야 한다"

@@ -4,6 +4,7 @@ uvicorn[standard]>=0.30,<1.0
 pydantic-settings>=2.4,<3.0
 python-multipart>=0.0.9        # Phase 2 ZIP 업로드 대비
 httpx>=0.27,<1.0               # NVIDIA API 호출(Phase 3+) 및 테스트 클라이언트
+PyYAML>=6,<7                    # codemap 프롬프트 YAML -> prompt_manifest.json 빌드(D3)
 
 # dev/test
 pytest>=8.0,<9.0
