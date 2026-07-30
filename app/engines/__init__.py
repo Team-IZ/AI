@@ -11,11 +11,17 @@ from app.engines.stub import StubAnalysisEngine
 
 def get_analysis_engine() -> AnalysisEngine:
     mode = get_settings().engine_mode
-    
+
     # 스텁 모드면 스텁으로
     if mode == "stub":
         return StubAnalysisEngine()
-    
+
+    # codemap: Tier 1(+옵션 Tier 2) 코드 중요도 선별 엔진 (Phase 5)
+    if mode == "codemap":
+        from app.engines.codemap.engine import CodeMapAnalysisEngine
+
+        return CodeMapAnalysisEngine()
+
     # 실제 기능인데 아직 구현이 없어서 일단 실패 경고
     raise NotImplementedError(
         f"engine_mode={mode!r}의 엔진이 아직 없습니다. 이식 필요"

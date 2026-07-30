@@ -108,6 +108,7 @@ class CodeMapConfig:
     max_shortlist_chars: int = 12_000
     tier2_enabled: bool = False
     model_code: str | None = None
+    max_rank_shift: int = 5
 
 
 AttributionMap = Mapping[str, AttributionSignal]

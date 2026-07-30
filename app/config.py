@@ -39,6 +39,11 @@ class Settings(BaseSettings):
     # D7: 모델은 요청의 model_code -> 이 기본값 순으로 결정한다(코드에 하드코딩 안 함).
     default_model_code: str = "z-ai/glm-5.2"
 
+    # codemap 엔진이 clone/unzip한 저장소를 푸는 임시 디렉터리. 비우면 OS 기본 임시
+    # 디렉터리(tempfile.TemporaryDirectory 기본 동작)를 쓴다 -- .gitignore의 workspace/는
+    # 레포 안에 잡았을 때를 대비한 방어일 뿐, 기본값은 레포 밖(OS temp)이다.
+    workspace_dir: str = ""
+
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()

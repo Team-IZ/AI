@@ -73,6 +73,18 @@ def test_real_mode_raises_not_implemented(monkeypatch):
         monkeypatch.setattr(get_settings(), "engine_mode", "stub")
 
 
+def test_codemap_mode_returns_codemap_engine(monkeypatch):
+    """engine_mode=codemap이면 Phase 5의 CodeMapAnalysisEngine이 나온다(NotImplementedError 아님)."""
+    from app.engines.codemap.engine import CodeMapAnalysisEngine
+
+    monkeypatch.setattr(get_settings(), "engine_mode", "codemap")
+    try:
+        engine = get_analysis_engine()
+        assert isinstance(engine, CodeMapAnalysisEngine)
+    finally:
+        monkeypatch.setattr(get_settings(), "engine_mode", "stub")
+
+
 def test_router_uses_injected_engine():
     """의존성 오버라이드로 가짜 엔진을 꽂으면 응답에 그 값이 나온다.
 
