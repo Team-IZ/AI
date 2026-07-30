@@ -2,6 +2,7 @@
 from datetime import datetime
 from typing import Any, Literal, get_args
 from app.schemas.report import AxisCode
+from app.schemas.usage import AiUsage
 
 from pydantic import Field, model_validator
 
@@ -222,4 +223,4 @@ class AnalysisJobStatus(BaseSchema):
     result: AnalysisResult | None = Field(default=None, description="SUCCEEDED·PARTIAL일 때만")
     # 스텁 단계에서는 항상 빈 배열이다. P02가 LLM 파이프라인으로 교체되는 중이라
     # (2026-07-29, PLAN §4) 실물 엔진이 붙으면 호출 기록이 채워진다.
-    ai_usage: list[dict[str, Any]] = Field(default_factory=list)
+    ai_usage: list[AiUsage] = Field(default_factory=list)

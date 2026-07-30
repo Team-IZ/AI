@@ -440,16 +440,19 @@ engine_mode: Literal["stub", "real"] = "stub"
 >
 > ⏳ **아직인 것**: `/sessions` 턴 점수 필드, `/curricula` 신설, `aiUsage` 타입(단가 분담 회신 대기). 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
-### 백엔드 대기 2건
+### 백엔드 대기 1건
 
 이슈 `Team-IZ/Backend#31` 본문이 현재 상태판이다.
 
 | # | 내용 | 우리 작업을 막나 |
 |---|---|---|
-| C-3 | 단가는 Spring이 채우는가 | **막는다.** `ai_usage` 쓰기 경로 |
-| C-4 | `source_type` 값 목록 | 아니다 |
+| C-4 | `source_type` 값 목록 | 아니다. 형식만 지키고 값은 나중에 맞춘다 |
 
-C-1(`focusItems` 방식)·C-2(`score_run`·`axis_score` 제거)는 **회신 완료**다. 점수의 단일 소유자는 `problem_stage`이고 축 어휘는 `'L1'`~`'L4'` 한 벌만 남는다.
+C-1~C-3은 **회신 완료**다.
+
+- **C-1** 분석 요청에 `focusItems: [{id, name}]`를 싣고 AI가 `questionFocusItemId`로 하나를 돌려준다
+- **C-2** `score_run`·`axis_score` 제거 예정. 점수의 단일 소유자는 `problem_stage`이고 축 어휘는 `'L1'`~`'L4'` 한 벌
+- **C-3** **비용은 Spring이 계산한다.** AI는 토큰·모델·지연·상태만 보낸다. 모델을 고르는 주체가 백엔드·프론트라 단가도 그쪽이 먼저 안다
 
 DDL 수정 요청 4건(`attempt_count` 0~3 · `attempt_no=3` 허용 · `stage_answer_attempt` NULL 허용 + all-or-nothing CHECK · `TERMINATED_AT_L1` 코드값)도 같은 이슈에 있다.
 

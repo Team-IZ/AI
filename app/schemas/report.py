@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from app.schemas.common import BaseSchema
+from app.schemas.usage import AiUsage
 
 # 4축. 축이 곧 문답 레벨이다(L1 통과해야 L2로 간다).
 # DB problem_stage.axis_code CHECK와 같은 값이라 그대로 INSERT된다.
@@ -110,4 +111,4 @@ class ReportJobStatus(BaseSchema):
     started_at: datetime | None = None
     completed_at: datetime | None = None
     result: ReportResult | None = Field(default=None, description="SUCCEEDED·PARTIAL일 때만")
-    ai_usage: list[dict[str, Any]] = Field(default_factory=list)
+    ai_usage: list[AiUsage] = Field(default_factory=list)

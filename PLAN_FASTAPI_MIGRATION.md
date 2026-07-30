@@ -42,7 +42,7 @@
 | `app/schemas/session.py:56` | `state` Literal에 `TIMEOUT` | `IN_PROGRESS`/`PAUSED`/`COMPLETED`/`FAILED`/`EXPIRED` — `assessment_session.status`에 `TIMEOUT`이 없다 | T3 |
 | `app/schemas/session.py:40~46` | `TranscriptTurn`에 점수 필드 없음 | `best_score`·`confirmed_score`·`attempt_count`·`hint_text`·`autonomy` | T3 |
 | `app/schemas/session.py:69` | `SessionRestore.problems: list[dict]` | `list[Problem]` — 복구 시에도 동결 구조(단계 4·힌트 2)를 검증해야 한다 | T3 |
-| `app/schemas/analysis.py:225` · `session.py:60` · `report.py:113` | `ai_usage: list[dict[str, Any]]` | 타입 확정 | T3b (**C-3 회신 대기**) |
+| `app/schemas/analysis.py:225` · `session.py:60` · `report.py:113` | `ai_usage: list[dict[str, Any]]` | `list[AiUsage]` — 토큰·모델·지연·상태만. 단가·비용은 Spring | T3b |
 
 ---
 
@@ -53,7 +53,7 @@
 **이슈 `Team-IZ/Backend#31` 본문이 항상 최신 상태다.** 사본: `../qna/2026-07-30/issue-body-v2.md`.
 2026-07-29 질문지(`../qna/2026-07-29/backend-schema-questions.md`)는 이력이며 대부분 해결됐다.
 
-남은 것은 **DDL 수정 3건 + 코드값 1건 + 답변 2건.** 신설 테이블·컬럼은 없다.
+남은 것은 **DDL 수정 3건 + 코드값 1건 + 답변 1건.** 신설 테이블·컬럼은 없다.
 
 **백엔드가 해줄 것**
 
@@ -78,14 +78,15 @@
 
 `stage_hint` 테이블·`problem_stage.question_text` 컬럼 신설 요청을 철회한 것이 결과적으로 맞았다 — B-3 하나로 동결분을 다 수용한다. **백엔드에 다시 보낼 것은 없다.** B-1·B-2·B-4도 그대로 필요하다.
 
-**답 대기 (2건)**
+**답 대기 (1건)**
 
 | # | 심각도 | 내용 | 우리 작업을 막나 |
 |---|---|---|---|
-| C-3 | 🟢 | 단가는 Spring이 채우는가 | **막는다.** 세 컬럼이 NOT NULL인데 AI는 단가를 모른다 |
 | C-4 | 🟢 | `source_type` 값 목록 | 아니다. 형식(`{source_id}:{source_type}:{attempt_no}`)만 지키고 값은 나중에 맞춘다 |
 
 **회신 완료 (2026-07-30)**
+
+- **C-3 해소** — **단가·비용은 Spring이 계산한다. AI는 토큰·모델·지연·상태만 보낸다.** 모델을 고르는 주체가 백엔드·프론트라 단가도 그쪽이 먼저 안다. `input_unit_price`·`output_unit_price`·`currency_code`·`estimated_cost`는 AI 응답에 넣지 않는다
 
 - **C-1 승인** — 요청에 `focusItems: [{id, name}]`를 싣고 AI가 `questionFocusItemId`로 하나를 돌려주는 방식. DDL 변경 없음. 백엔드가 `assessment_problem.question_focus_item_id`(VARCHAR(100))와 `question_focus_item.question_focus_item_id`(UUID)의 타입 불일치를 확인했다
 - **C-2 해소** — 07_ENG 시트는 갱신되지 않았고 06_MEAS와 겹치는 테이블(`score_run`·`axis_score`)은 **제거 예정**이다. 점수의 단일 소유자는 `problem_stage`이고 축 어휘도 `'L1'`~`'L4'` 한 벌만 남는다
