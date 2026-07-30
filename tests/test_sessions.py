@@ -25,7 +25,7 @@ def test_start_returns_first_question():
     body = r.json()
     assert body["state"] == "IN_PROGRESS"
     assert body["current"]["sequenceNo"] == 1
-    assert body["progress"]["dpTotal"] == 2
+    assert body["progress"]["problemTotal"] == 2
 
 
 def test_answer_advances_to_next_question():
@@ -95,7 +95,7 @@ def test_restore_rebuilds_from_transcript():
         json={
             "timeLimitSec": 2400,
             "transcript": [
-                {"dpId": "dp-stub-1", "depthLevel": "L1",
+                {"problemId": "prob-stub-1", "axisCode": "L1",
                  "questionText": "q1", "answerText": "a1", "answeredAt": "2026-07-23T00:00:00Z"}
             ],
         },

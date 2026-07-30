@@ -1,6 +1,7 @@
 """ 코드 분석 API(P02)의 요청 응답 스키마"""
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, get_args
+from app.schemas.report import AxisCode
 
 from pydantic import Field, model_validator
 
@@ -11,6 +12,16 @@ class AnalysisSource(BaseSchema):
         default=None, description="method=GITHUB_URL일 때 필수. 공개 레포만 지원"
     )
     branch: str | None = Field(default=None, description="생략 시 기본 브랜치")
+    
+class FocusItem(BaseSchema):
+    """강사가 지정한 질문 초점 후보. Spring question_focus_item 행 대응.
+
+    AI는 이 중 하나의 id를 골라 problem.questionFocusItemId로 돌려준다.
+    PK가 랜덤 UUID라 AI 코드에 값을 박을 수 없어서 후보를 받아 고르는 방식이다(C-1).
+    """
+
+    id: str
+    name: str
     
 class AnalysisRequest(BaseSchema):
     """ POST /api/v0/analyses 요청 본문 """
@@ -24,8 +35,20 @@ class AnalysisRequest(BaseSchema):
     source: AnalysisSource = Field(default_factory=AnalysisSource)
     extraction_scope: Literal["TOTAL", "OWN_COMMIT"] = "TOTAL"
     commit_email: str | None = Field(default=None, description="OWN_COMMIT일 때 필수")
-    question_budget: int = Field(default=4, ge=1, description="계획 질문 수")
-    focus_areas: list[str] = Field(default_factory=list)
+    question_budget: int = Field(default=3, ge=1, description="계획 문제 수")
+    focus_items: list[FocusItem] = Field(
+        default_factory=list, description="강사 지정 초점 후보. 비면 AI 자율 선정"
+    )
+    requirements: list[dict[str, Any]] = Field(
+        default_factory=list, description="[{requirementId, text}] P/F 판정 대상"
+    )
+    teaches: list[dict[str, Any]] = Field(
+        default_factory=list, description="[{id, label, unitId, sourcePages}] 교안 참조용"
+    )
+    curriculum_id: str | None = None
+    model_code: str | None = Field(
+        default=None, description="생략 시 서버 기본값. operator가 고른다"
+    )
     
     @model_validator(mode="after")
     def _check_conditional_fields(self) -> "AnalysisRequest":
@@ -52,12 +75,121 @@ class SnapshotMeta(BaseSchema):
     content_hash: str = Field(description="sha256 hex 64자")
     file_count: int
     byte_count: int
+
+# 문제 지점 주변에서 같이 봐야 하는 코드의 성격.
+# 주 지점 자체는 Problem이 갖는다(PRIMARY 폐기 — 같은 위치가 두 군데 적히는 것을 막는다).
+ReferenceType = Literal[
+    "CALLER",      # 이 코드를 부르는 쪽
+    "CALLEE",      # 이 코드가 부르는 쪽
+    "DEFINITION",  # 여기서 쓰는 타입·상수의 정의
+    "TEST",        # 이 코드를 검증하는 테스트
+    "CONFIG",      # 동작을 좌우하는 설정
+    "SIMILAR",     # 비슷한 처리를 하는 다른 자리 (L3 대안 질문의 재료)
+]
+
+class ProblemReference(BaseSchema):
+    """문제가 가리키는 코드 위치. DB problem_reference 대응."""
+
+    path: str
+    line_start: int
+    line_end: int
+    evidence_hash: str = Field(description="sha256 hex 64자")
+    reference_type: ReferenceType
+    
+class Hint(BaseSchema):
+    """단계 하나에 딸린 힌트. 분석 때 미리 만들어 동결한다."""
+
+    hint_level: int = Field(ge=1, le=2)
+    hint_text: str
+    
+class ProblemStage(BaseSchema):
+    """문제 하나의 단계 하나. 4축이 곧 4단계다.
+
+    질문·힌트는 분석 때 만들어 동결한다. 세션 중에는 생성하지 않고 꺼내 쓴다.
+    """
+
+    axis_code: AxisCode
+    question_text: str
+    flagged: bool = Field(
+        default=False,
+        description="보기형(①②③ 등)이 섞여 재생성에도 실패한 질문. 화면에 '검수 필요'",
+    )
+    hints: list[Hint] = Field(min_length=2, max_length=2)
+
+    @model_validator(mode="after")
+    def _check_hint_levels(self) -> "ProblemStage":
+        """힌트가 1, 2 순서로 정확히 한 벌인지 검사.
+
+        런타임이 hints[hintsUsed - 1]로 위치를 꺼내므로(PoC poc-engine.js:218)
+        순서가 곧 레벨이어야 한다. 뒤집혀도 에러가 안 나고 점수만 틀린다.
+        """
+        levels = [h.hint_level for h in self.hints]
+        if levels != [1, 2]:
+            raise ValueError(f"hints의 hintLevel은 [1, 2] 순서여야 합니다: {levels}")
+        return self
+
+
+# 왜 이 지점을 문제로 골랐는지의 분류. DB에 CHECK는 없지만 값을 흘리지 않는다.
+ProblemType = Literal[
+    "DESIGN_CHOICE",          # 설계 선택지가 있던 자리
+    "RISK_POINT",             # 실패·보안 위험
+    "COMPLEXITY_HOTSPOT",     # 복잡도가 몰린 곳
+    "REQUIREMENT_IMPL",       # 요구사항이 실제로 구현된 자리
+    "EXTERNAL_INTEGRATION",   # 외부 의존 경계
+]
+
+
+class Problem(BaseSchema):
+    """출제 대상 코드 지점. DB assessment_problem 대응."""
+
+    problem_id: str
+    problem_no: int = Field(ge=1, description="문제 순번 1~3. 화면·보고서가 이것으로 가리킨다")
+    # 문답 진행 상태다. 분석이 만드는 것은 전부 READY.
+    # (후보 선별 상태 CANDIDATE/USED/SKIPPED는 DB CHECK에 없어 보내면 INSERT가 깨진다)
+    status: Literal["READY", "IN_PROGRESS", "COMPLETED", "TERMINATED"] = "READY"
+    problem_type: ProblemType
+    priority: float
+    question_focus_item_id: str | None = Field(
+        default=None,
+        description="요청 focusItems[].id를 그대로 돌려준다. 강사 지정 없이 뽑았으면 null",
+    )
+    source_path: str
+    line_start: int
+    line_end: int
+    code_snippet: str = Field(
+        description="evidenceHash를 계산한 원문 그대로. Spring이 다시 자르면 해시가 어긋난다"
+    )
+    evidence_hash: str = Field(description="codeSnippet의 sha256 hex 64자")
+    extractor_version: str = Field(description="이 문제를 뽑은 룰 버전. 재현성 근거")
+    references: list[ProblemReference] = Field(default_factory=list)
+    stages: list[ProblemStage] = Field(min_length=4, max_length=4)
+
+    @model_validator(mode="after")
+    def _check_stages(self) -> "Problem":
+        """단계가 L1→L4 순서로 정확히 한 벌인지 검사.
+
+        문답이 이 순서로 진행하고(L1 통과해야 L2) 루브릭도 축으로 붙는다.
+        순서가 어긋나면 L3 답변을 L4 기준으로 채점한다 — 에러 없이 점수만 틀린다.
+        """
+        axes = [s.axis_code for s in self.stages]
+        expected = list(get_args(AxisCode))
+        if axes != expected:
+            raise ValueError(f"stages의 axisCode는 {expected} 순서여야 합니다: {axes}")
+        return self
+
+class RequirementResult(BaseSchema):
+    """요구사항 하나의 P/F 판정. 요청 requirements와 1:1로 대응한다."""
+
+    requirement_id: str
+    verdict: Literal["P", "F"]
+    evidence: str | None = Field(default=None, description="판정 근거가 된 코드 위치·인용")
+    note: str | None = Field(default=None, description="판정 실패 등 특이사항")
     
 class AnalysisResult(BaseSchema):
     """분석이 성공했을 때의 결과 본문.
 
-    findings 각 항목의 내부 구조는 팀원 엔진 결과에 따라 바뀌므로
-    dict로 열어둔다(PLAN §3 C7). 최상위 필드만 계약으로 고정한다.
+    문제·질문·힌트가 전부 여기 실린다. 질문과 힌트는 분석 때 만들어 동결하므로
+    세션 시작에는 AI 호출이 없다 — Spring이 이 응답을 저장해두고 꺼내 쓴다.
     """
 
     snapshot_id: str = Field(description="Spring code_snapshot 행의 키")
@@ -66,8 +198,12 @@ class AnalysisResult(BaseSchema):
     scope_fallback: bool = Field(description="요청 범위를 못 지켜 TOTAL로 물러났는지")
     fallback_reason: str | None = None
     commit_sha: str | None = None
-    findings: list[dict[str, Any]] = Field(default_factory=list)
-    question_count_planned: int = Field(description="계획된 질문 수. 유효 DP가 적으면 축소된다")
+    analysis_document_markdown: str = Field(
+        description="code_analysis.analysis_document_markdown 대응. 코드 분석 문서 본문"
+    )
+    requirement_results: list[RequirementResult] = Field(default_factory=list)
+    problems: list[Problem] = Field(default_factory=list)
+    question_count_planned: int = Field(description="계획된 질문 수. 유효 문제가 적으면 축소된다")
     
 class AnalysisJobStatus(BaseSchema):
     """GET /analyses/{jobId} 응답.

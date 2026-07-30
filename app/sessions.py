@@ -25,8 +25,8 @@ from app.schemas.session import (
 @dataclass
 class _Turn:
     """ 내부 저장용 턴. 와이어 모델(TranscriptTurn)과 분리해 둔다. """
-    dp_id: str
-    depth_level: str
+    problem_id: str
+    axis_code: str
     question_text: str
     answer_text: str
     answered_at: str
@@ -46,18 +46,18 @@ class _Session:
 # session_id -> 세션 상태
 _sessions: dict[str, _Session] = {}
 
-def _build_questions(finding_ids: list[str]) -> list[dict[str, Any]]:
-    """스텁 질문 스크립트. DP당 질문 하나. finding 없으면 기본 2개."""
-    ids = finding_ids or ["dp-stub-1", "dp-stub-2"]
+def _build_questions(problem_ids: list[str]) -> list[dict[str, Any]]:
+    """스텁 질문 스크립트. 문제당 질문 하나. 문제가 없으면 기본 2개."""
+    ids = problem_ids or ["prob-stub-1", "prob-stub-2"]
     return [
         {
-            "dp_id": dp_id,
-            "depth_level": "L1",
+            "problem_id": problem_id,
+            "axis_code": "L1",
             "sequence_no": i,
-            "question_text": f"[stub] {dp_id}에 대한 당신의 의도를 설명해 주세요.",
+            "question_text": f"[stub] {problem_id}에 대한 당신의 의도를 설명해 주세요.",
             "code_context": {"path": "app/main.py", "snippet": "...", "line_start": 1},
         }
-        for i, dp_id in enumerate(ids, start=1)
+        for i, problem_id in enumerate(ids, start=1)
     ]
     
 def _to_view(sess: _Session) -> SessionView:
@@ -66,12 +66,12 @@ def _to_view(sess: _Session) -> SessionView:
     progress = None
     if sess.state == "IN_PROGRESS":
         current = Question.model_validate(sess.questions[sess.cursor])
-        progress = Progress(dp_index=sess.cursor + 1, dp_total=len(sess.questions))
-        
+        progress = Progress(problem_index=sess.cursor + 1, problem_total=len(sess.questions))
+
     transcript = [
         TranscriptTurn(
-            dp_id=t.dp_id,
-            depth_level=t.depth_level,
+            problem_id=t.problem_id,
+            axis_code=t.axis_code,
             question_text=t.question_text,
             answer_text=t.answer_text,
             answered_at=t.answered_at,
@@ -88,7 +88,7 @@ def start_session(req: SessionStart) -> SessionView:
     sid = req.session_id or str(uuid.uuid4())
     sess = _Session(
         session_id=sid, state="IN_PROGRESS",
-        questions=_build_questions(req.selected_finding_ids),
+        questions=_build_questions(req.selected_problem_ids),
         cursor=0, time_limit_sec=req.time_limit_sec,
     )
     _sessions[sid] = sess
@@ -112,7 +112,7 @@ def submit_answer(session_id: str, req: AnswerSubmit) -> SessionView | None:
     q = sess.questions[sess.cursor]
     sess.transcript.append(
         _Turn(
-            dp_id=q["dp_id"], depth_level=q["depth_level"],
+            problem_id=q["problem_id"], axis_code=q["axis_code"],
             question_text=q["question_text"], answer_text=req.answer_text,
             answered_at=datetime.now(timezone.utc).isoformat(),
         )
@@ -132,16 +132,16 @@ def restore_session(session_id: str, req: SessionRestore) -> SessionView:
     
     완료된 턴 수만큼 cursor를 밀어 그 다음 질문부터 이어나감
     """
-    finding_ids = [f.get("finding_id", "") for f in req.findings]
+    problem_ids = [p.get("problem_id", "") for p in req.problems]
     sess = _Session(
         session_id=session_id, state="IN_PROGRESS",
-        questions=_build_questions([i for i in finding_ids if i]),
+        questions=_build_questions([i for i in problem_ids if i]),
         cursor=len(req.transcript), time_limit_sec=req.time_limit_sec,
     )
     for t in req.transcript:
         sess.transcript.append(
             _Turn(
-                dp_id=t.dp_id, depth_level=t.depth_level,
+                problem_id=t.problem_id, axis_code=t.axis_code,
                 question_text=t.question_text, answer_text=t.answer_text,
                 answered_at=t.answered_at,
             )

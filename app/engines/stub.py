@@ -2,8 +2,61 @@
 
 from typing import Any
 
+# 진행 순서. AxisCode와 같은 순서여야 한다(analysis.py의 Problem validator가 검사).
+_AXES = ("L1", "L2", "L3", "L4")
+
+
+def _stub_stages() -> list[dict[str, Any]]:
+    """단계 4개 × 힌트 2개.
+
+    동결 구조라 질문·힌트가 분석 응답에 다 실린다. 세션 중에는 생성하지 않는다.
+    """
+    return [
+        {
+            "axis_code": axis,
+            "question_text": f"[stub] {axis} 질문",
+            "flagged": False,
+            "hints": [
+                {"hint_level": 1, "hint_text": f"[stub] {axis} 힌트 1"},
+                {"hint_level": 2, "hint_text": f"[stub] {axis} 힌트 2"},
+            ],
+        }
+        for axis in _AXES
+    ]
+
+
+def _stub_problem(problem_no: int, focus_item_id: str | None = None) -> dict[str, Any]:
+    """문제 하나. DB assessment_problem 컬럼명을 그대로 쓴다."""
+    return {
+        "problem_id": f"00000000-0000-0000-0000-{problem_no:012d}",
+        "problem_no": problem_no,
+        "status": "READY",
+        "problem_type": "RISK_POINT",
+        "priority": 1.0,
+        # 요청 focusItems[].id를 그대로 돌려준다. 후보가 없으면 자율 선정(None).
+        "question_focus_item_id": focus_item_id,
+        "source_path": "app/main.py",
+        "line_start": 12,
+        "line_end": 14,
+        # evidence_hash는 이 문자열 기준 해시다. Spring이 다시 자르면 어긋난다.
+        "code_snippet": f"# stub problem {problem_no}\napi_key = 'hardcoded'\n",
+        "evidence_hash": str(problem_no) * 64,
+        "extractor_version": "stub-0",
+        "references": [
+            {
+                "path": "app/services/auth.py",
+                "line_start": 40,
+                "line_end": 44,
+                "evidence_hash": "a" * 64,
+                "reference_type": "CALLER",
+            }
+        ],
+        "stages": _stub_stages(),
+    }
+
+
 class StubAnalysisEngine:
-    
+
     def analyze(
         self, request: dict[str, Any], zip_bytes: bytes | None = None
     ) -> dict[str, Any]:
@@ -11,7 +64,10 @@ class StubAnalysisEngine:
         # 스텁이 요청 무시하고 고정값만 주면 실제값 확인 불가
         applied_scope = request["extraction_scope"]
         byte_count = len(zip_bytes) if zip_bytes is not None else 1024
-        
+
+        # 강사 지정 후보를 문제에 순서대로 물린다. 후보가 적으면 나머지는 자율 선정.
+        focus_ids = [item["id"] for item in request.get("focus_items", [])]
+
         return {
             "snapshot_id": "00000000-0000-0000-0000-000000000001",
             "snapshot_meta": {
@@ -23,31 +79,20 @@ class StubAnalysisEngine:
             "scope_fallback": False,
             "fallback_reason": None,
             "commit_sha": "0123456789abcdef0123456789abcdef01234567",
-            # findings 각 항목은 DB decision_point 테이블 컬럼명을 쓴다.
-            # (예전 findingId/sourcePath 같은 임의 이름 → 실제 컬럼명으로 교정)
-            # type/reference_type 문자열 값은 카탈로그 미정(B-3)이라 잠정값.
-            "findings": [
+            "analysis_document_markdown": "# [stub] 코드 분석\n\n실제 문서는 엔진 이식 후 생성됩니다.\n",
+            # 요청 requirements와 1:1. 스텁은 전부 P로 판정한다.
+            "requirement_results": [
                 {
-                    "dp_id": "00000000-0000-0000-0000-0000000000dp",
-                    "type": "CODE_RISK",        # 잠정값
-                    "status": "OPEN",
-                    "priority": 1,
-                    "focus_code": "hardcoded-secret",
-                    "source_path": "app/main.py",
-                    "line_start": 12,
-                    "line_end": 14,
-                    "evidence_hash": "1" * 64,
-                    "extractor_version": "stub-0",
-                    "references": [
-                        {
-                            "path": "app/main.py",
-                            "line_start": 12,
-                            "line_end": 14,
-                            "evidence_hash": "1" * 64,
-                            "reference_type": "PRIMARY",  # 잠정값
-                        }
-                    ],
+                    "requirement_id": req["requirementId"],
+                    "verdict": "P",
+                    "evidence": "app/main.py:12",
+                    "note": None,
                 }
+                for req in request.get("requirements", [])
+            ],
+            "problems": [
+                _stub_problem(no, focus_ids[i] if i < len(focus_ids) else None)
+                for i, no in enumerate((1, 2, 3))
             ],
             "question_count_planned": request["question_budget"],  # 요청 예산 반영
         }

@@ -217,18 +217,76 @@
                     "title": "Commitemail"
                   },
                   "questionBudget": {
-                    "default": 4,
-                    "description": "계획 질문 수",
+                    "default": 3,
+                    "description": "계획 문제 수",
                     "minimum": 1,
                     "title": "Questionbudget",
                     "type": "integer"
                   },
-                  "focusAreas": {
+                  "focusItems": {
+                    "description": "강사 지정 초점 후보. 비면 AI 자율 선정",
                     "items": {
-                      "type": "string"
+                      "description": "강사가 지정한 질문 초점 후보. Spring question_focus_item 행 대응.\n\nAI는 이 중 하나의 id를 골라 problem.questionFocusItemId로 돌려준다.\nPK가 랜덤 UUID라 AI 코드에 값을 박을 수 없어서 후보를 받아 고르는 방식이다(C-1).",
+                      "properties": {
+                        "id": {
+                          "title": "Id",
+                          "type": "string"
+                        },
+                        "name": {
+                          "title": "Name",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "title": "FocusItem",
+                      "type": "object"
                     },
-                    "title": "Focusareas",
+                    "title": "Focusitems",
                     "type": "array"
+                  },
+                  "requirements": {
+                    "description": "[{requirementId, text}] P/F 판정 대상",
+                    "items": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "title": "Requirements",
+                    "type": "array"
+                  },
+                  "teaches": {
+                    "description": "[{id, label, unitId, sourcePages}] 교안 참조용",
+                    "items": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "title": "Teaches",
+                    "type": "array"
+                  },
+                  "curriculumId": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "title": "Curriculumid"
+                  },
+                  "modelCode": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "생략 시 서버 기본값. operator가 고른다",
+                    "title": "Modelcode"
                   }
                 },
                 "required": [
@@ -618,14 +676,14 @@
         }
       }
     },
-    "/api/v0/gradings": {
+    "/api/v0/reports": {
       "post": {
         "tags": [
-          "gradings"
+          "reports"
         ],
-        "summary": "세션 transcript 5축 후채점 요청",
-        "description": "채점 요청 접수하고 즉시 202. 실제 채점은 백그라운드에서",
-        "operationId": "create_grading_api_v0_gradings_post",
+        "summary": "세션 결과로 보고서 생성 요청",
+        "description": "요청을 접수하고 즉시 202. 실제 생성은 백그라운드에서.",
+        "operationId": "create_report_api_v0_reports_post",
         "parameters": [
           {
             "name": "x-internal-key",
@@ -649,7 +707,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/GradingRequest"
+                "$ref": "#/components/schemas/ReportRequest"
               }
             }
           }
@@ -660,7 +718,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GradingAccepted"
+                  "$ref": "#/components/schemas/ReportAccepted"
                 }
               }
             }
@@ -678,13 +736,13 @@
         }
       }
     },
-    "/api/v0/gradings/{job_id}": {
+    "/api/v0/reports/{job_id}": {
       "get": {
         "tags": [
-          "gradings"
+          "reports"
         ],
-        "summary": "채점 상태·점수·근거 조회",
-        "operationId": "get_grading_api_v0_gradings__job_id__get",
+        "summary": "보고서 상태·점수 매트릭스·교안 참조 조회",
+        "operationId": "get_report_api_v0_reports__job_id__get",
         "parameters": [
           {
             "name": "job_id",
@@ -718,7 +776,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GradingJobStatus"
+                  "$ref": "#/components/schemas/ReportJobStatus"
                 }
               }
             }
@@ -917,18 +975,29 @@
             ],
             "title": "Commitsha"
           },
-          "findings": {
+          "analysisDocumentMarkdown": {
+            "type": "string",
+            "title": "Analysisdocumentmarkdown",
+            "description": "code_analysis.analysis_document_markdown 대응. 코드 분석 문서 본문"
+          },
+          "requirementResults": {
             "items": {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/components/schemas/RequirementResult"
             },
             "type": "array",
-            "title": "Findings"
+            "title": "Requirementresults"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "type": "array",
+            "title": "Problems"
           },
           "questionCountPlanned": {
             "type": "integer",
             "title": "Questioncountplanned",
-            "description": "계획된 질문 수. 유효 DP가 적으면 축소된다"
+            "description": "계획된 질문 수. 유효 문제가 적으면 축소된다"
           }
         },
         "type": "object",
@@ -937,10 +1006,11 @@
           "snapshotMeta",
           "appliedScope",
           "scopeFallback",
+          "analysisDocumentMarkdown",
           "questionCountPlanned"
         ],
         "title": "AnalysisResult",
-        "description": "분석이 성공했을 때의 결과 본문.\n\nfindings 각 항목의 내부 구조는 팀원 엔진 결과에 따라 바뀌므로\ndict로 열어둔다(PLAN §3 C7). 최상위 필드만 계약으로 고정한다."
+        "description": "분석이 성공했을 때의 결과 본문.\n\n문제·질문·힌트가 전부 여기 실린다. 질문과 힌트는 분석 때 만들어 동결하므로\n세션 시작에는 AI 호출이 없다 — Spring이 이 응답을 저장해두고 꺼내 쓴다."
       },
       "AnswerSubmit": {
         "properties": {
@@ -961,64 +1031,6 @@
         ],
         "title": "AnswerSubmit",
         "description": "POST /sessions/{id}/answers 요청."
-      },
-      "AxisEvidence": {
-        "properties": {
-          "turnRef": {
-            "type": "integer",
-            "title": "Turnref"
-          },
-          "quoteText": {
-            "type": "string",
-            "title": "Quotetext"
-          },
-          "reason": {
-            "type": "string",
-            "title": "Reason"
-          }
-        },
-        "type": "object",
-        "required": [
-          "turnRef",
-          "quoteText",
-          "reason"
-        ],
-        "title": "AxisEvidence",
-        "description": "점수 근거. 답변 인용 필수 "
-      },
-      "AxisScore": {
-        "properties": {
-          "axisCode": {
-            "type": "string",
-            "enum": [
-              "CODE_UNDERSTANDING",
-              "DESIGN_LOGIC",
-              "ALTERNATIVE_COMPARISION",
-              "COUNTEREXAMPLE_RESPONSE",
-              "SELF_CORRECTION"
-            ],
-            "title": "Axiscode"
-          },
-          "score": {
-            "type": "integer",
-            "maximum": 5.0,
-            "minimum": 1.0,
-            "title": "Score"
-          },
-          "evidence": {
-            "items": {
-              "$ref": "#/components/schemas/AxisEvidence"
-            },
-            "type": "array",
-            "title": "Evidence"
-          }
-        },
-        "type": "object",
-        "required": [
-          "axisCode",
-          "score"
-        ],
-        "title": "AxisScore"
       },
       "CodeContext": {
         "properties": {
@@ -1067,7 +1079,341 @@
         ],
         "title": "ErrorResponse"
       },
-      "GradingAccepted": {
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Hint": {
+        "properties": {
+          "hintLevel": {
+            "type": "integer",
+            "maximum": 2.0,
+            "minimum": 1.0,
+            "title": "Hintlevel"
+          },
+          "hintText": {
+            "type": "string",
+            "title": "Hinttext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "hintLevel",
+          "hintText"
+        ],
+        "title": "Hint",
+        "description": "단계 하나에 딸린 힌트. 분석 때 미리 만들어 동결한다."
+      },
+      "Problem": {
+        "properties": {
+          "problemId": {
+            "type": "string",
+            "title": "Problemid"
+          },
+          "problemNo": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Problemno",
+            "description": "문제 순번 1~3. 화면·보고서가 이것으로 가리킨다"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "IN_PROGRESS",
+              "COMPLETED",
+              "TERMINATED"
+            ],
+            "title": "Status",
+            "default": "READY"
+          },
+          "problemType": {
+            "type": "string",
+            "enum": [
+              "DESIGN_CHOICE",
+              "RISK_POINT",
+              "COMPLEXITY_HOTSPOT",
+              "REQUIREMENT_IMPL",
+              "EXTERNAL_INTEGRATION"
+            ],
+            "title": "Problemtype"
+          },
+          "priority": {
+            "type": "number",
+            "title": "Priority"
+          },
+          "questionFocusItemId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Questionfocusitemid",
+            "description": "요청 focusItems[].id를 그대로 돌려준다. 강사 지정 없이 뽑았으면 null"
+          },
+          "sourcePath": {
+            "type": "string",
+            "title": "Sourcepath"
+          },
+          "lineStart": {
+            "type": "integer",
+            "title": "Linestart"
+          },
+          "lineEnd": {
+            "type": "integer",
+            "title": "Lineend"
+          },
+          "codeSnippet": {
+            "type": "string",
+            "title": "Codesnippet",
+            "description": "evidenceHash를 계산한 원문 그대로. Spring이 다시 자르면 해시가 어긋난다"
+          },
+          "evidenceHash": {
+            "type": "string",
+            "title": "Evidencehash",
+            "description": "codeSnippet의 sha256 hex 64자"
+          },
+          "extractorVersion": {
+            "type": "string",
+            "title": "Extractorversion",
+            "description": "이 문제를 뽑은 룰 버전. 재현성 근거"
+          },
+          "references": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemReference"
+            },
+            "type": "array",
+            "title": "References"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemStage"
+            },
+            "type": "array",
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Stages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemId",
+          "problemNo",
+          "problemType",
+          "priority",
+          "sourcePath",
+          "lineStart",
+          "lineEnd",
+          "codeSnippet",
+          "evidenceHash",
+          "extractorVersion",
+          "stages"
+        ],
+        "title": "Problem",
+        "description": "출제 대상 코드 지점. DB assessment_problem 대응."
+      },
+      "ProblemReference": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "lineStart": {
+            "type": "integer",
+            "title": "Linestart"
+          },
+          "lineEnd": {
+            "type": "integer",
+            "title": "Lineend"
+          },
+          "evidenceHash": {
+            "type": "string",
+            "title": "Evidencehash",
+            "description": "sha256 hex 64자"
+          },
+          "referenceType": {
+            "type": "string",
+            "enum": [
+              "CALLER",
+              "CALLEE",
+              "DEFINITION",
+              "TEST",
+              "CONFIG",
+              "SIMILAR"
+            ],
+            "title": "Referencetype"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "lineStart",
+          "lineEnd",
+          "evidenceHash",
+          "referenceType"
+        ],
+        "title": "ProblemReference",
+        "description": "문제가 가리키는 코드 위치. DB problem_reference 대응."
+      },
+      "ProblemResult": {
+        "properties": {
+          "problemNo": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Problemno"
+          },
+          "problemId": {
+            "type": "string",
+            "title": "Problemid"
+          },
+          "totalScore": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Totalscore",
+            "description": "stages의 confirmedScore 합"
+          },
+          "maxScore": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Maxscore",
+            "description": "4단계 × 5점 = 20"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/StageScore"
+            },
+            "type": "array",
+            "title": "Stages"
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemNo",
+          "problemId",
+          "totalScore",
+          "maxScore",
+          "stages"
+        ],
+        "title": "ProblemResult",
+        "description": "문제(DB assessment_problem) 하나의 결과. 단계 4개를 순서대로 담는다."
+      },
+      "ProblemStage": {
+        "properties": {
+          "axisCode": {
+            "type": "string",
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ],
+            "title": "Axiscode"
+          },
+          "questionText": {
+            "type": "string",
+            "title": "Questiontext"
+          },
+          "flagged": {
+            "type": "boolean",
+            "title": "Flagged",
+            "description": "보기형(①②③ 등)이 섞여 재생성에도 실패한 질문. 화면에 '검수 필요'",
+            "default": false
+          },
+          "hints": {
+            "items": {
+              "$ref": "#/components/schemas/Hint"
+            },
+            "type": "array",
+            "maxItems": 2,
+            "minItems": 2,
+            "title": "Hints"
+          }
+        },
+        "type": "object",
+        "required": [
+          "axisCode",
+          "questionText",
+          "hints"
+        ],
+        "title": "ProblemStage",
+        "description": "문제 하나의 단계 하나. 4축이 곧 4단계다.\n\n질문·힌트는 분석 때 만들어 동결한다. 세션 중에는 생성하지 않고 꺼내 쓴다."
+      },
+      "Progress": {
+        "properties": {
+          "problemIndex": {
+            "type": "integer",
+            "title": "Problemindex"
+          },
+          "problemTotal": {
+            "type": "integer",
+            "title": "Problemtotal"
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemIndex",
+          "problemTotal"
+        ],
+        "title": "Progress"
+      },
+      "Question": {
+        "properties": {
+          "problemId": {
+            "type": "string",
+            "title": "Problemid"
+          },
+          "axisCode": {
+            "type": "string",
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ],
+            "title": "Axiscode"
+          },
+          "sequenceNo": {
+            "type": "integer",
+            "title": "Sequenceno"
+          },
+          "questionText": {
+            "type": "string",
+            "title": "Questiontext"
+          },
+          "codeContext": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CodeContext"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemId",
+          "axisCode",
+          "sequenceNo",
+          "questionText"
+        ],
+        "title": "Question",
+        "description": "지금 물어보는 질문 하나 "
+      },
+      "ReportAccepted": {
         "properties": {
           "jobId": {
             "type": "string",
@@ -1084,10 +1430,10 @@
           "jobId",
           "status"
         ],
-        "title": "GradingAccepted",
-        "description": "202 응답 "
+        "title": "ReportAccepted",
+        "description": "202 응답. 결과는 폴링으로 가져간다."
       },
-      "GradingJobStatus": {
+      "ReportJobStatus": {
         "properties": {
           "jobId": {
             "type": "string",
@@ -1108,8 +1454,8 @@
             "type": "string",
             "enum": [
               "QUEUED",
-              "GRADING",
-              "COMPELETED",
+              "RUNNING",
+              "SUCCEEDED",
               "PARTIAL",
               "FAILED"
             ],
@@ -1124,7 +1470,8 @@
                 "type": "null"
               }
             ],
-            "title": "Failurereason"
+            "title": "Failurereason",
+            "description": "FAILED일 때만 채워진다"
           },
           "startedAt": {
             "anyOf": [
@@ -1153,12 +1500,13 @@
           "result": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/GradingResult"
+                "$ref": "#/components/schemas/ReportResult"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "description": "SUCCEEDED·PARTIAL일 때만"
           },
           "aiUsage": {
             "items": {
@@ -1174,10 +1522,10 @@
           "jobId",
           "status"
         ],
-        "title": "GradingJobStatus",
-        "description": "GET /gradings/{jobId} 응답\n\nstatus 분석 job과 다름: RUNNING 아니라 GRADING\nPARTIAL =  일부 축만 실패"
+        "title": "ReportJobStatus",
+        "description": "GET /reports/{jobId} 응답.\n\nstatus 값은 analysis_job.status와 같은 집합을 쓴다. 별도 어휘를 만들면\nSpring이 enum을 하나 더 들어야 하고 DB CHECK와도 어긋난다."
       },
-      "GradingRequest": {
+      "ReportRequest": {
         "properties": {
           "sessionId": {
             "anyOf": [
@@ -1208,44 +1556,76 @@
               "type": "object"
             },
             "type": "array",
-            "title": "Transcript"
+            "title": "Transcript",
+            "description": "점수가 이미 확정된 턴 기록"
+          },
+          "analysisDocuments": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Analysisdocuments",
+            "description": "[{kind, content}] 코드 분석 문서"
+          },
+          "teaches": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Teaches",
+            "description": "[{id, label, unitId, sourcePages}] 교안 참조용"
           }
         },
         "type": "object",
-        "title": "GradingRequest",
-        "description": "POST /gradings 요청. 세션 종료 후 transcript 전체를 채점 "
+        "title": "ReportRequest",
+        "description": "POST /reports 요청. 세션이 끝난 뒤 전사와 재료를 함께 넘긴다."
       },
-      "GradingResult": {
+      "ReportResult": {
         "properties": {
-          "axisScores": {
+          "reportMarkdown": {
+            "type": "string",
+            "title": "Reportmarkdown"
+          },
+          "problems": {
             "items": {
-              "$ref": "#/components/schemas/AxisScore"
+              "$ref": "#/components/schemas/ProblemResult"
             },
             "type": "array",
-            "title": "Axisscores"
+            "title": "Problems"
           },
-          "totalScore": {
-            "type": "integer",
-            "title": "Totalscore"
+          "curriculumRefs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Curriculumrefs"
           },
-          "averageScore": {
-            "type": "number",
-            "title": "Averagescore"
+          "retestTargets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Retesttargets"
           },
           "versions": {
-            "$ref": "#/components/schemas/GradingVersions"
+            "$ref": "#/components/schemas/ReportVersions"
           }
         },
         "type": "object",
         "required": [
-          "axisScores",
-          "totalScore",
-          "averageScore",
+          "reportMarkdown",
+          "problems",
+          "curriculumRefs",
+          "retestTargets",
           "versions"
         ],
-        "title": "GradingResult"
+        "title": "ReportResult",
+        "description": "보고서가 완성됐을 때의 본문."
       },
-      "GradingVersions": {
+      "ReportVersions": {
         "properties": {
           "modelCode": {
             "type": "string",
@@ -1266,78 +1646,55 @@
           "promptVersion",
           "rubricVersion"
         ],
-        "title": "GradingVersions",
-        "description": "어떤 모델,프롬프트,루브릭으로 채점했는지. "
+        "title": "ReportVersions",
+        "description": "어떤 모델·프롬프트·루브릭으로 만들었는지. 재현성 근거."
       },
-      "HTTPValidationError": {
+      "RequirementResult": {
         "properties": {
-          "detail": {
-            "items": {
-              "$ref": "#/components/schemas/ValidationError"
-            },
-            "type": "array",
-            "title": "Detail"
-          }
-        },
-        "type": "object",
-        "title": "HTTPValidationError"
-      },
-      "Progress": {
-        "properties": {
-          "dpIndex": {
-            "type": "integer",
-            "title": "Dpindex"
-          },
-          "dpTotal": {
-            "type": "integer",
-            "title": "Dptotal"
-          }
-        },
-        "type": "object",
-        "required": [
-          "dpIndex",
-          "dpTotal"
-        ],
-        "title": "Progress"
-      },
-      "Question": {
-        "properties": {
-          "dpId": {
+          "requirementId": {
             "type": "string",
-            "title": "Dpid"
+            "title": "Requirementid"
           },
-          "depthLevel": {
+          "verdict": {
             "type": "string",
-            "title": "Depthlevel"
+            "enum": [
+              "P",
+              "F"
+            ],
+            "title": "Verdict"
           },
-          "sequenceNo": {
-            "type": "integer",
-            "title": "Sequenceno"
-          },
-          "questionText": {
-            "type": "string",
-            "title": "Questiontext"
-          },
-          "codeContext": {
+          "evidence": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/CodeContext"
+                "type": "string"
               },
               {
                 "type": "null"
               }
-            ]
+            ],
+            "title": "Evidence",
+            "description": "판정 근거가 된 코드 위치·인용"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "판정 실패 등 특이사항"
           }
         },
         "type": "object",
         "required": [
-          "dpId",
-          "depthLevel",
-          "sequenceNo",
-          "questionText"
+          "requirementId",
+          "verdict"
         ],
-        "title": "Question",
-        "description": "지금 물어보는 질문 하나 "
+        "title": "RequirementResult",
+        "description": "요구사항 하나의 P/F 판정. 요청 requirements와 1:1로 대응한다."
       },
       "SessionRestore": {
         "properties": {
@@ -1380,13 +1737,13 @@
             "type": "array",
             "title": "Transcript"
           },
-          "findings": {
+          "problems": {
             "items": {
               "additionalProperties": true,
               "type": "object"
             },
             "type": "array",
-            "title": "Findings"
+            "title": "Problems"
           },
           "source": {
             "anyOf": [
@@ -1441,13 +1798,13 @@
             "title": "Sessionid",
             "description": "Spring AssessmentSession 키(에코용)"
           },
-          "selectedFindingIds": {
+          "selectedProblemIds": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Selectedfindingids",
-            "description": "세션에 포함할 DP. 생략 시 전체"
+            "title": "Selectedproblemids",
+            "description": "세션에 포함할 문제. 생략 시 전체"
           },
           "timeLimitSec": {
             "type": "integer",
@@ -1545,15 +1902,106 @@
         "title": "SnapshotMeta",
         "description": "code_snapshot 테이블 대응. 코드 원문 저장하지 않고 메타만 주기 "
       },
+      "StageScore": {
+        "properties": {
+          "axisCode": {
+            "type": "string",
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ],
+            "title": "Axiscode"
+          },
+          "attemptCount": {
+            "type": "integer",
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Attemptcount",
+            "description": "문답 시도 횟수. 0이면 앞 단계에서 끝나 도달하지 못했다"
+          },
+          "passed": {
+            "type": "boolean",
+            "title": "Passed",
+            "description": "confirmedScore가 통과선(3점) 이상인지"
+          },
+          "bestScore": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bestscore",
+            "description": "힌트 상한 적용 전 원점수. 미도달이면 null"
+          },
+          "confirmedScore": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confirmedscore",
+            "description": "힌트 상한 적용 후 기록 점수. 미도달이면 null"
+          },
+          "hintsUsed": {
+            "type": "integer",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Hintsused",
+            "default": 0
+          },
+          "autonomy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "SELF",
+                  "SELF_MAINTAINED",
+                  "PARTIAL"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autonomy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "axisCode",
+          "attemptCount",
+          "passed"
+        ],
+        "title": "StageScore",
+        "description": "문제 하나의 단계 하나. DB problem_stage 대응."
+      },
       "TranscriptTurn": {
         "properties": {
-          "dpId": {
+          "problemId": {
             "type": "string",
-            "title": "Dpid"
+            "title": "Problemid"
           },
-          "depthLevel": {
+          "axisCode": {
             "type": "string",
-            "title": "Depthlevel"
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ],
+            "title": "Axiscode"
           },
           "questionText": {
             "type": "string",
@@ -1570,8 +2018,8 @@
         },
         "type": "object",
         "required": [
-          "dpId",
-          "depthLevel",
+          "problemId",
+          "axisCode",
           "questionText",
           "answerText",
           "answeredAt"
