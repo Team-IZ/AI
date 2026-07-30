@@ -1,22 +1,41 @@
-# D208-worker: dedicated deployment for Team-IZ/AI's feat/code_Q&A branch -- separate
-# name/KV namespace/queue from both the original nvidia-proxy (popixoxipop-collab) and
-# team-iz-nvidia-proxy (Team-IZ curriculum-manager task), so an incident or config change
-# in either of those never affects this one. Worker code (nvidia-proxy.js) is an unmodified
-# copy -- only bindings differ, matching env.NVIDIA_JOBS/env.NVIDIA_JOBS_QUEUE the code
-# already expects.
-name = "team-iz-code-qna-proxy"
+# D-poc-worker: dedicated deployment for Team-IZ/AI's feat/poc_full branch (P04 PoC,
+# served at /lab/poc/). This file previously was a BYTE-IDENTICAL copy of
+# feat/code_Q&A's -- same `name`, same KV namespace id, same queue -- inherited when
+# this branch was cut from feat/code_Q&A. `name`, KV namespace ids and queue names are
+# all account-scoped in Cloudflare and this is ONE account (popixoxipop@gmail.com), so
+# deploying it as-is would have overwritten the live team-iz-code-qna-proxy the team is
+# using, shared its job KV, and shared its queue consumer -- the exact failure D208-worker
+# was written to prevent. Disambiguated here following that same pattern: new KV
+# namespace + queue created via `wrangler kv namespace create`/`wrangler queues create`
+# (2026-07-30), new Worker name. Worker code (nvidia-proxy.js) stays an unmodified copy
+# of feat/code_Q&A's -- only bindings + [vars] differ here.
+name = "team-iz-poc-proxy"
 main = "nvidia-proxy.js"
 compatibility_date = "2026-07-14"
 
 kv_namespaces = [
-  { binding = "NVIDIA_JOBS", id = "4ef68f0d221949849ede364f39e8214b" }
+  { binding = "NVIDIA_JOBS", id = "ad7ee9f84b3a427baf63fbcd7caad356" }
 ]
 
 [[queues.producers]]
-queue = "team-iz-code-qna-jobs-queue"
+queue = "team-iz-poc-jobs-queue"
 binding = "NVIDIA_JOBS_QUEUE"
 
 [[queues.consumers]]
-queue = "team-iz-code-qna-jobs-queue"
+queue = "team-iz-poc-jobs-queue"
 max_batch_size = 1
 max_batch_timeout = 1
+
+# D-ls1: per-pipeline LangSmith project, isolating this pipeline's traces from both
+# curriculum-manager's and code-qna's. LANGSMITH_API_KEY is deliberately NOT here: it is
+# a Worker secret (`wrangler secret put LANGSMITH_API_KEY`), never committed. No
+# [[durable_objects.bindings]] here (no proxy-global rate limiter), so NVIDIA_RPM_LIMIT
+# is intentionally absent.
+[vars]
+LANGSMITH_ENDPOINT = "https://api.smith.langchain.com"
+LANGSMITH_PROJECT = "team-iz-nvidia-usage-poc"
+LANGSMITH_ORGANIZATION_ID = "63acea55-f27c-429b-850f-63fb363f56b1"
+LANGSMITH_TAGS = "nvidia,poc,production"
+MODEL_INPUT_USD_PER_MILLION = "0.24"
+MODEL_OUTPUT_USD_PER_MILLION = "0.96"
+MODEL_PRICING_BASIS = "gmi-cloud-serverless-2026-07-29"

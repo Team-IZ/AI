@@ -167,6 +167,176 @@ const PER_ATTEMPT_TIMEOUT_MS = 600_000; // 600s, == feedback/nvidia_client.py's 
 //     records, split it into a second KV binding -- not necessary at this scale.
 const TRAFFIC_SAMPLE_TTL_SECONDS = 300; // matches docs/lab/debug-traffic.js's 5-minute HISTORY_MS
 
+const LANGSMITH_DEFAULT_ENDPOINT = "https://api.smith.langchain.com";
+// D-ls-project6: this file is kept byte-identical between feat/code_Q&A and
+// feat/poc_full (see .github/workflows/pages.yml's drift-check), so this fallback is
+// shared by two Workers that MUST land in different LangSmith projects. If a
+// LANGSMITH_PROJECT var is ever dropped from either Worker's wrangler.toml, its traces
+// should land in an obviously-wrong "unattributed" project, not silently merge into
+// whichever pipeline still has its var set correctly.
+const LANGSMITH_DEFAULT_PROJECT = "team-iz-nvidia-usage-unattributed";
+
+function nonNegativeNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+async function sha256Hex(value) {
+  const bytes = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function parseNvidiaRequest(body) {
+  try {
+    const parsed = JSON.parse(body);
+    return {
+      model: typeof parsed.model === "string" ? parsed.model : "unknown",
+      messageCount: Array.isArray(parsed.messages) ? parsed.messages.length : 0,
+      maxTokens: Number.isFinite(parsed.max_tokens) ? parsed.max_tokens : null,
+      stream: parsed.stream === true,
+    };
+  } catch (e) {
+    return { model: "unknown", messageCount: 0, maxTokens: null, stream: false };
+  }
+}
+
+function parseNvidiaUsage(responseText, env) {
+  try {
+    const parsed = JSON.parse(responseText);
+    const usage = parsed && parsed.usage;
+    if (!usage || typeof usage !== "object") return null;
+
+    // D-ls-t1: LangSmith's UsageMetadata schema (api.smith.langchain.com/openapi.json)
+    // requires input_tokens/output_tokens/total_tokens TOGETHER. Emitting them
+    // conditionally meant a response missing just one -- e.g. no completion_tokens --
+    // could silently drop the WHOLE usage record server-side instead of degrading
+    // gracefully. Once `usage` exists at all, always emit all three, coercing an absent
+    // value to 0 rather than omitting the key.
+    const inputTokens = Number(usage.prompt_tokens ?? usage.input_tokens) || 0;
+    const outputTokens = Number(usage.completion_tokens ?? usage.output_tokens) || 0;
+    const totalTokensRaw = Number(usage.total_tokens);
+    const totalTokens = Number.isFinite(totalTokensRaw) ? totalTokensRaw : inputTokens + outputTokens;
+    const metadata = { input_tokens: inputTokens, output_tokens: outputTokens, total_tokens: totalTokens };
+
+    // D-ls-t2: this -- not the runs-table "Tokens" column, which only ever shows one
+    // number -- is the actual input/output breakdown LangSmith renders (hover on the
+    // token/cost cell in the trace tree; docs.langchain.com/langsmith/cost-tracking).
+    const cachedTokens = Number(usage.prompt_tokens_details?.cached_tokens);
+    if (Number.isFinite(cachedTokens) && cachedTokens > 0) {
+      metadata.input_token_details = { cache_read: cachedTokens };
+    }
+    const reasoningTokens = Number(usage.completion_tokens_details?.reasoning_tokens);
+    if (Number.isFinite(reasoningTokens) && reasoningTokens > 0) {
+      metadata.output_token_details = { reasoning: reasoningTokens };
+    }
+
+    const inputUsdPerMillion = nonNegativeNumber(env.MODEL_INPUT_USD_PER_MILLION, 0.24);
+    const outputUsdPerMillion = nonNegativeNumber(env.MODEL_OUTPUT_USD_PER_MILLION, 0.96);
+    metadata.input_cost = (inputTokens / 1_000_000) * inputUsdPerMillion;
+    metadata.output_cost = (outputTokens / 1_000_000) * outputUsdPerMillion;
+    metadata.total_cost = metadata.input_cost + metadata.output_cost;
+
+    return metadata;
+  } catch (e) {
+    return null;
+  }
+}
+
+function dottedOrderTimestamp(epochMs) {
+  const d = new Date(epochMs);
+  const pad = (n, len = 2) => String(n).padStart(len, "0");
+  const micros = String(d.getUTCMilliseconds() * 1000).padStart(6, "0");
+  return (
+    `${d.getUTCFullYear()}${pad(d.getUTCMonth() + 1)}${pad(d.getUTCDate())}T` +
+    `${pad(d.getUTCHours())}${pad(d.getUTCMinutes())}${pad(d.getUTCSeconds())}${micros}Z`
+  );
+}
+
+function langsmithTags(env) {
+  const raw = String(env.LANGSMITH_TAGS || "").trim();
+  if (!raw) return ["nvidia", "code-qna", "production"];
+  return raw.split(",").map((t) => t.trim()).filter(Boolean);
+}
+
+async function sendLangSmithTrace(env, trace) {
+  if (!env.LANGSMITH_API_KEY) return;
+  const endpoint = String(env.LANGSMITH_ENDPOINT || LANGSMITH_DEFAULT_ENDPOINT).replace(/\/$/, "");
+  const headers = {
+    "content-type": "application/json",
+    "x-api-key": env.LANGSMITH_API_KEY,
+  };
+  if (env.LANGSMITH_WORKSPACE_ID) headers["x-tenant-id"] = env.LANGSMITH_WORKSPACE_ID;
+  if (env.LANGSMITH_ORGANIZATION_ID) headers["x-organization-id"] = env.LANGSMITH_ORGANIZATION_ID;
+
+  const usageMetadata = trace.usage || undefined;
+  const payload = {
+    id: trace.id,
+    trace_id: trace.id,
+    dotted_order: `${dottedOrderTimestamp(trace.startedAt)}${trace.id}`,
+    name: "NVIDIA chat completion",
+    run_type: "llm",
+    start_time: new Date(trace.startedAt).toISOString(),
+    end_time: new Date(trace.finishedAt).toISOString(),
+    session_name: env.LANGSMITH_PROJECT || LANGSMITH_DEFAULT_PROJECT,
+    tags: langsmithTags(env),
+    // Deliberately omit prompt and completion content. Usage/accounting does not need it.
+    inputs: {
+      model: trace.request.model,
+      message_count: trace.request.messageCount,
+      max_tokens: trace.request.maxTokens,
+      stream: trace.request.stream,
+    },
+    outputs: {
+      job_id: trace.jobId,
+      attempt: trace.attempt,
+      http_status: trace.httpStatus,
+      status: trace.status,
+      ...(usageMetadata ? { usage_metadata: usageMetadata } : {}),
+    },
+    extra: {
+      metadata: {
+        ls_provider: "nvidia",
+        ls_model_name: trace.request.model,
+        job_id: trace.jobId,
+        attempt: trace.attempt,
+        max_attempts: trace.maxAttempts,
+        http_status: trace.httpStatus,
+        rate_limited: trace.httpStatus === 429,
+        // D5: this Worker has no NvidiaRateLimiter Durable Object (unlike
+        // team-iz-nvidia-proxy) -- explicit "none" rather than a stubbed 0, so it reads
+        // distinctly from "the DO limiter reserved a slot instantly".
+        limiter_scope: "none",
+        nvidia_key_fingerprint: trace.keyFingerprint,
+        model_pricing_basis: env.MODEL_PRICING_BASIS || "gmi-cloud-serverless",
+        model_input_usd_per_million: nonNegativeNumber(env.MODEL_INPUT_USD_PER_MILLION, 0.24),
+        model_output_usd_per_million: nonNegativeNumber(env.MODEL_OUTPUT_USD_PER_MILLION, 0.96),
+        ...(usageMetadata ? { usage_metadata: usageMetadata } : {}),
+      },
+    },
+    ...(trace.error ? { error: trace.error.slice(0, 500) } : {}),
+  };
+
+  const response = await fetch(`${endpoint}/runs`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`LangSmith HTTP ${response.status}: ${detail.slice(0, 300)}`);
+  }
+}
+
+function scheduleLangSmithTrace(ctx, env, trace) {
+  const promise = sendLangSmithTrace(env, trace).catch(() => {
+    // Telemetry must never fail or delay an NVIDIA job. LangSmith availability is not
+    // part of the model-serving correctness boundary.
+  });
+  if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(promise);
+  return promise;
+}
+
 async function recordTrafficSample(env) {
   try {
     const key = `traffic:${Date.now()}:${crypto.randomUUID()}`;
@@ -355,7 +525,7 @@ export default {
   // NVIDIA call never blocks a teammate's job queued behind it). No client is waiting on
   // this directly, so there's no 100s-class timeout to survive -- but see D-I above for
   // why a single attempt still isn't the end of the story.
-  async queue(batch, env) {
+  async queue(batch, env, ctx) {
     for (const message of batch.messages) {
       const { jobId, apiKey, body, maxAttempts } = message.body;
       // D169: per-job override (see the POST handler above) falls back to the existing
@@ -371,6 +541,18 @@ export default {
         continue;
       }
 
+      const requestMeta = parseNvidiaRequest(body);
+      const startedAt = Date.now();
+      const traceBase = {
+        id: crypto.randomUUID(),
+        jobId,
+        attempt: message.attempts,
+        maxAttempts: effectiveMaxAttempts,
+        request: requestMeta,
+        startedAt,
+        keyFingerprint: (await sha256Hex(apiKey)).slice(0, 12),
+      };
+
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), PER_ATTEMPT_TIMEOUT_MS);
       try {
@@ -385,10 +567,25 @@ export default {
         const text = await upstream.text();
 
         if (upstream.ok) {
+          scheduleLangSmithTrace(ctx, env, {
+            ...traceBase,
+            finishedAt: Date.now(),
+            httpStatus: upstream.status,
+            status: "success",
+            usage: parseNvidiaUsage(text, env),
+          });
           await putIfNotTerminal(env, jobId, { status: "done", result: text });
           message.ack();
           continue;
         }
+
+        scheduleLangSmithTrace(ctx, env, {
+          ...traceBase,
+          finishedAt: Date.now(),
+          httpStatus: upstream.status,
+          status: "error",
+          error: `NVIDIA HTTP ${upstream.status}: ${text.slice(0, 500)}`,
+        });
 
         if (RETRYABLE_STATUSES.has(upstream.status) && message.attempts < effectiveMaxAttempts) {
           const delaySeconds = upstream.status === 429 ? RATE_LIMIT_RETRY_DELAY_SECONDS : RETRY_DELAY_SECONDS;
@@ -415,6 +612,13 @@ export default {
         clearTimeout(timeoutId);
         const isTimeout = e.name === "AbortError";
         const reason = isTimeout ? `no response within ${PER_ATTEMPT_TIMEOUT_MS / 1000}s` : `upstream fetch failed: ${e.message}`;
+        scheduleLangSmithTrace(ctx, env, {
+          ...traceBase,
+          finishedAt: Date.now(),
+          httpStatus: 0,
+          status: isTimeout ? "timeout" : "error",
+          error: reason,
+        });
 
         if (message.attempts < effectiveMaxAttempts) {
           const wrote = await putIfNotTerminal(env, jobId, {

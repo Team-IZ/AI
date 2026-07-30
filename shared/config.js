@@ -10,7 +10,7 @@
 // email for per-member attribution.
 const LabConfig = (() => {
   // D208: repointed to Team-IZ's own resources for the NVIDIA proxy (Cloudflare Worker)
-  // -- unchanged, still team-iz-code-qna-proxy, see the DEFAULT_PROXY_URL comment below.
+  // -- see the DEFAULT_PROXY_URL comment below for this branch's own dedicated Worker.
   //
   // D213 (2026-07-22): Supabase repointed AGAIN -- team-iz-curriculum-manager (D208) was a
   // freshly-created, mostly-empty project (2 members). code-reviewer-pipeline-lab (the
@@ -43,11 +43,15 @@ const LabConfig = (() => {
   // editable field, since SETUP.md's team-sharing note explicitly means for teammates to
   // be able to deploy and swap in their own proxy instead (a URL, not a credential, so
   // there's no reason to also lock this one down).
-  // D208: deployed as its own dedicated Worker (team-iz-code-qna-proxy, own KV namespace +
-  // queue) from the unmodified worker/nvidia-proxy.js -- distinct from both the original
-  // nvidia-proxy and the curriculum-manager task's team-iz-nvidia-proxy, so this tool never
-  // shares failure/rate-limit blast radius with either.
-  const DEFAULT_PROXY_URL = "https://team-iz-code-qna-proxy.popixoxipop.workers.dev";
+  // D-poc-worker (2026-07-30): this file was pointing at team-iz-code-qna-proxy -- a
+  // byte-identical copy-paste inherited when this branch was cut from feat/code_Q&A
+  // (see worker/wrangler.toml's own D-poc-worker note for the full story). Repointed to
+  // this branch's own dedicated Worker (team-iz-poc-proxy, own KV namespace + queue)
+  // from the unmodified worker/nvidia-proxy.js -- distinct from the original nvidia-
+  // proxy, curriculum-manager's team-iz-nvidia-proxy, AND code-qna's
+  // team-iz-code-qna-proxy, so this tool never shares failure/rate-limit blast radius,
+  // job KV, or queue with any of them.
+  const DEFAULT_PROXY_URL = "https://team-iz-poc-proxy.popixoxipop.workers.dev";
 
   const FIELDS = ["nvidia-key", "proxy-url", "github-pat"];
   const SESSION_PREFIX = "lab_cfg_";
