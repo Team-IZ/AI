@@ -4,8 +4,10 @@
 //
 // Supabase URL/anon key are the one exception: this is the team's single shared DB, not a
 // per-teammate secret, so they're hardcoded below instead of typed in every session. This
-// is safe specifically because Supabase's RLS policies (supabase_schema.sql) -- not anon
-// key secrecy -- are what actually protects the data; the anon key is meant to ship in
+// is safe specifically because Supabase's RLS policies (defined in the dashboard; schema
+// DDL is upstream-only -- Code_reviewer_with_feedback:experiments/web_lab/
+// supabase_schema.sql, not vendored here) -- not anon key secrecy -- are what actually
+// protects the data; the anon key is meant to ship in
 // client code. Teammates still enter their own NVIDIA key/PAT and sign in with their own
 // email for per-member attribution.
 const LabConfig = (() => {
@@ -40,7 +42,8 @@ const LabConfig = (() => {
 
   // Owner-deployed proxy (worker/nvidia-proxy.js), pre-filled as a default -- unlike the
   // Supabase values above this is NOT force-hardcoded: it's just a starting value in an
-  // editable field, since SETUP.md's team-sharing note explicitly means for teammates to
+  // editable field, since the upstream SETUP.md's team-sharing note (Code_reviewer_with_
+  // feedback:experiments/web_lab/SETUP.md) explicitly means for teammates to
   // be able to deploy and swap in their own proxy instead (a URL, not a credential, so
   // there's no reason to also lock this one down).
   // D-poc-worker (2026-07-30): this file was pointing at team-iz-code-qna-proxy -- a

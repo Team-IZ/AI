@@ -50,7 +50,14 @@ app/
   p04_timing_schema.sql ★ public.runs에 hint_mode/timing_ms 컬럼 + p04_timing_view 추가(D8)
 
 shared/ cognition/ judgment/ feedback/  feat/code_Q&A에서 무수정 이식(vendored, 드리프트 검사 대상)
-worker/                동일 프록시 설정 재사용(재배포 불필요)
+  (참고: webtool_driver.py 헤더 주석의 "fetched at runtime from raw.githubusercontent.com"은
+   원본 기준 서술입니다 -- 이 저장소에서는 shared/p02-engine.js·p03-engine.js의
+   REPO_RAW_BASE = "../" 로 같은 저장소에서 상대경로로 읽습니다. 무수정 이식 원칙 + pages.yml의
+   바이트 동일성 드리프트 검사 때문에 그 파일 자체는 고치지 않습니다.)
+worker/                D-poc-worker(2026-07-30) 이전엔 code_Q&A와 같은 Worker/KV/큐를 공유했으나
+  (byte-identical wrangler.toml 사고, 프로덕션 충돌 위험) 이후 전용 Worker(team-iz-poc-proxy)·
+  KV 네임스페이스·큐로 분리됨. nvidia-proxy.js 코드 자체는 여전히 code_Q&A와 무수정 공유(env로만
+  분기), wrangler.toml만 forked -- .github/workflows/pages.yml의 드리프트 검사가 이 구분을 강제
 ```
 
 ## 왜 이 구조인가 (결정 기록)
@@ -123,7 +130,7 @@ p04-7 문구를 "답변이 있다면 참고, 없다면(동결) 질문 자체로 
 사실"과 "LLM의 주장"을 분리 — D-poc6가 finding 검증에 이미 쓰던 원칙을 위치 탐색에도 적용).
 블록 끝은 들여쓰기 기반 휴리스틱으로 추정(완벽하진 않지만 시작 줄은 항상 정확함이 보장됨).
 `session.html`의 코드 패널도 조각(앞뒤 2줄)이 아니라 **해당 파일 전체 + 구간 하이라이트**로
-바꿨다 — 조각만 보여줄 땐 L2~L4(설계논리·반례·대안)를 묻는데 주변 맥락(다른 함수, import,
+바꿨다 — 조각만 보여줄 땐 L2~L4(설계논리·대안·반례)를 묻는데 주변 맥락(다른 함수, import,
 호출부)이 안 보이는 문제가 있었다. 파일 본문은 `POCEngine.resolveFileContents()`로 세션
 시작 시 재확보한다(D-poc5 유지 — sessionStorage에 코드 본문을 넣지 않는다).
 
