@@ -227,7 +227,7 @@ cloudflared tunnel --url http://localhost:8000
   "lineStart": 12, "lineEnd": 14,
   "codeSnippet": "def main():\n    …",  // evidenceHash의 대상
   "evidenceHash": "…",
-  "extractorVersion": 1,
+  "extractorVersion": "v0",            // 문자열. 룰 버전을 붙일 수 있게
   "references": [
     { "path": "app/cli.py", "lineStart": 30, "lineEnd": 33,
       "evidenceHash": "…", "referenceType": "CALLER" }
@@ -429,37 +429,38 @@ engine_mode: Literal["stub", "real"] = "stub"
 | | |
 |---|---|
 | 엔드포인트 | **9/9 동작 (전부 스텁)** |
-| 테스트 | **41 passed** |
+| 테스트 | **45 passed** |
 | 붙일 수 있나 | **예.** 인증·에러 형식·camelCase·Swagger·`openapi.json`까지 완성 |
 
-완료된 것: `/gradings` → `/reports` 전환, 이름 통일(`decision_point`→`problem`, `depth_level`→`axis_code`).
+완료된 것: `/gradings` → `/reports` 전환, 이름 통일(`decision_point`→`problem`, `depth_level`→`axis_code`), **분석·보고서 스키마를 DB 계약에 정렬**.
 
 응답은 고정 스텁이지만 **계약 모양은 정해져 있다.** 백엔드는 9개 전부 지금 바로 붙여볼 수 있다.
 
-> ⚠️ **위 §3의 명세가 코드보다 앞서 있다.** 2026-07-30 확정분(축 값 `"L1"`, `focusItems`, `codeSnippet`, `requirementResults`, `best/confirmedScore`)은 아직 `schemas/`에 반영되지 않았다. 확정된 계약은 §3이 맞고, 코드 반영 순서는 `PLAN_FASTAPI_MIGRATION.md`에 있다. **`openapi.json`이 갱신·공유되는 시점이 반영 완료 신호다.**
+> ✅ **`/analyses`·`/reports`는 §3 명세대로 코드에 반영됐고 `openapi.json`도 갱신됐다.** 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례 대응), `focusItems`, `codeSnippet`, `requirementResults`, `bestScore`/`confirmedScore`가 전부 스펙에 들어가 있다. `Problem.stages`는 `minItems/maxItems: 4`, `ProblemStage.hints`는 `2`로 나가므로 **동결 구조를 스펙만 보고 알 수 있다.**
+>
+> ⏳ **아직인 것**: `/sessions` 턴 점수 필드, `/curricula` 신설, `aiUsage` 타입(단가 분담 회신 대기). 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
-### 백엔드 대기 4건
+### 백엔드 대기 2건
 
 이슈 `Team-IZ/Backend#31` 본문이 현재 상태판이다.
 
 | # | 내용 | 우리 작업을 막나 |
 |---|---|---|
-| C-1 | `question_focus_item` 지칭 방식 — 요청에 `focusItems[]`를 싣는 안 확인 | 아니다 |
-| C-2 | `score_run`·`axis_score` 유지 여부 | 아니다. 어느 쪽이든 AI 응답은 같다 |
 | C-3 | 단가는 Spring이 채우는가 | **막는다.** `ai_usage` 쓰기 경로 |
 | C-4 | `source_type` 값 목록 | 아니다 |
+
+C-1(`focusItems` 방식)·C-2(`score_run`·`axis_score` 제거)는 **회신 완료**다. 점수의 단일 소유자는 `problem_stage`이고 축 어휘는 `'L1'`~`'L4'` 한 벌만 남는다.
 
 DDL 수정 요청 4건(`attempt_count` 0~3 · `attempt_no=3` 허용 · `stage_answer_attempt` NULL 허용 + all-or-nothing CHECK · `TERMINATED_AT_L1` 코드값)도 같은 이슈에 있다.
 
 ### 앞으로
 
 ```
-분석 요청·응답 재정렬 (focusItems · requirementResults · codeSnippet · problemType · stages 4개 + hints 검증)
-보고서 스키마 교정  (axisCode "L1"~"L4", L3=대안/L4=반례, best/confirmedScore, 세션 총점 제거)
-세션 턴 점수 필드 추가
-aiUsage 스키마 확정 (지금은 dict로 열려 있다)
+세션 턴 점수 필드 추가 (state TIMEOUT→EXPIRED, best/confirmedScore·attemptCount·hintText·autonomy)
+세션 시작 시 질문 생성 제거 — 질문은 분석 때 동결돼 DB에 있다
 POST/GET /curricula 신설 (교안 분석)
-openapi.json 재생성 → 백엔드·프론트 전달
+aiUsage 스키마 확정 (지금은 dict로 열려 있다. 단가 분담 회신 대기)
+openapi.json 2차 재생성 → 백엔드·프론트 전달
 엔진 이식 (팀원 PoC feat/poc_full)
 (먼 항목) 적응형 힌트 모듈 대응 — 턴당 2콜, 힌트용 featureCode, 체크포인트 단위 모드 고정
 ```

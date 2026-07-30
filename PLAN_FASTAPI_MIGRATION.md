@@ -1,6 +1,6 @@
 # AI 파트 작업 계획
 
-> 갱신: 2026-07-30 · 작업 브랜치 `feature/engine-transplant` (`develop`에서 분기)
+> 갱신: 2026-07-30 · 작업 브랜치 `feature/contract-p04` (`develop`에서 분기)
 > **이 문서는 실행용이다.** 무엇을 어떤 순서로, 어떤 방법으로 할지만 적는다.
 > 구조·계약의 설명은 `README.md`(팀원용). 백엔드와의 현재 상태판은 이슈 `Team-IZ/Backend#31` 본문(사본 `../qna/2026-07-30/issue-body-v2.md`).
 
@@ -11,8 +11,8 @@
 | | |
 |---|---|
 | 엔드포인트 | 9/9 동작 (전부 스텁) |
-| 테스트 | 41 passed |
-| 다음 | **T2 → T2b → T3 → T3b → T4 → T5.** 백엔드 회신을 기다리지 않고 진행한다 |
+| 테스트 | 45 passed |
+| 다음 | **T3 → T4 → T5 재생성 → T6·T7 이식.** 백엔드 회신을 기다리지 않고 진행한다 |
 | 막힌 것 | **C-3(단가 분담) 하나뿐.** 그게 안 오면 `ai_usage` 쓰기 경로가 막히지만 나머지 스키마는 다 진행한다 |
 
 ### 완료된 것
@@ -26,36 +26,23 @@
 - `jobs.py`·`sessions.py`·`reports.py` — 인메모리 저장소 + 수명주기·멱등
 - 백엔드 계약 C1~C6 합의(2026-07-22), 로컬 통신 자체검증 통과, cloudflared 터널 준비
 - **T1 완료** — `/gradings` → `/reports` 전환. 파일 3쌍 개명(`schemas/grading.py`→`report.py`, `app/gradings.py`→`reports.py`, `api/gradings.py`→`reports.py`), 기존 결함 3개(`ALTERNATIVE_COMPARISION` 오타·`COMPELETED`·`AxisEvidence` 중복 정의) 정리. 41 tests
-- **S1 완료 (커밋 `4bda015`)** — 이름 통일. `decision_point`/`dp_*` 어휘를 `problem`/`problem_*`로, `depth_level`을 `axis_code`로 교체
+- **T1b 완료 (커밋 `4bda015`)** — 이름 통일. `decision_point`/`dp_*` 어휘를 `problem`/`problem_*`로, `depth_level`을 `axis_code`로 교체
+- **T2·T2b 완료** — 분석·보고서 스키마를 DB 계약에 정렬. `AxisCode`를 `"L1"`~`"L4"`로 바꾸고 **L3=대안 비교 / L4=반례 대응**으로 바로잡음, `Problem`에 `problem_no`·`code_snippet`·`problem_type`·`question_focus_item_id` 추가, `stages` 4개(L1→L4 순서)·`hints` 2개(`[1,2]` 순서) 검증 추가, `AnalysisResult.problems`를 `list[Problem]`으로 교체, 요청에 `focus_items`·`requirements`·`teaches`·`model_code` 추가, 응답에 `analysis_document_markdown`·`requirement_results` 추가(`jobs.py`가 요청 `requirements`와 개수 일치를 검사), 보고서는 `best_score`/`confirmed_score`로 개명하고 세션 총점 제거. 45 tests
+- **T5 1차 완료** — `openapi.json` 재생성. `stages` `minItems/maxItems: 4`, `hints` `2`가 스펙에 드러나 백엔드가 동결 구조를 코드 없이 읽는다. **범위는 `/analyses`·`/reports`까지** — T3(세션)·T4(교안) 반영 후 한 번 더 생성한다
 
 기존 구현(`app/` 1,659줄 + 목업 2,550줄 + vendored pipeline 4,815줄)은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났다(`.gitignore` 대상, 커밋 안 됨).
 
-### 코드가 계약을 아직 못 따라간 곳 (2026-07-30 확정분 미반영)
+### 코드가 계약을 아직 못 따라간 곳
 
-다음 표가 T2·T2b·T3의 실제 작업 목록이다. **문서가 앞서 있고 코드가 뒤에 있다.**
+**분석(`analysis.py`)·보고서(`report.py`)·스텁은 정렬 완료(T2·T2b).** 남은 것은 세션과 `ai_usage`다.
 
 | 파일:줄 | 지금 | 되어야 할 것 | 처리 |
 |---|---|---|---|
-| `app/engines/stub.py:33` | `"status": "OPEN"` | `"READY"` — `assessment_problem.status` 허용값에 `OPEN`이 없다 | T2 |
-| `app/engines/stub.py:32` | `"type": "CODE_RISK"` | `"problem_type": "RISK_POINT"` | T2 |
-| `app/engines/stub.py:36` | `"focus_code": "HARDCODED_SECRET"` | `"question_focus_item_id"` (요청 `focusItems[]`에서 받은 UUID) | T2 |
-| `app/engines/stub.py:48` | `"reference_type": "PRIMARY"` | `PRIMARY` 폐기. `CALLER` 등 6종 중 하나 | T2 |
-| `app/engines/stub.py:29~52` | `problem_no`·`code_snippet`·`stages` 없음 | 셋 다 필수. `stages` 4개 × `hints` 2개를 스텁도 채운다 | T2 |
-| `app/schemas/analysis.py:29` | `focus_areas: list[str]` | `focus_items: list[FocusItem]` | T2 |
-| `app/schemas/analysis.py:28` | `question_budget` 기본값 `4` | `3` | T2 |
-| `app/schemas/analysis.py:64` | `reference_type` 설명이 "PRIMARY 등, 카탈로그 미정(B-3)" | 6종 확정. 설명 교체 | T2 |
-| `app/schemas/analysis.py:66~81` | `Hint` 클래스 + `ProblemStage.hints` | **유지.** 힌트는 분석 때 동결되므로 분석 응답에 실린다 | — |
-| `app/schemas/analysis.py:72~81` | `ProblemStage`에 검증 없음 | `hints`가 정확히 2개이고 `hint_level`이 `[1, 2]` 순서인지 검사하는 validator **추가** | T2 |
-| `app/schemas/analysis.py:83~98` | `Problem`에 검증 없음 | `stages`가 정확히 4개이고 `axis_code`가 `L1`→`L4` 순서인지 검사하는 validator **추가** | T2 |
-| `app/schemas/analysis.py:83~98` | `Problem.status` Literal 5종(`CANDIDATE`…) · `focus_code` | 4종(`READY`/`IN_PROGRESS`/`COMPLETED`/`TERMINATED`) · `question_focus_item_id` | T2 |
-| `app/schemas/analysis.py` | `problem_no`·`code_snippet`·`problem_type`·`extractor_version` 없음 | 추가 | T2 |
-| `app/schemas/report.py:16~21` | `AxisCode` = `L1_CODE_DESCRIPTION`… **그리고 L3/L4가 뒤집혀 있다** | `"L1"`~`"L4"`, L3=대안·L4=반례 | T2b |
-| `app/schemas/report.py:43~74` | `LevelScore.raw_score`/`score`, `ReportSummary.total_score` | `best_score`/`confirmed_score`, 세션 총점 제거 | T2b |
-| `app/schemas/report.py:52` | `hints_used` `le=2` | 유지(힌트 최대 2회). 단 `attempt_count`(0~3)와 별개 필드임을 명시 | T2b |
 | `app/sessions.py:49~57` | `_build_questions()`가 세션 시작 시 질문을 만든다 (P03 구조) | 질문은 분석 때 동결돼 DB에 있다. Spring이 읽어 넘겨준 것을 쓴다 — 생성하지 않는다 | T3·T8 |
-| `app/sessions.py:55` | `"axis_code": "L1_CODE_DESCRIPTION"` | `"L1"` | T3 |
 | `app/schemas/session.py:56` | `state` Literal에 `TIMEOUT` | `IN_PROGRESS`/`PAUSED`/`COMPLETED`/`FAILED`/`EXPIRED` — `assessment_session.status`에 `TIMEOUT`이 없다 | T3 |
-| `app/schemas/session.py` | 턴 점수 필드 없음 | `best_score`·`confirmed_score`·`attempt_count`·`hint_text`·`autonomy` | T3 |
+| `app/schemas/session.py:40~46` | `TranscriptTurn`에 점수 필드 없음 | `best_score`·`confirmed_score`·`attempt_count`·`hint_text`·`autonomy` | T3 |
+| `app/schemas/session.py:69` | `SessionRestore.problems: list[dict]` | `list[Problem]` — 복구 시에도 동결 구조(단계 4·힌트 2)를 검증해야 한다 | T3 |
+| `app/schemas/analysis.py:225` · `session.py:60` · `report.py:113` | `ai_usage: list[dict[str, Any]]` | 타입 확정 | T3b (**C-3 회신 대기**) |
 
 ---
 
@@ -66,7 +53,7 @@
 **이슈 `Team-IZ/Backend#31` 본문이 항상 최신 상태다.** 사본: `../qna/2026-07-30/issue-body-v2.md`.
 2026-07-29 질문지(`../qna/2026-07-29/backend-schema-questions.md`)는 이력이며 대부분 해결됐다.
 
-남은 것은 **DDL 수정 3건 + 코드값 1건 + 답변 4건.** 신설 테이블·컬럼은 없다.
+남은 것은 **DDL 수정 3건 + 코드값 1건 + 답변 2건.** 신설 테이블·컬럼은 없다.
 
 **백엔드가 해줄 것**
 
@@ -91,14 +78,17 @@
 
 `stage_hint` 테이블·`problem_stage.question_text` 컬럼 신설 요청을 철회한 것이 결과적으로 맞았다 — B-3 하나로 동결분을 다 수용한다. **백엔드에 다시 보낼 것은 없다.** B-1·B-2·B-4도 그대로 필요하다.
 
-**답 대기 (4건)**
+**답 대기 (2건)**
 
 | # | 심각도 | 내용 | 우리 작업을 막나 |
 |---|---|---|---|
-| C-1 | 🔴 | `question_focus_item` 지칭 방식 — 요청에 `focusItems[]`를 실어 보내는 안 | 아니다. 그 안으로 진행하고 회신 오면 조정 |
-| C-2 | 🔴 | `score_run`·`axis_score` 유지 여부 | 아니다. **어느 쪽이든 AI 응답은 같다** |
 | C-3 | 🟢 | 단가는 Spring이 채우는가 | **막는다.** 세 컬럼이 NOT NULL인데 AI는 단가를 모른다 |
 | C-4 | 🟢 | `source_type` 값 목록 | 아니다. 형식(`{source_id}:{source_type}:{attempt_no}`)만 지키고 값은 나중에 맞춘다 |
+
+**회신 완료 (2026-07-30)**
+
+- **C-1 승인** — 요청에 `focusItems: [{id, name}]`를 싣고 AI가 `questionFocusItemId`로 하나를 돌려주는 방식. DDL 변경 없음. 백엔드가 `assessment_problem.question_focus_item_id`(VARCHAR(100))와 `question_focus_item.question_focus_item_id`(UUID)의 타입 불일치를 확인했다
+- **C-2 해소** — 07_ENG 시트는 갱신되지 않았고 06_MEAS와 겹치는 테이블(`score_run`·`axis_score`)은 **제거 예정**이다. 점수의 단일 소유자는 `problem_stage`이고 축 어휘도 `'L1'`~`'L4'` 한 벌만 남는다
 
 **나중에 여쭐 것** — `/reports`와 `report`·`report_generation_run` 정합 · 재시험 기록 위치 · **힌트용 `feature_code`(적응형 힌트 모듈이 붙는 시점에 다시 필요해진다. 지금 물을 것은 아니다)**.
 
@@ -120,7 +110,7 @@
 
 ---
 
-### T2 — 분석 요청·응답 재정렬
+### T2 ✅ — 분석 요청·응답 재정렬
 
 **대상**: `schemas/analysis.py`, `engines/stub.py`
 
@@ -160,7 +150,7 @@ requirement_results: list[dict]          # [{requirementId, verdict: "P"|"F", ev
   "lineStart": 12, "lineEnd": 14,
   "codeSnippet": "...",                // 신규. evidenceHash의 대상
   "evidenceHash": "...",
-  "extractorVersion": 1,
+  "extractorVersion": "v0",            // 문자열. 룰 버전을 붙일 수 있게
   "references": [ { "path": "...", "lineStart": 12, "lineEnd": 14,
                     "evidenceHash": "...", "referenceType": "CALLER" } ],
   "stages": [
@@ -190,7 +180,7 @@ requirement_results: list[dict]          # [{requirementId, verdict: "P"|"F", ev
 
 ---
 
-### T2b — 보고서 스키마 교정
+### T2b ✅ — 보고서 스키마 교정
 
 **대상**: `schemas/report.py`
 
@@ -324,7 +314,11 @@ GET  /api/v0/curricula/{jobId}  → {teaches: [{id, label, unitId, sourcePages}]
 ./.venv/Scripts/python.exe -c "from app.main import app; import json,io; io.open('openapi.json','w',encoding='utf-8').write(json.dumps(app.openapi(),ensure_ascii=False,indent=2))"
 ```
 
-커밋하고 백엔드·프론트에 전달한다. **T2~T4를 다 끝내고 한 번에 한다** — 중간에 여러 번 주면 백엔드가 헛작업한다. 이슈 #31의 완료 조건에 "AI가 `schemas/` 확정 후 `openapi.json` 갱신·공유"가 들어 있다.
+**1차 완료 (T2·T2b 반영분).** `/analyses`·`/reports` 계약이 스펙에 들어갔다. `Problem.stages`의 `minItems/maxItems: 4`, `ProblemStage.hints`의 `2`가 그대로 나가 백엔드가 동결 구조를 코드 없이 읽는다.
+
+**2차는 T3·T4를 끝내고 한 번에 한다.** 원래 "T2~T4를 다 끝내고 한 번"이었지만 1차를 당겼다 — T3(`/sessions`)·T4(`/curricula`)는 **다른 엔드포인트**라 이번 분을 다시 고치게 하지 않고, C-3에 막힌 T3b를 기다리면 확정된 계약까지 같이 묶이기 때문이다. 전달할 때 범위를 명시한다: **"분석·보고서 확정, 세션·교안은 추가 예정."**
+
+이슈 #31의 완료 조건에 "AI가 `schemas/` 확정 후 `openapi.json` 갱신·공유"가 들어 있다.
 
 ---
 
