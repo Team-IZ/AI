@@ -437,6 +437,11 @@ def refine_once(
     json_mode: bool = True,
     course_label: str = "Java",
 ) -> dict[str, Any]:
+    # D-refine-issue-type (2026-07-30): this audit-only function has no p01-3b
+    # equivalent (the manifest's auto-fix stage) -- issue_type/affected_unit_ids are
+    # recorded here for parity with docs/lab/prompt_manifest.json's p01-3, but nothing
+    # in this pipeline acts on them the way p01-runner.js routes actionable issue_types
+    # to p01-3b. See Readme.md's D-refine-issue-type entry for the full WHY/COST/EXIT.
     compact = json.dumps(unit_map, ensure_ascii=False)[:24000]
     prompt = f"""
 Audit this page-grounded {course_label} curriculum unit_map for refinement iteration {iteration}.
@@ -447,7 +452,7 @@ Return ONLY valid JSON:
   "status": "pass|needs_refine",
   "coverage_summary": "short summary",
   "issues": [
-    {{"severity": "high|medium|low", "issue": "specific issue", "source_pages": [1, 2], "suggested_fix": "fix"}}
+    {{"severity": "high|medium|low", "issue": "specific issue", "issue_type": "duplicate_exact|missing_pages|overbroad_unit|boundary_split_needed|coverage_gap_failed_chunk|other", "affected_unit_ids": ["01"], "source_pages": [1, 2], "suggested_fix": "fix"}}
   ],
   "checklist": {{
     "all_concepts_have_pages": true,
@@ -462,6 +467,14 @@ Checklist standard:
 - concepts without pages are a hard failure.
 - duplicate or overly broad concept nodes should be called out.
 - graph should support asking "where in the PDF does this concept come from?"
+
+issue_type guide:
+- duplicate_exact: near-identical concept/code_example/caution nodes that should be merged.
+- overbroad_unit / boundary_split_needed: a unit spans clearly distinct topics and should be split.
+- missing_pages: an existing item's page citation looks incomplete or wrong (do NOT use this to mean "invent more pages").
+- coverage_gap_failed_chunk: content is missing because a chunk failed to analyze, not something restructuring can fix.
+- other: anything not covered above.
+affected_unit_ids must list the real unit_id values (from unit_map's own keys) this issue concerns.
 
 unit_map:
 {compact}
@@ -522,7 +535,15 @@ def build_graph(unit_map: dict[str, Any], refine_audits: list[dict[str, Any]]) -
         for idx, issue in enumerate(audit.get("issues", []) or [], 1):
             iid = f"{aid}:issue:{idx}"
             pages = normalize_pages(issue.get("source_pages"))
-            add_node(iid, issue.get("issue") or iid, "refine_issue", severity=issue.get("severity"), source_pages=pages)
+            add_node(
+                iid,
+                issue.get("issue") or iid,
+                "refine_issue",
+                severity=issue.get("severity"),
+                source_pages=pages,
+                issue_type=issue.get("issue_type"),
+                affected_unit_ids=issue.get("affected_unit_ids") or [],
+            )
             add_link(aid, iid, "found_issue")
             for page in pages:
                 pid = f"page:{page}"
