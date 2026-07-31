@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>codemap 백엔드 팀 테스트</title>
+<!--
+  D1 (2026-07-31): 이 저장소(feature/code-importance-map)가 소유하는 유일한 정적 페이지.
+  다른 세 파이프라인(P01/P02·P03/P04-poc)은 프론트가 있는 PoC라 정적 UI를 이미 갖고
+  있지만, 이 브랜치는 FastAPI 백엔드만 있다 -- Cloudflare Worker+Container로 배포된
+  백엔드를 팀원이 코드 없이 URL만 넣고 눌러볼 수 있게 하는 것이 이 페이지의 유일한
+  목적이다(운영 도구 아님, 데모/스모크테스트 전용).
+    WHY: 실제 배포 URL(workers.dev)은 아직 확정 전(시크릿 미등록, 이 세션에서 배포는
+      생략됨) -- 그래서 base URL을 입력값으로 받는다. 배포되면 placeholder를 실제
+      URL로 바꾸기만 하면 된다.
+    COST: 백엔드가 안 떠 있으면 이 페이지는 그냥 fetch 실패만 보여준다 -- 그 자체가
+      "아직 배포 전"이라는 신호라 별도 안내문 없이 에러 메시지로 충분하다고 판단.
+-->
+<style>
+  :root {
+    --bg: #fafafa;
+    --panel: #ffffff;
+    --border: #e2e2e2;
+    --text: #1a1a1a;
+    --muted: #6b6b6b;
+    --accent: #2f6f4f;
+    --accent-ink: #ffffff;
+    --danger: #b3403a;
+    --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #17181a; --panel: #1f2023; --border: #33353a; --text: #eaeaea; --muted: #9a9a9a; --accent: #5ea583; --accent-ink: #0d130f; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1.25rem 4rem;
+    background: var(--bg); color: var(--text);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Pretendard, sans-serif;
+  }
+  main { max-width: 760px; margin: 0 auto; }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  .sub { color: var(--muted); margin: 0 0 1.5rem; font-size: .9rem; }
+  a { color: var(--accent); }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 1.25rem; margin-bottom: 1rem; }
+  label { display: block; font-size: .8rem; color: var(--muted); margin: .75rem 0 .25rem; }
+  label:first-child { margin-top: 0; }
+  input {
+    width: 100%; padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg); color: var(--text); font: inherit; font-family: var(--mono); font-size: .85rem;
+  }
+  .row { display: flex; gap: .75rem; }
+  .row > div { flex: 1; }
+  button {
+    margin-top: 1rem; padding: .6rem 1.1rem; border: none; border-radius: 6px;
+    background: var(--accent); color: var(--accent-ink); font-weight: 600; font-size: .9rem; cursor: pointer;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  #status { font-family: var(--mono); font-size: .85rem; white-space: pre-wrap; }
+  #status.err { color: var(--danger); }
+  .pill { display: inline-block; padding: .1rem .5rem; border-radius: 999px; font-size: .75rem; font-weight: 600; background: var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: .8rem; margin-top: .5rem; }
+  th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  pre.doc { white-space: pre-wrap; font-family: var(--mono); font-size: .82rem; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-x: auto; }
+  .mermaid { background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 1rem; overflow-x: auto; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>codemap 백엔드 팀 테스트</h1>
+  <p class="sub">app/engines/codemap -- Tier1/2 코드 중요도 선별 + 분석 문서 + 구조도(p05-4) 데모 호출기. <a href="../">← 파이프라인 허브</a></p>
+
+  <div class="panel">
+    <label for="baseUrl">백엔드 Base URL</label>
+    <input id="baseUrl" placeholder="https://team-iz-codemap-backend.<subdomain>.workers.dev" />
+
+    <label for="internalKey">X-Internal-Key</label>
+    <input id="internalKey" type="password" placeholder="wrangler secret put INTERNAL_API_KEY 로 등록한 값" />
+
+    <div class="row">
+      <div>
+        <label for="repoUrl">GitHub 저장소 URL (공개 repo만)</label>
+        <input id="repoUrl" placeholder="https://github.com/org/repo" />
+      </div>
+      <div>
+        <label for="branch">브랜치 (생략 시 기본)</label>
+        <input id="branch" placeholder="main" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="modelCode">모델 코드</label>
+        <input id="modelCode" value="z-ai/glm-5.2" />
+      </div>
+      <div>
+        <label for="questionBudget">question budget</label>
+        <input id="questionBudget" type="number" value="4" min="1" max="20" />
+      </div>
+    </div>
+
+    <button id="runBtn">분석 시작</button>
+  </div>
+
+  <div class="panel hidden" id="statusPanel">
+    <span class="pill" id="statusPill">-</span>
+    <div id="status"></div>
+  </div>
+
+  <div class="panel hidden" id="resultPanel">
+    <h2 style="font-size:1rem;margin:0 0 .5rem;">분석 문서</h2>
+    <div id="docBody"></div>
+    <h2 style="font-size:1rem;margin:1.25rem 0 .5rem;">AI 사용 내역</h2>
+    <table id="usageTable"><thead><tr><th>스테이지</th><th>모델</th><th>상태</th><th>토큰(in/out)</th></tr></thead><tbody></tbody></table>
+  </div>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.6/dist/mermaid.min.js"
+        integrity="sha384-qX9VvWkP79m/O121ZE6sOYp0nf/pldQgtvWDbkpzi+3mUo4Wn4Ix4cFzNPay3VaB"
+        crossorigin="anonymous"></script>
+<script>
+mermaid.initialize({ startOnLoad: false, theme: "neutral" });
+
+const $ = (id) => document.getElementById(id);
+const POLL_MS = 3000;
+const MAX_POLLS = 100; // ~5분
+
+function setStatus(text, isErr) {
+  const el = $("status");
+  el.textContent = text;
+  el.className = isErr ? "err" : "";
+  $("statusPanel").classList.remove("hidden");
+}
+
+function renderDoc(markdown) {
+  const fence = /```mermaid\n([\s\S]*?)```/;
+  const match = markdown.match(fence);
+  const container = $("docBody");
+  container.innerHTML = "";
+
+  if (!match) {
+    const pre = document.createElement("pre");
+    pre.className = "doc";
+    pre.textContent = markdown;
+    container.appendChild(pre);
+    return;
+  }
+
+  const before = markdown.slice(0, match.index);
+  const after = markdown.slice(match.index + match[0].length);
+  const mermaidSrc = match[1].trim();
+
+  const preBefore = document.createElement("pre");
+  preBefore.className = "doc";
+  preBefore.textContent = before.trim();
+  container.appendChild(preBefore);
+
+  const diagramDiv = document.createElement("div");
+  diagramDiv.className = "mermaid";
+  diagramDiv.textContent = mermaidSrc;
+  container.appendChild(diagramDiv);
+
+  const preAfter = document.createElement("pre");
+  preAfter.className = "doc";
+  preAfter.textContent = after.trim();
+  container.appendChild(preAfter);
+
+  mermaid.run({ nodes: [diagramDiv] }).catch((e) => {
+    diagramDiv.outerHTML = `<pre class="doc">(mermaid 렌더 실패: ${e.message})\n\n${mermaidSrc}</pre>`;
+  });
+}
+
+function renderUsage(aiUsage) {
+  const tbody = $("usageTable").querySelector("tbody");
+  tbody.innerHTML = "";
+  for (const u of aiUsage || []) {
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${u.sourceType ?? "-"}</td><td>${u.modelCode ?? "-"}</td><td>${u.status ?? "-"}</td><td>${u.inputTokens ?? "-"}/${u.outputTokens ?? "-"}</td>`;
+    tbody.appendChild(tr);
+  }
+}
+
+async function pollJob(baseUrl, internalKey, jobId) {
+  for (let i = 0; i < MAX_POLLS; i++) {
+    const res = await fetch(`${baseUrl}/api/v0/analyses/${jobId}`, {
+      headers: internalKey ? { "x-internal-key": internalKey } : {},
+    });
+    if (!res.ok) throw new Error(`GET /analyses/${jobId} -> HTTP ${res.status}`);
+    const body = await res.json();
+    $("statusPill").textContent = body.status;
+    setStatus(`job ${jobId} -- ${body.status}`);
+
+    if (["SUCCEEDED", "PARTIAL", "FAILED"].includes(body.status)) {
+      if (body.status === "FAILED") {
+        setStatus(`FAILED: ${body.failureReason ?? "(사유 없음)"}`, true);
+        return;
+      }
+      $("resultPanel").classList.remove("hidden");
+      renderDoc(body.result?.analysisDocumentMarkdown ?? "(빈 응답)");
+      renderUsage(body.aiUsage);
+      return;
+    }
+    await new Promise((r) => setTimeout(r, POLL_MS));
+  }
+  throw new Error("polling timeout (5분 초과) -- 컨테이너 콜드스타트가 오래 걸리는 중일 수 있음");
+}
+
+$("runBtn").addEventListener("click", async () => {
+  const baseUrl = $("baseUrl").value.trim().replace(/\/+$/, "");
+  const internalKey = $("internalKey").value.trim();
+  const repoUrl = $("repoUrl").value.trim();
+  const branch = $("branch").value.trim();
+  const modelCode = $("modelCode").value.trim();
+  const questionBudget = Number($("questionBudget").value) || 4;
+
+  if (!baseUrl || !repoUrl) {
+    setStatus("Base URL과 GitHub 저장소 URL은 필수입니다.", true);
+    return;
+  }
+
+  $("runBtn").disabled = true;
+  $("resultPanel").classList.add("hidden");
+  setStatus("요청 전송 중...");
+
+  try {
+    const res = await fetch(`${baseUrl}/api/v0/analyses`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(internalKey ? { "x-internal-key": internalKey } : {}),
+      },
+      body: JSON.stringify({
+        method: "GITHUB_URL",
+        source: { repoUrl, branch: branch || null },
+        modelCode: modelCode || undefined,
+        questionBudget,
+      }),
+    });
+    if (!res.ok) {
+      const errBody = await res.text();
+      throw new Error(`POST /analyses -> HTTP ${res.status}: ${errBody.slice(0, 300)}`);
+    }
+    const accepted = await res.json();
+    await pollJob(baseUrl, internalKey, accepted.jobId);
+  } catch (e) {
+    setStatus(`요청 실패: ${e.message}`, true);
+  } finally {
+    $("runBtn").disabled = false;
+  }
+});
+</script>
+</body>
+</html>
