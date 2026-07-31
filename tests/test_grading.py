@@ -5,7 +5,7 @@ from app.engines.analysis import grading, stages
 
 
 def _fake(monkeypatch, data):
-    def _call(stage_id, values, *, model_code, max_attempts=2):
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
         _call.values = values
         return stages.StageResult(data=data, usages=[{"status": "SUCCEEDED"}])
 

@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.engines.analysis import scoring, stages
+from app.llm import client
 
 
 @dataclass
@@ -56,7 +57,7 @@ def grade(axis_code: str, question: str, answer: str, *, model_code: str,
         "code_block": code_snippet or "(근거 코드 없음)",
         "code_ref": code_ref or "-",
         "answer": answer,
-    }, model_code=model_code)
+    }, model_code=model_code, timeout_s=client.SESSION_TIMEOUT_S)
 
     raw = result.data.get("score")
     try:

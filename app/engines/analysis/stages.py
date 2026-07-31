@@ -88,7 +88,7 @@ def parse_json(text: str) -> dict[str, Any]:
 
 
 def call(stage_id: str, values: dict[str, Any], *, model_code: str,
-         max_attempts: int = 2) -> StageResult:
+         max_attempts: int = 2, timeout_s: float | None = None) -> StageResult:
     """스테이지 하나 실행. 파싱 실패하면 한 번 더 시도한다.
 
     재시도하는 이유: temperature 0이어도 JSON이 깨져 나오는 경우가 실재한다
@@ -119,6 +119,7 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
                 max_tokens=budget,
                 temperature=params.get("temperature", 0.0),
                 response_format={"type": "json_object"},
+                timeout_s=timeout_s or client.DEFAULT_TIMEOUT_S,
             )
         except client.LlmError as exc:
             usages.append(exc.usage)

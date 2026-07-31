@@ -28,7 +28,7 @@ def _fake(monkeypatch, *responses):
     """호출마다 다음 응답을 돌려준다. 재생성 경로를 보기 위함."""
     calls = []
 
-    def _call(stage_id, values, *, model_code, max_attempts=2):
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
         calls.append(values)
         data = responses[min(len(calls) - 1, len(responses) - 1)]
         return stages.StageResult(data=data, usages=[{"status": "SUCCEEDED"}])

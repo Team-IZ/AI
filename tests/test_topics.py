@@ -18,7 +18,7 @@ def _topic(teach_id, title, symbol, file="app/auth.py"):
 def fake_stage(monkeypatch):
     """stages.call을 가짜로. 매니페스트·LLM 없이 검증 로직만 본다."""
     def _install(topic_list):
-        def _call(stage_id, values, *, model_code, max_attempts=2):
+        def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
             return stages.StageResult(data={"topics": topic_list}, usages=[{"status": "SUCCEEDED"}])
         monkeypatch.setattr(topics.stages, "call", _call)
     return _install
