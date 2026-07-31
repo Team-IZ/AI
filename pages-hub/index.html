@@ -8,6 +8,13 @@
   D-codemap1 (2026-07-31, .github/workflows/pages.yml): site 조립 시 이 파일 하나가
   그대로 site/index.html이 된다(cp, rsync 아님) -- /lab/ 아래가 아니라 사이트 루트에
   놓이는 유일한 파일. 어느 팀원 도구도 아니고 넷을 잇는 허브라서 /lab/**에 안 넣었다.
+
+  D-codemap2 (2026-07-31, 배포 직후 실사용자 클릭으로 발견): href를 "/lab/..."(절대
+  경로)로 처음 썼다가 전부 404 -- 이 사이트는 커스텀 도메인이 없는 project page라
+  https://team-iz.github.io/AI/ 서브패스에서 뜬다. "/lab/..."은 브라우저가 origin
+  루트(team-iz.github.io/lab/...)로 풀어버려서 /AI/ 세그먼트가 사라진다. 상대경로
+  "lab/..."(선행 슬래시 없음)로 고쳐야 이 페이지(site/index.html) 기준으로 풀린다.
+  pages.yml의 smoke-check에 href="/lab 재발 감지 assertion을 추가해뒀다.
 -->
 <style>
   :root { --bg:#fafafa; --panel:#fff; --border:#e2e2e2; --text:#1a1a1a; --muted:#6b6b6b; --accent:#2f6f4f; }
@@ -30,22 +37,22 @@
   <h1>Team-IZ AI 파이프라인</h1>
   <p class="sub">네 파이프라인 각각 자기 브랜치가 소유한 도구로 이어집니다.</p>
   <div class="grid">
-    <a class="card" href="/lab/curriculum-manager/">
+    <a class="card" href="lab/curriculum-manager/">
       <div class="tag">P01</div>
       <div class="name">교안 분석</div>
       <div class="desc">feat/pdf_analysis</div>
     </a>
-    <a class="card" href="/lab/code-qna/trainee/submission.html">
+    <a class="card" href="lab/code-qna/trainee/submission.html">
       <div class="tag">P02 · P03</div>
       <div class="name">코드 분석 &amp; 문답</div>
       <div class="desc">feat/code_Q&amp;A</div>
     </a>
-    <a class="card" href="/lab/poc/">
+    <a class="card" href="lab/poc/">
       <div class="tag">P04</div>
       <div class="name">교안→제출→코드분석→문답→보고서 통합 PoC</div>
       <div class="desc">feat/poc_full</div>
     </a>
-    <a class="card" href="/lab/codemap/">
+    <a class="card" href="lab/codemap/">
       <div class="tag">codemap</div>
       <div class="name">코드 중요도 선별 백엔드 팀 테스트</div>
       <div class="desc">feature/code-importance-map (병행 구현, P04 이식 대상 아님)</div>

@@ -227,6 +227,16 @@ jobs:
             echo "  FAIL site/lab/codemap/index.html doesn't look like the codemap test page"
             fail=1
           fi
+
+          # D-codemap2: this site has no custom domain, so it serves at /AI/, not root.
+          # An absolute href="/lab/..." on the hub resolves against the origin root and
+          # 404s in production even though it looks fine when the file is opened locally.
+          # Caught this the hard way (real user clicked every link, all four 404'd) --
+          # guard it here instead of trusting a local open() check again.
+          if grep -q 'href="/lab' site/index.html; then
+            echo "  FAIL site/index.html has an absolute /lab href -- breaks under the /AI/ subpath, use a relative href"
+            fail=1
+          fi
           exit $fail
 
       # D-poc1: feat/poc_full was branched from feat/code_Q&A and vendors its P02 scanner
