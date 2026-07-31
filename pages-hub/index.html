@@ -9,12 +9,14 @@
   그대로 site/index.html이 된다(cp, rsync 아님) -- /lab/ 아래가 아니라 사이트 루트에
   놓이는 유일한 파일. 어느 팀원 도구도 아니고 넷을 잇는 허브라서 /lab/**에 안 넣었다.
 
-  D-codemap2 (2026-07-31, 배포 직후 실사용자 클릭으로 발견): href를 "/lab/..."(절대
-  경로)로 처음 썼다가 전부 404 -- 이 사이트는 커스텀 도메인이 없는 project page라
-  https://team-iz.github.io/AI/ 서브패스에서 뜬다. "/lab/..."은 브라우저가 origin
-  루트(team-iz.github.io/lab/...)로 풀어버려서 /AI/ 세그먼트가 사라진다. 상대경로
-  "lab/..."(선행 슬래시 없음)로 고쳐야 이 페이지(site/index.html) 기준으로 풀린다.
-  pages.yml의 smoke-check에 href="/lab 재발 감지 assertion을 추가해뒀다.
+  D-codemap2 (2026-07-31, 배포 직후 실사용자 클릭으로 발견): 링크를 선행 슬래시가 붙은
+  절대경로(lab 앞에 슬래시)로 처음 썼다가 전부 404 -- 이 사이트는 커스텀 도메인이 없는
+  project page라 https://team-iz.github.io/AI/ 서브패스에서 뜬다. 선행 슬래시가 붙으면
+  브라우저가 origin 루트(team-iz.github.io 바로 아래)로 풀어버려서 /AI/ 세그먼트가
+  사라진다. 아래처럼 선행 슬래시 없는 상대경로여야 이 페이지(site/index.html) 기준으로
+  풀린다. pages.yml의 smoke-check에 이 패턴 재발 감지 assertion을 추가해뒀다(주의:
+  그 assertion이 찾는 리터럴 문자열을 이 주석에 그대로 적으면 주석 자체가 오탐을
+  유발한다 -- 실제로 한 번 겪음).
 -->
 <style>
   :root { --bg:#fafafa; --panel:#fff; --border:#e2e2e2; --text:#1a1a1a; --muted:#6b6b6b; --accent:#2f6f4f; }
