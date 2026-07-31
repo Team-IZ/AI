@@ -19,6 +19,29 @@ D1 (2026-07-31, crewai 제거): app.engines.shared.llm.chat()을 직접 호출�
     requirements-codemap.txt는 참고용으로 남겨둔다(git 이력에도 crewai 기반
     구현이 남아 있음).
 
+D13 (2026-07-31, 사용자 결정 "teaches/requirements가 랭킹 자체에 반영돼야 한다"):
+  이 스테이지가 curriculum_block(교안 개념 + 요구사항 원문)을 실제 프롬프트 입력으로
+  받는다. rank.py D13이 같은 결정의 Tier 1(결정론적 토큰 겹침) 절반이고, 이쪽이
+  의미 판단 절반이다.
+  WHY 여기가 의미 판단의 제자리인가: "이 파일이 '예외 처리' 교안과 관련 있는가"는
+    토큰 겹침으로는 원리적으로 못 푼다(try/catch에는 '예외'라는 문자열이 없다).
+    Tier 2는 이 파이프라인에서 유일하게 LLM을 부르는 지점이고, 이미 closed-vocabulary
+    검증(ground.py)이 자유 서술 유출을 막고 있어서 새 판단 축을 추가하는 비용이
+    가장 낮다.
+  WHY 지금까지 Tier 2가 별 값을 못 했는가(이 변경의 진짜 동기): 기존 프롬프트 입력
+    (candidates_block)은 path/rank/score/fan_in/entry_point뿐 -- 전부 Tier 1이 이미
+    계산해서 결론까지 낸 값이다. 모델에게 "다시 판단할 새 재료"가 하나도 없었고,
+    그래서 재랭킹은 사실상 Tier 1 점수를 되읽는 작업이었다. curriculum_block은
+    Tier 1이 원리적으로 다룰 수 없는 종류의 정보를 처음으로 넣는다.
+  COST: 프롬프트가 길어진다(truncation.curriculum_block=2000자로 상한). 교안/요구사항이
+    없는 요청에서는 빈 문자열이라 기존과 동일한 프롬프트가 나간다 -- optional_placeholder라
+    render()의 필수값 검사에도 걸리지 않는다.
+  EXIT: 재랭킹 품질이 오히려 나빠지면 codemap_rerank.yaml에서 이 블록을 빼고
+    manifest를 리빌드하면 끝이다(코드 변경 불필요 -- 값이 안 쓰이면 그만).
+  범위 밖(의도적): tier2_enabled 기본값은 이 변경에서 건드리지 않았다. 여전히
+    False이므로 이 스테이지 자체가 운영 기본 경로에서는 실행되지 않는다 --
+    docs/code-importance-map/OPEN_QUESTIONS.md의 D13 참고(저장소 소유자 결정 대기).
+
 D12(학생 코드는 읽기만, 절대 실행 안 함)는 이제 이 함수 하나로 지킨다: 프롬프트
   (candidates_block 등)에 필요한 내용을 이미 다 담아 보내므로 모델이 파일을 직접
   읽을 필요 자체가 없다 -- tools를 아예 안 보낸다(chat()의 tools 파라미터를
@@ -57,6 +80,7 @@ def run_rerank_crew(
     job_id: str,
     repo_summary_block: str = "",
     attribution_block: str = "",
+    curriculum_block: str = "",
     chat_fn: Callable[..., ChatResult] = chat,
 ) -> tuple[tuple[CrewClaim, ...], tuple[str, ...], list[AiUsage]]:
     """ 반환: (채택된 CrewClaim들, ground.py가 거부한 사유들, AiUsage 목록)
@@ -73,10 +97,12 @@ def run_rerank_crew(
     stage = load_stage("p05", "p05-1")
     cand_limit = stage.truncation.get("candidates_block", len(candidates_block))
     summary_limit = stage.truncation.get("repo_summary_block", len(repo_summary_block))
+    curriculum_limit = stage.truncation.get("curriculum_block", len(curriculum_block))
     values = {
         "candidates_block": candidates_block[:cand_limit],
         "repo_summary_block": repo_summary_block[:summary_limit],
         "attribution_block": attribution_block,
+        "curriculum_block": curriculum_block[:curriculum_limit] or "(교안/요구사항 없음)",
     }
     messages = render(stage, values)
     max_tokens = param_default(stage, "max_tokens") or 2000

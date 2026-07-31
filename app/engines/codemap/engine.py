@@ -59,12 +59,23 @@ class CodeMapAnalysisEngine:
     def __init__(
         self,
         *,
-        tier2_enabled: bool = False,
+        # D13(2026-07-31, 저장소 소유자 결정): teaches/requirements가 랭킹 자체에
+        # 반영되려면 Tier 2가 실제로 돌아야 한다(crew.py D13 -- curriculum_block은
+        # Tier 2 프롬프트에만 들어간다, Tier 1의 curriculum 신호는 OPEN_QUESTIONS.md
+        # D13 실측에 따라 weight=0.0으로 고정돼 있다). models.py::CodeMapConfig의
+        # 기본값과 반드시 같이 바꾼다(README OPEN_QUESTIONS.md D13: 한 곳만 바꾸면
+        # 호출 경로에 따라 동작이 갈린다).
+        #   COST: 제출물당 LLM 호출이 1건 늘어난다(D10의 "6콜" 계약과 충돌 -- 그
+        #   항목은 여전히 미결이며 이 변경으로 더 시급해졌다). 실패해도 D6 강등으로
+        #   Tier1 순위가 남으므로 job 자체는 안 죽는다.
+        #   EXIT: models.py 기본값과 이 기본값을 같이 False로 되돌린다.
+        tier2_enabled: bool = True,
         materializer: Materializer = default_materialize_repo,
         attribution: Mapping[str, AttributionSignal] | None = None,
         weights_path=None,
         analysis_doc_chat_fn=None,
         diagram_chat_fn=None,
+        crew_chat_fn=None,
     ) -> None:
         self._tier2_enabled = tier2_enabled
         self._materializer = materializer
@@ -72,6 +83,7 @@ class CodeMapAnalysisEngine:
         self._weights_path = weights_path
         self._analysis_doc_chat_fn = analysis_doc_chat_fn  # 테스트 주입 지점. None이면 실제 chat() 사용
         self._diagram_chat_fn = diagram_chat_fn  # 테스트 주입 지점(p05-4). None이면 실제 chat() 사용
+        self._crew_chat_fn = crew_chat_fn  # 테스트 주입 지점(Tier 2). None이면 실제 chat() 사용
 
     def analyze(self, request: dict[str, Any], zip_bytes: bytes | None = None) -> dict[str, Any]:
         """ 동기 def(코루틴 아님) -- BackgroundTasks가 스레드풀에서 돌리므로 이벤트
@@ -79,6 +91,7 @@ class CodeMapAnalysisEngine:
         settings = get_settings()
         job_id = request.get("submission_id") or request.get("attempt_id") or "unknown"
 
+        crew_kwargs = {"crew_chat_fn": self._crew_chat_fn} if self._crew_chat_fn is not None else {}
         with self._materializer(request, zip_bytes, settings.workspace_dir or None) as repo_dir:
             code_map = build_code_map_from_repo(
                 repo_dir,
@@ -86,6 +99,11 @@ class CodeMapAnalysisEngine:
                 attribution=self._attribution,
                 weights_path=self._weights_path,
                 job_id=job_id,
+                **crew_kwargs,
+                # D13: 요청의 교안/요구사항이 여기서 처음으로 "무엇을 쓸지"가 아니라
+                # "무엇을 고를지"에 들어간다(rank.py D13, crew.py D13).
+                teaches=request.get("teaches", []),
+                requirements=request.get("requirements", []),
             )
 
         applied_scope, scope_fallback, fallback_reason = self._resolve_scope(request)

@@ -1,15 +1,20 @@
 """ D2 순수성을 코드가 아니라 테스트로 증명한다
 
 "스테이트풀이든 스테이트리스든 채점 로직이 안 바뀐다"는 사용자의 요구는 곧
-"이 모듈들이 프로세스 경계를 넘어도 같은 답을 낸다"는 뜻이다. 아래 다섯 모듈은
-graph/rank/shortlist/weights/ground -- 파일시스템/네트워크/시계/전역상태에 의존하는
-import이 하나도 없어야 한다(collect.py/crew.py/__init__.py는 의도적으로 불순한
-edge라서 이 목록에 없다).
+"이 모듈들이 프로세스 경계를 넘어도 같은 답을 낸다"는 뜻이다. 아래 여섯 모듈은
+graph/rank/shortlist/weights/ground/curriculum -- 파일시스템/네트워크/시계/전역상태에
+의존하는 import이 하나도 없어야 한다(collect.py/crew.py/__init__.py는 의도적으로
+불순한 edge라서 이 목록에 없다).
+
+curriculum.py(D13)가 이 목록에 들어간 게 핵심이다: 교안/요구사항을 랭킹에 반영하는
+결정이 D2 순수성을 깨지 않았다는 주장은 이 테스트로 고정된다 -- 나중에 누군가
+"의미 매칭을 제대로 하려면 임베딩이 필요하다"며 네트워크/모델 로딩을 이 모듈에
+들이면 즉시 실패한다(그 방향의 제자리는 Tier 2다, crew.py D13).
 """
 import ast
 from pathlib import Path
 
-PURE_MODULES = ["graph.py", "rank.py", "shortlist.py", "weights.py", "ground.py"]
+PURE_MODULES = ["graph.py", "rank.py", "shortlist.py", "weights.py", "ground.py", "curriculum.py"]
 ALLOWED_TOP_LEVEL_IMPORTS = {
     "dataclasses", "typing", "math", "collections", "re", "json", "functools",
     "__future__",

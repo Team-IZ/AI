@@ -5,6 +5,22 @@ Tier 1이 이미 보여준 후보 목록(allowed_paths) 안에 있어야 하고,
 고정된 열거값 중 하나여야 한다. 이 셋 중 하나라도 어긋나면 그 항목 전체를
 버린다(rejected에 이유 코드로 남긴다) -- 모델의 자유 텍스트가 CodeMap까지
 도달하는 경로는 이 파일 어디에도 없다.
+
+D13 (2026-07-31): ALLOWED_REASON_CODES에 MATCHES_TEACH/MATCHES_REQUIREMENT 두
+  값을 추가한다 -- Tier 2가 curriculum_block(crew.py D13)을 받게 되면서, 모델이
+  "이 파일이 교안/요구사항과 관련 있어서 올린다"고 말할 자리가 필요해졌다.
+  WHY 열거값을 늘리는가(자유 텍스트가 아니라): 이유를 표현할 자리가 없으면 모델은
+    기존 5개 중 아무거나(대개 BUSINESS_LOGIC) 골라 붙인다 -- 그러면 사후에
+    "이 재랭킹이 교안 때문인지 로직 때문인지"를 구분할 수 없어 PR-3 실측에서
+    Tier 2의 기여를 분해할 수 없다. 열거값을 늘리는 건 closed-vocabulary 원칙의
+    예외가 아니라 그 원칙 안에서 어휘를 정의하는 정상 경로다.
+  COST: 어휘가 5개 -> 7개. 모델이 고를 수 있는 오답이 2개 늘어난다.
+  불변식(약화 금지): 검증 실패 시 **항목 전체를 버린다**는 규칙은 그대로다 --
+    reason_code만 모르는 값이라고 나머지 필드를 살려 쓰지 않는다. teach id나
+    requirement id를 claim에 담게 하지도 않는다: 그건 새 closed-vocabulary
+    (allowed_teach_ids)를 이 함수에 들여야 한다는 뜻이고, 그럴 필요가 생기면
+    analysis_doc.py::parse_analysis_doc_response()가 이미 쓰는 검증 방식을
+    그대로 가져오는 게 맞다(지금은 그 요구가 없어 안 만든다).
 """
 from __future__ import annotations
 
@@ -20,6 +36,7 @@ ALLOWED_ROLES = frozenset({
 ALLOWED_REASON_CODES = frozenset({
     "IMPORT_HUB", "BUSINESS_LOGIC", "RISK_SURFACE",
     "ENTRY_POINT_CONFIRMED", "REDUNDANT_WITH_HIGHER_RANK",
+    "MATCHES_TEACH", "MATCHES_REQUIREMENT",  # D13
 })
 
 

@@ -13,6 +13,7 @@
 | `graph.py` | 다국어 import 그래프(fan-in dedup) | 순수 |
 | `rank.py` | Tier 1 결정론적 랭커 | 순수 |
 | `weights.py` | `weights/codemap_weights.json` 파싱 | 순수(파일 읽기는 `__init__.py`가 함) |
+| `curriculum.py` | 교안(`teaches`)/요구사항(`requirements`) ↔ 코드 토큰 겹침(D13, 2026-07-31 신규). 하드코딩 어휘 없음 — 변별력은 제출물마다 df로 실측 | 순수 |
 | `shortlist.py` | 예산 안에서 rank 순서로 채우기 | 순수 |
 | `ground.py` | Tier 2 원시 응답의 closed-vocabulary 검증 | 순수 |
 | `crew.py` | Tier 2 재랭킹(2026-07-31부터 crewai 없이 `shared.llm.chat()` 직접 호출, D1) | **불순** -- 유일한 네트워크 지점 |
@@ -62,5 +63,6 @@ CI(`.github/workflows/ci.yml`)는 훅 설정과 무관하게 항상 강제한다
 
 ## 더 읽을 것
 
-- [OPEN_QUESTIONS.md](./OPEN_QUESTIONS.md) -- D8(호출 회계 단위), D10(README "6콜" 계약) 미결 상태
+- [OPEN_QUESTIONS.md](./OPEN_QUESTIONS.md) -- D8(호출 회계 단위), D10(README "6콜" 계약),
+  D13(교안/요구사항을 랭킹에 반영하는 두 경로 중 무엇을 켤지 -- `tier2_enabled` 기본값) 미결 상태
 - [PARALLEL_RUN_CHECKLIST.md](./PARALLEL_RUN_CHECKLIST.md) -- 기존 Worker 은퇴 조건(D5)

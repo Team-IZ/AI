@@ -82,3 +82,62 @@ def test_single_commit_repo_ranking_unaffected_by_all_unknown_attribution(tmp_pa
     with_unknown = build_code_map_from_repo(str(tmp_path), attribution=all_unknown)
 
     assert [r["path"] for r in without["ranked"]] == [r["path"] for r in with_unknown["ranked"]]
+
+
+# --- D13: 교안/요구사항이 랭킹 경로에 실제로 도달하는지 (조립부 전체 통과) ------
+
+def test_omitting_curriculum_is_identical_to_pre_d13_result(tmp_path):
+    """ 교안/요구사항을 안 주면 D13 이전과 결과가 완전히 같다.
+
+    조립부까지 포함해서 확인하는 이유: rank.py 단위 테스트는 curriculum=None을
+    직접 넘기지만, 실제 운영 요청은 teaches=[]를 넘긴다 -- 그 빈 리스트가
+    match_curriculum()에서 None으로 바뀌어 같은 기권 경로를 타는지가 진짜 계약이다.
+    """
+    _write(tmp_path, "main.py", "from app.util import helper\nhelper()\n")
+    _write(tmp_path, "app/util.py", "def helper():\n    return 1\n")
+
+    without = build_code_map_from_repo(str(tmp_path))
+    with_empty = build_code_map_from_repo(str(tmp_path), teaches=[], requirements=[])
+
+    assert without["ranked"] == with_empty["ranked"]  # rank_score까지 동일
+    assert without["curriculum"] is None
+    assert with_empty["curriculum"] is None
+
+
+def test_curriculum_diagnostics_are_recorded_even_though_weight_is_zero(tmp_path):
+    """ 운영 가중치가 0.0이라 순위는 안 바뀌지만, 무엇에 걸렸는지는 기록된다 --
+    PR-3 가중치 재보정이 쓸 원자료(rank.py D13의 "관측은 하되 판단엔 안 쓴다") """
+    _write(tmp_path, "main.py", "from app.util import helper\nhelper()\n")
+    _write(tmp_path, "app/util.py", "def helper():\n    return 1\n")
+    _write(tmp_path, "app/settlement.py", "def settlement_ledger():\n    return 1\n")
+
+    baseline = build_code_map_from_repo(str(tmp_path))
+    result = build_code_map_from_repo(
+        str(tmp_path),
+        teaches=[{"id": "t1", "label": "settlement ledger 정산"}],
+        requirements=[{"requirementId": "r1", "text": "정산 원장을 구현한다"}],
+    )
+
+    # 커밋된 codemap_weights.json의 curriculum=0.0 -> 순위는 그대로여야 한다
+    assert [r["path"] for r in baseline["ranked"]] == [r["path"] for r in result["ranked"]]
+
+    # 그러나 신호 자체는 계산돼 결과에 남는다
+    assert result["curriculum"] is not None
+    assert result["curriculum"]["matches"].get("app/settlement.py")
+    assert "settlement" in result["curriculum"]["matched_terms"]
+
+    settlement = next(r for r in result["ranked"] if r["path"] == "app/settlement.py")
+    assert settlement["signals"]["curriculum_raw"] >= 1.0
+    assert settlement["rank_evidence"]["weights"]["curriculum"] == 0.0
+
+
+def test_result_dict_is_json_serializable_with_curriculum(tmp_path):
+    """ __main__.py --json이 그대로 직렬화한다 -- 새 키가 그 경로를 깨지 않는지 """
+    import json
+
+    _write(tmp_path, "main.py", "def settlement_ledger():\n    return 1\n")
+    result = build_code_map_from_repo(
+        str(tmp_path), teaches=[{"id": "t1", "label": "settlement ledger 정산"}]
+    )
+    payload = {k: v for k, v in result.items() if k not in {"entries", "ai_usage"}}
+    assert json.loads(json.dumps(payload, ensure_ascii=False))["curriculum"]["item_count"] == 1

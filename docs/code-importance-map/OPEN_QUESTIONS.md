@@ -51,3 +51,87 @@ codemap 스테이지가 실제로 몇 콜을 쓰는지는 크루의 tool-loop �
 **결정 필요 시점:** codemap을 실제 파일럿(운영 세션)에 붙이기 전 --
 `PARALLEL_RUN_CHECKLIST.md`의 PR-3 실측 절차가 진행되면 실제 호출 수가
 자연히 나오므로, 그 데이터를 들고 이 논의를 다시 열 것.
+
+## D13 — teaches/requirements를 랭킹에 반영하는 두 경로 중 무엇을 기본값으로 켤지
+
+**상태: 결정됨(2026-07-31) — 옵션 1(`tier2_enabled` 기본값 `True`) 채택.**
+`app/engines/codemap/models.py::CodeMapConfig`와
+`app/engines/codemap/engine.py::CodeMapAnalysisEngine.__init__` 두 곳 다
+`tier2_enabled: bool = True`로 반영, 329개 테스트 전부 통과 확인(신규 `crew_chat_fn`
+주입 지점 추가 + 기존 engine 테스트 12곳에 페이크 재랭킹 응답 주입).
+아래 배경/실측/트레이드오프 기록은 그대로 남긴다 — 결정 재검토 시 근거가 필요하다.
+
+**아직 남은 것(이 항목 밖, D10 문서 시급성만 올라감)**: 제출물당 LLM 호출이
+실제로 1건 늘었으므로, D10("6콜" 계약)의 용량 계산이 이제 진짜로 안 맞는다 --
+PR-3 실측(방금 로깅 붙임, `app/jobs.py`)이 쌓이면 그 데이터로 D10을 다시 열 것.
+
+배경: "교안(`teaches`)과 요구사항(`requirements`)이 랭킹 **자체**에 반영돼야
+한다"는 결정(소유자 지시). 그 전까지 교안은 `analysis_doc.py`(p05-3)에서
+**이미 뽑힌** 파일에 대해 무엇을 쓸지만 정했고, 무엇을 뽑을지에는 전혀 관여하지
+않았다. `requirements`는 어느 스테이지도 안 쓰고 있었다
+(`engine.py::_build_requirement_results()`는 지금도 순수 스텁이다 — 이 항목의
+범위 밖).
+
+구현된 것(양쪽 다 코드·테스트 완료, 기본값만 꺼져 있음):
+
+1. **Tier 1 결정론적 신호** — `curriculum.py`(신규 순수 모듈) + `rank.py`의
+   6번째 신호. 교안 문구/요구사항 문구와 파일 토큰의 겹침을 센다. LLM 호출
+   없음, D2 순수성 유지(`test_codemap_purity.py`의 `PURE_MODULES`에 추가됨).
+   현재 가중치 `codemap_weights.json: curriculum = 0.0` → **순위를 안 움직인다**.
+2. **Tier 2 의미 판단** — `crew.py`가 `curriculum_block`(교안/요구사항 원문)을
+   실제 프롬프트 입력으로 받고, `ground.py`의 closed vocabulary에
+   `MATCHES_TEACH`/`MATCHES_REQUIREMENT`가 추가됐다. 현재
+   `models.py:109`/`engine.py`의 `tier2_enabled = False` → **스테이지 자체가 안 돈다**.
+
+**따라서 지금 이 순간 운영 기본 경로에서는 교안/요구사항이 여전히 순위를
+바꾸지 않는다.** 둘 중 하나를 켜는 게 이 항목의 결정이다.
+
+### 왜 Tier 1 가중치를 임의로 안 올렸나 (실측)
+
+이 저장소 `app/` 49개 파일로 측정(2026-07-31, 교안만·요구사항 없음):
+
+| 교안 시나리오 | 발화율 | 상위10 변동(w=0.25 / 0.5 / 1.0) |
+|---|---|---|
+| specific(실제 관련 개념) | 34.7% | 0 / 2 / 3 |
+| generic(일부러 무의미하게: "function and class definition" 등) | 20.4% | 1 / 1 / 4 |
+| nonsense(코드와 무관: 제빵/커피) | **기권(0%)** | — |
+
+읽는 법: 게이트 자체는 작동한다(무관한 교안은 기권한다). 그러나 **무의미한
+교안도 파일의 20.4%에서 발화하고 `w=1.0`이면 상위 10위 중 4자리를 뒤바꾼다** —
+이 신호는 "의미 있는 교안"과 "무의미한 교안"을 구분하지 못한다. 그 상태로
+순위를 움직이면 `feat/poc_full`의 Tier B(고정 키워드 위험 트리거 스캔)가
+폐기된 것과 같은 실패다. 그래서 값을 추측해 넣는 대신 0.0으로 두고, 신호는
+계속 계산·기록만 한다(`build_code_map_from_repo()` 반환의 `curriculum` 블록 —
+PR-3에서 이 값을 모으는 것이 곧 가중치 재보정의 원자료다).
+
+### 검토할 세 방향 (어느 쪽도 아직 채택 안 함)
+
+1. **`tier2_enabled` 기본값을 `True`로 (권장).** 소유자 결정을 실제로 실현하는
+   방향이고, "얕은 패턴 매칭보다 top-down LLM 판단"이라는 이 프로젝트의 일관된
+   선호와도 맞는다. 단점이자 이게 별도 결정인 이유: **이미 배포돼 있고
+   `tier2_enabled=False` 상태로 테스트된 시스템의 운영 동작을 바꾸는 일**이다.
+   제출물당 LLM 호출이 1건 늘고(D10의 "6콜" 계약과 직접 충돌 — 위 항목 참고),
+   `HANDOFF.md` §5의 모델 무응답 실측을 감안하면 지연도 늘어난다(실패 자체는
+   D6 강등으로 안전하다 — job은 안 죽고 Tier 1 순위가 남는다).
+2. **`codemap_weights.json`의 `curriculum`을 0보다 크게.** LLM 호출·지연이 전혀
+   안 늘고 결정론성도 유지된다. 단점: 위 표가 보여주듯 근거가 없다.
+   그래도 지금 켜야 한다면 실측 감도상 `0.25`가 상한이다(상위 10위 변동 0~2자리).
+   `1.0`(다른 다섯 신호와 동일 가중)은 이 데이터에서 명확히 과하다.
+3. **둘 다 켜지 않고 PR-3까지 대기.** 관측만 계속 쌓고(가중치 0에서도 기록됨)
+   라벨 데이터가 생긴 뒤 1·2를 데이터로 정한다. 단점: 그때까지 소유자 결정이
+   운영에 반영되지 않는다.
+
+**결정 필요 시점:** 다음 파일럿 실행 전. 1을 고르면 `models.py::CodeMapConfig`와
+`engine.py::CodeMapAnalysisEngine.__init__`의 기본값 **두 곳을 같이** 바꿔야
+한다(한 곳만 바꾸면 호출 경로에 따라 동작이 갈린다).
+
+### 이 항목에서 일부러 안 한 것
+
+- `tier2_enabled` 기본값을 말없이 뒤집기 — 배포된 시스템의 운영 동작 변경이라
+  별도 승인 사안으로 남겼다.
+- `CrewClaim`에 teach id/requirement id 담기 — 새 closed vocabulary
+  (`allowed_teach_ids`)를 `ground.py`에 들여야 하는 별개의 확장이다. 필요해지면
+  `analysis_doc.py::parse_analysis_doc_response()`가 이미 쓰는 방식을 그대로
+  가져오는 게 맞다(`ground.py` D13 참고).
+- `_build_requirement_results()` 스텁 채우기 — 요구사항 P/F 판정은 별도
+  스테이지라는 기존 결정을 이 변경이 바꾸지 않는다.

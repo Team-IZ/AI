@@ -4,7 +4,8 @@
     "entry_point": 1.0,
     "path_depth": 1.0,
     "size": 1.0,
-    "own_commit": 1.0
+    "own_commit": 1.0,
+    "curriculum": 0.0
   },
-  "provenance": "provisional-equal -- unmeasured, no labeler data yet (D6/D194와 같은 패턴: rank.py의 로직과 이 수치를 분리해 재보정을 파일 교체 하나로 끝낸다, git revert가 롤백 경로)"
+  "provenance": "fan_in/entry_point/path_depth/size/own_commit = provisional-equal -- unmeasured, no labeler data yet (D6/D194와 같은 패턴: rank.py의 로직과 이 수치를 분리해 재보정을 파일 교체 하나로 끝낸다, git revert가 롤백 경로). curriculum = 0.0 measured-off (D13, 2026-07-31): 다른 다섯과 달리 '측정 전 잠정 동일값'이 아니라 실측 결과에 따른 명시적 OFF다 -- 이 저장소 app/ 49파일 실측에서 일부러 무의미하게 만든 교안('function and class definition' 등)이 파일의 20.4%에서 발화하고 curriculum=1.0일 때 상위 10위 중 4자리를 뒤바꿨다. 즉 이 신호는 '의미 있는 교안'과 '무의미한 교안'을 구분하지 못한다(무관한 교안은 기권하므로 게이트 자체는 작동). 그 상태로 순위를 움직이면 poc_full의 Tier B(고정 키워드 위험 트리거)가 폐기된 것과 같은 실패가 된다. 켤 때의 실측 감도(app/ 49파일 상위10 churn): w=0.1 -> 0~1자리, w=0.25 -> 0~2자리, w=0.5 -> 1~3자리, w=1.0 -> 2~5자리. 재보정 조건: PARALLEL_RUN_CHECKLIST.md의 PR-3 실측으로 라벨 데이터가 생기면 그 데이터로 값을 정한다(OPEN_QUESTIONS.md D13)."
 }

@@ -89,6 +89,41 @@ def test_free_prose_never_reaches_output():
     assert "definitely the most important" not in joined
 
 
+def test_accepts_curriculum_reason_codes():
+    """ D13: 교안/요구사항 때문에 올린다는 주장을 표현할 자리가 열거값에 있다 """
+    for code in ("MATCHES_TEACH", "MATCHES_REQUIREMENT"):
+        raw = {"changes": [{"path": "src/main.py", "role": "DOMAIN_LOGIC", "delta_rank": 2, "reason_code": code}]}
+        claims, rejected = parse_rerank(raw, ALLOWED_PATHS)
+        assert len(claims) == 1, code
+        assert claims[0].reason_code == code
+        assert rejected == ()
+
+
+def test_curriculum_reason_code_does_not_relax_whole_claim_discard():
+    """ D13이 열거값을 늘렸다고 '한 필드만 틀리면 나머지는 살린다'로 바뀌지 않는다 --
+    reason_code가 맞아도 role이 틀리면 항목 전체가 버려진다(하우스 룰 유지) """
+    raw = {"changes": [{
+        "path": "src/main.py", "role": "MOST_IMPORTANT_FILE",
+        "delta_rank": 3, "reason_code": "MATCHES_TEACH",
+    }]}
+    claims, rejected = parse_rerank(raw, ALLOWED_PATHS)
+    assert claims == ()
+    assert any("UNKNOWN_ROLE" in r for r in rejected)
+
+
+def test_teach_id_shaped_reason_code_is_still_rejected():
+    """ 모델이 열거값 대신 교안 id/문구를 reason_code에 넣으면 그대로 버려진다 --
+    새 어휘를 추가한 것이지 자유 텍스트를 허용한 게 아니다 """
+    raw = {"changes": [{
+        "path": "src/main.py", "role": "DOMAIN_LOGIC", "delta_rank": 1,
+        "reason_code": "MATCHES_TEACH:t-42 (예외 처리 교안과 직접 대응)",
+    }]}
+    claims, rejected = parse_rerank(raw, ALLOWED_PATHS)
+    assert claims == ()
+    assert any("UNKNOWN_REASON_CODE" in r for r in rejected)
+    assert "예외 처리" not in " ".join(rejected)  # 원문은 어디에도 안 남는다
+
+
 def test_clamps_delta_rank_to_max_shift():
     from app.engines.codemap.models import CrewClaim
 

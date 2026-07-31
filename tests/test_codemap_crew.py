@@ -151,6 +151,76 @@ def test_truncates_candidates_block_per_stage_truncation_config():
     assert huge_block not in captured["user"]
 
 
+def test_curriculum_block_reaches_the_prompt():
+    """ D13: 교안/요구사항이 실제로 Tier 2 프롬프트에 들어간다 -- 이 스테이지가
+    "Tier 1이 이미 계산한 값만 되풀이해서 보여준다"는 상태를 벗어난 지점이다 """
+    captured = {}
+
+    def chat_fn(*, messages, **kwargs):
+        captured["user"] = messages[1]["content"]
+        return ChatResult(content='{"changes": []}', finish_reason="stop", input_tokens=1, output_tokens=1, cached_tokens=0)
+
+    run_rerank_crew(
+        candidates_block="- src/main.py (rank=1)", allowed_paths=ALLOWED, model_code="m",
+        budget=BUDGET, job_id="job-1", chat_fn=chat_fn,
+        curriculum_block="### 교안 개념(teaches)\n- id=t1 unit=u1: 예외 처리와 트랜잭션 경계",
+    )
+    assert "예외 처리와 트랜잭션 경계" in captured["user"]
+
+
+def test_missing_curriculum_block_renders_explicit_placeholder():
+    """ 교안이 없는 요청도 정상 동작한다 -- optional_placeholder라 render()의
+    필수값 검사에 안 걸리고, 빈칸 대신 명시 문구가 들어가 모델이 "누락"과
+    "해당 없음"을 헷갈리지 않는다 """
+    captured = {}
+
+    def chat_fn(*, messages, **kwargs):
+        captured["user"] = messages[1]["content"]
+        return ChatResult(content='{"changes": []}', finish_reason="stop", input_tokens=1, output_tokens=1, cached_tokens=0)
+
+    run_rerank_crew(
+        candidates_block="- src/main.py (rank=1)", allowed_paths=ALLOWED, model_code="m",
+        budget=BUDGET, job_id="job-1", chat_fn=chat_fn,
+    )
+    assert "(교안/요구사항 없음)" in captured["user"]
+    assert "{curriculum_block}" not in captured["user"]  # 치환 안 된 채로 새어나가지 않는다
+
+
+def test_truncates_curriculum_block_per_stage_truncation_config():
+    """ p05-1 truncation.curriculum_block(2000)을 실제로 지키는지 -- 교안이 많은
+    과제에서 프롬프트가 무제한으로 늘어나지 않게 하는 유일한 상한 """
+    captured = {}
+
+    def chat_fn(*, messages, **kwargs):
+        captured["user"] = messages[1]["content"]
+        return ChatResult(content='{"changes": []}', finish_reason="stop", input_tokens=1, output_tokens=1, cached_tokens=0)
+
+    huge = "교" * 5_000
+    run_rerank_crew(
+        candidates_block="- src/main.py (rank=1)", allowed_paths=ALLOWED, model_code="m",
+        budget=BUDGET, job_id="job-1", chat_fn=chat_fn, curriculum_block=huge,
+    )
+    assert huge[:2000] in captured["user"]
+    assert huge not in captured["user"]
+
+
+def test_curriculum_reason_code_survives_the_full_stage():
+    """ 프롬프트 -> 응답 -> ground 검증까지 D13 어휘가 실제로 통과한다 """
+    json_text = (
+        '{"changes": [{"path": "src/util.py", "role": "DOMAIN_LOGIC", '
+        '"delta_rank": 2, "reason_code": "MATCHES_TEACH"}]}'
+    )
+    claims, rejected, ai_usage = run_rerank_crew(
+        candidates_block="- src/util.py (rank=2)", allowed_paths=ALLOWED, model_code="m",
+        budget=BUDGET, job_id="job-1", chat_fn=_fake_chat(json_text),
+        curriculum_block="- id=t1: 트랜잭션 경계",
+    )
+    assert len(claims) == 1
+    assert claims[0].reason_code == "MATCHES_TEACH"
+    assert rejected == ()
+    assert ai_usage[0].status == "SUCCEEDED"
+
+
 def test_uses_budget_feature_code_and_source_type_in_ai_usage():
     claims, rejected, ai_usage = run_rerank_crew(
         candidates_block="[x]", allowed_paths=ALLOWED, model_code="m",

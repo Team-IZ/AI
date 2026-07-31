@@ -19,6 +19,10 @@ from app.engines.codemap.models import Weights
 
 DEFAULT_WEIGHTS = Weights(
     fan_in=1.0, entry_point=1.0, path_depth=1.0, size=1.0, own_commit=1.0,
+    # D13: curriculum만 0.0 -- 나머지 다섯의 1.0은 "측정 전 잠정 동일값"이지만 이건
+    # 실측 결과에 따른 명시적 OFF다(codemap_weights.json의 provenance에 근거 전문).
+    # 파일을 못 읽는 상황이라고 검증 안 된 신호가 켜지면 안 된다(폴백은 항상 보수적으로).
+    curriculum=0.0,
     provenance="module-constant-fallback (codemap_weights.json 읽기 실패시)",
 )
 
@@ -39,5 +43,6 @@ def parse_weights(json_text: str | None) -> Weights:
         path_depth=w.get("path_depth", DEFAULT_WEIGHTS.path_depth),
         size=w.get("size", DEFAULT_WEIGHTS.size),
         own_commit=w.get("own_commit", DEFAULT_WEIGHTS.own_commit),
+        curriculum=w.get("curriculum", DEFAULT_WEIGHTS.curriculum),
         provenance=data.get("provenance", "unspecified"),
     )
