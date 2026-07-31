@@ -1,0 +1,16 @@
+{
+  "name": "team-iz-codemap-backend",
+  "private": true,
+  "type": "module",
+  "description": "Cloudflare Worker+Container 배포 설정. 이 저장소의 실제 서비스는 Python(app/)이고, 이 package.json은 wrangler deploy에만 쓰인다.",
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "containers:list": "wrangler containers list"
+  },
+  "dependencies": {
+    "@cloudflare/containers": "0.3.7"
+  },
+  "devDependencies": {
+    "wrangler": "4.116.0"
+  }
+}

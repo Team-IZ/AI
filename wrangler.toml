@@ -1,0 +1,35 @@
+# D1 (2026-07-31): Cloudflare Worker + Container로 이 FastAPI 서비스를 상시 배포한다.
+# 다른 3개 파이프라인(feat/pdf_analysis 등)의 "Worker가 서버 로직을 돌린다" 패턴과
+# 자리는 같지만, 저쪽은 Worker가 직접 NVIDIA를 부르고 여기는 Worker가 요청을
+# Container(우리 FastAPI 전체)로 그대로 전달한다 -- WHY/COST/EXIT는 Dockerfile 참고.
+name = "team-iz-codemap-backend"
+main = "deploy/worker/index.js"
+compatibility_date = "2026-07-31"
+
+# D5 (2026-07-31): 이 홈 디렉터리 상위 어딘가에 이 프로젝트와 무관한 Yarn PnP
+# 매니페스트(~/.pnp.cjs, 이번 세션과 무관한 다른 프로젝트의 잔재)가 있어서, esbuild
+# 번들러가 그걸 발견하고 우리 로컬 node_modules 대신 그 PnP 규칙으로 해석하려 든다
+# (에러: "Yarn Plug'n'Play manifest forbids importing ..."). alias로 실제 설치
+# 위치를 명시해 그 오판단을 우회한다 -- ~/.pnp.cjs 자체는 이 프로젝트 소유가 아니므로
+# 건드리지 않는다.
+[alias]
+"@cloudflare/containers" = "./node_modules/@cloudflare/containers/dist/index.js"
+
+[[containers]]
+class_name = "CodemapContainer"
+image = "./Dockerfile"
+# D6 (2026-07-31, 갱신): basic(1/4 vCPU, 1GiB 메모리, 4GB 디스크) -- crewai가 코드
+# 자체에서 제거돼(app/engines/codemap/crew.py D1) Tier 2를 켜도 이미지가 커지지
+# 않는다. fastapi/httpx/pydantic 정도의 가벼운 의존성만 있다.
+# EXIT: requirements-codemap.txt(참고용 보관)가 다시 필요해지면 standard-2(6GiB)
+# 이상으로 올릴 것.
+instance_type = "basic"
+max_instances = 3
+
+[[durable_objects.bindings]]
+class_name = "CodemapContainer"
+name = "CODEMAP_CONTAINER"
+
+[[migrations]]
+new_sqlite_classes = ["CodemapContainer"]
+tag = "v1"

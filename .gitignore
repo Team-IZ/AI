@@ -57,6 +57,12 @@ Thumbs.db
 .vscode/
 .idea/
 
+# Cloudflare Worker+Container 배포 (D1, 2026-07-31)
+# package-lock.json은 재현성을 위해 커밋한다(gitignore 대상 아님) -- 팀원 누구든
+# `npm ci`로 같은 wrangler/containers 버전을 받게 하기 위함.
+node_modules/
+.wrangler/
+
 # Claude Code
 .claude/
 CLAUDE.md
