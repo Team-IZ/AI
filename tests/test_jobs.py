@@ -1,6 +1,8 @@
 """ 6단계 job 수명주기 테스트. HTTP 없이 jobs.py 함수를 직접 검증한다. """
+import json
 from typing import Any
 
+import app.jobs as jobs_mod
 from app.engines.stub import StubAnalysisEngine
 from app.jobs import create_job, get_job, run_analysis
 from app.schemas.analysis import AnalysisRequest
@@ -50,3 +52,85 @@ def test_run_analysis_failed_on_engine_error():
     assert job.status == "FAILED"
     assert job.failure_reason == "boom"
     assert job.result is None
+
+
+def test_measurement_logged_to_stdout_on_success(capsys):
+    """ D-pr3: 터미널 전이(SUCCEEDED)마다 stdout에 측정 한 줄이 남는다 -- 컨테이너에서도
+    항상 동작하는 경로가 이것 하나뿐이므로 stub 경로에서도 반드시 확인한다. """
+    job = create_job(BODY, idempotency_key=None)
+    run_analysis(job.job_id, BODY, StubAnalysisEngine(), zip_bytes=None)
+
+    out = capsys.readouterr().out
+    line = next(l for l in out.splitlines() if l.startswith("[pr3-measurement] "))
+    record = json.loads(line[len("[pr3-measurement] "):])
+    assert record["job_id"] == job.job_id
+    assert record["status"] == "SUCCEEDED"
+    assert record["started_at"] is not None
+    assert record["completed_at"] is not None
+    assert record["failure_reason"] is None
+
+
+def test_measurement_logged_to_stdout_on_failure(capsys):
+    """ FAILED로 끝나도(엔진 예외) 측정은 남고 failure_reason이 채워진다. """
+
+    class BoomEngine:
+        def analyze(self, request: dict[str, Any], zip_bytes: bytes | None = None) -> dict[str, Any]:
+            raise RuntimeError("boom")
+
+    job = create_job(BODY, idempotency_key=None)
+    run_analysis(job.job_id, BODY, BoomEngine(), zip_bytes=None)
+
+    out = capsys.readouterr().out
+    line = next(l for l in out.splitlines() if l.startswith("[pr3-measurement] "))
+    record = json.loads(line[len("[pr3-measurement] "):])
+    assert record["status"] == "FAILED"
+    assert record["failure_reason"] == "boom"
+
+
+def test_measurement_writes_local_jsonl_file(tmp_path):
+    """ docs/가 실제로 존재하는(로컬 개발) 환경에서는 파일에도 한 줄 쌓인다.
+    _MEASUREMENTS_DIR는 conftest.py의 autouse fixture가 이미 tmp_path로 격리해둔다. """
+    job = create_job(BODY, idempotency_key=None)
+    run_analysis(job.job_id, BODY, StubAnalysisEngine(), zip_bytes=None)
+
+    files = list((tmp_path / "measurements").glob("*.jsonl"))
+    assert len(files) == 1
+    lines = files[0].read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    assert json.loads(lines[0])["job_id"] == job.job_id
+
+
+def test_measurement_failure_never_breaks_job_result(monkeypatch):
+    """ D6과 같은 원칙, 벨트-앤-브레이스: _log_measurement 자신의 내부 안전장치가
+    (가정상) 뚫려도 run_analysis의 finally에 있는 두번째 방어가 job 결과를 지킨다.
+    이 테스트는 _log_measurement 내부 안전장치를 일부러 우회해서 그 두번째 방어를
+    검증한다(내부 안전장치 자체는 test_log_measurement_swallows_write_errors가 검증). """
+
+    def _boom_log(_job):
+        raise OSError("disk full, pretend")
+
+    monkeypatch.setattr(jobs_mod, "_log_measurement", _boom_log)
+
+    job = create_job(BODY, idempotency_key=None)
+    run_analysis(job.job_id, BODY, StubAnalysisEngine(), zip_bytes=None)  # 예외 안 나야 함
+
+    assert job.status == "SUCCEEDED"
+    assert job.result is not None
+
+
+def test_log_measurement_swallows_write_errors(monkeypatch, capsys):
+    """ 실제 안전장치 자체를 검증 -- 로컬 파일 쓰기가 뭘 던지든 _log_measurement는
+    예외를 밖으로 절대 안 던진다(stdout 경로는 별개로 계속 동작). """
+    from app.schemas.analysis import AnalysisJobStatus
+
+    class ExplodingPath:
+        def mkdir(self, *a, **kw):
+            raise OSError("permission denied, pretend")
+
+    monkeypatch.setattr(jobs_mod, "_MEASUREMENTS_DIR", ExplodingPath())
+
+    job = AnalysisJobStatus(job_id="x", status="SUCCEEDED")
+    jobs_mod._log_measurement(job)  # 예외 안 나면 통과
+
+    out = capsys.readouterr().out
+    assert "[pr3-measurement]" in out
