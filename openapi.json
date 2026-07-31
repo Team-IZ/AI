@@ -1953,7 +1953,10 @@
               "$ref": "#/components/schemas/StageScore"
             },
             "type": "array",
-            "title": "Stages"
+            "maxItems": 4,
+            "minItems": 4,
+            "title": "Stages",
+            "description": "항상 4개. 도달 못 한 단계도 attemptCount=0으로 채워 보낸다"
           }
         },
         "type": "object",

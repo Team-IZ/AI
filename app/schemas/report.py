@@ -5,9 +5,9 @@
 보고서 생성(LLM + 교안 참조 조회)뿐이라 리소스 이름을 그것에 맞췄다.
 """
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from app.schemas.common import BaseSchema
 from app.schemas.usage import AiUsage
@@ -69,7 +69,24 @@ class ProblemResult(BaseSchema):
     problem_id: str
     total_score: int = Field(ge=0, description="stages의 confirmedScore 합")
     max_score: int = Field(ge=0, description="4단계 × 5점 = 20")
-    stages: list[StageScore]
+    stages: list[StageScore] = Field(
+        min_length=4, max_length=4,
+        description="항상 4개. 도달 못 한 단계도 attemptCount=0으로 채워 보낸다",
+    )
+
+    @model_validator(mode="after")
+    def _check_stages(self) -> "ProblemResult":
+        """L1→L4 순서로 정확히 한 벌인지 검사.
+
+        DB problem_stage가 문제당 4행으로 미리 만들어져 있다. 도달 못 한 단계를
+        빼고 보내면 Spring이 어느 행을 채울지 몰라 순서로 짐작하게 되고,
+        그때 L3 점수가 L4 행에 들어간다 — 에러 없이 점수만 틀린다.
+        """
+        axes = [s.axis_code for s in self.stages]
+        expected = list(get_args(AxisCode))
+        if axes != expected:
+            raise ValueError(f"stages의 axisCode는 {expected} 순서여야 합니다: {axes}")
+        return self
 
 
 class ReportVersions(BaseSchema):

@@ -104,3 +104,14 @@ def test_unknown_report_job_returns_404():
     assert r.status_code == 404
     assert r.json()["error"] == "JOB_NOT_FOUND"
     assert r.json()["retryable"] is False
+
+def test_report_stages_must_be_four_in_order():
+    """도달 못 한 단계를 빼고 보내면 막는다 — Spring이 어느 problem_stage 행인지 못 찾는다."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.report import ProblemResult
+
+    only_l1 = [{"axisCode": "L1", "attemptCount": 3, "passed": False, "hintsUsed": 2}]
+    with pytest.raises(ValidationError):
+        ProblemResult(problemNo=1, problemId="p-1", totalScore=2, maxScore=20, stages=only_l1)
