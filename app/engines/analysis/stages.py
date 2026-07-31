@@ -122,12 +122,21 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
             )
         except client.LlmError as exc:
             usages.append(exc.usage)
+            failure = exc.usage.get("failure_code")
+
             # 예산이 모자라 잘린 것이면 늘려서 한 번 더. 모델마다 배수를 실측하지 않고도
             # 스스로 맞춰가게 하는 장치다(client.REASONING_TOKEN_MULTIPLIER 주석 참고).
-            if (exc.usage.get("failure_code") == "CONTEXT_OVERFLOW"
-                    and attempt < max_attempts and budget):
+            if failure == "CONTEXT_OVERFLOW" and attempt < max_attempts and budget:
                 budget *= 2
                 continue
+
+            # 5xx·타임아웃은 일시적이다. 학생이 답을 냈는데 게이트웨이가 한 번 트림했다고
+            # 그 턴을 통째로 버리면 안 된다 (실측: mistral 채점에서 HTTP 504).
+            # 대신 재시도하는 동안 학생은 계속 기다린다 — 세션 경로의 타임아웃은
+            # 배치보다 짧아야 한다(T7c 실측 후 결정).
+            if failure in ("PROVIDER_ERROR", "TIMEOUT") and attempt < max_attempts:
+                continue
+
             raise StageError(f"{stage_id}: {exc}", usages) from exc
 
         usages.append(result.usage)
