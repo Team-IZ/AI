@@ -29,6 +29,7 @@
 - **T1b 완료 (커밋 `4bda015`)** — 이름 통일. `decision_point`/`dp_*` 어휘를 `problem`/`problem_*`로, `depth_level`을 `axis_code`로 교체
 - **T2·T2b 완료** — 분석·보고서 스키마를 DB 계약에 정렬. `AxisCode`를 `"L1"`~`"L4"`로 바꾸고 **L3=대안 비교 / L4=반례 대응**으로 바로잡음, `Problem`에 `problem_no`·`code_snippet`·`problem_type`·`question_focus_item_id` 추가, `stages` 4개(L1→L4 순서)·`hints` 2개(`[1,2]` 순서) 검증 추가, `AnalysisResult.problems`를 `list[Problem]`으로 교체, 요청에 `focus_items`·`requirements`·`teaches`·`model_code` 추가, 응답에 `analysis_document_markdown`·`requirement_results` 추가(`jobs.py`가 요청 `requirements`와 개수 일치를 검사), 보고서는 `best_score`/`confirmed_score`로 개명하고 세션 총점 제거. 45 tests
 - **T5 1차 완료** — `openapi.json` 재생성. `stages` `minItems/maxItems: 4`, `hints` `2`가 스펙에 드러나 백엔드가 동결 구조를 코드 없이 읽는다. **범위는 `/analyses`·`/reports`까지** — T3(세션)·T4(교안) 반영 후 한 번 더 생성한다
+- **T7b 진행 중 (2026-07-31, 75 tests)** — **p04-1(코드 분석 문서) 전 구간 실동작.** `stages.py`(매니페스트 기반 스테이지 호출 + JSON 파싱 + 예산 자동 증액)와 `fragments.py`(symbol → 줄 번호 산정) 신설, `prompt_manifest.json`(p04-0.2.0) vendor. 실측: 룰 스캔 → LLM → symbol 검증 → 스키마까지 **근거 유효 4/4**, 75~115초(step-3.7-flash)
 - **T7a 완료 (2026-07-31, 69 tests)** — LLM 클라이언트 배선. `nvidia_key_pool.py`·`nvidia_client.py`를 `app/llm/vendor/`로(둘 다 상류 nvidia-build에서 vendored된 파일이라 같은 규칙 승계), 우리 소유 `app/llm/client.py`가 키 풀 싱글턴·지연 측정·토큰 추출·실패 분류를 더한다. **실패해도 `usage`를 들고 던진다**(`LlmError.usage`) — 실패한 호출도 토큰을 태운다
 - **T6 완료 (2026-07-31)** — 룰 규칙부 이식. **vendor 방식**(원본 12 `.py` + 19 `.json` 무수정 복사 + 우리 소유 `rules.py` 래퍼). ZIP 안전 해제(Zip Slip·심볼릭 링크·ZIP 폭탄 방어), `extractor_version`을 vendor 전체 해시로 산출. `engine_mode="real"` 배선은 T7로 미룸 — 룰만으론 `AnalysisResult`를 못 채운다. 64 tests
 - **T2c 완료 (2026-07-31)** — 분석 문서를 Markdown에서 **JSON**으로 교체. `AnalysisDocument`(`overview`·`structure`·`decisionPoints`·`risks`) 신설, `analysis_document_markdown: str` 제거. PoC 파이프라인의 원본이 strict JSON이고 Markdown은 화면 렌더 결과였다. **백엔드에 B-5(컬럼 타입 변경) 요청 발생 — "신설 테이블·컬럼 없음"이 깨진 첫 건.** `openapi.json` 3차 재생성. 59 tests
@@ -470,7 +471,7 @@ feedback/reflection_signal.py     + _hook   반성 신호
 | **키** | 팀원 8개를 `.env`의 `NVIDIA_API_KEY_1`~`_8`로. `NvidiaKeyPool.from_env(prefix="NVIDIA_API_KEY_")`가 코드 수정 없이 잡는다. **팀원 브라우저 PoC는 키 1개**(사용자 붙여넣기 → Worker 헤더)이고 풀링은 서버 계보(`_legacy/.../nvidia_key_pool.py`)다 |
 | **`prompt_manifest.json`** | **vendor 그대로.** JSON이고 계약이다 — 문자열을 코드에 박지 않는다 |
 | **`scoring-config.js`** | **Python 상수 모듈(`scoring.py`)로 옮긴다.** JS라 vendor 불가. JSON으로 값만 뽑으면 루브릭 근거 주석이 날아가는데, 축 순서 사고를 겪은 파일이라 그 주석이 자산이다. **우리가 관리하는 유일한 사본** — 팀원이 루브릭을 고치면 우리도 손대야 한다 |
-| **기본 모델** | **`stepfun-ai/step-3.7-flash`** (`DEFAULT_MODEL_CODE`). 팀원 CURATED 11종 중 **유일하게 `tier: "good"`**. 나머지는 단종(HTTP 410) 2건·쿼타 소진 2건·결함 이력 3건·20~50배 느림 1건 |
+| **기본 모델** | **용도별 3개**(팀원 결정, 2026-07-31). 요청의 `modelCode`가 오면 그쪽이 이긴다. 라이브 카탈로그 102종에서 ID 확인함 |
 | **착수 순서** | **p04-1 먼저.** T2c에서 스키마를 이미 확정했고 다음 스테이지들이 이 JSON을 입력으로 받는다. p04-1이 되면 LLM 경로 전체(키 풀 → 호출 → JSON 파싱 → `ai_usage` 기록)가 한 번에 검증되고, 나머지는 같은 배관에 프롬프트만 갈아끼우는 일이다 |
 
 **출처**: `../ai_poc/poc_full/app/` — 전체 1,175줄
@@ -513,6 +514,23 @@ feedback/reflection_signal.py     + _hook   반성 신호
 
 **LLM 클라이언트** ✅ **T7a에서 완료.** `app/llm/vendor/`(무수정) + `app/llm/client.py`(우리 소유). Worker 프록시(`worker/nvidia-proxy.js`)는 브라우저 제약의 산물이므로 옮기지 않았다.
 
+### 용도별 기본 모델 (2026-07-31 확정)
+
+| 용도 | `modelCode` | 팀원 실측 | 우리 설정 키 |
+|---|---|---|---|
+| 코드 분석 | `nvidia/nemotron-3-ultra-550b-a55b` | **2시간** — 목표는 30~60분 | `MODEL_CODE_ANALYSIS` |
+| AI 문답 | `mistralai/mistral-medium-3.5-128b` | 3분 안팎 — 개선 필요 | `MODEL_CODE_SESSION` |
+| 교안 분석 | `minimaxai/minimax-m3` | 25분 — 강사가 수업 전까지만 끝나면 되므로 허용 | `MODEL_CODE_CURRICULUM` |
+
+**언제든 바뀐다.** 나중에 프론트에서 operator가 고를 수도 있어서 코드가 아니라 설정에 둔다. 우리 엔드포인트 3종과 1:1이라 매핑이 그대로 성립한다.
+
+**⚠️ 코드 분석 2시간이 가장 큰 미해결 과제다.** 줄일 지렛대 3개, 순서대로:
+1. **병렬화** — 질문 생성(문제당 1콜 × 3)과 힌트(× 24)는 서로 독립이다. 키 8개로 모델당 320 RPM이라 여유가 크다. **효과가 가장 크다. T7c에서 한다**
+2. **스테이지별 모델 분리** — 판단이 무거운 곳(p04-3 문제 선정)만 550b, 정형 출력(질문·힌트)은 빠른 모델로. 지금 구조가 이미 스테이지 단위라 붙이기 쉽다
+3. 입력 축소 — 12,000자 truncation이 이미 걸려 있어 여지가 작다
+
+**1번 먼저, 2번은 그다음.** 동시에 하면 어느 쪽이 효과였는지 못 가린다.
+
 **T7a 실측 (2026-07-31)** — 이 모델을 쓰는 이상 T7b가 반드시 알아야 하는 것:
 
 | 관측 | 함의 |
@@ -521,7 +539,17 @@ feedback/reflection_signal.py     + _hook   반성 신호
 | `"OK"` 2글자에 **출력 36토큰** | 추론형이라 답 길이와 무관하게 사고 토큰을 태운다. `max_tokens`를 매니페스트 값(2400 등)보다 줄이면 안 된다 — 사고가 예산을 먼저 다 쓴다 |
 | 지연 0.5~3.1초 | 팀원 실측 1.5~3.9초와 일치. 배치 30콜이면 순차 1~2분 |
 
-**⚠️ 팀원 주석의 *"reasoning_content 경유, 폴백 정상 동작"*은 P03의 tool_calls 경로 얘기다.** 일반 chat에는 해당 없다 — 그대로 옮기면 위 오진이 난다.
+**⚠️ 팀원 주석의 *"reasoning_content 경유, 폴백 정상 동작"*은 P03의 tool_calls 경로 얘기다.** 일반 chat에는 해당 없다 — 그대로 옮기면 위 오진이 난다. JSON 모드에서도 `step-3.7-flash`는 `content`에 제대로 넣는 것을 실측했다(폴백은 구버전 `step-3.5-flash`용이었다).
+
+### T7b 실측에서 나온 것 (2026-07-31)
+
+**① 매니페스트의 `max_tokens`는 "답에 필요한 길이"다.** 추론형 모델은 같은 예산에서 사고까지 하므로 답에 닿기 전에 끝난다. p04-1 실측: 답 3,219자(~1,100토큰)인데 완료 토큰 5,840 — 매니페스트 값 2,400으로는 **두 번 다 잘렸다**(1차 `INVALID_JSON`, 2차 `CONTEXT_OVERFLOW`).
+
+**모델 속성이지 프롬프트 속성이 아니므로 매니페스트를 고치지 않는다.** `client.budget_for()`가 모델별 배수를 곱하고, 배수를 모르는 모델은 **잘리면 `stages.call()`이 예산을 두 배로 올려 재시도**한다. nemotron은 콜 하나에 오래 걸려서 실측으로 표를 채우는 비용이 크기 때문이다.
+
+**② LLM이 `symbol`을 여러 줄로 준다.** 매니페스트는 "한 줄"을 요구하지만 실제로는 함수 시그니처 전체를 붙여 왔다. 줄 단위 매칭만 하면 통째로 버려진다 — `fragments.py`가 **첫 줄로 한 번 더 시도**해 살린다.
+
+**③ 블록 끝 추정에 괄호 깊이가 필요하다.** 여러 줄 시그니처는 닫는 `)` 줄의 들여쓰기가 시작줄과 같아서, 들여쓰기만 보면 **시그니처 한복판에서 끊긴다.** 괄호가 닫힐 때까지 이어붙인 뒤 들여쓰기 규칙으로 넘어간다. 이건 원본 `code-fragment.js`에 없던 개선이다(원본 주석도 이 한계를 인정하고 있다).
 
 **레이트리밋**: `(키, 모델) 쌍당` 분당 40회다(`nvidia_key_pool.py:3~6`). 키를 N개 풀링하면 모델당 N×40. **키 풀 자체를 서버로 옮긴다.** 짧은 초과는 내부 큐로 흡수하고, 한계를 넘으면 `RATE_LIMITED` + `retryAfterSec`로 돌려준다. 유료 전환 시 사라질 제약이므로 **여기에 아키텍처를 맞추지 않는다**(§규모).
 

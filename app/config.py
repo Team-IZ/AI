@@ -31,6 +31,15 @@ class Settings(BaseSettings):
     # 분석 엔진 선택. 기본은 가짜(stub). 실물은 나중에 이식 후 "real"로
     engine_mode: Literal["stub", "real"] = "stub"
 
+    # 용도별 기본 모델. 요청에 modelCode가 오면 그쪽이 이긴다(모델 선택은 operator 권한).
+    # 팀원 실측 기준값이고 언제든 바뀐다 — 그래서 코드가 아니라 설정이다.
+    #   분석  nemotron-3-ultra-550b  2시간  (목표 30~60분, 개선 과제)
+    #   문답  mistral-medium-3.5     3분    (개선 필요)
+    #   교안  minimax-m3             25분   (강사가 수업 전까지만 끝나면 되므로 허용)
+    model_code_analysis: str = "nvidia/nemotron-3-ultra-550b-a55b"
+    model_code_session: str = "mistralai/mistral-medium-3.5-128b"
+    model_code_curriculum: str = "minimaxai/minimax-m3"
+
 @lru_cache
 def get_settings() -> Settings:
     settings = Settings()

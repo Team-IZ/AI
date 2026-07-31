@@ -4,11 +4,20 @@
 
 | | |
 |---|---|
-| 출처 | `Team-IZ/AI` 브랜치 `feat/poc_full` 의 `cognition/` · `judgment/` · `feedback/` |
+| 출처 | `Team-IZ/AI` 브랜치 `feat/poc_full` 의 `cognition/` · `judgment/` · `feedback/` + `app/prompt_manifest.json` |
 | 기준 커밋 | `15b02fb` (2026-07-30) |
 | 복사 일자 | 2026-07-31 |
-| 구성 | `.py` 12개 + `.json` 데이터 19개 |
+| 구성 | `.py` 12개 + `.json` 데이터 19개 + `prompt_manifest.json`(p04-0.2.0) |
 | 의존성 | 없음 (Python stdlib만) |
+
+## `prompt_manifest.json`은 계약이다
+
+p04-1~7의 system·user_template·`max_tokens`·`temperature`·truncation 상한이 전부 여기 있다.
+**프롬프트 문자열을 코드에 박지 않는다** — 박으면 팀원이 프롬프트를 고쳐도 서버가 옛 문구로 돌고,
+"같은 파이프라인"이라는 전제가 조용히 깨진다. `../stages.py`가 이 파일을 읽어 채운다.
+
+`temperature: 0.0`에 `"locked": true`가 붙은 스테이지가 있다(p04-1). 재현성 요구다 —
+같은 제출물이 같은 분석 문서를 내야 비교가 성립한다. **오버라이드하지 않는다.**
 
 ## 왜 그대로 두는가
 
@@ -25,6 +34,7 @@ JSON 데이터 파일도 `os.path.dirname(__file__)` 기준으로 열리므로 *
 $src = "..\ai_poc\poc_full"
 $dst = "app\engines\analysis\vendor"
 foreach ($d in @("cognition","judgment","feedback")) { Copy-Item -Recurse -Force "$src\$d" "$dst\$d" }
+Copy-Item -Force "$src\app\prompt_manifest.json" "$dst\prompt_manifest.json"
 ```
 
 갱신 후 **이 파일의 기준 커밋·복사 일자를 반드시 같이 고친다.** 안 고치면

@@ -18,9 +18,39 @@ from typing import Any
 
 _VENDOR = Path(__file__).parent / "vendor"
 
-# 호출 1건 상한. 원본 기본값은 600초인데 그건 과부하 모델까지 기다리는 값이라
-# 우리 배치에는 너무 길다 — 굳은 호출 하나가 분석 전체를 붙잡는다.
-DEFAULT_TIMEOUT_S = 120.0
+# 호출 1건 상한. 팀원 실측(shared/llm.js:143~147): step-3.7-flash는 reasoning_effort=low
+# 로도 실제 프롬프트에서 39초가 걸렸고 재시도가 120초에서 통째로 타임아웃했다.
+# 상류 vendor 기본값이 600초인 것도 그 때문이다 — 짧게 잡으면 성공할 호출을 죽인다.
+DEFAULT_TIMEOUT_S = 600.0
+
+# reasoning_effort는 모델마다 지원 여부가 다르다. Mistral에 "low"를 보내면 무시가 아니라
+# 하드 HTTP 400이다(팀원 실측). 그래서 전역 파라미터가 아니라 모델별 맵이어야 한다.
+#
+# step-3.7-flash에 "low"가 필요한 이유: 기본값(medium)이면 답 전체를 reasoning_content에만
+# 쓰다가 content에 닿기 전에 max_tokens로 잘린다. "low"가 그 실패 모드를 없앤다.
+# 지연 자체는 안 줄어든다 — 그건 위 타임아웃이 흡수한다.
+REASONING_EFFORT_BY_MODEL = {
+    "stepfun-ai/step-3.7-flash": "low",
+}
+
+# 추론형 모델은 답과 사고를 같은 max_tokens 예산에서 쓴다. 매니페스트의 값은
+# "답에 필요한 길이"라 그대로 주면 사고가 먼저 예산을 소진하고 답이 잘린다.
+# 실측(p04-1, step-3.7-flash, 프롬프트 12,488자): 답 3,219자(~1,100토큰)인데
+# 완료 토큰 5,840 — 사고가 약 4,700. 매니페스트 값 2,400으로는 두 번 다 잘렸다.
+#
+# 여기 없는 모델은 배수 1.0으로 시작하고, 잘리면 stages.call()이 예산을 두 배로
+# 올려 재시도한다. 모델마다 실측하려면 nemotron은 콜 하나에 시간이 오래 걸린다.
+REASONING_TOKEN_MULTIPLIER = {
+    "stepfun-ai/step-3.7-flash": 3.0,
+}
+
+
+def budget_for(model_code: str, manifest_max_tokens: int | None) -> int | None:
+    """매니페스트의 max_tokens를 그 모델이 실제로 필요한 예산으로 환산한다."""
+    if manifest_max_tokens is None:
+        return None
+    return int(manifest_max_tokens * REASONING_TOKEN_MULTIPLIER.get(model_code, 1.0))
+
 
 _pool = None
 _pool_lock = threading.Lock()
@@ -122,6 +152,9 @@ def chat(model_code: str, messages: list[dict], *, timeout_s: float = DEFAULT_TI
     """
     NvidiaRotatingClient, _, KeyPoolExhausted = _load_vendor()
     client = NvidiaRotatingClient(pool=get_pool(), timeout_s=timeout_s)
+    effort = REASONING_EFFORT_BY_MODEL.get(model_code)
+    if effort and "reasoning_effort" not in kwargs:
+        kwargs = {**kwargs, "reasoning_effort": effort}
 
     base = {
         "model_code": model_code,
