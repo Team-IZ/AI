@@ -44,7 +44,7 @@ def build_code_map_from_repo(
     weights_path: Path | None = None,
     job_id: str = "unknown",
     budget: CallBudget | None = None,
-    crew_kickoff_fn: Callable[..., Any] | None = None,
+    crew_chat_fn: Callable[..., Any] | None = None,
 ) -> dict:
     """ 저장소 경로 -> 코드 중요도 맵(dict). config.tier2_enabled가 True면 크루도 돈다.
 
@@ -76,14 +76,14 @@ def build_code_map_from_repo(
     claims: tuple = ()
     if config.tier2_enabled and selected:
         effective_budget = budget or load_budget("CODE_MAP")
-        kickoff_kwargs = {"kickoff_fn": crew_kickoff_fn} if crew_kickoff_fn is not None else {}
+        chat_kwargs = {"chat_fn": crew_chat_fn} if crew_chat_fn is not None else {}
         claims, tier2_rejected, call_usage = crew_mod.run_rerank_crew(
             candidates_block=_build_candidates_block(ranked, selected),
             allowed_paths=frozenset(selected),
             model_code=config.model_code or get_settings().default_model_code,
             budget=effective_budget,
             job_id=job_id,
-            **kickoff_kwargs,
+            **chat_kwargs,
         )
         ai_usage.extend(call_usage)
 

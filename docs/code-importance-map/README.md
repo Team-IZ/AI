@@ -15,7 +15,7 @@
 | `weights.py` | `weights/codemap_weights.json` 파싱 | 순수(파일 읽기는 `__init__.py`가 함) |
 | `shortlist.py` | 예산 안에서 rank 순서로 채우기 | 순수 |
 | `ground.py` | Tier 2 원시 응답의 closed-vocabulary 검증 | 순수 |
-| `crew.py` | Tier 2 CrewAI 재랭킹 | **불순** -- 유일한 네트워크 지점 |
+| `crew.py` | Tier 2 재랭킹(2026-07-31부터 crewai 없이 `shared.llm.chat()` 직접 호출, D1) | **불순** -- 유일한 네트워크 지점 |
 | `materialize.py` | GITHUB_URL clone / ZIP 해제 | **불순** -- 유일한 git/zipfile 지점 |
 | `engine.py` | `AnalysisEngine` 프로토콜 구현체(조립) | 조립부 |
 | `__init__.py` | composition root -- Tier1+Tier2 전체 조립 | 조립부 |
@@ -46,19 +46,17 @@ git config core.hooksPath .githooks   # 선택. 커밋 전 린터+시크릿가�
 ```
 
 CI(`.github/workflows/ci.yml`)는 훅 설정과 무관하게 항상 강제한다:
-`test`(crewai 없이), `test-codemap`(crewai 포함, `requirements-codemap.txt`),
-`lint`(D3/D4 AST 검사 + D9 시크릿 가드), `prompt-manifest`(D3-2 드리프트).
+`test`, `lint`(D3/D4 AST 검사 + D9 시크릿 가드), `prompt-manifest`(D3-2 드리프트).
 
-## Tier 2(크루)를 실제로 쓰려면
+## Tier 2(재랭킹)를 실제로 쓰려면
 
-```bash
-pip install -r requirements.txt -r requirements-codemap.txt
-```
+추가 설치가 필요 없다 -- `pip install -r requirements.txt`만으로 충분하다
+(2026-07-31부터 crewai 의존성 없음, `crew.py` 모듈 docstring D1 참고).
+`NVIDIA_API_KEY`는 `.env`에만 두고(`tools/check_no_secrets.py`가 커밋을 막는다),
+`engine_mode=codemap`으로 설정하면 `get_analysis_engine()`이 이 엔진을 반환한다.
 
-`crewai`는 `crew.py` 함수 안에서만 지연 import되므로, 설치 안 해도 Tier 1만
-쓰는 나머지 전체는 그대로 동작한다. `NVIDIA_API_KEY`는 `.env`에만 두고
-(`tools/check_no_secrets.py`가 커밋을 막는다), `engine_mode=codemap`으로
-설정하면 `get_analysis_engine()`이 이 엔진을 반환한다.
+멀티라운드 도구 사용이 실제로 필요한 스테이지가 생기면
+`app/engines/shared/agent_loop.py::run_tool_loop()`을 쓴다(모듈 docstring 참고).
 
 ## 더 읽을 것
 

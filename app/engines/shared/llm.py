@@ -78,9 +78,9 @@ _KNOWN_FAILURE_CODES = {"TIMEOUT", "RATE_LIMITED", "PROVIDER_ERROR", "INVALID_JS
 
 
 def classify_failure_code(exc: Exception) -> str:
-    """ 임의 예외 -> AiUsage.failure_code 5개 값 중 하나. crew.py/analysis_doc.py가
-    공유한다 -- LlmCallError 서브클래스면 그 failure_code를, 아니면(crewai 내부
-    예외 등 우리가 모르는 예외 타입) 가장 안전한 기본값인 PROVIDER_ERROR로. """
+    """ 임의 예외 -> AiUsage.failure_code 5개 값 중 하나. crew.py/analysis_doc.py/
+    agent_loop.py가 공유한다 -- LlmCallError 서브클래스면 그 failure_code를,
+    아니면(우리가 모르는 예외 타입) 가장 안전한 기본값인 PROVIDER_ERROR로. """
     code = getattr(exc, "failure_code", None)
     return code if code in _KNOWN_FAILURE_CODES else "PROVIDER_ERROR"
 

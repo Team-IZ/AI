@@ -35,12 +35,12 @@ from pathlib import Path
 
 ALLOWLIST_LLM001: dict[str, str] = {
     "app/engines/shared/llm.py": "the wrapper itself -- the only module allowed to touch HTTP/SDK primitives",
-    "app/engines/codemap/crew.py": (
-        "constructs the CrewAI Crew/Agent/LLM for Tier 2 reranking; crewai is lazy-imported "
-        "inside _default_kickoff() only, and the Agent is given tools=[] (D12 -- never wired "
-        "to crewai_tools' unrestricted FileReadTool/DirectoryReadTool)"
-    ),
 }
+
+# D1 (2026-07-31, crew.py 모듈 docstring): crewai를 제거하면서 app/engines/codemap/crew.py의
+# ALLOWLIST_LLM001 예외도 같이 없앴다 -- 이제 그 파일도 shared.llm.chat()만 거친다
+# (analysis_doc.py와 동일). "crewai"는 BANNED_IMPORT_MODULES에 그대로 남겨둔다: 나중에
+# 누군가 실수로 다시 import하면 이 린터가 즉시 잡아야 한다(회귀 방지).
 
 BANNED_IMPORT_MODULES = {
     "httpx", "requests", "openai", "litellm", "crewai",
