@@ -51,7 +51,7 @@
 **이슈 `Team-IZ/Backend#31` 본문이 항상 최신 상태다.** 사본: `../qna/2026-07-30/issue-body-v2.md`.
 2026-07-29 질문지(`../qna/2026-07-29/backend-schema-questions.md`)는 이력이며 대부분 해결됐다.
 
-남은 것은 **DDL 수정 3건 + 코드값 1건 + 답변 1건.** 신설 테이블·컬럼은 없다.
+남은 것은 **DDL 수정 4건 + 코드값 1건 + 답변 2건.** 신설 테이블은 없고, **컬럼 타입 변경이 1건 생겼다(B-5).**
 
 **백엔드가 해줄 것**
 
@@ -61,6 +61,9 @@
 | B-2 | `stage_answer_attempt` 마지막 CHECK의 `attempt_no = 2`를 `IN (2, 3)`으로 |
 | B-3 | `stage_answer_attempt` 컬럼 5개(`answer_text`·`score_value`·`score_reason`·`answered_at`·`client_request_id`) NULL 허용 + all-or-nothing CHECK |
 | B-4 | 코드값 `MEAS.PROBLEM_TERMINATION_REASON`에 `TERMINATED_AT_L1` 추가 (DDL 변경 없음) |
+| **B-5** | **`code_analysis.analysis_document_markdown TEXT` → `analysis_document JSONB`** (2026-07-31 추가. 근거는 T2c) |
+
+**B-5가 왜 생겼나**: 정의서 비고가 *"Markdown은 비정형 문서라 JSONB보다 TEXT가 적합"*이라고 적었는데, **그 전제가 사실과 다르다.** PoC 파이프라인의 분석 문서 원본은 strict JSON이고 Markdown은 화면 렌더 결과다. TEXT로 저장하면 `/reports`에서 되파싱해야 한다. **`assessment` 도메인이 아직 DB·코드 미구현이라 지금이 가장 싼 시점이다.** 자세한 것은 T2c.
 
 **B-3이 왜 필요한가**: 질문을 보여주는 시점과 저장되는 시점이 어긋나 있다. 행의 의미를 "답변 1건"에서 **"문답 1라운드"**로 바꿔, 질문이 나갈 때(동결된 질문·힌트를 INSERT) 넣고 답이 오면 채운다. NOT NULL이 하던 역할은 all-or-nothing CHECK가 이어받는다.
 
@@ -130,7 +133,7 @@ question_budget: int = 3                 # 기본값 4 → 3
 **응답에 추가**
 
 ```python
-analysis_document_markdown: str          # code_analysis.analysis_document_markdown 대응
+analysis_document_markdown: str          # ⚠️ T2c에서 analysis_document(JSON)로 교체된다
 requirement_results: list[dict]          # [{requirementId, verdict: "P"|"F", evidence, note}]
 ```
 
@@ -206,6 +209,61 @@ requirement_results: list[dict]          # [{requirementId, verdict: "P"|"F", ev
 ```
 
 **DoD**: `AxisCode`가 4값이고 L3/L4 주석이 대안/반례 순서다. 세션 총점 필드가 없다. 테스트 통과.
+
+---
+
+### T2c — 분석 문서를 Markdown에서 JSON으로 교체 ← **다음 작업**
+
+**발단**: 2026-07-31 AI 팀원 통보 — *"`.md` 산출물은 변환 산출물이다. raw JSON에서 변환하는 거라 JSON으로 스키마 교체 필요."* **PoC를 직접 읽어 확인했고 맞다.**
+
+**근거 3가지**
+
+1. `prompt_manifest.json`의 `p04-1`이 *"Output strict JSON only"*를 지시하고 반환 형태를 프롬프트에 못 박는다.
+   ```jsonc
+   { "overview": "3-5문장",
+     "structure":       [ { "area": "...", "files": ["실제 경로"], "role": "..." } ],
+     "decision_points": [ { "title", "file", "symbol", "why_it_matters", "related_teach" } ],
+     "risks":           [ "..." ] }
+   ```
+2. **다운스트림도 JSON을 먹는다.** `poc-engine.js:106`(문제 선정 p04-3)과 `:457`(보고서 p04-6)이 `JSON.stringify(analysisDoc)`을 그대로 프롬프트에 넣는다. Markdown으로 저장하면 우리가 되파싱해야 한다.
+3. Markdown은 어디에도 없다. `app/analysis.html:189`가 그 JSON을 HTML로 그리는 것뿐이다 — 화면 렌더지 파이프라인 산출물이 아니다.
+
+**같이 옮겨야 할 후처리** (`poc-engine.js:90`) — 이게 환각 방지 장치라 스키마에 남는다.
+
+```
+LLM은 {file, symbol}만 준다. symbol = 소스에서 문자 그대로 복사한 코드 한 줄.
+  → CodeFragment.locateSymbol()이 실제 파일에서 그 문자열을 찾아 줄 번호를 산정
+  → 못 찾으면 valid=false. 화면에 "근거 무효"로 표시하고 근거로 쓰지 않는다
+```
+
+**줄 번호를 LLM이 세지 않는 이유**: 지어낸 위치를 근거로 보여주면 "코드 파편 = 근거"라는 전제가 무너진다. 매니페스트가 *"줄 번호는 우리가 그 문자열을 찾아 직접 산정한다 — 네가 지어낸 번호는 쓰지 않는다"*로 명시한다.
+
+**대상**
+
+| 파일 | 무엇 |
+|---|---|
+| `schemas/analysis.py` | `DocumentArea` · `DecisionPoint` · `AnalysisDocument` 신설, `analysis_document_markdown: str` → `analysis_document: AnalysisDocument` |
+| `engines/stub.py` | 스텁 문자열 → 빈 구조체 |
+| `tests/test_engines.py` | 2곳 |
+| `openapi.json` | 재생성 |
+
+```python
+class DecisionPoint(BaseSchema):
+    title: str
+    source_path: str
+    symbol: str                              # LLM이 소스에서 그대로 복사한 한 줄
+    line_start: int | None = None            # symbol을 찾아 우리가 산정. 못 찾으면 None
+    line_end: int | None = None
+    why_it_matters: str
+    related_teach_id: str | None = None
+    evidence_valid: bool                     # symbol을 실제 소스에서 찾았는지
+```
+
+**`decision_points`와 `problems`의 관계**: `decision_points`는 후보 풀이고 `problems` 3개는 그중에서 p04-3이 고른 것이다. 겹치지만 같지 않다 — 탈락한 지점도 매니저가 "왜 이 지점을 골랐나"를 판단하려면 문서에 남아야 한다.
+
+**백엔드에 나가는 것**: B-5(컬럼 타입 변경) 1건. **이슈 #31의 "신설 테이블·컬럼 없음"과 ✅ 확정 Q2-1을 정정해야 한다.**
+
+**DoD**: `openapi.json`에 `AnalysisDocument` 스키마가 나오고 `analysisDocumentMarkdown`이 사라진다. 테스트 통과. 백엔드 통지문 발송.
 
 ---
 
@@ -322,18 +380,36 @@ GET  /api/v0/curricula/{jobId}  → {teaches: [{id, label, unitId, sourcePages}]
 
 ---
 
-### T6 — P02 규칙부 이식
+### T6 — P02 규칙부 이식 (T2c 다음)
 
-**출처**: `../ai_poc/poc_full` 의 `cognition/`·`judgment/`·`feedback/` (Python, vendored)
-**난이도**: 낮음 — 순수 Python stdlib이라 거의 그대로 import된다
+**T6만 진짜 이식이다** (Python → Python). T7은 JavaScript → Python **포팅**이라 성격이 다르다.
+
+**출처**: `../ai_poc/poc_full` 의 `.py` 12개 (기준 커밋 `15b02fb`)
+
+```
+cognition/two_tier_scan.py                  2단계 스캔
+judgment/idiom_filter.py                    관용구 걸러내기
+judgment/importance_rank.py                 후보 우선순위
+judgment/isolation_classifier.py  + _hook   고립도 분류
+judgment/score_findings.py                  후보 점수
+judgment/subrubric.py             + _hook   세부 루브릭
+judgment/tier_b_hook.py                     2차 판정
+judgment/tier_b_suppression_filter.py       2차 억제
+feedback/reflection_signal.py     + _hook   반성 신호
+```
+
+**난이도**: 낮음 — 순수 Python stdlib이라 거의 그대로 import된다.
 
 **방법**
 
 1. `app/engines/analysis/` 아래로 옮긴다
 2. `webtool_driver.py`가 Pyodide용 진입점이니 참고만 하고 서버용 호출부를 새로 쓴다
 3. `AnalysisEngine` Protocol에 맞춰 `analyze(request, zip_bytes) -> dict` 하나로 감싼다
+4. 출력이 `Problem` 스키마(문제·근거)에 맞는지 확인. **`stages`는 T7이 채운다** — T6 단계에서는 문제 후보까지만
 
 **함정**: CPU 작업이다. `async def` 안에서 동기로 돌리면 이벤트 루프가 막혀 **문답 중인 학생까지 굳는다.** `def`(threadpool)로 두거나 `run_in_executor`로 뺀다.
+
+**T6이 끝나도 `/analyses`는 완성이 아니다.** 룰이 후보를 좁히고 그 위에서 LLM(p04-3)이 고르는 2단계 구조라, T7이 붙어야 문제 3개가 확정된다. T6 단계에서는 `engine_mode`를 나눠 후보 목록만 확인한다.
 
 ---
 
@@ -343,51 +419,62 @@ GET  /api/v0/curricula/{jobId}  → {teaches: [{id, label, unitId, sourcePages}]
 
 | 파일 | 줄 | 역할 |
 |---|---|---|
-| `prompt_manifest.json` | — | p04-1~6 프롬프트·파라미터. **계약이다. 문자열을 코드에 박지 않는다** |
-| `scoring-config.js` | 177 | 축×값 루브릭 + 임계값 + 힌트 상한. 선언적이라 그대로 옮김 |
-| `poc-engine.js` | 385 | 3문제 × 4레벨 루프 + 레벨별 즉시 채점 |
-| `hint-ladder.js` | 99 | 문제 하나의 L1~L4 질문 + 단계별 힌트 2개를 **한 번에 생성해 동결**(`frozen_at`). 그대로 옮긴다 |
-| `question-guard.js` | 56 | 질문·힌트에 선택지가 섞이는 것 차단 → 재생성 |
-| `code-fragment.js` | 90 | `{file, lines}`를 실제 파일과 대조해 파편 추출 |
-| `requirements.js` | 36 | 요구사항 P/F 판정 |
-| `llm-stage.js` | 87 | 매니페스트 스테이지 1개 호출 공용 경로 |
+**기준 커밋**: `15b02fb` (2026-07-30). 축 순서 정정 + `hintMode` 토글이 들어온 시점이다.
 
-**스테이지 구성** (전부 LLM)
+| 파일 | 역할 |
+|---|---|
+| `prompt_manifest.json` | p04-1~7 프롬프트·파라미터. **계약이다. 문자열을 코드에 박지 않는다** |
+| `scoring-config.js` | 축×값 루브릭 + 임계값 + 힌트 상한 + **`hintLadder` 강도 spec** + `hintMode`. 선언적이라 그대로 옮김 |
+| `poc-engine.js` | 3문제 × 4레벨 루프 + 레벨별 즉시 채점. `:340`이 동결/적응형 분기 |
+| `hint-ladder.js` | `freezeQuestionSet()` 질문 4개 동결 + `generateHint()` 힌트 1개 생성 |
+| `question-guard.js` | 질문·힌트에 선택지가 섞이는 것 차단 → 재생성 |
+| `code-fragment.js` | `{file, symbol}`의 symbol 문자열을 실제 파일에서 찾아 **줄 번호를 산정**하고 파편 추출. 못 찾으면 `valid=false` (T2c) |
+| `requirements.js` | 요구사항 P/F 판정 |
+| `llm-stage.js` | 매니페스트 스테이지 1개 호출 공용 경로 |
+
+**스테이지 구성** (전부 LLM. 매니페스트 순서는 1·2·3·4·**7**·5·6)
 
 ```
 분석 배치
-  p04-1  코드 분석 문서                  입력: teaches + problems + code
+  p04-1  코드 분석 문서                  입력: teaches + findings + code. 출력은 JSON (T2c)
   p04-2  요구사항 P/F 판정
   p04-3  문제 3개 선정
-  p04-4  L1~L4 질문 + 힌트 2개씩 동결     문제당 1콜 (질문 4 + 힌트 8)
+  p04-4  L1~L4 질문 생성                 문제당 1콜. 어느 모드든 동결된다
+  p04-7  힌트 생성                       동결형이면 여기서 문제당 8콜(단계 4 × 힌트 2)
+                                         적응형이면 안 돈다
 런타임
-  p04-5  답변 채점 (단계 1개, 0~5점)      턴당 1콜. 세션 중 유일한 LLM 호출
+  p04-5  답변 채점 (단계 1개, 0~5점)      턴당 1콜
+  p04-7  힌트 생성                       적응형일 때만. 오답 확정 직후 1콜
 세션 후
   p04-6  보고서
 ```
 
-**세션 루프에는 LLM 호출이 하나뿐이다.** `poc-engine.js:218`이 동결된 `lvl.hints[hintsUsed - 1]`을 꺼내 쓰고, 호출은 `gradeLevel`(p04-5)만 한다. 이식할 때 이 구조를 바꾸지 않는다.
+**`p04-7`은 하나의 프롬프트를 두 모드가 공유한다.** `{attempts_block}`에 실제 시도가 있으면 적응형, `"(아직 답변 없음)"`이면 동결로 **모델이 판단**한다. 스테이지를 둘로 나누지 않는다.
+
+**적응형 힌트의 입력**: `formatAttemptsBlock()`이 질문·답변·채점 점수뿐 아니라 **채점기가 판정한 `missing`/`evidence`까지** 넣는다. 학생이 뭘 빠뜨렸는지를 힌트가 겨냥할 수 있는 이유다.
 
 **LLM 클라이언트**: `_legacy/pipeline/feedback/nvidia_client.py`·`nvidia_key_pool.py`가 서버용 원본이라 재활용한다. Worker 프록시(`worker/nvidia-proxy.js`)는 브라우저 제약의 산물이므로 옮기지 않는다.
 
-**레이트리밋**: 무료 티어 분당 40회. PoC의 `shared/traffic-rate.js`가 같은 상수를 들고 있다. **이건 잘라낼 것이 아니라 서버로 옮겨야 할 것이다.** 짧은 초과는 내부 큐로 흡수하고, 한계를 넘으면 `RATE_LIMITED` + `retryAfterSec`로 돌려준다.
+**레이트리밋**: `(키, 모델) 쌍당` 분당 40회다(`nvidia_key_pool.py:3~6`). 키를 N개 풀링하면 모델당 N×40. **키 풀 자체를 서버로 옮긴다.** 짧은 초과는 내부 큐로 흡수하고, 한계를 넘으면 `RATE_LIMITED` + `retryAfterSec`로 돌려준다. 유료 전환 시 사라질 제약이므로 **여기에 아키텍처를 맞추지 않는다**(§규모).
 
 **잘라낼 것**: Supabase 저장(`shared/db.js`), Worker 프록시, IndexedDB·sessionStorage, UI·타이머, 브라우저 pdf.js.
 
 > Supabase 관련 보안 주의: 팀 공용 프로젝트가 open signup + RLS read-all이라 cross-tenant 위험이 있고, 팀원이 **브라우저 PoC 한정으로** 수용했다. 제품 결정이 아니다. 이식 과정에서 Supabase 클라이언트·스키마·인증 흐름을 따라 옮기지 않는다. 애초에 FastAPI는 저장하지 않으므로 옮길 것이 없어야 정상이고, Supabase 호출이 필요해 보이면 설계가 틀린 것이니 멈추고 재검토한다.
 
-### 🔴 이식 중 반드시 할 것 — PoC 축 순서를 뒤집는다
+### ✅ 축 순서 — 해결됐다 (2026-07-30, 팀원 커밋 `fc80044`·`15b02fb`)
 
-`scoring-config.js:22~77`의 `AXES`가 **L3=반례한계, L4=대안**이다. 우리 기준(백엔드 `axis_score`·프론트·PM)과 **반대다.**
+전에는 PoC가 L3=반례, L4=대안이라 이식 중 교환이 필요했다. **요청서(`../qna/2026-07-30/poc-axis-order-fix.md`)대로 팀원이 고쳤다.**
 
+```js
+L3_대안:     order 3, label "대안 비교",      values 6단계 = 대안 비교 루브릭
+L4_반례한계: order 4, label "반례 대응·한계",  values 6단계 = 반례 루브릭
+axisWeights = { …, L3_대안: 1.0, L4_반례한계: 1.0 }
+prompt_manifest p04-4 → "L1_코드기술, L2_설계논리, L3_대안, L4_반례한계이다"
 ```
-PoC        L1 코드기술 / L2 설계논리 / L3 반례한계 / L4 대안
-우리 기준   L1 코드기술 / L2 설계논리 / L3 대안     / L4 반례·한계
-```
 
-이식할 때 `AXES`의 **`order`·`label`·`question_intent`·`values` 루브릭 텍스트를 L3↔L4로 교환**한다. 루브릭이 축에 붙어 있으므로 순서만 맞추고 텍스트를 그대로 두면 **L3 답변이 L4 기준으로 채점된다.** `axisWeights`(`:124`)와 `prompt_manifest.json` p04-4의 축 열거 순서도 같이 본다.
+**루브릭 텍스트까지 함께 옮겨졌고 키 이름도 우리가 지정한 문자열 그대로다.** 이식할 때 뒤집을 것이 없다. `scoring-config.js`에 되돌리는 방법까지 주석으로 남아 있다.
 
-**팀원 코드를 우리가 고치지 않는다.** 워크트리는 읽기 전용이므로 이식본에서 교환하고, **원본 정정은 팀원에게 요청하기로 확정**했다 — 요청서 `../qna/2026-07-30/poc-axis-order-fix.md`.
+⚠️ 다만 **이슈 #31의 옛 댓글에 L3=반례로 적힌 표가 남아 있다.** 백엔드가 그걸 보고 구현하지 않도록 경고 배너를 달았다.
 
 ---
 
@@ -444,7 +531,7 @@ stage_answer_attempt     답변 이력                PK answer_attempt_id, atte
 question_focus_item      구 focus_area_code
 project_requirement / project_requirement_assessment   요구사항·판정 결과
 curriculum_section / teaches                            교안
-code_analysis.analysis_document_markdown (TEXT)         분석 문서
+code_analysis.analysis_document (JSONB)                 분석 문서 — B-5로 타입 변경 요청 중(T2c)
 
 폐기: session_turn · dp_question · question_candidate(안 씀) · depth_level
      score_run / axis_score — AI가 값을 만들지 않는다 (유지 여부는 백엔드 몫, C-2)
@@ -598,15 +685,41 @@ AI가 채우는 값과 Spring이 채우는 값이 갈린다. **경계를 넘지 
 
 ### 규모
 
+**단위는 "제출 1건"이다** — 학생 1명(또는 팀 1개)의 코드 1회 분석 + 세션 1개.
+
+**① 호출 수 — 설계 사실. 유료 API로 가도 같다**
+
 ```
-NVIDIA 무료 티어   분당 40회
-코드 분석 배치      팀당 6콜 (분석문서 1 + 요구사항 1 + 문제선정 1 + 질문·힌트 동결 3)
-                   30팀 = 180콜 = 약 4.5분. 1시간 예산에 여유
-문답 실시간         턴당 1콜(채점만). 동시 10~20명 = 13~27 RPM
-결론               Redis 불필요. 워커 1개 유지
+동결형   분석 30 + 문답 12~36 + 보고서 1  =  43 ~ 67콜
+적응형   분석  6 + 문답 12~108 + 보고서 1  =  19 ~ 115콜
+
+분석 30콜의 내역 (동결형)
+  p04-1 분석 문서 1 · p04-2 요구사항 1 · p04-3 문제 선정 1
+  p04-4 질문      문제당 1 × 3 =  3
+  p04-7 힌트      문제당 8 × 3 = 24     ← 단계 4 × 힌트 2, 레벨마다 개별 호출
 ```
 
-진짜 병목은 호출 수가 아니라 **컨텍스트 길이**다. 코드를 12,000자로 잘라 프롬프트에 넣으므로(`requirements.js:18`) 큰 레포는 잘린 코드로 요구사항이 판정된다.
+⚠️ **예전에 적어둔 "팀당 6콜"은 틀렸다.** 힌트가 `p04-4`에 묶여 있다고 본 것인데, `p04-7`이 별도 스테이지이고 `hint-ladder.js:103~118`이 레벨마다 개별 호출한다.
+
+동결형은 폭이 좁고(43~67), 적응형은 학생 실력에 따라 6배 흔들린다(19~115).
+
+**② 속도 제한 — 지금 무료 티어 사정. 설계 근거로 쓰지 않는다**
+
+```
+NVIDIA 무료 티어   (키, 모델) 쌍당 분당 40회      ← 키당이 아니다
+키 8개 풀링        모델당 320 RPM
+유료 전환          사라지거나 크게 오름
+```
+
+`nvidia_key_pool.py:3~6`이 근거다. **"RPM 때문에 X를 못 한다"는 문장을 쓰지 않는다** — 임시 조건으로 아키텍처를 못 박으면 유료 전환 때 근거가 통째로 무효가 된다.
+
+시연 규모(30명 제출 = 900콜)면 배치 약 3분이라 제약이 아니다.
+
+**③ 유료 전환 시**
+
+호출 수가 아니라 **토큰 수**가 비용이다. 힌트 콜은 프롬프트가 짧아 호출 수 비중만큼 비싸지 않다. `ai_usage`가 정확히 이걸 재려고 있고, 단가를 Spring이 곱하는 구조라 **AI 쪽은 손댈 게 없다**(C-3).
+
+**진짜 병목은 컨텍스트 길이다.** 코드를 12,000자로 잘라 프롬프트에 넣으므로(`requirements.js:18`) 큰 레포는 잘린 코드로 요구사항이 판정된다.
 
 ---
 
@@ -624,16 +737,32 @@ NVIDIA 무료 티어   분당 40회
 | D8 | 턴 점수를 wire에 노출한다 | Spring이 매 턴 저장한다. 점수·시도 횟수가 wire에 없으면 복구된 세션이 "힌트를 몇 번 썼는지" 모른 채 재개된다 |
 | D9 | `bestScore`·`confirmedScore`를 둘 다 보낸다 | 힌트가 점수 상한을 깎는다. 캡 적용 결과만 남기면 상한 정책 변경 시 재계산 불가, 감사도 불가 |
 | D10 | 재시험·문제배정 판정은 Spring이 한다 | AI는 점수와 `retestTargets`만 낸다. 커트라인·배정은 조직 정책이라 DB 주인이 갖는다 |
-| D11 | **질문·힌트는 분석 때 미리 만들어 동결한다** | 답변을 보고 힌트를 만들면 학생마다 힌트가 달라져, "몇 번째 힌트에서 통과했는가"가 학생 실력이 아니라 생성 결과의 차이를 재게 된다. 같은 문제를 받은 두 학생은 글자 단위로 같은 질문·힌트를 받아야 한다. PoC가 이미 그 구조다(`freezeQuestionSet`·`frozen_at`). **이식할 때 이 성질을 깨지 않는다** |
+| D11 | **질문은 분석 때 미리 만들어 동결한다. 힌트 방식은 확정 전** | 질문 동결은 어느 모드든 유지된다(팀원 `Readme.md` D4 개정: "질문 동결은 그대로다 — 바뀐 건 힌트뿐이다"). 힌트는 아래 참조 |
 
-> **D11 보충 — 적응형 힌트는 폐기가 아니라 후속이다.** 팀원이 **적응형 힌트 모듈을 개발 중이고 나중에 추가할 예정**이다. **현재 계약은 동결 기준**이고, 붙는 시점에 셋이 따라온다.
+> **D11 보충 — 힌트 방식이 확정 전이다 (2026-07-30).**
 >
-> 1. 세션 중 LLM 호출이 하나 늘어 **턴당 2콜**이 된다 (§규모의 RPM 계산을 다시 한다)
-> 2. `feature_code`에 **힌트용 값이 필요해진다** — 지금은 불필요하지만 그때 백엔드에 요청한다
-> 3. **한 기수 안에서 두 모드가 섞이면 점수를 나란히 비교할 수 없다.** 동결 힌트로 받은 4점과 적응형 힌트로 받은 4점은 같은 값이 아니다. **체크포인트 단위로 모드를 고정**해야 한다 (`checkpoint`에 모드 컬럼이 필요할 수 있다 — 그때 백엔드와 논의)
+> ```
+> 동결형   분석 배치에서 힌트를 미리 만들어 둔다. 세션 중 LLM 호출은 채점뿐
+> 적응형   학생 오답 + 채점 근거(missing/evidence)를 입력으로 재질의를 그 자리에서 만든다
+> ```
+>
+> **현재 유력한 방향은 적응형이다** (PM 판단: 고정 힌트는 학생이 실제로 뭘 틀렸는지와 무관하게 나가 겨냥이 빗나간다). 팀원 PoC는 **둘 다 구현**해두고 `POCScoring.hintMode`로 토글하며 실측 비교 중이다. 기본값은 `"frozen"`인데, 이는 결론이 아니라 **우리가 준 계약이 동결이라 거기 맞춘 것**이다.
+>
+> **비교 가능성 근거가 이동했다** — "힌트 텍스트가 동일함"에서 **"사다리 단계 수(레벨당 2회)·강도 정의·점수 상한(5/4/3)이 동일함"**으로. `scoring-config.js`의 `hintLadder`가 힌트1="관점 되짚기", 힌트2="범위 좁힘"으로 **강도를 고정**하고 두 모드가 이 spec을 공유한다. 적응형은 겨냥 대상만 바꾼다. 그래서 "2번째 시도에서 통과"가 여전히 같은 뜻이다.
+>
+> **적응형으로 확정되면 우리 쪽 변경**
+> 1. `AnalysisResult`에 `hintMode` 필드, `ProblemStage.hints`의 `min_length=2` 강제를 모드별 validator로
+> 2. `SessionView`에 지금 보여줄 힌트를 담을 필드 신설 (`TranscriptTurn.hint_text`는 기록용이라 별개)
+> 3. 세션 중 LLM 호출이 채점 + 힌트로 늘어난다
+>
+> **백엔드 쪽은 오히려 줄어든다** — 36행 선생성 로직이 사라지고 재질의 때 1행씩 INSERT. DDL 추가·신설 없음. 보류 요청 2건은 이슈 #31 본문 `⏸` 절.
+>
+> **힌트 가드는 PoC에 이미 있다** — `hint-ladder.js:190`이 `QuestionGuard.check()`를 힌트에도 걸고, 위반 시 재생성, 계속 실패하면 `fallbackHint()` 결정론적 문장으로 대체한다. **힌트 미생성이 구조적으로 불가능**하므로 `attempt_no IN (2,3) AND hint_text IS NOT NULL` CHECK가 항상 만족된다. 다만 폴백 사용 여부(`generated: false`)를 남길 자리가 DB에 없다 — 확정 때 같이 논의.
 | D12 | 세션 총점·축 평균을 AI가 만들지 않는다 | 점수는 매 턴 `problem_stage`에 저장돼 있다. 집계는 Spring이 SQL로 하면 되고, LLM이 아니면 못 만드는 것만 `/reports`에 담는다 |
 | D13 | `codeSnippet`을 AI가 보낸다 | `evidence_hash`가 code_snippet 기준 해시이고 해시를 AI가 만든다. Spring이 따로 잘라내면 줄바꿈·BOM 차이로 해시가 안 맞는다 |
-| D14 | 값 이름은 DB 컬럼명을 그대로 쓴다 | 새 어휘를 만들면 백엔드가 "정의서에 없는 컬럼"으로 읽는다. 실제로 `callId`로 한 번 겪었다 |
+| D14 | 값 이름은 DB 컬럼명을 그대로 쓴다 | 새 어휘를 만들면 백엔드가 "정의서에 없는 컬럼"으로 읽는다. 실제로 `callId`로 한 번 겪었다. **단 컬럼명이 사실과 다르면 컬럼명을 고친다 — `analysis_document_markdown`이 그 사례(B-5)** |
+| D15 | 분석 문서의 원본은 JSON이고 Markdown은 렌더 결과다 | 다운스트림(문제 선정·보고서)이 JSON을 그대로 프롬프트에 넣는다. Markdown으로 저장하면 되파싱해야 한다. 사람이 읽는 화면은 이 JSON을 렌더한 것이다 (T2c) |
+| D16 | LLM에게 줄 번호를 세게 하지 않는다 | LLM은 `symbol`(소스에서 복사한 코드 한 줄)만 주고 줄 번호는 우리가 그 문자열을 찾아 산정한다. 못 찾으면 `evidenceValid=false`로 남기고 근거로 쓰지 않는다. "코드 파편이 곧 근거"라는 전제를 지키는 장치다 |
 
 ---
 
