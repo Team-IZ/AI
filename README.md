@@ -1,6 +1,6 @@
 # AI 서비스 (FastAPI)
 
-> 갱신: 2026-07-30
+> 갱신: 2026-07-31
 
 교육생이 제출한 코드를 분석해 **문답 문제를 뽑고**, 학생과 **문답을 진행하며 채점**하고, 끝나면 **보고서**를 내는 서비스. Spring Boot가 호출하는 내부 서비스다.
 
@@ -464,10 +464,10 @@ class AnalysisEngine(Protocol):
 `api/`가 결과 dict를 pydantic 모델로 감싸 응답한다. 그 변환이 유일한 접착점이다.
 
 ```python
-engine_mode: Literal["stub", "real"] = "stub"
+engine_mode: Literal["stub", "real", "codemap"] = "stub"
 ```
 
-`stub`이면 스키마에 맞는 고정 응답을 돌려준다. **엔진이 하나도 없어도 모든 엔드포인트가 살아 있어서** 백엔드가 엔진 완성을 기다리지 않고 붙여볼 수 있다. 반대로 `real`인데 엔진이 없으면 조용히 스텁으로 떨어지지 않고 시끄럽게 실패한다 — 가짜 데이터가 운영까지 흘러가는 것을 막는다.
+`stub`이면 스키마에 맞는 고정 응답을 돌려준다. **엔진이 하나도 없어도 모든 엔드포인트가 살아 있어서** 백엔드가 엔진 완성을 기다리지 않고 붙여볼 수 있다. 반대로 `real`인데 엔진이 없으면 조용히 스텁으로 떨어지지 않고 시끄럽게 실패한다 — 가짜 데이터가 운영까지 흘러가는 것을 막는다. `codemap`은 이미 실물이다(`app/engines/codemap/`, §6). `real`은 P02~P04 전체 이식 후 쓸 자리 — 아직 stub.
 
 ---
 
@@ -511,6 +511,10 @@ DDL 수정 요청 4건(`attempt_count` 0~3 · `attempt_no=3` 허용 · `stage_an
 ```
 세션 시작 시 질문 생성 제거 — 질문은 분석 때 동결돼 DB에 있다 (세션 엔드포인트 축소와 함께)
 엔진 이식 (팀원 PoC feat/poc_full) — P02 규칙부, P04 LLM 스테이지
+  └ 일부 완료: engine_mode=codemap(app/engines/codemap/)이 P04 p04-1(코드 분석 문서
+    생성)에 해당하는 스테이지를 실제로 구현·배포 설정까지 마쳤다(§6). poc_full 전체
+    7-스테이지의 이식은 아니고, 별개 파이프라인으로 병행 중 — engine_mode=real(P02
+    규칙부 포함 전체 이식)은 아직 stub
 (먼 항목) 적응형 힌트 모듈 대응 — 턴당 2콜, 힌트용 featureCode, 체크포인트 단위 모드 고정
 ```
 
@@ -531,6 +535,13 @@ DDL 수정 요청 4건(`attempt_count` 0~3 · `attempt_no=3` 허용 · `stage_an
 | `feat/pdf_analysis` | P01 교안 분석 | `../ai_poc/pdf` |
 
 워크트리는 **읽기 전용(detached HEAD)** 이다. 절대 수정·커밋하지 않는다. 팀원 코드를 고쳐야 하면 팀원에게 요청한다.
+
+**`feature/code-importance-map`(이 브랜치)는 위 이식 대상이 아니다.** P04의 p04-1(코드
+분석 문서 생성)과 필드 단위로 같은 계약을 갖는 독립 파이프라인을 병행 구현한 것으로,
+`app/engines/codemap/`(engine_mode=codemap)에 실제로 존재하고 Cloudflare Worker+Container로
+상시 배포 설정까지 끝났다(`wrangler.toml`/`Dockerfile`, 2026-07-31 — 시크릿 등록·팀
+테스트 허브 페이지는 아직 진행 중). 자세한 구조·D1~D12 결정은
+[`docs/code-importance-map/README.md`](docs/code-importance-map/README.md).
 
 ### 이식할 때
 
