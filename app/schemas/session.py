@@ -32,8 +32,12 @@ class SessionStart(BaseSchema):
     analysis_job_id: str | None = None
     session_id: str | None = Field(default=None, description="Spring AssessmentSession 키(에코용)")
     selected_problem_ids: list[str] = Field(default_factory=list, description="세션에 포함할 문제. 생략 시 전체")
-    time_limit_sec: int = Field(default=2400, ge=1)
-    
+    time_limit_sec: int = Field(
+        default=1200, ge=1,
+        description="**문제 1개당** 제한 시간(초). 세션 전체가 아니다 — 문제가 바뀌면 "
+                    "리셋되고 남은 시간은 이월되지 않는다. AI 호출 대기 동안은 멈춘다",
+    )
+
 class AnswerSubmit(BaseSchema):
     """POST /sessions/{id}/answers 요청."""
     client_request_id: str = Field(description="세션 내 유일 멱등키")
@@ -85,8 +89,8 @@ class SessionRestore(BaseSchema):
     """POST /sessions/{id}/restore 요청 (명세 §4.4)."""
     attempt_id: str | None = None
     analysis_job_id: str | None = None
-    time_limit_sec: int = 2400
-    elapsed_sec: int = 0
+    time_limit_sec: int = Field(default=1200, description="문제 1개당 제한 시간(초)")
+    elapsed_sec: int = Field(default=0, description="현재 문제에서 흘러간 시간. 문제가 바뀌면 0으로 돌아간다")
     transcript: list[TranscriptTurn] = Field(default_factory=list)
     problems: list[Problem] = Field(default_factory=list)
     source: dict[str, Any] | None = None

@@ -7,7 +7,7 @@ from app.main import app
 client = TestClient(app)
 HEADERS = {"X-Internal-Key": get_settings().internal_api_key}
 
-START_BODY = {"attemptId": "a-1", "timeLimitSec": 2400}
+START_BODY = {"attemptId": "a-1", "timeLimitSec": 1200}
 
 
 def _start() -> str:
@@ -93,7 +93,7 @@ def test_restore_rebuilds_from_transcript():
     r = client.post(
         "/api/v0/sessions/restored-1/restore",
         json={
-            "timeLimitSec": 2400,
+            "timeLimitSec": 1200,
             "transcript": [
                 {"problemId": "prob-stub-1", "axisCode": "L1",
                  "questionText": "q1", "answerText": "a1", "answeredAt": "2026-07-23T00:00:00Z",

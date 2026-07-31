@@ -77,11 +77,15 @@ def _normalize(raw_levels: Any, wanted: tuple[str, ...]) -> list[dict[str, str]]
 
 
 def freeze(topic: dict[str, Any], files: dict[str, str], teach: dict[str, Any] | None,
-           *, model_code: str, axes: tuple[str, ...] = scoring.FROZEN_AXES) -> QuestionSet:
+           *, model_code: str, axes: tuple[str, ...] = scoring.FROZEN_AXES,
+           timeout_s: float | None = None, max_attempts: int | None = None) -> QuestionSet:
     """문제 하나의 동결 대상 질문을 만든다.
 
     기본은 L1·L2다(2026-07-31 PM 확정 혼합 모드). L3·L4는 세션 중에 직전 답변을
     근거로 만들므로 여기서 만들지 않는다.
+
+    **세션 중에 부를 때는 timeout_s를 반드시 넘겨야 한다.** 안 넘기면 배치 상한(600초)이
+    적용돼 학생이 그만큼 기다린다 — 실측에서 이 경로가 910초를 태웠다.
     """
     stage = stages.get_stage("p04-4")
     max_regenerations = {p["key"]: p["default"] for p in stage.get("params", [])}.get(
@@ -105,7 +109,9 @@ def freeze(topic: dict[str, Any], files: dict[str, str], teach: dict[str, Any] |
 
     for attempt in range(max_regenerations + 1):
         try:
-            result = stages.call("p04-4", values, model_code=model_code)
+            result = stages.call("p04-4", values, model_code=model_code,
+                                 timeout_s=timeout_s,
+                                 **({"max_attempts": max_attempts} if max_attempts else {}))
         except stages.StageError as exc:
             usages.extend(exc.usages)
             reason = f"호출 실패: {exc}"

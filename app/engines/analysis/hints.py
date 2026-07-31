@@ -98,7 +98,8 @@ def generate(hint_level: int, question: str, *, model_code: str,
     for attempt in range(max_regenerations + 1):
         try:
             result = stages.call("p04-7", values, model_code=model_code,
-                                 timeout_s=timeout_s or client.SESSION_TIMEOUT_S)
+                                 timeout_s=timeout_s or client.SESSION_TIMEOUT_S,
+                                 max_attempts=client.SESSION_MAX_ATTEMPTS)
         except stages.StageError as exc:
             usages.extend(exc.usages)
             continue

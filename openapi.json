@@ -2388,11 +2388,13 @@
           "timeLimitSec": {
             "type": "integer",
             "title": "Timelimitsec",
-            "default": 2400
+            "description": "문제 1개당 제한 시간(초)",
+            "default": 1200
           },
           "elapsedSec": {
             "type": "integer",
             "title": "Elapsedsec",
+            "description": "현재 문제에서 흘러간 시간. 문제가 바뀌면 0으로 돌아간다",
             "default": 0
           },
           "transcript": {
@@ -2474,7 +2476,8 @@
             "type": "integer",
             "minimum": 1.0,
             "title": "Timelimitsec",
-            "default": 2400
+            "description": "**문제 1개당** 제한 시간(초). 세션 전체가 아니다 — 문제가 바뀌면 리셋되고 남은 시간은 이월되지 않는다. AI 호출 대기 동안은 멈춘다",
+            "default": 1200
           }
         },
         "type": "object",
