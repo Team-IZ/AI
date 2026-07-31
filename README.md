@@ -482,17 +482,26 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 | | |
 |---|---|
-| 엔드포인트 | **11/11 동작 (전부 스텁)** |
-| 테스트 | **58 passed** |
+| 엔드포인트 | **11/11 동작 (응답은 아직 스텁)** |
+| 테스트 | **112 passed** |
 | 붙일 수 있나 | **예.** 인증·에러 형식·camelCase·Swagger·`openapi.json`까지 완성 |
 
-완료된 것: `/gradings` → `/reports` 전환, 이름 통일(`decision_point`→`problem`, `depth_level`→`axis_code`), **분석·보고서 스키마를 DB 계약에 정렬**.
+**엔진 이식이 진행 중이다.** 룰 스캔 → 분석 문서 → 문제 선정 → L1·L2 질문·힌트 동결 → 채점까지 실호출로 동작을 확인했다(`app/engines/analysis/`). 팀원 PoC 규칙부와 NVIDIA 클라이언트는 **무수정 vendor**하고 우리 래퍼가 감싼다 — 갱신 절차는 각 `vendor/SOURCE.md`.
 
-응답은 고정 스텁이지만 **계약 모양은 정해져 있다.** 백엔드는 9개 전부 지금 바로 붙여볼 수 있다.
+엔드포인트 응답은 아직 스텁이라 **백엔드는 11개 전부 지금 바로 붙여볼 수 있다.**
 
-> ✅ **`/analyses`·`/reports`는 §3 명세대로 코드에 반영됐고 `openapi.json`도 갱신됐다.** 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례 대응), `focusItems`, `codeSnippet`, `requirementResults`, `bestScore`/`confirmedScore`가 전부 스펙에 들어가 있다. `Problem.stages`는 `minItems/maxItems: 4`, `ProblemStage.hints`는 `2`로 나가므로 **동결 구조를 스펙만 보고 알 수 있다.**
+> ✅ 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례 대응), `focusItems`, `codeSnippet`, `requirementResults`, `bestScore`/`confirmedScore`, `analysisDocument`(JSON)가 전부 스펙에 있다.
 >
-> ⏳ **아직인 것**: 세션 시작 시 질문 생성 제거(동결이라 Spring이 DB에서 읽어 넘겨준다 — 세션 엔드포인트 축소와 함께), 엔진 이식. 순서는 `PLAN_FASTAPI_MIGRATION.md`.
+> ⚠️ **`ProblemStage.hints`의 `minItems: 2`는 사라졌다.** 혼합 모드(L1·L2 동결 / L3·L4 적응형)로 바뀌면서 축마다 채워지는 시점이 달라졌기 때문이다.
+>
+> ```
+> L1·L2   questionText 필수 · hints 정확히 2개(hintLevel 1, 2 순서)
+> L3·L4   questionText null · hints 빈 배열      ← 세션 중 생성
+> ```
+>
+> 이 규칙은 **축에 따라 달라지는 조건부 제약이라 OpenAPI 문법으로 표현이 안 된다.** 스키마 검증기가 막고 있고 여기 산문으로만 적혀 있다.
+>
+> ⏳ **아직인 것**: p04-2(요구사항 P/F), 엔진 조립(`engine_mode="real"`), 배치 병렬화, 세션 엔드포인트 축소. 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
 ### 백엔드 대기 2건
 

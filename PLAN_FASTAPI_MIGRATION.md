@@ -29,6 +29,7 @@
 - **T1b 완료 (커밋 `4bda015`)** — 이름 통일. `decision_point`/`dp_*` 어휘를 `problem`/`problem_*`로, `depth_level`을 `axis_code`로 교체
 - **T2·T2b 완료** — 분석·보고서 스키마를 DB 계약에 정렬. `AxisCode`를 `"L1"`~`"L4"`로 바꾸고 **L3=대안 비교 / L4=반례 대응**으로 바로잡음, `Problem`에 `problem_no`·`code_snippet`·`problem_type`·`question_focus_item_id` 추가, `stages` 4개(L1→L4 순서)·`hints` 2개(`[1,2]` 순서) 검증 추가, `AnalysisResult.problems`를 `list[Problem]`으로 교체, 요청에 `focus_items`·`requirements`·`teaches`·`model_code` 추가, 응답에 `analysis_document_markdown`·`requirement_results` 추가(`jobs.py`가 요청 `requirements`와 개수 일치를 검사), 보고서는 `best_score`/`confirmed_score`로 개명하고 세션 총점 제거. 45 tests
 - **T5 1차 완료** — `openapi.json` 재생성. `stages` `minItems/maxItems: 4`, `hints` `2`가 스펙에 드러나 백엔드가 동결 구조를 코드 없이 읽는다. **범위는 `/analyses`·`/reports`까지** — T3(세션)·T4(교안) 반영 후 한 번 더 생성한다
+- **T7c 완료 (2026-07-31, 112 tests)** — **학생 체감 지연 실측.** 결론: 지연은 문제가 아니고 **무료 티어 실패율 32%가 문제다.** 세션 타임아웃을 배치와 분리(600초 → 20초 × 4회), 5xx·타임아웃 재시도 추가, 타이머 규칙 확정(문제당 20분·AI 대기 중 정지). `hints.py`(p04-7)·`grading.py`(p04-5) 신설. 상세는 아래 T7c 절
 - **T7b 진행 중 (2026-07-31, 104 tests)** — **룰 → p04-1 → p04-3 → p04-4 전 구간 실동작.** 실측(step-3.7-flash): **문제 3/3 · 질문 12개**, LLM 5회, 340초, 토큰 24,124. 질문이 실제 코드 위치를 인용하고 선택지 없이 축별로 갈린다
   - 신설: `stages.py`(매니페스트 호출·JSON 파싱·예산 자동 증액) · `fragments.py`(symbol → 줄 번호) · `topics.py`(문제 선정 + 검증 2단계 + 폴백) · `scoring.py`(축 루브릭·힌트 사다리) · `guard.py`(선택지 금지) · `questions.py`(질문 4개 동결)
   - vendor 추가: `prompt_manifest.json`(p04-0.2.0)
