@@ -1,9 +1,9 @@
 """ app/engines/codemap/engine.py -- AnalysisEngine 계약 만족 테스트
 
 materializer를 페이크로 주입해 실제 git clone/zip 해제 없이(네트워크 없이)
-tmp_path에 이미 있는 파일들을 그대로 "저장소"로 취급한다. analysis_doc_chat_fn도
-페이크로 주입해 코드 분석 문서 생성 스테이지(p05-3)가 실제 네트워크를 타지
-않게 한다(D7) -- crew.py 테스트와 동일 패턴.
+tmp_path에 이미 있는 파일들을 그대로 "저장소"로 취급한다. analysis_doc_chat_fn/
+diagram_chat_fn도 페이크로 주입해 코드 분석 문서 생성(p05-3)·구조도 생성(p05-4)
+스테이지가 실제 네트워크를 타지 않게 한다(D7) -- crew.py 테스트와 동일 패턴.
 """
 import inspect
 import json
@@ -64,6 +64,17 @@ def _fake_analysis_doc_chat(decision_points=None, *, fail=False):
     return chat_fn
 
 
+def _fake_diagram_chat():
+    """ 실제 네트워크 없이 p05-4(구조도)를 응답하는 페이크. 도구를 안 부르고 바로
+    유효한 flowchart를 낸다(run_tool_loop은 tool_calls가 없으면 그대로 종료). """
+    def chat_fn(**kwargs):
+        return ChatResult(
+            content="flowchart TD\n  core[core] --> util[util]",
+            finish_reason="stop", input_tokens=50, output_tokens=20, cached_tokens=0,
+        )
+    return chat_fn
+
+
 REQUEST = {
     "method": "ZIP_WITH_GITLOG",
     "extraction_scope": "TOTAL",
@@ -76,20 +87,22 @@ REQUEST = {
 
 def test_result_validates_against_analysis_result(tmp_path):
     repo = _build_repo(tmp_path)
-    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat())
+    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat())
     raw = engine.analyze(dict(REQUEST), zip_bytes=b"fake-zip-bytes")
 
     usage = raw.pop("ai_usage")
     result = AnalysisResult.model_validate(raw)  # 계약 위반이면 여기서 예외
     assert result.snapshot_meta.file_count == 2
-    assert len(usage) == 1  # tier2_enabled=False 기본값이라 codemap crew 호출은 없고, 분석 문서 호출 1건만
+    assert len(usage) == 2  # tier2_enabled=False라 crew 호출은 없음 -- ANALYSIS_DOC + DIAGRAM(p05-4) 2건
     assert usage[0]["source_type"] == "ANALYSIS_DOC"
     assert usage[0]["status"] == "SUCCEEDED"
+    assert usage[1]["source_type"] == "DIAGRAM"
+    assert usage[1]["status"] == "SUCCEEDED"
 
 
 def test_requirement_results_match_request_length(tmp_path):
     repo = _build_repo(tmp_path)
-    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat())
+    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat())
     raw = engine.analyze(dict(REQUEST), zip_bytes=b"x")
     assert len(raw["requirement_results"]) == len(REQUEST["requirements"])
     assert {r["requirement_id"] for r in raw["requirement_results"]} == {"r1", "r2"}
@@ -98,7 +111,7 @@ def test_requirement_results_match_request_length(tmp_path):
 
 def test_stages_are_L1_to_L4_with_two_hints(tmp_path):
     repo = _build_repo(tmp_path)
-    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat())
+    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat())
     raw = engine.analyze(dict(REQUEST), zip_bytes=b"x")
     assert raw["problems"], "적어도 하나는 problem이 만들어져야 한다"
     for problem in raw["problems"]:
@@ -114,7 +127,7 @@ def test_evidence_hash_matches_code_snippet(tmp_path):
     from app.engines.shared.evidence import evidence_hash
 
     repo = _build_repo(tmp_path)
-    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat())
+    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat())
     raw = engine.analyze(dict(REQUEST), zip_bytes=b"x")
     for problem in raw["problems"]:
         assert problem["evidence_hash"] == evidence_hash(problem["code_snippet"])
@@ -124,7 +137,7 @@ def test_ai_usage_is_top_level_sibling_key(tmp_path):
     """ base.py 계약: ai_usage는 AnalysisResult 필드가 아니라 형제 키 --
     jobs.py::run_analysis가 pop해서 AnalysisJobStatus.ai_usage로 옮긴다. """
     repo = _build_repo(tmp_path)
-    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat())
+    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat())
     raw = engine.analyze(dict(REQUEST), zip_bytes=b"x")
     assert "ai_usage" in raw
     usage_raw = raw.pop("ai_usage")
@@ -142,19 +155,20 @@ def test_tier2_off_still_calls_analysis_doc_but_not_crew(tmp_path):
     문서 생성(ANALYSIS_DOC)은 tier2와 무관하게 항상 시도된다(D7) -- 둘은 별개 스테이지. """
     repo = _build_repo(tmp_path)
     engine = CodeMapAnalysisEngine(
-        materializer=_materializer_for(str(repo)), tier2_enabled=False, analysis_doc_chat_fn=_fake_analysis_doc_chat(),
+        materializer=_materializer_for(str(repo)), tier2_enabled=False,
+        analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat(),
     )
     request = dict(REQUEST, question_budget=2)
     raw = engine.analyze(request, zip_bytes=b"x")
     source_types = {u["source_type"] for u in raw["ai_usage"]}
-    assert source_types == {"ANALYSIS_DOC"}  # CODE_MAP은 없음(tier2 꺼짐), ANALYSIS_DOC만 있음
+    assert source_types == {"ANALYSIS_DOC", "DIAGRAM"}  # CODE_MAP은 없음(tier2 꺼짐)
 
 
 def test_problems_come_from_real_decision_points_when_analysis_doc_succeeds(tmp_path):
     """ D7 핵심: 분석 문서 호출이 성공하면 실제 decision_points 기반 problem이 나온다
     (Tier1 랭킹 기반 placeholder가 아니라). """
     repo = _build_repo(tmp_path)
-    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat())
+    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat())
     request = dict(REQUEST, question_budget=2)
     raw = engine.analyze(request, zip_bytes=b"x")
 
@@ -166,11 +180,12 @@ def test_problems_come_from_real_decision_points_when_analysis_doc_succeeds(tmp_
 
 def test_analysis_document_markdown_includes_both_doc_and_ranking_table(tmp_path):
     repo = _build_repo(tmp_path)
-    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat())
+    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat())
     raw = engine.analyze(dict(REQUEST), zip_bytes=b"x")
     md = raw["analysis_document_markdown"]
     assert "# 코드 분석 문서" in md  # analysis_doc.render_markdown()의 산출
     assert "helper()를 호출" in md  # 실제 overview 내용
+    assert "```mermaid" in md and "flowchart TD" in md  # p05-4 구조도(D3: 새 필드 없이 펜스로만)
     assert "codemap 선정 근거" in md  # Tier1/2 표
 
 
@@ -179,7 +194,8 @@ def test_falls_back_to_tier1_placeholder_when_analysis_doc_call_fails(tmp_path):
     Tier1 랭킹 기반 placeholder로 채워진다(D6과 같은 강등 철학). """
     repo = _build_repo(tmp_path)
     engine = CodeMapAnalysisEngine(
-        materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(fail=True),
+        materializer=_materializer_for(str(repo)),
+        analysis_doc_chat_fn=_fake_analysis_doc_chat(fail=True), diagram_chat_fn=_fake_diagram_chat(),
     )
     request = dict(REQUEST, question_budget=2)
     raw = engine.analyze(request, zip_bytes=b"x")
@@ -192,7 +208,7 @@ def test_falls_back_to_tier1_placeholder_when_analysis_doc_call_fails(tmp_path):
 
 def test_question_budget_caps_problem_count(tmp_path):
     repo = _build_repo(tmp_path)
-    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat())
+    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat())
     request = dict(REQUEST, question_budget=1)
     raw = engine.analyze(request, zip_bytes=b"x")
     assert len(raw["problems"]) == 1
@@ -202,7 +218,8 @@ def test_question_budget_caps_problem_count(tmp_path):
 def test_own_commit_scope_without_attribution_falls_back_to_total(tmp_path):
     repo = _build_repo(tmp_path)
     engine = CodeMapAnalysisEngine(
-        materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(),
+        materializer=_materializer_for(str(repo)),
+        analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat(),
     )  # attribution=None
     request = dict(REQUEST, extraction_scope="OWN_COMMIT", commit_email="dev@example.com")
     raw = engine.analyze(request, zip_bytes=b"x")
@@ -213,7 +230,7 @@ def test_own_commit_scope_without_attribution_falls_back_to_total(tmp_path):
 
 def test_content_hash_is_64_hex_and_stable(tmp_path):
     repo = _build_repo(tmp_path)
-    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat())
+    engine = CodeMapAnalysisEngine(materializer=_materializer_for(str(repo)), analysis_doc_chat_fn=_fake_analysis_doc_chat(), diagram_chat_fn=_fake_diagram_chat())
     raw1 = engine.analyze(dict(REQUEST), zip_bytes=b"x")
     raw2 = engine.analyze(dict(REQUEST), zip_bytes=b"x")
     h1, h2 = raw1["snapshot_meta"]["content_hash"], raw2["snapshot_meta"]["content_hash"]

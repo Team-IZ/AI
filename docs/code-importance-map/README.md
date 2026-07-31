@@ -16,6 +16,8 @@
 | `shortlist.py` | 예산 안에서 rank 순서로 채우기 | 순수 |
 | `ground.py` | Tier 2 원시 응답의 closed-vocabulary 검증 | 순수 |
 | `crew.py` | Tier 2 재랭킹(2026-07-31부터 crewai 없이 `shared.llm.chat()` 직접 호출, D1) | **불순** -- 유일한 네트워크 지점 |
+| `analysis_doc.py` | 코드 분석 문서 생성(p05-3) | **불순** -- `chat()` 경유 네트워크 |
+| `diagram.py` | 구조도 생성(p05-4, 2026-07-31 신규, 데모) -- `agent_loop.run_tool_loop()`의 첫 실사용처, `mermaid_syntax_lookup` 도구 하나로 시연 | **불순** -- `chat()` 경유 네트워크 |
 | `materialize.py` | GITHUB_URL clone / ZIP 해제 | **불순** -- 유일한 git/zipfile 지점 |
 | `engine.py` | `AnalysisEngine` 프로토콜 구현체(조립) | 조립부 |
 | `__init__.py` | composition root -- Tier1+Tier2 전체 조립 | 조립부 |

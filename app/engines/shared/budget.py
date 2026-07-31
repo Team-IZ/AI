@@ -33,6 +33,14 @@ _DEFAULT_BUDGETS = {
         "max_attempts_per_call": 3,
         "timeout_s": 600,
     },
+    "DIAGRAM": {
+        "feature_code": "CODE_ANALYSIS",
+        "source_type": "DIAGRAM",
+        "max_llm_calls": 1,
+        "max_tool_rounds": 3,
+        "max_attempts_per_call": 3,
+        "timeout_s": 600,
+    },
 }
 
 

@@ -26,6 +26,7 @@ from app.config import get_settings
 from app.engines.codemap import build_code_map_from_repo
 from app.engines.codemap.analysis_doc import build_problems as build_problems_from_decision_points
 from app.engines.codemap.analysis_doc import render_markdown, run_analysis_doc
+from app.engines.codemap.diagram import run_diagram_stage
 from app.engines.codemap.materialize import Materializer, default_materialize_repo
 from app.engines.codemap.models import CodeMapConfig
 from app.engines.shared.budget import load_budget
@@ -63,12 +64,14 @@ class CodeMapAnalysisEngine:
         attribution: Mapping[str, AttributionSignal] | None = None,
         weights_path=None,
         analysis_doc_chat_fn=None,
+        diagram_chat_fn=None,
     ) -> None:
         self._tier2_enabled = tier2_enabled
         self._materializer = materializer
         self._attribution = attribution
         self._weights_path = weights_path
         self._analysis_doc_chat_fn = analysis_doc_chat_fn  # 테스트 주입 지점. None이면 실제 chat() 사용
+        self._diagram_chat_fn = diagram_chat_fn  # 테스트 주입 지점(p05-4). None이면 실제 chat() 사용
 
     def analyze(self, request: dict[str, Any], zip_bytes: bytes | None = None) -> dict[str, Any]:
         """ 동기 def(코루틴 아님) -- BackgroundTasks가 스레드풀에서 돌리므로 이벤트
@@ -106,7 +109,12 @@ class CodeMapAnalysisEngine:
         problems = self._fill_problems(doc_problems, code_map, question_budget)
         requirement_results = self._build_requirement_results(request)
 
-        all_ai_usage = list(code_map["ai_usage"]) + doc_ai_usage
+        diagram_kwargs = {"chat_fn": self._diagram_chat_fn} if self._diagram_chat_fn is not None else {}
+        mermaid_source, diagram_ai_usage = run_diagram_stage(
+            doc=doc, model_code=model_code, budget=load_budget("DIAGRAM"), job_id=job_id, **diagram_kwargs,
+        )
+
+        all_ai_usage = list(code_map["ai_usage"]) + doc_ai_usage + diagram_ai_usage
 
         return {
             "snapshot_id": str(uuid.uuid4()),
@@ -119,7 +127,7 @@ class CodeMapAnalysisEngine:
             "scope_fallback": scope_fallback,
             "fallback_reason": fallback_reason,
             "commit_sha": None,
-            "analysis_document_markdown": self._build_analysis_document(code_map, doc),
+            "analysis_document_markdown": self._build_analysis_document(code_map, doc, mermaid_source),
             "requirement_results": requirement_results,
             "problems": problems,
             "question_count_planned": len(problems),
@@ -135,10 +143,15 @@ class CodeMapAnalysisEngine:
             )
         return requested, False, None
 
-    def _build_analysis_document(self, code_map: dict[str, Any], doc) -> str:
-        """ 실제 코드 분석 문서(render_markdown) + codemap의 선정 근거(Tier1/2 표)를
-        이어붙인다 -- 전자는 "무엇을 하는 코드인가", 후자는 "왜 이 파일들을 골랐는가". """
-        parts = [render_markdown(doc), "## codemap 선정 근거 (Tier 1/2)", ""]
+    def _build_analysis_document(self, code_map: dict[str, Any], doc, mermaid_source: str = "") -> str:
+        """ 실제 코드 분석 문서(render_markdown) + 구조도(p05-4, 성공 시만) + codemap의
+        선정 근거(Tier1/2 표)를 이어붙인다. mermaid_source가 빈 문자열이면(D6 강등)
+        구조도 섹션 자체를 안 넣는다 -- 백엔드 스키마 변경 없이 자유 텍스트 안에
+        ```mermaid 펜스 블록으로만 추가된다(D3, diagram.py 모듈 docstring). """
+        parts = [render_markdown(doc)]
+        if mermaid_source:
+            parts += ["## 구조도", "", "```mermaid", mermaid_source, "```", ""]
+        parts += ["## codemap 선정 근거 (Tier 1/2)", ""]
         parts.append(
             "Tier 2(크루 재랭킹) 적용: " + ("예" if code_map["tier2_applied"] else "아니오 (Tier 1 결정론적 순위만 사용)")
         )

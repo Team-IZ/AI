@@ -1,0 +1,51 @@
+# D1 (2026-07-31, 데모용): analysis_doc(p05-3)의 구조 정보를 Mermaid flowchart로
+# 시각화하는 스테이지. app.engines.shared.agent_loop.run_tool_loop()을 거치는
+# 첫 실사용 스테이지다 -- mermaid_syntax_lookup 도구 하나를 준다(diagram.py 참고).
+#   WHY: 학생 제출물의 구조(structure[])를 그림으로도 보여주면 사람이 읽기 쉽다 --
+#     nvidia-demo 원본의 writer 에이전트가 WebsiteSearchTool로 mermaid.js 문법을
+#     참고하던 것과 같은 동기다(다만 여기서는 라이브 웹 검색 대신 정적 치트시트를
+#     쓴다, diagram.py의 D2 참고).
+#   COST: 실패해도 job을 안 죽인다(D6과 동일 철학) -- 다이어그램 없이도
+#     analysis_document_markdown은 그대로 나간다. 새 스키마 필드를 요구하지
+#     않는다 -- analysis_document_markdown이 이미 자유 텍스트라 ```mermaid
+#     펜스 블록 하나 더 넣는 것뿐이다(Backend와 계약 변경 협의 불필요).
+#   EXIT: 데모 이상으로 쓰려면(현재는 "일단 만들어서 붙이기") 별도 정확성 검증
+#     (실제 mermaid-cli로 렌더 확인 등)을 추가해야 한다 -- 지금은 구조적 검증
+#     (check_mermaid_syntax)만 한다.
+
+id: p05-4
+pipeline: p05
+title: 구조도(Mermaid) 생성
+kind: prompt
+function: run_diagram_stage() -- app/engines/codemap/diagram.py
+system: >
+  You draw a Mermaid flowchart summarizing a codebase's structure for a code-review
+  document. Use the mermaid_syntax_lookup tool if you are unsure of exact syntax for a
+  diagram type. Output ONLY raw Mermaid source (no markdown code fences, no prose).
+system_note: >
+  도구 사용을 유도하는 것 자체가 목적 중 하나다(데모) -- 그래서 시스템 프롬프트가
+  "확실하지 않으면 도구를 써라"라고 명시한다. 모델이 도구를 안 써도(이미 아는
+  문법이면) 정상이다 -- run_tool_loop은 tool_calls가 없으면 그대로 종료한다.
+user_template: |
+  아래는 코드 분석 문서가 이미 정리한 이 제출물의 구조다. 이걸 Mermaid flowchart로
+  그려라(diagram type: flowchart).
+
+  ## 구조
+  {structure_block}
+
+  규칙:
+  - 노드는 위 구조의 area 이름을 그대로 쓴다(지어내지 않는다).
+  - 화살표는 구조 간 관계를 나타낸다(추정 가능한 경우만).
+  - 출력은 순수 Mermaid 소스만(펜스·설명 문장 없이).
+required_placeholders: [structure_block]
+truncation:
+  structure_block: 3000
+params:
+  - key: max_tokens
+    type: int
+    default: 800
+  - key: temperature
+    type: float
+    default: 0.0
+    locked: true
+    note: "재현성 -- 같은 구조는 같은 다이어그램이 나와야 비교가 가능하다"

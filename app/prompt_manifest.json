@@ -104,6 +104,35 @@
               "note": "재현성 -- 같은 제출물은 같은 분석 문서가 나와야 비교가 가능하다"
             }
           ]
+        },
+        {
+          "id": "p05-4",
+          "title": "구조도(Mermaid) 생성",
+          "kind": "prompt",
+          "function": "run_diagram_stage() -- app/engines/codemap/diagram.py",
+          "system": "You draw a Mermaid flowchart summarizing a codebase's structure for a code-review document. Use the mermaid_syntax_lookup tool if you are unsure of exact syntax for a diagram type. Output ONLY raw Mermaid source (no markdown code fences, no prose).\n",
+          "system_note": "도구 사용을 유도하는 것 자체가 목적 중 하나다(데모) -- 그래서 시스템 프롬프트가 \"확실하지 않으면 도구를 써라\"라고 명시한다. 모델이 도구를 안 써도(이미 아는 문법이면) 정상이다 -- run_tool_loop은 tool_calls가 없으면 그대로 종료한다.\n",
+          "user_template": "아래는 코드 분석 문서가 이미 정리한 이 제출물의 구조다. 이걸 Mermaid flowchart로\n그려라(diagram type: flowchart).\n\n## 구조\n{structure_block}\n\n규칙:\n- 노드는 위 구조의 area 이름을 그대로 쓴다(지어내지 않는다).\n- 화살표는 구조 간 관계를 나타낸다(추정 가능한 경우만).\n- 출력은 순수 Mermaid 소스만(펜스·설명 문장 없이).\n",
+          "required_placeholders": [
+            "structure_block"
+          ],
+          "truncation": {
+            "structure_block": 3000
+          },
+          "params": [
+            {
+              "key": "max_tokens",
+              "type": "int",
+              "default": 800
+            },
+            {
+              "key": "temperature",
+              "type": "float",
+              "default": 0.0,
+              "locked": true,
+              "note": "재현성 -- 같은 구조는 같은 다이어그램이 나와야 비교가 가능하다"
+            }
+          ]
         }
       ]
     }
