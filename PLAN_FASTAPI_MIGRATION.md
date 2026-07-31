@@ -29,6 +29,7 @@
 - **T1b 완료 (커밋 `4bda015`)** — 이름 통일. `decision_point`/`dp_*` 어휘를 `problem`/`problem_*`로, `depth_level`을 `axis_code`로 교체
 - **T2·T2b 완료** — 분석·보고서 스키마를 DB 계약에 정렬. `AxisCode`를 `"L1"`~`"L4"`로 바꾸고 **L3=대안 비교 / L4=반례 대응**으로 바로잡음, `Problem`에 `problem_no`·`code_snippet`·`problem_type`·`question_focus_item_id` 추가, `stages` 4개(L1→L4 순서)·`hints` 2개(`[1,2]` 순서) 검증 추가, `AnalysisResult.problems`를 `list[Problem]`으로 교체, 요청에 `focus_items`·`requirements`·`teaches`·`model_code` 추가, 응답에 `analysis_document_markdown`·`requirement_results` 추가(`jobs.py`가 요청 `requirements`와 개수 일치를 검사), 보고서는 `best_score`/`confirmed_score`로 개명하고 세션 총점 제거. 45 tests
 - **T5 1차 완료** — `openapi.json` 재생성. `stages` `minItems/maxItems: 4`, `hints` `2`가 스펙에 드러나 백엔드가 동결 구조를 코드 없이 읽는다. **범위는 `/analyses`·`/reports`까지** — T3(세션)·T4(교안) 반영 후 한 번 더 생성한다
+- **T6 완료 (2026-07-31)** — 룰 규칙부 이식. **vendor 방식**(원본 12 `.py` + 19 `.json` 무수정 복사 + 우리 소유 `rules.py` 래퍼). ZIP 안전 해제(Zip Slip·심볼릭 링크·ZIP 폭탄 방어), `extractor_version`을 vendor 전체 해시로 산출. `engine_mode="real"` 배선은 T7로 미룸 — 룰만으론 `AnalysisResult`를 못 채운다. 64 tests
 - **T2c 완료 (2026-07-31)** — 분석 문서를 Markdown에서 **JSON**으로 교체. `AnalysisDocument`(`overview`·`structure`·`decisionPoints`·`risks`) 신설, `analysis_document_markdown: str` 제거. PoC 파이프라인의 원본이 strict JSON이고 Markdown은 화면 렌더 결과였다. **백엔드에 B-5(컬럼 타입 변경) 요청 발생 — "신설 테이블·컬럼 없음"이 깨진 첫 건.** `openapi.json` 3차 재생성. 59 tests
 
 기존 구현(`app/` 1,659줄 + 목업 2,550줄 + vendored pipeline 4,815줄)은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났다(`.gitignore` 대상, 커밋 안 됨).
@@ -387,9 +388,39 @@ GET  /api/v0/curricula/{jobId}  → {teaches: [{id, label, unitId, sourcePages}]
 
 ---
 
-### T6 — P02 규칙부 이식 ← **다음 작업**
+### T6 ✅ — P02 규칙부 이식 (2026-07-31, 64 tests)
 
 **T6만 진짜 이식이다** (Python → Python). T7은 JavaScript → Python **포팅**이라 성격이 다르다.
+
+**결정: vendor 방식.** 원본 12개 `.py` + 데이터 19개 `.json`을 **한 줄도 안 고치고** `app/engines/analysis/vendor/`에 복사하고, 우리 소유의 `rules.py`가 감싼다. 이유는 팀원이 그 파일들을 계속 고치는 중이라 — 패키지 상대 import로 바꿔놓으면 갱신 때마다 병합이 된다. 원본 유지하면 **복사 한 번**이다. 기준 커밋·갱신 절차는 `vendor/SOURCE.md`.
+
+```
+app/engines/analysis/
+  vendor/       팀원 소유. 절대 안 고침. 갱신 = 통째로 덮어쓰기 (기준 커밋 15b02fb)
+  rules.py      우리 소유. ZIP 안전 해제 → scan/score 호출 → finding을 우리 어휘로
+```
+
+**실측** — `app/` 자체를 스캔: 25파일 → finding 10개, hub `common.py`. JSON 데이터도 `__file__` 상대경로로 정상 로드. 코드 수정 0.
+
+**밝혀진 것 — `Problem` 스키마와 안 맞는 곳 5개**
+
+| # | 내용 | 처리 |
+|---|---|---|
+| 1 | **finding에 줄 번호가 없다**(파일 단위) | T7이 `{file, symbol}` → `locateSymbol`로 산정. T2c의 그 메커니즘 |
+| 2 | `priority`가 PoC는 문자열(`"최우선"`), 우리는 float | `rank_score`(3축 가중합)를 쓴다 |
+| 3 | **`source_path`가 `None`인 후보가 있다** | `repeated-pattern:duplicate-definition`은 여러 파일에 흩어져 단일 경로가 없다. **버리지 않고 넘긴다** — 대표 파일 선택은 LLM 선정의 판단이다 |
+| 4 | `problem_type` 5종이 finding에 없다 | `id` 접두사로 매핑(`rules.py:_PROBLEM_TYPE_BY_PREFIX`). `REQUIREMENT_IMPL`·`EXTERNAL_INTEGRATION`은 룰이 안 만든다 |
+| 5 | `extractor_version`이 PoC에 없다 | vendor의 `.py`+`.json` 전부를 해시. **데이터 파일이 결과를 바꾸므로 코드만 해싱하면 안 된다** |
+
+⚠️ **3번이 첫 실행에서 바로 나왔다** — 상위 3개 중 2개가 `source_path: None`이었다. 룰만으로 상위 3개를 뽑으면 2개가 버려진다는 뜻이고, T7의 LLM 선정이 선택이 아니라 필수라는 근거다.
+
+**아직 안 한 것 — `engine_mode="real"` 배선.** 룰 결과에는 `stages`·`codeSnippet`이 없어 `AnalysisResult` 검증을 못 통과한다. **지금 꽂으면 `/analyses`가 500이 된다.** T7에서 LLM이 스키마를 채울 수 있게 됐을 때 한 번에 배선한다. 그때까지 검증 수단은 `tests/test_rules.py`.
+
+**보안 — `rules.py`가 막는 것**: Zip Slip(`../` 경로 탈출), 심볼릭 링크, ZIP 폭탄(항목 20,000개·해제 500MB 상한). 학생이 올린 ZIP이라 항목 이름을 신뢰할 수 없다. 임시 디렉터리는 빠져나갈 때 삭제 — 코드 원문을 남기지 않는다.
+
+**이벤트 루프 함정은 이미 피해져 있다** — `jobs.run_analysis`가 `def`(async 아님)라 Starlette이 threadpool로 돌린다. **`async def`로 바꾸지 말 것.**
+
+<details><summary>원래 계획 (참고)</summary>
 
 **출처**: `../ai_poc/poc_full` 의 `.py` 12개 (기준 커밋 `15b02fb`)
 
@@ -418,9 +449,11 @@ feedback/reflection_signal.py     + _hook   반성 신호
 
 **T6이 끝나도 `/analyses`는 완성이 아니다.** 룰이 후보를 좁히고 그 위에서 LLM(p04-3)이 고르는 2단계 구조라, T7이 붙어야 문제 3개가 확정된다. T6 단계에서는 `engine_mode`를 나눠 후보 목록만 확인한다.
 
+</details>
+
 ---
 
-### T7 — P04 LLM 스테이지 이식
+### T7 — P04 LLM 스테이지 이식 ← **다음 작업**
 
 **출처**: `../ai_poc/poc_full/app/` — 전체 1,175줄
 

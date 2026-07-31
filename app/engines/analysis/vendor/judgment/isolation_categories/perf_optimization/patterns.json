@@ -1,0 +1,15 @@
+{
+  "promotion_threshold": 2,
+  "patterns": [
+    {
+      "id": "perf_or_rerender",
+      "regex": "성능|리렌더링",
+      "status": "confirmed",
+      "confirmations": 2,
+      "sources": [
+        "cognition-isolation:Header.jsx",
+        "cognition-isolation:LibraryScene.jsx"
+      ]
+    }
+  ]
+}
