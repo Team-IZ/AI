@@ -80,3 +80,35 @@ def test_shortfall_reports_missing_count(fake_stage):
     s = _select(budget=3)
 
     assert s.shortfall == 2
+    
+def test_shortfall_is_filled_with_general_topics(fake_stage):
+    """부족분은 teach 없는 일반 문제로 채운다 — teach 세트를 바꾸지 않는다.
+
+    프론트가 강사가 고른 teach 목록을 그대로 보여주므로, 같은 teach를 두 번 쓰면
+    화면과 실제가 어긋난다.
+    """
+    fake_stage([_topic("t1", "발급", "def issue_token(user):")])
+    doc = {"decision_points": [
+        {"title": "토큰 검증", "file": "app/auth.py",
+         "symbol": "def verify(token):", "why_it_matters": "신뢰 경계"},
+    ]}
+
+    s = topics.select(FILES, TEACHES, doc, [], model_code="m", question_budget=2)
+
+    assert len(s.topics) == 2
+    assert [t["teach_id"] for t in s.topics] == ["t1", None]
+    assert s.topics[1]["code_ref"]["line_start"] == 4
+
+
+def test_general_topic_does_not_reuse_a_used_location(fake_stage):
+    """1차와 같은 지점을 다시 쓰면 같은 문제가 두 번 나간다."""
+    fake_stage([_topic("t1", "발급", "def issue_token(user):")])
+    doc = {"decision_points": [
+        {"title": "같은 지점", "file": "app/auth.py",
+         "symbol": "def issue_token(user):", "why_it_matters": "중복"},
+    ]}
+
+    s = topics.select(FILES, TEACHES, doc, [], model_code="m", question_budget=2)
+
+    assert len(s.topics) == 1
+    assert s.shortfall == 1

@@ -89,5 +89,54 @@ def select(files: dict[str, str], teaches: list[dict[str, Any]],
         }
         verified.append(t)
 
+    # 폴백: teach 앵커로 예산을 못 채웠으면 teach 없는 일반 문제로 채운다.
+    #
+    # 같은 teach를 재사용하지 않는 이유: 강사가 (클래스, 상속, 캡슐화)로 정하면
+    # 프론트도 그 셋을 보여준다. 뒤에서 (클래스, 클래스, 캡슐화)로 바꾸면 화면과 어긋난다.
+    #
+    # 미구현 teach는 이미 requirementResults가 F로 보고한다. 그걸 점수 분모에도
+    # 반영하면(문제 2개 = 만점 40) 같은 사실을 두 번 벌하고, 학생마다 만점이 달라진다.
+    #
+    # LLM을 다시 부르지 않는다 — p04-1의 decision_points가 이미 코드에 앵커돼 있다.
+    if len(verified) < question_budget:
+        used = {(t["code_ref"]["file"], t["code_ref"]["line_start"]) for t in verified}
+        verified.extend(_general_topics(
+            files, analysis_document, need=question_budget - len(verified), used=used
+        ))
+
     return Selection(topics=verified[:question_budget], usages=result.usages,
                      dropped=dropped, budget=question_budget)
+    
+def _general_topics(files: dict[str, str], analysis_document: dict[str, Any],
+                    *, need: int, used: set[tuple[str, int]]) -> list[dict[str, Any]]:
+    """teach 없는 일반 문제. 분석 문서의 decision_points 중 안 쓰인 것을 쓴다.
+
+    decision_points는 p04-1이 "판단이 개입된 지점"으로 이미 골라둔 것이고 코드에
+    앵커돼 있다. 새로 LLM을 부를 이유가 없다.
+
+    teach_id가 None이라 **보고서의 교안 복습 위치 지목이 이 문제엔 안 붙는다.**
+    임시안이고, 미구현 teach를 어떻게 다룰지는 나중에 다시 본다.
+    """
+    picked: list[dict[str, Any]] = []
+    for dp in analysis_document.get("decision_points") or []:
+        if len(picked) >= need:
+            break
+        located = fragments.extract_fragment(files, dp.get("file"), dp.get("symbol", ""))
+        if not located["valid"]:
+            continue
+        key = (located["file"], located["line_start"])
+        if key in used:
+            continue   # 1차에서 이미 쓴 지점. 같은 문제를 두 번 내지 않는다
+        used.add(key)
+        picked.append({
+            "teach_id": None,
+            "title": dp.get("title", ""),
+            "rationale": dp.get("why_it_matters", ""),
+            "code_ref": {
+                "file": located["file"],
+                "line_start": located["line_start"],
+                "line_end": located["line_end"],
+                "snippet": located["snippet"],
+            },
+        })
+    return picked
