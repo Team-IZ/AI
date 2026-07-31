@@ -28,4 +28,11 @@ COPY openapi.json ./
 
 EXPOSE 8000
 
+# D7 (2026-07-31): Worker의 DEFAULT_MODEL_CODE 교체를 이미 떠 있던 컨테이너
+# 인스턴스에 반영시키려면 이미지 해시 자체가 바뀌어야 강제 재생성된다(env var는
+# 컨테이너 프로세스 시작 시점에 고정, 실측 확인 -- warm 인스턴스가 새 값 없이 옛
+# 값(z-ai/glm-5.2)으로 계속 돌아 재현). 주석만으로는 레이어 해시가 안 바뀌어서(1차
+# 시도 실패, 확인함) LABEL로 실제 이미지 config를 바꾼다.
+LABEL rebuild_reason="D7-force-container-recreate-2026-07-31"
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

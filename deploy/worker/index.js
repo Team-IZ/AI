@@ -19,7 +19,13 @@ export class CodemapContainer extends Container {
       INTERNAL_API_KEY: env.INTERNAL_API_KEY,
       APP_ENV: "production",
       ENGINE_MODE: "codemap",
-      DEFAULT_MODEL_CODE: "z-ai/glm-5.2",
+      // D4 (2026-07-31, 실측 교체): z-ai/glm-5.2가 NVIDIA 쪽에서 무응답(90초+ 타임아웃,
+      // 직접 호출로 확인)이라 기본값으로 못 쓴다. mistralai/mistral-medium-3.5-128b로
+      // 교체 -- 같은 세션에서 실제 배포본에 analysis_doc+diagram 둘 다 완전 성공
+      // (21.8s/7.6s) 확인. 비교 대상 nvidia/nemotron-3-ultra-550b-a55b도 성공은
+      // 했지만 콜당 ~80초라 기본값에는 너무 느림(4분+/job) -- 그쪽은 필요할 때
+      // modelCode로 명시해서 쓴다.
+      DEFAULT_MODEL_CODE: "mistralai/mistral-medium-3.5-128b",
     };
   }
 }

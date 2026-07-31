@@ -94,7 +94,7 @@
             {
               "key": "max_tokens",
               "type": "int",
-              "default": 2400
+              "default": 4096
             },
             {
               "key": "temperature",
