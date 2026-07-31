@@ -2,27 +2,31 @@
 
 from typing import Any
 
+from app.schemas.analysis import FROZEN_AXES
+
 # 진행 순서. AxisCode와 같은 순서여야 한다(analysis.py의 Problem validator가 검사).
 _AXES = ("L1", "L2", "L3", "L4")
 
 
 def _stub_stages() -> list[dict[str, Any]]:
-    """단계 4개 × 힌트 2개.
+    """단계 4개. 구조는 분석 때 확정되고 내용은 단계마다 시점이 다르다.
 
-    동결 구조라 질문·힌트가 분석 응답에 다 실린다. 세션 중에는 생성하지 않는다.
+    L1·L2  질문·힌트를 여기서 동결한다
+    L3·L4  세션 중 직전 답변을 근토로 만든다 — 여기서는 비워 보낸다
     """
-    return [
-        {
+    stages = []
+    for axis in _AXES:
+        frozen = axis in FROZEN_AXES
+        stages.append({
             "axis_code": axis,
-            "question_text": f"[stub] {axis} 질문",
+            "question_text": f"[stub] {axis} 질문" if frozen else None,
             "flagged": False,
             "hints": [
                 {"hint_level": 1, "hint_text": f"[stub] {axis} 힌트 1"},
                 {"hint_level": 2, "hint_text": f"[stub] {axis} 힌트 2"},
-            ],
-        }
-        for axis in _AXES
-    ]
+            ] if frozen else [],
+        })
+    return stages
 
 
 def _stub_problem(problem_no: int, focus_item_id: str | None = None) -> dict[str, Any]:

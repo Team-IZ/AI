@@ -216,11 +216,14 @@ def test_problem_rejects_wrong_stage_order():
     from app.schemas.analysis import Problem
 
     def stage(axis: str) -> dict:
-        return {
-            "axisCode": axis,
-            "questionText": f"{axis} 질문",
-            "hints": [{"hintLevel": 1, "hintText": "h1"}, {"hintLevel": 2, "hintText": "h2"}],
-        }
+        # L1·L2만 분석 때 채워진다. L3·L4는 세션 중 생성이라 비어 있어야 한다.
+        if axis in ("L1", "L2"):
+            return {
+                "axisCode": axis,
+                "questionText": f"{axis} 질문",
+                "hints": [{"hintLevel": 1, "hintText": "h1"}, {"hintLevel": 2, "hintText": "h2"}],
+            }
+        return {"axisCode": axis, "questionText": None, "hints": []}
 
     base = {
         "problemId": "p-1", "problemNo": 1, "problemType": "RISK_POINT",
@@ -261,3 +264,33 @@ def test_requirement_result_count_mismatch_fails_job():
         assert body["result"] is None          # 검증 실패면 결과를 남기지 않는다
     finally:
         app.dependency_overrides.clear()
+
+def test_stage_fill_time_is_enforced_per_axis():
+    """단계마다 채워지는 시점이 다르다 — L1·L2는 분석 때, L3·L4는 세션 중.
+
+    "0개 또는 2개"로 느슨하게 두면 L1에 힌트가 없어도, L3에 힌트가 있어도 통과한다.
+    전자는 학생이 힌트 없이 재답변하게 되고 후자는 적응 생성분을 덮어쓴다 —
+    둘 다 에러 없이 동작만 틀린다.
+    """
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.analysis import ProblemStage
+
+    two_hints = [{"hintLevel": 1, "hintText": "h1"}, {"hintLevel": 2, "hintText": "h2"}]
+
+    # 정상
+    ProblemStage.model_validate({"axisCode": "L1", "questionText": "q", "hints": two_hints})
+    ProblemStage.model_validate({"axisCode": "L3", "questionText": None, "hints": []})
+
+    with pytest.raises(ValidationError):   # L1인데 질문이 없다
+        ProblemStage.model_validate({"axisCode": "L1", "questionText": None, "hints": two_hints})
+
+    with pytest.raises(ValidationError):   # L2인데 힌트가 없다
+        ProblemStage.model_validate({"axisCode": "L2", "questionText": "q", "hints": []})
+
+    with pytest.raises(ValidationError):   # L4인데 질문이 미리 들어왔다
+        ProblemStage.model_validate({"axisCode": "L4", "questionText": "q", "hints": []})
+
+    with pytest.raises(ValidationError):   # L3인데 힌트가 미리 들어왔다
+        ProblemStage.model_validate({"axisCode": "L3", "questionText": None, "hints": two_hints})

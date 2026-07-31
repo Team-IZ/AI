@@ -83,6 +83,15 @@ AXES: dict[str, dict[str, Any]] = {
 AXIS_CODES = list(AXES)
 POC_ID_TO_CODE = {v["poc_id"]: k for k, v in AXES.items()}
 
+# 질문·힌트를 언제 만드는가 (2026-07-31 PM 확정 · 혼합 모드)
+#
+#   L1·L2   분석 배치에서 질문·힌트를 만들어 동결한다
+#   L3·L4   세션 중에 만든다 — 직전 단계 답변과 채점 근거를 봐야 겨냥이 맞기 때문이다
+#
+# 전면 동결(24힌트)도 전면 적응형도 아니다. 배치는 가벼워지고 세션 중 호출이 늘어난다.
+FROZEN_AXES = ("L1", "L2")
+ADAPTIVE_AXES = ("L3", "L4")
+
 PASS_SCORE = 3            # 이 점수 이상이어야 다음 단계로
 MAX_HINTS_PER_LEVEL = 2   # 단계당 힌트 상한. 소진 후 미달 = 그 문제 종료
 QUESTIONS_PER_SUBMISSION = 3

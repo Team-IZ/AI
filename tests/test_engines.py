@@ -58,9 +58,13 @@ def test_problems_use_db_columns():
     assert problem["status"] == "READY"          # 4종. OPEN은 DB CHECK에 없다
     assert problem["references"][0]["reference_type"] == "CALLER"   # PRIMARY 폐기
 
-    # 동결: 단계 4개 × 힌트 2개가 분석 응답에 실려야 세션 중 LLM 호출이 채점뿐이 된다.
+    # 구조는 분석 때 확정(4단계)되고 내용은 단계마다 시점이 다르다.
+    # L1·L2는 여기서 동결, L3·L4는 세션 중 직전 답변을 보고 만든다.
     assert [s["axis_code"] for s in problem["stages"]] == ["L1", "L2", "L3", "L4"]
-    assert all(len(s["hints"]) == 2 for s in problem["stages"])
+    frozen = {s["axis_code"]: s for s in problem["stages"] if s["axis_code"] in ("L1", "L2")}
+    adaptive = {s["axis_code"]: s for s in problem["stages"] if s["axis_code"] in ("L3", "L4")}
+    assert all(s["question_text"] and len(s["hints"]) == 2 for s in frozen.values())
+    assert all(s["question_text"] is None and s["hints"] == [] for s in adaptive.values())
 
 
 def test_real_mode_raises_not_implemented(monkeypatch):

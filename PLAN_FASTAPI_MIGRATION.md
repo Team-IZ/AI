@@ -29,7 +29,11 @@
 - **T1b 완료 (커밋 `4bda015`)** — 이름 통일. `decision_point`/`dp_*` 어휘를 `problem`/`problem_*`로, `depth_level`을 `axis_code`로 교체
 - **T2·T2b 완료** — 분석·보고서 스키마를 DB 계약에 정렬. `AxisCode`를 `"L1"`~`"L4"`로 바꾸고 **L3=대안 비교 / L4=반례 대응**으로 바로잡음, `Problem`에 `problem_no`·`code_snippet`·`problem_type`·`question_focus_item_id` 추가, `stages` 4개(L1→L4 순서)·`hints` 2개(`[1,2]` 순서) 검증 추가, `AnalysisResult.problems`를 `list[Problem]`으로 교체, 요청에 `focus_items`·`requirements`·`teaches`·`model_code` 추가, 응답에 `analysis_document_markdown`·`requirement_results` 추가(`jobs.py`가 요청 `requirements`와 개수 일치를 검사), 보고서는 `best_score`/`confirmed_score`로 개명하고 세션 총점 제거. 45 tests
 - **T5 1차 완료** — `openapi.json` 재생성. `stages` `minItems/maxItems: 4`, `hints` `2`가 스펙에 드러나 백엔드가 동결 구조를 코드 없이 읽는다. **범위는 `/analyses`·`/reports`까지** — T3(세션)·T4(교안) 반영 후 한 번 더 생성한다
-- **T7b 진행 중 (2026-07-31, 75 tests)** — **p04-1(코드 분석 문서) 전 구간 실동작.** `stages.py`(매니페스트 기반 스테이지 호출 + JSON 파싱 + 예산 자동 증액)와 `fragments.py`(symbol → 줄 번호 산정) 신설, `prompt_manifest.json`(p04-0.2.0) vendor. 실측: 룰 스캔 → LLM → symbol 검증 → 스키마까지 **근거 유효 4/4**, 75~115초(step-3.7-flash)
+- **T7b 진행 중 (2026-07-31, 104 tests)** — **룰 → p04-1 → p04-3 → p04-4 전 구간 실동작.** 실측(step-3.7-flash): **문제 3/3 · 질문 12개**, LLM 5회, 340초, 토큰 24,124. 질문이 실제 코드 위치를 인용하고 선택지 없이 축별로 갈린다
+  - 신설: `stages.py`(매니페스트 호출·JSON 파싱·예산 자동 증액) · `fragments.py`(symbol → 줄 번호) · `topics.py`(문제 선정 + 검증 2단계 + 폴백) · `scoring.py`(축 루브릭·힌트 사다리) · `guard.py`(선택지 금지) · `questions.py`(질문 4개 동결)
+  - vendor 추가: `prompt_manifest.json`(p04-0.2.0)
+  - ⚠️ **p04-1 지연 편차가 크다: 36초 → 115초 → 195초.** 같은 프롬프트인데 5배 넘게 흔들린다. 배치 소요시간을 예측값으로 못 쓴다
+  - 남은 것: p04-2(요구사항 P/F) · p04-7(힌트) · 엔진 조립
 - **T7a 완료 (2026-07-31, 69 tests)** — LLM 클라이언트 배선. `nvidia_key_pool.py`·`nvidia_client.py`를 `app/llm/vendor/`로(둘 다 상류 nvidia-build에서 vendored된 파일이라 같은 규칙 승계), 우리 소유 `app/llm/client.py`가 키 풀 싱글턴·지연 측정·토큰 추출·실패 분류를 더한다. **실패해도 `usage`를 들고 던진다**(`LlmError.usage`) — 실패한 호출도 토큰을 태운다
 - **T6 완료 (2026-07-31)** — 룰 규칙부 이식. **vendor 방식**(원본 12 `.py` + 19 `.json` 무수정 복사 + 우리 소유 `rules.py` 래퍼). ZIP 안전 해제(Zip Slip·심볼릭 링크·ZIP 폭탄 방어), `extractor_version`을 vendor 전체 해시로 산출. `engine_mode="real"` 배선은 T7로 미룸 — 룰만으론 `AnalysisResult`를 못 채운다. 64 tests
 - **T2c 완료 (2026-07-31)** — 분석 문서를 Markdown에서 **JSON**으로 교체. `AnalysisDocument`(`overview`·`structure`·`decisionPoints`·`risks`) 신설, `analysis_document_markdown: str` 제거. PoC 파이프라인의 원본이 strict JSON이고 Markdown은 화면 렌더 결과였다. **백엔드에 B-5(컬럼 타입 변경) 요청 발생 — "신설 테이블·컬럼 없음"이 깨진 첫 건.** `openapi.json` 3차 재생성. 59 tests
@@ -696,6 +700,44 @@ code_analysis.analysis_document (JSONB)                 분석 문서 — B-5로
 
 > 우리가 L3=반례, L4=대안으로 뒤집어 쓰고 있었다. 정의서·프론트·PM 기준이 위 표다. `schemas/report.py`는 아직 옛 순서다(T2b).
 
+### 🔴 질문·힌트 생성 시점 — 혼합 모드 (2026-07-31 PM 확정)
+
+**아래 절은 낡았다.** "전부 동결"이 아니라 단계별로 갈린다.
+
+```
+L1  질문 동결 · 힌트 동결      분석 배치
+L2  질문 동결 · 힌트 동결      분석 배치
+L3  질문 적응형 · 힌트 적응형   세션 중 (L2 통과 후, 직전 답변·채점 근거를 보고 생성)
+L4  질문 적응형 · 힌트 적응형   세션 중 (L3 통과 후)
+```
+
+**콜 수**
+
+```
+분석 배치   문서1 + 요구사항1 + 선정1 + 질문3(문제당 L1·L2 한 번) + 힌트12  = 18콜
+            (전면 동결이었으면 30콜 — 배치는 오히려 가벼워졌다)
+
+세션 중     L1 채점3 · L2 채점3 · L3 질문1+채점3+힌트2 · L4 질문1+채점3+힌트2
+            = 문제당 최대 18 → 3문제 54콜
+```
+
+**🔴 미해결 — 턴당 대기 시간.** L3·L4 턴은 **채점 → 질문 생성**이 연달아 돌아야 다음 화면이 뜬다. 문답 기본 모델 `mistral-medium-3.5`가 팀원 실측 3분이라 **한 턴에 6분**이 된다. `timeLimitSec: 2400`(40분)에 12질문이 산술적으로 안 들어간다. 완화 수단은 ① 질문 생성을 채점과 병렬로(채점 근거 없이 답변만으로 생성) ② 문답 모델을 빠른 것으로 교체 — **②가 근본이다. PM에게 알려야 한다.**
+
+**스키마 반영 완료** — `ProblemStage.question_text: str | None`, `hints`는 축별 규칙으로 검증한다.
+
+```
+L1·L2   questionText 필수 · hints 정확히 2개([1,2] 순서)
+L3·L4   questionText null · hints 빈 배열
+```
+
+느슨하게 "0개 또는 2개"로 풀지 않은 이유: 그러면 L1에 힌트가 안 와도, L3에 힌트가 와도 통과한다. 전자는 학생이 힌트 없이 재답변하게 되고 후자는 적응 생성분을 덮어쓴다 — **둘 다 에러 없이 동작만 틀린다.**
+
+⚠️ **이 규칙은 `openapi.json`에 안 나온다.** 축별 조건부 제약은 OpenAPI로 표현이 안 돼서 `minItems`가 사라지고 description만 남았다. 백엔드에는 산문으로 전달해야 한다.
+
+**팀원 프롬프트 요청** — p04-4를 L1·L2 2개만 생성하도록, 그리고 L3·L4를 직전 문답 전문 + 채점 근거로 생성하는 스테이지 신설. **고지 완료(2026-07-31).** 그때까지 `questions.py`는 4개를 받아 2개만 쓴다(`_normalize`가 남는 축을 버린다).
+
+<details><summary>낡은 절 — 전면 동결 시절의 근거 (2026-07-30까지)</summary>
+
 ### 질문·힌트 생성 시점 — 분석 배치에서 전부 동결한다
 
 ```
@@ -710,6 +752,8 @@ PoC 구현이 이미 그렇다 — `poc-engine.js:110`이 분석 단계에서 `H
 그래서 **`AnalysisResult`의 `problems[].stages[]`는 4개(L1~L4)이고 각 stage에 `hints` 2개가 실린다.**
 
 세션 중 LLM 호출: **채점 1콜뿐.** 질문 생성도 힌트 생성도 세션 중에 없다.
+
+</details>
 
 ### 채점
 

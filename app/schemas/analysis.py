@@ -98,35 +98,73 @@ class ProblemReference(BaseSchema):
     reference_type: ReferenceType
     
 class Hint(BaseSchema):
-    """단계 하나에 딸린 힌트. 분석 때 미리 만들어 동결한다."""
+    """단계 하나에 딸린 힌트(= 재질의 문장). L1·L2만 분석 때 미리 만든다."""
 
     hint_level: int = Field(ge=1, le=2)
     hint_text: str
-    
+
+
+# 질문·힌트를 분석 배치에서 미리 만드는 단계.
+# 2026-07-31 PM 확정: L1·L2는 동결, L3·L4는 세션 중 직전 답변을 근거로 적응 생성.
+FROZEN_AXES = ("L1", "L2")
+
+
 class ProblemStage(BaseSchema):
     """문제 하나의 단계 하나. 4축이 곧 4단계다.
 
-    질문·힌트는 분석 때 만들어 동결한다. 세션 중에는 생성하지 않고 꺼내 쓴다.
+    **단계마다 채워지는 시점이 다르다.**
+
+        L1·L2   분석 배치에서 질문·힌트를 만들어 동결한다
+        L3·L4   세션 중에 만든다 — 직전 단계 답변과 채점 근거를 봐야 하기 때문이다.
+                분석 응답에서는 questionText가 null이고 hints가 빈 배열이다
+
+    구조(4단계)는 분석 시점에 확정되고 내용만 나중에 채워진다. 그래서 stages는
+    항상 4개이고, 아래 검증이 "어느 단계가 언제 채워지는지"를 스펙에 드러낸다.
     """
 
     axis_code: AxisCode
-    question_text: str
+    question_text: str | None = Field(
+        default=None,
+        description="L1·L2는 분석 때 확정. L3·L4는 세션 중 생성되므로 여기서는 null",
+    )
     flagged: bool = Field(
         default=False,
         description="보기형(①②③ 등)이 섞여 재생성에도 실패한 질문. 화면에 '검수 필요'",
     )
-    hints: list[Hint] = Field(min_length=2, max_length=2)
+    hints: list[Hint] = Field(
+        default_factory=list,
+        description="L1·L2는 정확히 2개(hintLevel 1, 2). L3·L4는 빈 배열",
+    )
 
     @model_validator(mode="after")
-    def _check_hint_levels(self) -> "ProblemStage":
-        """힌트가 1, 2 순서로 정확히 한 벌인지 검사.
+    def _check_axis_rules(self) -> "ProblemStage":
+        """단계별로 채워져야 할 것과 비어 있어야 할 것을 검사.
 
-        런타임이 hints[hintsUsed - 1]로 위치를 꺼내므로(PoC poc-engine.js:218)
-        순서가 곧 레벨이어야 한다. 뒤집혀도 에러가 안 나고 점수만 틀린다.
+        느슨하게 "0개 또는 2개"로 두지 않는 이유: 그러면 L1에 힌트가 안 와도,
+        L3에 힌트가 와도 통과한다. 전자는 학생이 힌트 없이 재답변하게 되고
+        후자는 적응 생성분을 덮어쓴다 — 둘 다 에러 없이 동작만 틀린다.
         """
-        levels = [h.hint_level for h in self.hints]
-        if levels != [1, 2]:
-            raise ValueError(f"hints의 hintLevel은 [1, 2] 순서여야 합니다: {levels}")
+        frozen = self.axis_code in FROZEN_AXES
+
+        if frozen:
+            if not (self.question_text or "").strip():
+                raise ValueError(f"{self.axis_code}는 분석 때 질문이 확정돼야 합니다")
+            levels = [h.hint_level for h in self.hints]
+            # 런타임이 hints[hintsUsed - 1]로 꺼내므로 순서가 곧 레벨이다.
+            # 뒤집혀도 에러가 안 나고 점수만 틀린다.
+            if levels != [1, 2]:
+                raise ValueError(
+                    f"{self.axis_code}의 hints는 hintLevel [1, 2] 순서로 2개여야 합니다: {levels}"
+                )
+        else:
+            if self.question_text is not None:
+                raise ValueError(
+                    f"{self.axis_code} 질문은 세션 중에 만듭니다. 분석 응답에서는 null이어야 합니다"
+                )
+            if self.hints:
+                raise ValueError(
+                    f"{self.axis_code} 힌트는 세션 중에 만듭니다. 분석 응답에서는 빈 배열이어야 합니다"
+                )
         return self
 
 
