@@ -29,6 +29,7 @@
 - **T1b 완료 (커밋 `4bda015`)** — 이름 통일. `decision_point`/`dp_*` 어휘를 `problem`/`problem_*`로, `depth_level`을 `axis_code`로 교체
 - **T2·T2b 완료** — 분석·보고서 스키마를 DB 계약에 정렬. `AxisCode`를 `"L1"`~`"L4"`로 바꾸고 **L3=대안 비교 / L4=반례 대응**으로 바로잡음, `Problem`에 `problem_no`·`code_snippet`·`problem_type`·`question_focus_item_id` 추가, `stages` 4개(L1→L4 순서)·`hints` 2개(`[1,2]` 순서) 검증 추가, `AnalysisResult.problems`를 `list[Problem]`으로 교체, 요청에 `focus_items`·`requirements`·`teaches`·`model_code` 추가, 응답에 `analysis_document_markdown`·`requirement_results` 추가(`jobs.py`가 요청 `requirements`와 개수 일치를 검사), 보고서는 `best_score`/`confirmed_score`로 개명하고 세션 총점 제거. 45 tests
 - **T5 1차 완료** — `openapi.json` 재생성. `stages` `minItems/maxItems: 4`, `hints` `2`가 스펙에 드러나 백엔드가 동결 구조를 코드 없이 읽는다. **범위는 `/analyses`·`/reports`까지** — T3(세션)·T4(교안) 반영 후 한 번 더 생성한다
+- **T2c 완료 (2026-07-31)** — 분석 문서를 Markdown에서 **JSON**으로 교체. `AnalysisDocument`(`overview`·`structure`·`decisionPoints`·`risks`) 신설, `analysis_document_markdown: str` 제거. PoC 파이프라인의 원본이 strict JSON이고 Markdown은 화면 렌더 결과였다. **백엔드에 B-5(컬럼 타입 변경) 요청 발생 — "신설 테이블·컬럼 없음"이 깨진 첫 건.** `openapi.json` 3차 재생성. 59 tests
 
 기존 구현(`app/` 1,659줄 + 목업 2,550줄 + vendored pipeline 4,815줄)은 브라우저 PoC와 얽혀 있어 `_legacy/`로 물러났다(`.gitignore` 대상, 커밋 안 됨).
 
@@ -212,7 +213,7 @@ requirement_results: list[dict]          # [{requirementId, verdict: "P"|"F", ev
 
 ---
 
-### T2c — 분석 문서를 Markdown에서 JSON으로 교체 ← **다음 작업**
+### T2c ✅ — 분석 문서를 Markdown에서 JSON으로 교체 (2026-07-31, 59 tests)
 
 **발단**: 2026-07-31 AI 팀원 통보 — *"`.md` 산출물은 변환 산출물이다. raw JSON에서 변환하는 거라 JSON으로 스키마 교체 필요."* **PoC를 직접 읽어 확인했고 맞다.**
 
@@ -264,6 +265,12 @@ class DecisionPoint(BaseSchema):
 **백엔드에 나가는 것**: B-5(컬럼 타입 변경) 1건. **이슈 #31의 "신설 테이블·컬럼 없음"과 ✅ 확정 Q2-1을 정정해야 한다.**
 
 **DoD**: `openapi.json`에 `AnalysisDocument` 스키마가 나오고 `analysisDocumentMarkdown`이 사라진다. 테스트 통과. 백엔드 통지문 발송.
+
+**완료 확인** — `AnalysisDocument`·`DecisionPoint`·`DocumentArea` 3개가 스펙에 나가고 `AnalysisResult.required`가 `analysisDocument`로 바뀌었다. 59 tests.
+
+⚠️ **`evidenceValid=false`면 줄 번호가 비어야 한다는 제약은 OpenAPI로 표현되지 않는다.** pydantic validator에만 있다. 백엔드에는 산문으로 전달했다(이슈 #31 B-5).
+
+`schemas/report.py`의 `analysis_documents: list[{kind, content}]`는 **loose dict 그대로 둔다** — 문서 4종이 각각 무엇인지 미확정이다(U-3). `content`에 `AnalysisDocument`가 그대로 들어가면 된다.
 
 ---
 
@@ -380,7 +387,7 @@ GET  /api/v0/curricula/{jobId}  → {teaches: [{id, label, unitId, sourcePages}]
 
 ---
 
-### T6 — P02 규칙부 이식 (T2c 다음)
+### T6 — P02 규칙부 이식 ← **다음 작업**
 
 **T6만 진짜 이식이다** (Python → Python). T7은 JavaScript → Python **포팅**이라 성격이 다르다.
 

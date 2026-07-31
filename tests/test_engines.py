@@ -88,7 +88,8 @@ def test_router_uses_injected_engine():
                 "scope_fallback": False,
                 "fallback_reason": None,
                 "commit_sha": None,
-                "analysis_document_markdown": "",   # 필수. 못 만들었으면 빈 문자열을 명시적으로
+                "analysis_document": {"overview": "", "structure": [],
+                                      "decision_points": [], "risks": []},   # 필수. 못 만들었으면 빈 문자열을 명시적으로
                 "problems": [],
                 "question_count_planned": 0,
             }
@@ -132,4 +133,17 @@ def test_stub_judges_every_requirement():
     )
 
     assert [r["requirement_id"] for r in raw["requirement_results"]] == ["req-1", "req-2"]
-    assert raw["analysis_document_markdown"]
+    assert raw["analysis_document"]["overview"]
+    
+def test_invalid_evidence_cannot_carry_line_numbers():
+    """근거를 못 찾았는데 줄 번호가 붙어 있으면 막는다 — 지어낸 위치가 근거로 새는 경로."""
+    from pydantic import ValidationError
+
+    from app.schemas.analysis import DecisionPoint
+
+    with pytest.raises(ValidationError):
+        DecisionPoint(
+            title="t", source_path="a.py", symbol="def f():",
+            line_start=1, line_end=2,
+            why_it_matters="w", evidence_valid=False,
+        )

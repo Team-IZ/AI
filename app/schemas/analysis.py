@@ -185,6 +185,59 @@ class RequirementResult(BaseSchema):
     verdict: Literal["P", "F"]
     evidence: str | None = Field(default=None, description="판정 근거가 된 코드 위치·인용")
     note: str | None = Field(default=None, description="판정 실패 등 특이사항")
+
+class DocumentArea(BaseSchema):
+    """분석 문서의 구조 항목 하나. 코드를 영역 단위로 묶어 설명한다."""
+
+    area: str
+    files: list[str] = Field(description="이 영역에 속한 실제 파일 경로")
+    role: str
+
+
+class DecisionPoint(BaseSchema):
+    """판단이 개입된 지점. 문제 3개는 여기서 골라 뽑는다(전부 문제가 되지는 않는다).
+
+    lineStart/lineEnd는 LLM이 센 값이 아니다. LLM은 symbol(소스에 실제로 있는
+    코드 한 줄을 문자 그대로 복사한 것)만 주고, 그 문자열을 실제 파일에서 찾아
+    우리가 산정한다. 못 찾으면 evidenceValid=false로 남기고 줄 번호를 비운다 —
+    지어낸 위치를 근거로 보여주면 "코드 파편이 곧 근거"라는 전제가 무너진다.
+    """
+
+    title: str
+    source_path: str
+    symbol: str = Field(description="LLM이 소스에서 문자 그대로 복사한 코드 한 줄")
+    line_start: int | None = Field(default=None, ge=1)
+    line_end: int | None = Field(default=None, ge=1)
+    why_it_matters: str
+    related_teach_id: str | None = None
+    evidence_valid: bool = Field(description="symbol을 실제 소스에서 찾았는지")
+    
+    @model_validator(mode="after")
+    def _check_evidence(self) -> "DecisionPoint":
+        """근거를 못 찾았으면 줄 번호가 남아 있으면 안 된다.
+
+        evidenceValid=false인데 lineStart가 채워져 있으면 백엔드는 그 값을 그대로
+        화면에 그린다 — 지어낸 위치가 근거처럼 보인다. 플래그만으로는 못 막는다.
+        """
+        if not self.evidence_valid and (self.line_start is not None or self.line_end is not None):
+            raise ValueError("evidenceValid=false면 lineStart/lineEnd는 비어야 합니다")
+        if self.line_start is not None and self.line_end is not None and self.line_end < self.line_start:
+            raise ValueError(f"lineEnd가 lineStart보다 작습니다: {self.line_start}~{self.line_end}")
+        return self
+
+
+class AnalysisDocument(BaseSchema):
+    """코드 분석 문서. Markdown이 아니라 구조화 JSON이 원본이다.
+
+    문제 선정(p04-3)과 보고서(p04-6)가 이 JSON을 그대로 프롬프트에 다시 넣는다.
+    Markdown으로 저장하면 넣을 때 JSON→MD, 꺼낼 때 MD→JSON으로 두 번 변환해야 하고
+    두 번째는 파싱이라 깨진다. 사람이 읽는 화면은 이걸 렌더한 결과다.
+    """
+
+    overview: str
+    structure: list[DocumentArea] = Field(default_factory=list)
+    decision_points: list[DecisionPoint] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
     
 class AnalysisResult(BaseSchema):
     """분석이 성공했을 때의 결과 본문.
@@ -199,8 +252,8 @@ class AnalysisResult(BaseSchema):
     scope_fallback: bool = Field(description="요청 범위를 못 지켜 TOTAL로 물러났는지")
     fallback_reason: str | None = None
     commit_sha: str | None = None
-    analysis_document_markdown: str = Field(
-        description="code_analysis.analysis_document_markdown 대응. 코드 분석 문서 본문"
+    analysis_document: AnalysisDocument = Field(
+        description="code_analysis.analysis_document 대응. Markdown이 아니라 구조화 JSON이다"
     )
     requirement_results: list[RequirementResult] = Field(default_factory=list)
     problems: list[Problem] = Field(default_factory=list)

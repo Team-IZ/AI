@@ -79,7 +79,35 @@ class StubAnalysisEngine:
             "scope_fallback": False,
             "fallback_reason": None,
             "commit_sha": "0123456789abcdef0123456789abcdef01234567",
-            "analysis_document_markdown": "# [stub] 코드 분석\n\n실제 문서는 엔진 이식 후 생성됩니다.\n",
+            "analysis_document": {
+                "overview": "[stub] 실제 문서는 엔진 이식 후 생성됩니다.",
+                "structure": [
+                    {"area": "진입점", "files": ["app/main.py"], "role": "요청을 받아 서비스로 넘긴다"},
+                ],
+                # 두 번째 항목은 근거 검증에 실패한 경우다. 백엔드가 이 모양을
+                # 실제로 받아보고 렌더 분기를 짜도록 스텁에 일부러 섞어 둔다.
+                "decision_points": [
+                    {
+                        "title": "결제 수단 분기를 함수 안에서 처리",
+                        "source_path": "app/main.py",
+                        "symbol": "def pay(order, method):",
+                        "line_start": 12,
+                        "line_end": 20,
+                        "why_it_matters": "대안이 있었는데 이것을 택한 지점이라 설계 의도를 물을 수 있다",
+                        "related_teach_id": None,
+                        "evidence_valid": True,
+                    },
+                    {
+                        "title": "[stub] 근거를 찾지 못한 지점",
+                        "source_path": "app/unknown.py",
+                        "symbol": "def vanished():",
+                        "why_it_matters": "모델이 지목했으나 실제 소스에 없어 근거로 쓰지 않는다",
+                        "related_teach_id": None,
+                        "evidence_valid": False,
+                    },
+                ],
+                "risks": ["[stub] 실제 위험 요소는 엔진 이식 후 채워집니다"],
+            },
             # 요청 requirements와 1:1. 스텁은 전부 P로 판정한다.
             "requirement_results": [
                 {

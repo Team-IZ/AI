@@ -1106,6 +1106,41 @@
         "title": "AnalysisAccepted",
         "description": "202 응답. 점수만 알리고 결과는 폴링으로 가져감 "
       },
+      "AnalysisDocument": {
+        "properties": {
+          "overview": {
+            "type": "string",
+            "title": "Overview"
+          },
+          "structure": {
+            "items": {
+              "$ref": "#/components/schemas/DocumentArea"
+            },
+            "type": "array",
+            "title": "Structure"
+          },
+          "decisionPoints": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionPoint"
+            },
+            "type": "array",
+            "title": "Decisionpoints"
+          },
+          "risks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Risks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "overview"
+        ],
+        "title": "AnalysisDocument",
+        "description": "코드 분석 문서. Markdown이 아니라 구조화 JSON이 원본이다.\n\n문제 선정(p04-3)과 보고서(p04-6)가 이 JSON을 그대로 프롬프트에 다시 넣는다.\nMarkdown으로 저장하면 넣을 때 JSON→MD, 꺼낼 때 MD→JSON으로 두 번 변환해야 하고\n두 번째는 파싱이라 깨진다. 사람이 읽는 화면은 이걸 렌더한 결과다."
+      },
       "AnalysisJobStatus": {
         "properties": {
           "jobId": {
@@ -1253,10 +1288,9 @@
             ],
             "title": "Commitsha"
           },
-          "analysisDocumentMarkdown": {
-            "type": "string",
-            "title": "Analysisdocumentmarkdown",
-            "description": "code_analysis.analysis_document_markdown 대응. 코드 분석 문서 본문"
+          "analysisDocument": {
+            "$ref": "#/components/schemas/AnalysisDocument",
+            "description": "code_analysis.analysis_document 대응. Markdown이 아니라 구조화 JSON이다"
           },
           "requirementResults": {
             "items": {
@@ -1284,7 +1318,7 @@
           "snapshotMeta",
           "appliedScope",
           "scopeFallback",
-          "analysisDocumentMarkdown",
+          "analysisDocument",
           "questionCountPlanned"
         ],
         "title": "AnalysisResult",
@@ -1580,6 +1614,105 @@
         ],
         "title": "CurriculumSection",
         "description": "교안의 모듈 하나. DB curriculum_section 대응."
+      },
+      "DecisionPoint": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "sourcePath": {
+            "type": "string",
+            "title": "Sourcepath"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol",
+            "description": "LLM이 소스에서 문자 그대로 복사한 코드 한 줄"
+          },
+          "lineStart": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linestart"
+          },
+          "lineEnd": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineend"
+          },
+          "whyItMatters": {
+            "type": "string",
+            "title": "Whyitmatters"
+          },
+          "relatedTeachId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relatedteachid"
+          },
+          "evidenceValid": {
+            "type": "boolean",
+            "title": "Evidencevalid",
+            "description": "symbol을 실제 소스에서 찾았는지"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title",
+          "sourcePath",
+          "symbol",
+          "whyItMatters",
+          "evidenceValid"
+        ],
+        "title": "DecisionPoint",
+        "description": "판단이 개입된 지점. 문제 3개는 여기서 골라 뽑는다(전부 문제가 되지는 않는다).\n\nlineStart/lineEnd는 LLM이 센 값이 아니다. LLM은 symbol(소스에 실제로 있는\n코드 한 줄을 문자 그대로 복사한 것)만 주고, 그 문자열을 실제 파일에서 찾아\n우리가 산정한다. 못 찾으면 evidenceValid=false로 남기고 줄 번호를 비운다 —\n지어낸 위치를 근거로 보여주면 \"코드 파편이 곧 근거\"라는 전제가 무너진다."
+      },
+      "DocumentArea": {
+        "properties": {
+          "area": {
+            "type": "string",
+            "title": "Area"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "이 영역에 속한 실제 파일 경로"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "area",
+          "files",
+          "role"
+        ],
+        "title": "DocumentArea",
+        "description": "분석 문서의 구조 항목 하나. 코드를 영역 단위로 묶어 설명한다."
       },
       "ErrorResponse": {
         "properties": {

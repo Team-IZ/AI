@@ -201,7 +201,16 @@ cloudflared tunnel --url http://localhost:8000
     "snapshotMeta": { "contentHash": "…64자…", "fileCount": 42, "byteCount": 183920 },
     "appliedScope": "TOTAL", "scopeFallback": false, "fallbackReason": null,
     "commitSha": null,
-    "analysisDocumentMarkdown": "## 구조\n…",       // code_analysis.analysis_document_markdown
+    "analysisDocument": {                          // code_analysis.analysis_document (JSONB)
+      "overview": "결제 흐름을 …",
+      "structure": [ { "area": "진입점", "files": ["app/main.py"], "role": "…" } ],
+      "decisionPoints": [
+        { "title": "결제 수단 분기", "sourcePath": "app/main.py",
+          "symbol": "def pay(order, method):", "lineStart": 12, "lineEnd": 20,
+          "whyItMatters": "…", "relatedTeachId": null, "evidenceValid": true }
+      ],
+      "risks": ["…"]
+    },
     "requirementResults": [
       { "requirementId": "req-1", "verdict": "P", "evidence": "AuthService:41", "note": null }
     ],
@@ -213,6 +222,10 @@ cloudflared tunnel --url http://localhost:8000
 ```
 
 `requirementResults`는 **요청 `requirements`와 길이가 같다.** 모델이 일부를 빠뜨리면 조용히 채우지 않고 `verdict: "F"` + `note: "판정 실패"`로 명시한다.
+
+`analysisDocument`는 **Markdown이 아니라 JSON이 원본이다.** 문제 선정·보고서 생성이 이 객체를 그대로 프롬프트에 다시 넣는다. 사람이 읽는 화면은 이걸 렌더한 결과다.
+
+`decisionPoints[].lineStart`/`lineEnd`는 **LLM이 센 값이 아니다.** LLM은 `symbol`(소스에 실제로 있는 코드 한 줄을 문자 그대로 복사한 것)만 주고, 그 문자열을 실제 파일에서 찾아 우리가 산정한다. 못 찾으면 `evidenceValid: false`로 남기고 줄 번호를 비운다 — **`evidenceValid: false`인 항목은 근거로 쓰지 않는다.** 스키마가 그 조합(무효인데 줄 번호 있음)을 막는다(OpenAPI로는 표현되지 않는 제약이다).
 
 `problems[]`는 DB `assessment_problem`(+ `problem_reference`) 테이블에 대응하므로 **컬럼 이름을 그대로 쓴다.**
 
@@ -342,7 +355,8 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 ```jsonc
 // POST /api/v0/reports          → 202
 { "sessionId": "sess-abc", "transcript": [ … ],
-  "analysisDocumentMarkdown": "…", "teaches": [ … ] }
+  "analysisDocuments": [ { "kind": "CODE_ANALYSIS", "content": { /* AnalysisDocument */ } } ],
+  "teaches": [ … ] }
 { "jobId": "…", "status": "QUEUED" }
 ```
 
