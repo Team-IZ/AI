@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Team-IZ AI 파이프라인</title>
+<!--
+  D-codemap1 (2026-07-31, .github/workflows/pages.yml): site 조립 시 이 파일 하나가
+  그대로 site/index.html이 된다(cp, rsync 아님) -- /lab/ 아래가 아니라 사이트 루트에
+  놓이는 유일한 파일. 어느 팀원 도구도 아니고 넷을 잇는 허브라서 /lab/**에 안 넣었다.
+-->
+<style>
+  :root { --bg:#fafafa; --panel:#fff; --border:#e2e2e2; --text:#1a1a1a; --muted:#6b6b6b; --accent:#2f6f4f; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17181a; --panel:#1f2023; --border:#33353a; --text:#eaeaea; --muted:#9a9a9a; --accent:#5ea583; } }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:3rem 1.25rem; background:var(--bg); color:var(--text); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Pretendard,sans-serif; }
+  main { max-width: 640px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 .25rem; }
+  p.sub { color: var(--muted); margin: 0 0 2rem; font-size: .9rem; }
+  .grid { display: grid; gap: .9rem; }
+  a.card { display: block; padding: 1.1rem 1.25rem; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); text-decoration: none; color: var(--text); }
+  a.card:hover { border-color: var(--accent); }
+  a.card .tag { display: inline-block; font-size: .72rem; font-weight: 700; color: var(--accent); letter-spacing: .04em; margin-bottom: .3rem; }
+  a.card .name { font-size: 1.02rem; font-weight: 600; }
+  a.card .desc { color: var(--muted); font-size: .85rem; margin-top: .2rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Team-IZ AI 파이프라인</h1>
+  <p class="sub">네 파이프라인 각각 자기 브랜치가 소유한 도구로 이어집니다.</p>
+  <div class="grid">
+    <a class="card" href="/lab/curriculum-manager/">
+      <div class="tag">P01</div>
+      <div class="name">교안 분석</div>
+      <div class="desc">feat/pdf_analysis</div>
+    </a>
+    <a class="card" href="/lab/code-qna/trainee/submission.html">
+      <div class="tag">P02 · P03</div>
+      <div class="name">코드 분석 &amp; 문답</div>
+      <div class="desc">feat/code_Q&amp;A</div>
+    </a>
+    <a class="card" href="/lab/poc/">
+      <div class="tag">P04</div>
+      <div class="name">교안→제출→코드분석→문답→보고서 통합 PoC</div>
+      <div class="desc">feat/poc_full</div>
+    </a>
+    <a class="card" href="/lab/codemap/">
+      <div class="tag">codemap</div>
+      <div class="name">코드 중요도 선별 백엔드 팀 테스트</div>
+      <div class="desc">feature/code-importance-map (병행 구현, P04 이식 대상 아님)</div>
+    </a>
+  </div>
+</main>
+</body>
+</html>
