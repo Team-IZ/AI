@@ -103,6 +103,14 @@
 
 **팀원 수정 요청 확정 (백엔드 아님)** — PoC `scoring-config.js`의 축 순서가 L3=반례, L4=대안으로 우리 기준과 반대다(§함정). **축 순서는 L3=대안 비교 / L4=반례 대응·한계로 확정됐고 팀원 코드를 고치기로 결정했다.** 요청서: `../qna/2026-07-30/poc-axis-order-fix.md`.
 
+### ⚠️ `origin/feature/code-importance-map`은 병합 대상이 아니다
+
+2026-07-31 확인. 팀원이 **`develop`에서 갈라 실험 중인 브랜치**다. `app/engines/codemap/`(엔진 재설계·`analysis_doc.py`가 p04-1 상당)·`app/engines/shared/`(llm·budget·prompts·evidence)·Dockerfile·Cloudflare 배포·CI·pre-commit이 통째로 들어 있어 **우리 작업과 정면으로 중복돼 보이지만, 팀원이 "합칠 일 없다"고 확인했다.**
+
+`diff --stat origin/feat/poc_full ...`으로 보면 우리 서버 파일이 전부 추가로 잡혀 오해하기 쉽다 — **`origin/develop` 기준으로 봐야** 실제로 더한 것이 보인다.
+
+**참고 가치는 있다**(가져오진 않는다): `tools/check_no_secrets.py`+`.githooks/pre-commit`(키 유출 방어), `Dockerfile`·`wrangler.toml`(배포 — 백엔드가 Railway라 우리도 주소가 필요해진다), `tools/check_prompt_drift.py`(매니페스트 드리프트 검사 — 지금 `vendor/SOURCE.md`가 수동으로 하는 일).
+
 ### 백엔드 스키마의 근거
 
 **`../docs/docs_for_read/테이블정의서_v06.md`(2026-07-30 변환)와 이슈 #31 본문을 본다.** 이 문서에 테이블 구조를 복사해 두지 않는다 — 복사하면 곧 낡고, 낡은 사본이 최신 정의서보다 위험하다. 우리가 계약으로 못 박은 값만 아래 §계약 기준값에 남긴다.
@@ -457,12 +465,22 @@ feedback/reflection_signal.py     + _hook   반성 신호
 
 ### T7 — P04 LLM 스테이지 이식 ← **다음 작업**
 
-**🔜 T7b 끝나고 백엔드에 고지할 것 (B-6 후보) — 선정 근거를 담을 자리.**
-`rules.py`가 후보마다 `selection_evidence`(subrubric 3축 원점수 + `rank_evidence`: 가중치·항별 값·동점 처리 깊이)를 싣는다. 이게 **"왜 이 문제를 골랐나"의 근거 전체**인데 `Problem` 스키마엔 `priority: float` 하나뿐이라 나머지가 버려진다. "매니저에게 왜 이 문제를 골랐는지 공개"는 확정된 설계 결정이라 그냥 못 버린다.
+**🔜 백엔드에 고지할 것 (B-6) — 선정 근거 필드 1개. p04-3 실동작으로 모양이 확정됐다.**
 
-**지금 계약에 넣지 않기로 했다** — ① 볼 화면이 아직 없고(프론트 미착수) ② T7b에서 실제 선정 로직을 짜봐야 어떤 필드가 필요한지 드러난다. 지금 박으면 두 번 바꾸게 되고 백엔드가 두 번 고친다.
+처음엔 `rules.py`의 `selection_evidence`(subrubric 3축 원점수 + `rank_evidence` 가중치·동점 처리 깊이)를 어떻게 실어보낼지 고민했는데, **p04-3이 topic마다 `rationale`을 낸다.** 매니저가 읽을 "왜 이 문제인가"는 숫자 블롭이 아니라 이 문장이다.
 
-**T7b 완료 시점에 필드 모양을 확정해 백엔드에 한 번만 요청한다.** 그때까지는 로그로만 남긴다. 잊으면 근거가 영영 사라지므로 여기 적어둔다.
+```
+"설정값에 따라 다른 분석 엔진 구현체를 주입하는 의존성 주입 패턴의 이해도를
+ 검증할 수 있으며, 코드의 엔진 모듈과 교안 t1이 직접 연결되는 지점임"
+```
+
+→ **요청은 `assessment_problem`에 `selection_rationale TEXT` 한 컬럼**이면 된다. 숫자 근거는 로그에만 남긴다(재현·튜닝용이지 매니저용이 아니다).
+
+**언제 보내나**: p04-4까지 붙여 `Problem` 전체 모양이 확정되면 B-5와 함께. 지금 따로 보내면 백엔드가 두 번 고친다.
+
+**✅ 함께 해소됨 — `source_path: None` 후보 처리.** 룰 후보는 **선택지가 아니라 맥락**이다. 매니페스트가 `code_ref.file`을 "분석 문서에 등장한 파일"로 제약하고 환각 방지는 symbol 검증이 한다. 후보가 문제로 승격되는 구조가 아니라서 대표 파일을 고를 필요가 없다.
+
+**⚠️ 새로 드러난 계약 사실 — 문제 수는 `teaches` 개수에 묶인다.** p04-3이 *"각 topic은 서로 다른 teach를 다뤄야 한다"*를 요구하고 중복은 버려진다. **teaches가 2개면 `questionBudget: 3`이어도 문제는 최대 2개.** 교안 분석이 teach를 적게 뽑으면 문제 수가 조용히 줄어든다 — 이것도 백엔드에 알려야 한다(`questionCountPlanned` ≠ `problems` 길이의 원인).
 
 **결정된 것 (2026-07-31)**
 
