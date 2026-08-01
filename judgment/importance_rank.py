@@ -26,6 +26,40 @@ from subrubric import THRESHOLDS  # noqa: E402
 #   EXIT: `judgment/rank_weights/rank_weights.json` is the single point to recalibrate once
 #        labels exist -- no code change needed, just replace the file (same D5 pattern as
 #        idiom_patterns.json: data separate from logic, git revert is the rollback story).
+#
+# D-tierb2 (2026-07-31, D-tierb1의 랭킹 쪽 귀결): Tier B finding이 사라진 뒤 이 파일의
+#   **코드는 한 줄도 바꾸지 않는다.** 대신 무엇이 조용히 무의미해졌는지를 여기 명시한다 --
+#   이 결정 자체가 D-tierb1 리뷰에서 가장 놓치기 쉬운 부분이었기 때문이다.
+#
+#   측정(고정 fixture, JS 6파일 = entry/hub/peer 3 + 중복정의 1쌍, Tier B 3트리거 전부 발동):
+#     제거 전: finding 5건, risk.total ∈ {9, 2}, trigger_confidence ∈ {3, 1}
+#     제거 후: finding 2건, risk.total ∈ {2},    trigger_confidence ∈ {1}
+#     남은 2건의 rank_score(6.667 / 5.667)와 상대 순서는 제거 전과 완전히 동일.
+#
+#   WHY 코드를 안 바꾸는가: subrubric.score_risk()에 True/False나 spread_count>0을 넘기던
+#   유일한 호출부가 Tier B 블록이었다(score_findings.py의 D-tierb1 자리). 남은 finding
+#   종류(cognition-isolation / architecture-diffusion / repeated-pattern /
+#   duplicate-definition)는 넷 다 risk_evidence로 (None, None, False, 0) 상수를 넘긴다.
+#   따라서 _sort_key()의 2번 슬롯(-risk_total)과 3번 슬롯(-trigger_confidence)은
+#   **현재 개체군에서 항상 동률**이라 정렬에 기여하지 못하고, 실질 동점 처리기는
+#   4번 슬롯(파일의 fan_in)으로, 최종 결정자는 id로 내려앉는다.
+#   그렇다고 두 슬롯을 지우면, risk를 실제로 채우는 finding 소스가 다시 생기는 순간
+#   (D-ground1의 LLM 분석 문서가 risks[]를 내놓으면 바로 그 경우다) 동점 처리가 조용히
+#   사라진 채로 돌아간다 -- "지금 입력이 퇴화했다"는 것과 "이 로직이 틀렸다"는 다른 문제고,
+#   전자를 이유로 후자처럼 코드를 지우면 되돌릴 때 근거가 남지 않는다.
+#   rank_score 쪽도 같은 이유로 risk 항을 빼지 않는다: risk가 상수여도 가중합에 상수를
+#   더하는 것이라 **순서는 불변**이고, 빼면 이미 Supabase runs에 저장된 과거 run의
+#   rank_score와 숫자 비교가 불가능해진다(순서만 같고 값이 달라짐).
+#   COST: (1) 웹 랩 p02-5 패널의 RANK_WEIGHT_RISK 슬라이더는 지금 **순서를 절대 바꾸지
+#   못한다** -- 값(rank_score)만 흔들린다. 트레이니가 "가중치를 만졌는데 순위가 안 변한다"고
+#   느낄 수 있고 그게 정상이라는 표시가 UI에는 없다. (2) tie_break_depth 분포가 이전보다
+#   깊은 쪽(3~4)으로 쏠린다 -- 과거 run과 이 필드를 그대로 비교하면 안 된다.
+#   (3) 3축 가중합의 1/3이 상수라 rank_score의 실질 해상도가 그만큼 줄었다.
+#   EXIT: 라벨 스프린트(benchmarks/judgment_precision_labels.jsonl) 결과가 나오면
+#   rank_weights.json에서 risk 가중치를 실측값으로 정한다 -- 그 전에 "risk가 상수니까
+#   0으로 두자"고 손으로 정하는 것은 이 저장소가 금지하는 직관 기반 수치 결정이다
+#   (D194 COST가 이미 같은 이유로 세 가중치를 1.0으로 묶어둔 상태).
+#   회귀 방지: tests/test_rank_after_tier_b_drop.py가 위 측정치를 그대로 고정한다.
 
 # D194: weights start equal and provisional -- same "named module constant, honestly marked
 # unmeasured" style as D181's MAX_CONNECT_FILES. Overridable at runtime by the web lab's
@@ -74,6 +108,10 @@ def _sort_key(finding, fan_in):
     "완전히 같을 때만" 개입한다(설계 문서 그대로): risk_total desc -> trigger_confidence desc ->
     finding.file의 fan_in desc -> id asc. Phase 1(S1~S5 근거 보강)은 이번 범위 밖 — 여기까지도
     안 갈리면 마지막은 항상 id로 완전히 결정된다(재현성 보장).
+
+    D-tierb2: risk_total/trigger_confidence 두 슬롯은 Tier B 제거 이후 현재 finding
+    개체군에서 항상 동일한 값이라 실질적으로 정렬에 기여하지 않는다(의도적으로 남겨둔
+    상태 — 이유는 이 파일 상단 D-tierb2 참조). 실질 동점 처리기는 fan_in이다.
     """
     sub = finding.get("subrubric", {})
     risk_total = sub.get("risk", {}).get("total", 0)

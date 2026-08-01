@@ -76,6 +76,13 @@ const POCEngine = (() => {
     const findingsBlock = findingsBlockFor(findings);
 
     // ── p04-1: 분석 문서 ────────────────────────────────────────────────────
+    // D-poc13 (2026-07-31, 설계): 아래 buildCodeBlock은 파일을 **알파벳순**으로 12,000자
+    // 예산에 채운다 -- 중요도 신호가 0이라 알파벳으로 늦은 핵심 파일이 잘린다. 대안 설계와
+    // 프로토타입은 app/code-candidates.js에 있다(후보 식별 -> grounding -> 랭킹 -> 상위 K개
+    // 병렬 심층분석). **아직 배선하지 않았다** -- 승인 시 이 줄에 order 하나를 넘기는 것부터가
+    // 가장 싼 첫 단계다:
+    //   order: CodeCandidates.orderFilesByImportance(files, (p02Result.scan.tier_a_structural || {}).fan_in)
+    // (analysis.html에 code-candidates.js <script> 추가 필요. 그 전까지 동작은 오늘 그대로.)
     hooks.onProgress("코드 분석 문서 작성 중...");
     const docStage = POCStage.getStage("p04-1");
     const docCodeBlock = CodeFragment.buildCodeBlock(files, { maxChars: docStage.truncation.code_block });

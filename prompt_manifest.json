@@ -35,17 +35,6 @@
           ]
         },
         {
-          "id": "p02-3",
-          "title": "Tier B 위험 스캔",
-          "kind": "params",
-          "function": "tier_b_risk_triggered_scan()",
-          "params": [
-            { "key": "AUTH_KEYWORDS", "type": "regex_readonly", "default": "\\b(uid|email|token|password|apiKey|currentUser|authInfo)\\b" },
-            { "key": "EVAL_RE", "type": "regex_readonly", "default": "(?<!\\.)\\beval\\(|dangerouslySetInnerHTML" },
-            { "key": "SECRET_RE", "type": "regex_readonly", "default": "(\\bsk-[A-Za-z0-9_-]{8,}|\\bAKIA[A-Z0-9]{12,}|api[_-]?key\\s*=\\s*['\"][^'\"]{4,}['\"])" }
-          ]
-        },
-        {
           "id": "p02-4",
           "title": "판단 채점",
           "kind": "params",

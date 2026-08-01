@@ -135,9 +135,28 @@ const CodeFragment = (() => {
    * 코드베이스 전체를 프롬프트에 넣을 하나의 블록으로 truncate. maxChars 예산 안에서
    * 파일을 순서대로 채우고, 넘치면 남은 파일은 파일명만 나열한다(있다는 사실은 알리되
    * 내용을 짜깁기해 왜곡하지 않는다).
+   *
+   * D-poc13 (2026-07-31): opts.order로 채우는 순서를 주입할 수 있다. **기본값은 오늘과
+   * 동일한 알파벳순이라, 호출부를 안 바꾸면 동작이 한 비트도 변하지 않는다.**
+   *   WHY: 알파벳순은 중요도 신호가 0이다 -- 알파벳으로 늦은 핵심 파일이 잘리고 이른 사소한
+   *   파일이 예산을 먹는다. 그런데 이 함수가 도는 시점(p04-1 이전)에도 구조 신호는 이미
+   *   존재한다: P02Engine.run()이 먼저 끝나 있고 그 결과의
+   *   scan.tier_a_structural.fan_in이 그대로 쓸 수 있는 중요도다(새 계산/새 LLM 호출 0).
+   *   CodeCandidates.orderFilesByImportance(files, fanIn)가 그 순서를 만든다.
+   *   COST: fan_in은 basename 키라 서로 다른 폴더의 동명 파일이 합산돼 있다(스캐너 쪽 계약,
+   *   shared/p02-engine.js:148의 같은 경고). 순서만 바뀌고 포함/제외 판정 로직은 그대로라
+   *   최악이라도 "다른 순서로 같은 예산을 채움"이다.
+   *   EXIT: poc-engine.js:81의 호출부에 order를 넘기는 한 줄이 전부다. 알파벳순보다
+   *   나쁘다는 게 관측되면 그 한 줄을 되돌린다.
+   *   NOTE 예산 초과 시 stop이 아니라 skip인 것은 유지한다 -- 랭크 순으로 채우다 첫 파일이
+   *   예산보다 크면 그 자리에서 멈추는 구현(Team-IZ-AI-codemap의
+   *   app/engines/codemap/shortlist.py)은 결과가 통째로 비어버린다. 여기서는 그 파일만
+   *   건너뛰고 다음 파일을 계속 시도한다.
    */
-  function buildCodeBlock(files, { maxChars = 12000 } = {}) {
-    const paths = Object.keys(files).sort();
+  function buildCodeBlock(files, { maxChars = 12000, order = null } = {}) {
+    const paths = Array.isArray(order) && order.length
+      ? order.filter((p) => Object.prototype.hasOwnProperty.call(files, p))
+      : Object.keys(files).sort();
     let used = 0;
     const included = [];
     const omitted = [];
@@ -156,3 +175,8 @@ const CodeFragment = (() => {
 
   return { extractFragment, locateSymbol, formatRef, formatFragmentBlock, buildCodeBlock, resolveFile };
 })();
+
+// D-poc13: 브라우저에는 module이 없어 no-op. node --test에서 이 파일의 순수 로직을
+// (app/code-candidates.test.js가) 그대로 불러 검증하기 위한 한 줄이다 -- locateSymbol을
+// 복제하지 않고 실제 구현을 테스트에서도 쓰기 위한 것.
+if (typeof module !== "undefined" && module.exports) module.exports = CodeFragment;
