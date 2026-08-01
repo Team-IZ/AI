@@ -3,12 +3,30 @@ import os
 import sys
 import json
 
-# D2: Tier A(구조 스캔) / Tier B(위험 트리거 내용 스캔) 이원화
-#   WHY: 그래프/import 스캔(저비용)만으로는 handleFirestoreError 같은 "내용 기반" 이슈를 못 잡음
-#        (2026-07-01 Study-Match- 실측: 그래프에서 fan-in 최고였던 firebase.ts가 아니라
-#         파일 전체를 읽어야만 보이는 인증정보 유출이 진짜 위험이었음)
-#   COST: 위험 키워드 사전에 없는 새로운 패턴의 이슈는 여전히 놓침. 정규식 기반이라 오탐 발생
-#   EXIT: RISK_TRIGGERS에 항목 추가/수정. 또는 judgment 블록의 tier_b_hook 재귀 업데이트로 대체
+# D2(폐기, D-tierb1로 대체): Tier A(구조 스캔) / Tier B(위험 트리거 내용 스캔) 이원화.
+#   원안(WHY/COST/EXIT 전문)은 git history 참조 -- `git show HEAD:cognition/two_tier_scan.py`.
+#
+# D-tierb1 (2026-07-31): Tier B(정규식 위험 트리거 스캔)를 활성 경로에서 완전히 제거한다.
+#   이 파일의 이름("two_tier")과 아래 Tier A 함수명은 그대로 둔다 -- 이름을 바꾸면
+#   prompt_manifest.json의 stage function 문자열, webtool_driver의 override 대상,
+#   docs/lab 파라미터 패널, Supabase에 이미 저장된 run 레코드가 전부 같이 깨진다.
+#   이름은 이력이고, 지금 이 파일이 하는 일은 "Tier A 구조 스캔" 하나다.
+#   WHY: Tier B가 만들던 finding은 (a) 키워드 공기출현(auth+stringify+throw) 정규식이라
+#        새로운 패턴을 원천적으로 못 잡고(D2 COST가 이미 인정), (b) 근거로 남기는
+#        matched_text가 "uid"처럼 3글자라 코드 위치를 특정하는 데 쓸 수 없으며
+#        (feat/poc_full app/code-candidates.test.js:72-82이 이 실패를 실측 회귀테스트로 박아둠),
+#        (c) 그 결과 "위험 목록"으로도 "질문 근거"로도 둘 다 어중간했다. 같은 자리를
+#        LLM 하향식 분석 문서(D-ground1, shared/code-locate.js 헤더 참조)가 대체한다 --
+#        그쪽은 지목한 코드 한 줄을 실제 파일에서 문자열로 검증하므로 근거가 항상 실재한다.
+#   COST: 하드코딩 시크릿/eval/dangerouslySetInnerHTML을 **결정론적으로** 잡던 장치가
+#        사라진다. 대체재(LLM 분석 문서)는 확률적이라 같은 제출물에서 매번 같은 위험을
+#        지목한다는 보장이 없고, LLM 호출 비용/지연도 새로 생긴다. 이건 "위험 스캔"을
+#        포기하는 결정이지 더 나은 위험 스캔으로 갈아타는 결정이 아니다 -- 보안 스캔이
+#        다시 필요해지면 정규식 재도입이 아니라 전용 SAST 도구(semgrep 등)를 붙이는 게 맞다.
+#   EXIT: `git show <이 커밋 이전>:cognition/two_tier_scan.py`로 tier_b_risk_triggered_scan()과
+#        AUTH_KEYWORDS/EVAL_RE/SECRET_RE를 그대로 꺼낼 수 있다(judgment 쪽 대응 블록은
+#        judgment/score_findings.py의 같은 커밋에서). 주석 처리해 남기지 않는 이유는
+#        codemap `_legacy/`의 .gitignore 주석이 정한 이 저장소 관례 그대로다: 이력이 undo다.
 #
 # D12: fan-in 계산을 (src,dst) 파일쌍 단위로 dedupe한 뒤 집계 (이중계산 버그 수정)
 #   WHY: 같은 모듈을 import문 여러 줄로 나눠 쓰면(예: AuthScreen.tsx가 '../firebase'를 두 줄로
@@ -97,26 +115,8 @@ PY_IMPORT_RE = re.compile(r"^\s*(?:from\s+([\w\.]+)\s+import|import\s+([\w\.]+))
 JAVA_IMPORT_RE = re.compile(r"^\s*import\s+(?:static\s+)?([\w\.]+)\s*;", re.MULTILINE)
 C_INCLUDE_RE = re.compile(r'#include\s*"([^"]+)"')  # 따옴표 include만 로컬로 간주(<> 시스템 헤더는 제외)
 
-AUTH_KEYWORDS = re.compile(r"\b(uid|email|token|password|apiKey|currentUser|authInfo)\b")
-STRINGIFY_RE = re.compile(r"JSON\.stringify")
-THROW_RE = re.compile(r"\bthrow\b")
-# D17: eval( 앞이 '.'이면(메서드 호출) 제외 — RunPod_Deploy_Agent 실측: "model.eval()"은
-#   PyTorch 표준 API(평가모드 전환, 안전)인데 기존 정규식이 위험한 전역 eval()과 구분 못했음
-#   WHY: (?<!\.) 부정 후방탐색으로 "obj.eval("류 메서드 호출을 전부 배제 — 진짜 위험한 전역
-#        eval(...)은 앞에 '.'이 오지 않으므로 그대로 잡힘
-#   COST: 아주 드물게 `some_dict.get('eval')(...)` 처럼 변수명이 우연히 eval인 메서드 호출도
-#        같이 배제될 수 있음(발생 가능성 낮음, 발견되면 tier_b_hook 억제 루프로 개별 처리)
-#   EXIT: 이후 언어별 오탐이 더 쌓이면 tier_b_hook.py의 재귀 억제 루프로 이관
-# 안전 확인: 아래는 eval()을 실행하는 코드가 아니라 스캔 대상 파일에서 위험한 eval() 호출
-# "문자열 패턴"을 탐지만 하는 정규식이다. 이 스크립트 자체는 eval()을 호출하지 않는다.
-EVAL_RE = re.compile(r"(?<!\.)\beval\(|dangerouslySetInnerHTML")
-# D12-secret: \b로 단어경계 강제 + 최소 길이 요구 (Competitions.tsx의 "risk-stability" 오탐 수정)
-#   기존 SECRET_RE=r"(sk-|AKIA|...)"는 "risk-stability" 안의 "sk-" 부분일치를 그대로 매치했음.
-#   "sk-"는 항상 'i' 같은 단어문자 뒤가 아니라 인용부호/문자열 시작 뒤에 오므로 \b가 정확히 구분해줌.
-SECRET_RE = re.compile(
-    r"(\bsk-[A-Za-z0-9_-]{8,}|\bAKIA[A-Z0-9]{12,}|api[_-]?key\s*=\s*['\"][^'\"]{4,}['\"])",
-    re.I,
-)
+# D-tierb1: AUTH_KEYWORDS / STRINGIFY_RE / THROW_RE / EVAL_RE(D17) / SECRET_RE(D12-secret)는
+#   Tier B 전용 상수라 함께 삭제됨. 원문과 각자의 WHY/COST/EXIT은 git history에 있다.
 
 
 def find_src_files(repo_root):
@@ -166,7 +166,8 @@ def extract_java_targets(text):
 #        줄)처럼 "원천적으로 스캔 불가"가 아니라 "이 파일 하나만 봐선 부족하고 형제 파일
 #        이름 목록이 필요하다"는 차이라 별도 해결 가능.
 #   COST: 단어 경계(\b) 매치라 흔한 이름(예: 클래스명이 "Test"처럼 JDK/일반 English 단어와
-#        겹치면) 오탐 가능 -- idiom_filter/tier_b_suppression처럼 재귀 억제 루프가 없어
+#        겹치면) 오탐 가능 -- idiom_filter처럼 재귀 억제 루프가 없어(D-tierb1 이후
+#        tier_b_suppression은 더 이상 존재하지 않는다)
 #        오탐이 나면 지금은 그냥 감수해야 함(발생 빈도 보고 필요시 hook화).
 #   EXIT: 오탐이 실측되면 클래스 선언(`class ClassName`) 패턴이 있는 파일만 fan_in_keys
 #        후보로 좁히거나, 문자열/주석 안 매치를 제외하도록 정교화.
@@ -276,30 +277,7 @@ def tier_a_structural_scan(files):
     return {"fan_in": fan_in, "edges": edges, "zero_fan_in_files": isolated}
 
 
-def tier_b_risk_triggered_scan(files):
-    """고비용이지만 조건부 발동: 키워드 사전 매치가 없는 파일은 깊게 읽지 않음
-    (=deep_read_count를 늘리지 않음). 이게 인지 블록의 비용 절감 핵심 장치.
-
-    각 히트에 실제 매치된 텍스트(matched_text)도 함께 기록한다 — 판단 블록의
-    tier_b_hook 재귀 억제 필터가 (trigger, matched_text) 단위로 오탐을 학습하기 위함.
-    """
-    flagged = {}
-    deep_read_count = 0
-    for fp in files:
-        text = open(fp, encoding="utf-8", errors="ignore").read()
-        hits = []
-        if AUTH_KEYWORDS.search(text) and STRINGIFY_RE.search(text) and THROW_RE.search(text):
-            hits.append({"trigger": "auth_info_leak_via_thrown_error", "matched_text": AUTH_KEYWORDS.search(text).group(0)})
-        m = EVAL_RE.search(text)
-        if m:
-            hits.append({"trigger": "eval_or_dangerous_html", "matched_text": m.group(0)})
-        m = SECRET_RE.search(text)
-        if m:
-            hits.append({"trigger": "hardcoded_secret_pattern", "matched_text": m.group(0)})
-        if hits:
-            flagged[os.path.basename(fp)] = hits
-            deep_read_count += 1
-    return {"flagged": flagged, "deep_read_count": deep_read_count, "total_files": len(files)}
+# D-tierb1: tier_b_risk_triggered_scan()이 여기 있었다. 삭제됨 -- 위 D-tierb1 참조.
 
 
 # D-fix17 (연주 audit B3, 2026-07-23): Swift files silently produce zero structural edges
@@ -317,9 +295,12 @@ def _language_coverage_notice(files):
 
 
 def scan(repo_root):
+    # D-tierb1: 반환 dict에서 "tier_b_risk_triggered" 키가 사라졌다. 이건 스키마 변경이라
+    #   이 JSON을 읽는 쪽(judgment/score_findings.py::score)도 같은 커밋에서 같이 바뀐다.
+    #   반대 방향(예전에 저장된 scan_output.json을 지금 score()에 다시 먹이는 경우)은
+    #   그대로 동작한다 -- 새 score()는 그 키를 아예 읽지 않으므로 남아 있어도 무시된다.
     files = find_src_files(repo_root)
     tier_a = tier_a_structural_scan(files)
-    tier_b = tier_b_risk_triggered_scan(files)
     return {
         "repo": repo_root,
         "total_source_files": len(files),
@@ -328,12 +309,6 @@ def scan(repo_root):
             "fan_in": tier_a["fan_in"],
             "zero_fan_in_files": tier_a["zero_fan_in_files"],
             "edges": tier_a["edges"],
-        },
-        "tier_b_risk_triggered": {
-            "flagged_files": tier_b["flagged"],
-            "deep_read_count": tier_b["deep_read_count"],
-            "total_files": tier_b["total_files"],
-            "cost_saved_ratio": round(1 - tier_b["deep_read_count"] / max(tier_b["total_files"], 1), 3),
         },
     }
 

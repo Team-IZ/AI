@@ -57,9 +57,11 @@ const P02Engine = (() => {
     "cognition/two_tier_scan.py",
     "judgment/score_findings.py",
     "judgment/idiom_filter.py",
-    "judgment/tier_b_suppression_filter.py",
+    // D-tierb1 (2026-07-31): tier_b_suppression_filter.py / tier_b_hook.py /
+    // tier_b_suppressions/suppressions.json 3건 삭제 -- 해당 .py 파일이 저장소에서
+    // 사라졌으므로 목록에 남겨두면 LabPyodide.loadFiles가 404를 받아 P02 부트스트랩
+    // 자체가 실패한다(찾기 어려운 실패 모드라 파일 삭제와 반드시 같은 커밋이어야 함).
     "judgment/subrubric.py",
-    "judgment/tier_b_hook.py",
     "judgment/subrubric_hook.py",
     "judgment/importance_rank.py",
     "judgment/rank_weights/rank_weights.json",
@@ -67,7 +69,6 @@ const P02Engine = (() => {
     "judgment/isolation_categories/domain_irrelevance/patterns.json",
     "judgment/isolation_categories/alt_storage_or_scope/patterns.json",
     "judgment/isolation_categories/perf_optimization/patterns.json",
-    "judgment/tier_b_suppressions/suppressions.json",
     "judgment/subrubric_weights/question_value/weights.json",
     "judgment/subrubric_weights/design_intent/weights.json",
     "judgment/subrubric_weights/risk/weights.json",
@@ -441,7 +442,11 @@ shutil.rmtree("/target", ignore_errors=True)
     const manifest = LabApp.getManifest();
     const stages = manifest.pipelines.p02.stages;
     const overrides = { two_tier_scan: {}, score_findings: {}, importance_rank: {} };
-    const moduleForStage = { "p02-1": "two_tier_scan", "p02-2": "two_tier_scan", "p02-3": "two_tier_scan", "p02-4": "score_findings", "p02-5": "importance_rank" };
+    // D-tierb1: "p02-3"(Tier B 위험 스캔) 매핑 삭제. 남은 id는 **일부러 재번호하지 않는다** --
+    // stage id는 LabApp.getOverride/Supabase runs.overrides에 이미 저장된 키라, p02-4를
+    // p02-3으로 당기면 과거 run의 override 기록이 조용히 다른 단계에 붙는다. 비어 있는 p02-3은
+    // 결번(缺番)이며 그 자체가 "여기 Tier B가 있었다"는 이력이다.
+    const moduleForStage = { "p02-1": "two_tier_scan", "p02-2": "two_tier_scan", "p02-4": "score_findings", "p02-5": "importance_rank" };
     for (const stage of stages) {
       const ov = LabApp.getOverride("p02", stage.id);
       if (ov && ov.params) {

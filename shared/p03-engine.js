@@ -125,6 +125,33 @@ const P03Engine = (() => {
   //   rebalancing (that would need a second pass; not worth the complexity for a 3-file cap).
   //   EXIT: if a content-aware allocation is needed later (give unused budget from short
   //   files to longer ones), rebalance here -- callers don't need to change.
+  //
+  // D-poc13 (2026-07-31, 설계만 -- 코드 변경 없음. 전문은 feat/poc_full의
+  // app/code-candidates.js 파일 헤더): D-fix10은 "어느 파일이 대표되는가"를 고쳤지만 "파일
+  // 안 어디를 보여주는가"는 그대로다 -- 아래는 여전히 각 파일 **앞에서부터** perFileCap자를
+  // 자르므로, finding이 가리키는 실제 코드가 그 지점보다 뒤에 있으면 프롬프트에서(따라서
+  // 학생이 보는 근거에서도) 조용히 사라진다.
+  //   해법은 P04가 이미 쓰는 심볼 grounding(app/code-fragment.js::locateSymbol, D-poc10):
+  //   LLM이나 스캐너가 지목한 **실제 코드 한 줄**을 파일에서 문자열로 찾아 그 주변만 잘라낸다.
+  //   P03에 필요한 건 **그 grounding 한 단계뿐**이다 -- 후보 식별/랭킹/병렬 fan-out(P04 설계의
+  //   1/3/4단계)은 여기 필요 없다: 후보는 이미 finding.file로 MAX_CONNECT_FILES=3까지 좁혀져
+  //   있고 순위도 finding.rank_score(D194)가 갖고 있으며, P03은 사람이 답을 타이핑하는 동안
+  //   동시 호출 1건으로 도는 루프라(D181) 인터뷰 중 병렬 버스트는 얻는 것 없이 429 위험만 키운다.
+  //   ★미해결 갈림길이었던 "심볼을 누가 만드는가?"는 D-tierb1/D-ground1로 **해소됐다**
+  //   (2026-07-31). 당시 후보 셋과 그 결말:
+  //     (A) finding 텍스트의 matched_text 재사용 -- **소멸**. matched_text는 tier-b-risk
+  //         계열에만 있었는데 D-tierb1이 Tier B를 통째로 제거했다. 애초에 AUTH_KEYWORDS
+  //         계열은 "uid"처럼 3글자라 못 쓴다고 적어둔 그대로이며, 그 실패가 오히려
+  //         shared/code-locate.js의 MIN_SYMBOL_LEN 방어(D-ground1 §3a)로 남았다.
+  //     (B) 심볼 선택용 LLM 호출 1회 추가 -- **채택**. 단 P03 세션 시작이 아니라 P02 끝의
+  //         하향식 분석 문서(p02-6) 한 곳으로 옮겨서, 인터뷰 루프에는 지연을 더하지 않는다.
+  //         설계 전문은 shared/code-locate.js 헤더 D-ground1 §4.
+  //     (C) 트리거 정규식 JS 재구현 -- **불필요**. 재구현할 정규식 자체가 사라졌다.
+  //   grounding 로직은 예고한 대로 shared/code-locate.js로 분리돼 있고 테스트도 있다
+  //   (tests/code-locate.test.js). **아직 이 함수에 배선하지 않았다** -- 배선은 p02-6가
+  //   실제로 decision_points를 만들기 시작한 다음이다. 그때 여기서 할 일은:
+  //   contexts를 앞에서부터 자르는 대신, 해당 finding에 연결된 decision point의
+  //   located.lines 주변만 CodeLocate.buildFragment로 잘라 넣는 것.
   function buildCombinedCodeContext(contexts, cap) {
     if (!contexts || !contexts.length) return null;
     const perFileCap = cap ? Math.floor(cap / contexts.length) : null;
