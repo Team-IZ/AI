@@ -525,6 +525,16 @@
               }
             }
           },
+          "503": {
+            "description": "채점 실패. 같은 clientRequestId로 재전송하면 된다",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -1821,6 +1831,12 @@
             "title": "Questionfocusitemid",
             "description": "요청 focusItems[].id를 그대로 돌려준다. 강사 지정 없이 뽑았으면 null"
           },
+          "isGeneral": {
+            "type": "boolean",
+            "title": "Isgeneral",
+            "description": "teach에 연결되지 않은 일반 문제. 제출 코드가 teaches를 만족하지 않아 그 개념으로 문제를 못 만들었을 때 나온다. **화면에 '일반 문제'로 표기해야 한다** — 검증 개념 앵커가 없어 다른 문제와 성격이 다르고, 보고서의 교안 복습 위치 지목도 붙지 않는다 (2026-08-02 PM 확정)",
+            "default": false
+          },
           "sourcePath": {
             "type": "string",
             "title": "Sourcepath"
@@ -1936,17 +1952,12 @@
             "type": "string",
             "title": "Problemid"
           },
-          "totalScore": {
+          "reachedStage": {
             "type": "integer",
+            "maximum": 4.0,
             "minimum": 0.0,
-            "title": "Totalscore",
-            "description": "stages의 confirmedScore 합"
-          },
-          "maxScore": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Maxscore",
-            "description": "4단계 × 5점 = 20"
+            "title": "Reachedstage",
+            "description": "통과한 최고 단계. 0=L1 미달 · 1=L1까지 · 2=L2까지 · 3=L3까지 · 4=완주. 위험·우수·재시험 판정이 전부 이 값으로 돈다"
           },
           "stages": {
             "items": {
@@ -1963,12 +1974,11 @@
         "required": [
           "problemNo",
           "problemId",
-          "totalScore",
-          "maxScore",
+          "reachedStage",
           "stages"
         ],
         "title": "ProblemResult",
-        "description": "문제(DB assessment_problem) 하나의 결과. 단계 4개를 순서대로 담는다."
+        "description": "문제(DB assessment_problem) 하나의 결과. 단계 4개를 순서대로 담는다.\n\n🔴 **총점이 없다** (2026-08-02, PM 설계 v2 §5-1). 이유 둘:\n\n① **이 구인은 보상을 허용하지 않는다.** 자기 코드가 무엇을 하는지 설명하지\n   못하는데 대안을 잘 알아서 총점이 높은 상태는 성립하면 안 된다.\n② **총합은 결측을 0으로 만든다.** L1에서 막혀 L2~L4를 받지 않은 학생의 나머지를\n   0으로 계산하면 \"못한 것\"과 \"안 물어본 것\"이 섞인다.\n\n대신 `reachedStage`가 판정값이다. 축별 0~5점은 그대로 보낸다 — 저장·정렬\ntie-break·재채점 실험의 입력이다(화면에 표기할지는 프론트가 정한다)."
       },
       "ProblemStage": {
         "properties": {
@@ -1992,7 +2002,7 @@
               }
             ],
             "title": "Questiontext",
-            "description": "L1·L2는 분석 때 확정. L3·L4는 세션 중 생성되므로 여기서는 null"
+            "description": "분석 때 확정된 질문. 4축 전부 필수"
           },
           "flagged": {
             "type": "boolean",
@@ -2006,7 +2016,7 @@
             },
             "type": "array",
             "title": "Hints",
-            "description": "L1·L2는 정확히 2개(hintLevel 1, 2). L3·L4는 빈 배열"
+            "description": "정확히 2개(hintLevel 1, 2). 4축 전부 필수"
           }
         },
         "type": "object",
@@ -2014,7 +2024,7 @@
           "axisCode"
         ],
         "title": "ProblemStage",
-        "description": "문제 하나의 단계 하나. 4축이 곧 4단계다.\n\n**단계마다 채워지는 시점이 다르다.**\n\n    L1·L2   분석 배치에서 질문·힌트를 만들어 동결한다\n    L3·L4   세션 중에 만든다 — 직전 단계 답변과 채점 근거를 봐야 하기 때문이다.\n            분석 응답에서는 questionText가 null이고 hints가 빈 배열이다\n\n구조(4단계)는 분석 시점에 확정되고 내용만 나중에 채워진다. 그래서 stages는\n항상 4개이고, 아래 검증이 \"어느 단계가 언제 채워지는지\"를 스펙에 드러낸다."
+        "description": "문제 하나의 단계 하나. 4축이 곧 4단계다.\n\n**4축 전부 분석 배치에서 질문·힌트를 만들어 동결한다.** 세션은 저장분을 꺼내\n쓰기만 한다. 그래서 분석 응답에는 항상 질문 4개와 힌트 8개가 다 들어 있다."
       },
       "Progress": {
         "properties": {
@@ -2067,6 +2077,26 @@
                 "type": "null"
               }
             ]
+          },
+          "hintText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hinttext",
+            "description": "재질의면 직전에 보여줄 힌트. 첫 시도면 null"
+          },
+          "hintsUsed": {
+            "type": "integer",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Hintsused",
+            "description": "이 단계에서 지금까지 쓴 힌트 수. 화면의 '2번 쓸 수 있어요' 표기 근거",
+            "default": 0
           }
         },
         "type": "object",
@@ -2077,7 +2107,7 @@
           "questionText"
         ],
         "title": "Question",
-        "description": "지금 물어보는 질문 하나 "
+        "description": "지금 물어보는 질문 하나.\n\n질문은 **분석 때 동결돼 DB에 있다.** 세션은 그걸 꺼내 보여줄 뿐 만들지 않는다.\n같은 단계를 다시 물을 때도 `questionText`는 그대로고 `hintText`만 붙는다 —\n힌트는 재진술이라 원 질문을 대체하지 않는다(scoring.HINT_LADDER)."
       },
       "ReportAccepted": {
         "properties": {
@@ -2104,6 +2134,18 @@
           "jobId": {
             "type": "string",
             "title": "Jobid"
+          },
+          "problemId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problemid",
+            "description": "이 job이 다루는 문제"
           },
           "sessionId": {
             "anyOf": [
@@ -2192,6 +2234,11 @@
       },
       "ReportRequest": {
         "properties": {
+          "problemId": {
+            "type": "string",
+            "title": "Problemid",
+            "description": "이 보고서가 다루는 문제. 문제 단위의 키"
+          },
           "sessionId": {
             "anyOf": [
               {
@@ -2215,6 +2262,18 @@
             "title": "Scorerunid",
             "description": "Spring ScoreRun 키(에코용)"
           },
+          "modelCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modelcode",
+            "description": "생략 시 서버 기본값. `/analyses`·`/curricula`와 같은 규칙이다 — 모델 선택은 operator 권한이고, 없으면 보고서만 비용·지연을 못 고른다"
+          },
           "transcript": {
             "items": {
               "additionalProperties": true,
@@ -2222,7 +2281,7 @@
             },
             "type": "array",
             "title": "Transcript",
-            "description": "점수가 이미 확정된 턴 기록"
+            "description": "**이 문제의 턴만.** 점수가 이미 확정된 기록 (최대 4단계 × 3시도)"
           },
           "analysisDocuments": {
             "items": {
@@ -2244,8 +2303,11 @@
           }
         },
         "type": "object",
+        "required": [
+          "problemId"
+        ],
         "title": "ReportRequest",
-        "description": "POST /reports 요청. 세션이 끝난 뒤 전사와 재료를 함께 넘긴다."
+        "description": "POST /reports 요청. **문제 하나가 끝날 때마다 한 번씩** 부른다.\n\n2026-08-02 확정: 보고서는 세션 단위가 아니라 **문제 단위**다. 세션 1회에\n문제 3개면 보고서도 3개다. 학생이 다음 문제를 푸는 동안 병렬로 돌리므로\n학생 체감 대기가 0이다 — 세션 끝에 몰아 만들면 그만큼 기다리게 된다."
       },
       "ReportResult": {
         "properties": {
@@ -2253,12 +2315,8 @@
             "type": "string",
             "title": "Reportmarkdown"
           },
-          "problems": {
-            "items": {
-              "$ref": "#/components/schemas/ProblemResult"
-            },
-            "type": "array",
-            "title": "Problems"
+          "problem": {
+            "$ref": "#/components/schemas/ProblemResult"
           },
           "curriculumRefs": {
             "items": {
@@ -2268,12 +2326,10 @@
             "type": "array",
             "title": "Curriculumrefs"
           },
-          "retestTargets": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Retesttargets"
+          "retest": {
+            "type": "boolean",
+            "title": "Retest",
+            "description": "이 문제가 재시험 대상인가. **L1·L2 둘 다 통과해야 아니다** (scoring.RETEST_TRIGGER_AXES). 세션 전체의 재시험 여부는 Spring이 문제 3개의 이 값을 모아 판단한다"
           },
           "versions": {
             "$ref": "#/components/schemas/ReportVersions"
@@ -2282,13 +2338,12 @@
         "type": "object",
         "required": [
           "reportMarkdown",
-          "problems",
-          "curriculumRefs",
-          "retestTargets",
+          "problem",
+          "retest",
           "versions"
         ],
         "title": "ReportResult",
-        "description": "보고서가 완성됐을 때의 본문."
+        "description": "보고서가 완성됐을 때의 본문. **문제 하나 분량이다.**"
       },
       "ReportVersions": {
         "properties": {
@@ -2464,13 +2519,21 @@
             "title": "Sessionid",
             "description": "Spring AssessmentSession 키(에코용)"
           },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "type": "array",
+            "title": "Problems",
+            "description": "분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다"
+          },
           "selectedProblemIds": {
             "items": {
               "type": "string"
             },
             "type": "array",
             "title": "Selectedproblemids",
-            "description": "세션에 포함할 문제. 생략 시 전체"
+            "description": "problems 중 이 세션에 쓸 것. 생략 시 전체"
           },
           "timeLimitSec": {
             "type": "integer",
@@ -2482,7 +2545,7 @@
         },
         "type": "object",
         "title": "SessionStart",
-        "description": "POST /sessions 요청."
+        "description": "POST /sessions 요청.\n\n🔴 **`problems`가 필수다** (2026-08-02, 전면 동결). 문제·질문·힌트는 분석 때\n만들어져 DB에 있고 세션은 그것을 받아 진행한다. **AI는 세션 중에 아무것도\n생성하지 않는다** — 채점만 한다. 안 주면 물을 것이 없어 세션이 성립하지 않는다."
       },
       "SessionView": {
         "properties": {
