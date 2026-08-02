@@ -5,7 +5,12 @@ from fastapi import Depends, FastAPI
 from app.api import analyses, curricula, health, reports, sessions
 from app.api.deps import require_internal_key
 from app.api.errors import register_error_handlers
-from app.config import API_V0_PREFIX
+from app.config import API_V0_PREFIX, get_settings
+
+# import 시점에 설정을 강제로 읽어 production 가드를 여기서 터뜨린다.
+# 지연 호출(요청 때 첫 호출)로 두면 기동은 성공하고 /api/health도 200이라
+# App Runner가 배포를 정상으로 판정한 뒤 업무 요청만 전부 500이 된다.
+get_settings()
 
 app = FastAPI(
     title="IZ-GET",
