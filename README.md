@@ -87,9 +87,28 @@ Swagger UI: **http://127.0.0.1:8000/docs** — 여기서 엔드포인트를 직�
 
 > **워커는 1개로 유지한다.** job·세션 저장소가 인메모리라 `--workers 2` 이상이면 만든 프로세스와 조회 프로세스가 달라져 404가 난다. 시연 규모(동시 10~20명)에서는 제약이 아니다 — 병목은 FastAPI가 아니라 NVIDIA 무료 티어의 분당 40회다.
 
+### 배포 — AWS EC2 + cloudflared (2026-08-02~)
+
+운영 인스턴스는 **서울 리전 EC2 t3.small**이고 `main` 브랜치를 체크아웃해 둔다.
+`uvicorn`과 `cloudflared`가 각각 systemd 서비스라 재부팅에도 자동으로 올라온다.
+
+```bash
+# 배포 (EC2에서)
+cd ~/AI && git pull && .venv/bin/pip install -r requirements.txt && sudo systemctl restart iz-get-ai
+# 상태·현재 주소
+systemctl is-active iz-get-ai cloudflared
+sudo journalctl -u cloudflared -n 60 --no-pager | grep trycloudflare.com
+```
+
+- **8080은 인바운드로 열지 않는다.** 터널이 아웃바운드로 나가므로 인터넷에 평문 포트가 없다.
+  `X-Internal-Key`가 공유 비밀이라 이 성질이 중요하다.
+- **quick tunnel URL은 cloudflared가 재시작될 때마다 바뀐다.** 백엔드는 AI 주소를 설정값으로 갖고 있어야 한다.
+- 안 쓸 때는 인스턴스를 **Stop**(EBS만 과금). **`Terminate`는 디스크째 삭제라 금지.**
+- App Runner는 2026-04-30부터 신규 고객을 받지 않아 쓸 수 없다. 경위와 대안은 `PLAN_FASTAPI_MIGRATION.md` §T9.
+
 ### 백엔드와 통신 테스트 (배포 없이)
 
-Spring이 Railway에 떠 있으면 로컬 FastAPI를 터널로 노출해 확인한다.
+로컬 FastAPI를 터널로 노출해 확인한다. 백엔드는 서울 EC2(`http://13.209.190.34`)에 떠 있다.
 
 ```bash
 ./.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000

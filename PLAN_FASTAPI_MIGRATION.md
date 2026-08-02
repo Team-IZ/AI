@@ -15,7 +15,7 @@
 | 테스트 | **192 passed** |
 | 기능 | **6/6 완성 + 전부 실호출 검증.** 교안 · 코드 분석 · 문제 생성 · 힌트 · 채점 · 보고서 |
 | 계약 | `openapi.json` 재생성 완료(2026-08-02). `tests/test_openapi.py`가 드리프트를 막는다 |
-| 다음 | **🔴 T9 배포.** T9b·T9c 완료(`apprunner.yaml` 작성됨). **다음은 T9a 머지(사용자 git) → T9d 백엔드 연동.** **develop = 로컬(백엔드 연동 테스트) · main = AWS.** 상세는 §T9 |
+| 다음 | ✅ **T9 배포 완료** — 서울 EC2 + cloudflared(systemd 상시 가동, 외부 검증 끝). **App Runner는 신규 고객 차단으로 사용 불가.** 다음은 **T9d 백엔드 연동** — 터널 URL + 키 전달. 상세는 §T9 |
 | 기준 | **§T10**(기능 동결) · **§T10-B**(PM 설계 v2 대조) · **§T10-C**(vendor 정책). 앞선 절과 충돌하면 이 셋이 이긴다 |
 | 막힌 것 | **없다.** 백엔드를 기다리지 않는다(§T0) — 우리가 확정해 통보한다 |
 | 🔴 위험 | **무료 티어.** 채점 5회 중 4회 실패한 시각이 있었다. 유료 전환이 근본 해결(`../output_docs/미결_논의사항.md` P-3) |
@@ -866,157 +866,125 @@ stages.call        CONTEXT_OVERFLOW만 재시도
 
 ---
 
-### T9 — 배포 (2026-08-02 전략 확정)
+### T9 ✅ — 배포 (2026-08-02 완료 · EC2 + cloudflared)
 
-**목표는 "백엔드가 언제든 붙을 수 있는 주소"다.** 기능은 6/6 완성됐고 실호출 검증도 끝났다.
+**결과: 서울 EC2 한 대에서 systemd로 상시 가동하고, cloudflared가 HTTPS 주소를 준다.**
+외부에서 11개 엔드포인트 전부 확인했다 — `/api/health` 200(무인증) · 키 없으면 401 ·
+올바른 키면 통과 · 잘못된 body는 422 `INVALID_REQUEST`. 왕복 0.95초.
 
-#### 🔴 브랜치 두 개의 역할이 다르다
+#### 🔴 App Runner는 쓸 수 없다 (경위를 남긴다 — 다시 검토하지 않기 위해)
 
-```
-feature/*   개발
-   ↓  동작·테스트 통과
-develop     **로컬 테스트용.** 백엔드 연동 테스트를 여기서 한다 — 내 PC에서 돌리고
-            cloudflared로 주소만 노출한다. AWS를 안 쓰므로 비용 0
-   ↓  검증 끝난 것만
-main        **AWS 배포용.** App Runner가 이 브랜치를 본다. 시연·상시 필요할 때만
-```
+| 사실 | 확인 |
+|---|---|
+| **2026-04-30부터 신규 고객 차단** | 콘솔에 `Create service` 버튼 자체가 없다. 소개 페이지만 뜬다 |
+| 계정이 **Free plan**이면 그 전에 먼저 막힌다 | "Complete your account setup" 안내. Paid plan 업그레이드로 이건 풀렸지만 **신규 차단은 그대로였다** |
+| **서울 리전에 App Runner가 없다** | 지원: 버지니아·오하이오·오레곤·뭄바이·싱가포르·시드니·도쿄·프랑크푸르트·아일랜드·런던·파리 |
+| AWS 권장 후속은 **ECS Express Mode** | Dockerfile + ECR + IAM 역할 2개 + ALB. 월 $30+, pause 없음. **replica 1 고정인 우리에겐 이점이 없다** |
 
-**핵심: 백엔드 연동 테스트에 AWS를 쓰지 않는다.** 통합 과정은 요청을 수십·수백 번
-주고받는데 그동안 App Runner를 켜두면 그게 다 돈이다. **`develop` + 로컬 + cloudflared로
-붙이고, `main`은 실제로 보여줘야 할 때만 켠다.**
+`apprunner.yaml`은 삭제했다. `runtime: python311`이 아니라 `python3`가 맞다는 것까지 확인했지만
+쓸 곳이 없어졌다.
 
-| | develop | main |
-|---|---|---|
-| 어디서 도나 | 내 PC (`uvicorn`) | AWS App Runner |
-| 주소 | cloudflared 임시 HTTPS | App Runner 고정 HTTPS |
-| 비용 | **0** | 시간당 (pause하면 0) |
-| 쓰는 때 | **백엔드 연동 테스트 · 개발 중 상시** | 시연 · 상시 가동이 필요할 때 |
-| 배포 방식 | 없음 (그냥 실행) | `main` push → 자동 재배포 |
+#### 왜 EC2 + cloudflared인가
 
-⚠️ **백엔드에 "AI 주소는 설정값으로 빼라"고 요청해야 한다.** 코드에 박으면 로컬↔AWS를
-오갈 때마다 백엔드를 재배포해야 한다. 이 요청이 이 전략의 전제다.
+- **코드 수정 0.** Dockerfile·레지스트리·CI 파이프라인이 전부 필요 없다
+- **TLS를 공짜로 얻는다.** cloudflared가 HTTPS를 종단한다. **8080을 인바운드로 열지 않는다** —
+  터널이 아웃바운드로 나가므로 인터넷에 평문 포트가 아예 존재하지 않는다.
+  `X-Internal-Key`가 공유 비밀이라 이 성질이 중요하다
+- **백엔드 EC2(서울 `13.209.190.34`)와 같은 리전**
+- **중지하면 거의 0.** 인스턴스 시간요금이 멈추고 EBS 16GB(월 약 $1.5)만 남는다
 
-#### 배포 전 확인된 제약
+**대가: quick tunnel URL이 cloudflared 재시작마다 바뀐다.** 인스턴스를 Stop/Start 하면 새 주소다.
+고정 주소가 필요해지면 아래 "후속".
 
-| # | 사실 | 영향 | 대응 |
-|---|---|---|---|
-| **1** | `jobs.py`·`sessions.py`·`reports.py`·`curricula.py`가 **인메모리 dict**다 | 인스턴스가 2개로 늘면 A에 만든 job을 B가 못 찾아 404 | **오토스케일 max = 1로 고정.** Redis 이전은 나중 |
-| **2** | 재배포·pause 시 진행 중 job·세션 유실 | 통합테스트 도중 배포하면 상대가 깨진다 | 배포 창을 백엔드와 맞춘다 |
-| **3** | App Runner 요청 타임아웃 기본 120초 | `/analyses`·`/curricula`·`/reports`는 202+폴링이라 안전. **세션 채점만 동기** | 실측 4.5~7.7초(flash). 여유 있음 |
-| **4** | 분석이 626초, 교안이 464초 | App Runner가 요청을 끊어도 백그라운드는 계속 돈다 | 202+폴링 구조라 문제없음 |
+#### 실제 구성 (2026-08-02 구축)
 
-**1번이 진짜 제약이다.** 오토스케일을 켜두면 에러 없이 조용히 깨진다 — 폴링만 404가 난다.
-
-#### 왜 App Runner인가
-
-GitHub 저장소를 직접 물릴 수 있어 **Dockerfile·ECR·GitHub Actions가 전부 필요 없다.**
-`main`에 push하면 알아서 빌드·배포한다.
-
-⚠️ **`X-Internal-Key`는 공유 비밀이라 TLS가 필수다.** EC2에 평문 HTTP로 띄우면 인터넷
-구간에 키가 그대로 흐른다. App Runner는 HTTPS URL을 그냥 준다. cloudflared도 마찬가지다.
-
-⚠️ **poppler 같은 시스템 바이너리를 못 깐다.** 그래서 교안 PDF 추출을 `pypdf`(순수 파이썬)로
-했다 — PoC의 `pdftotext` 방식을 그대로 가져왔으면 배포에서 막혔다.
-
-#### 비용 — idle에도 과금된다
-
-App Runner는 요청이 없어도 프로비저닝된 메모리 요금이 나간다(2GB 기준 월 $3~5).
-**일시중지(pause)하면 0이다.**
-
-⚠️ **pause 중에는 자동배포도 멈춘다.** resume하면 그 시점의 최신 `main`으로 뜬다.
-문제가 아니라 오히려 원하는 동작이다.
-
-#### 단계
-
-**T9a — 브랜치 정리 (git. 사용자가 직접 실행)** — 명령 전달됨, 실행 대기
-
-```
-feature/engine-transplant (+27커밋) → develop        # fast-forward 확인됨
-```
-`main`은 아직 README 한 줄짜리다(`db751a9`). **`main`의 첫 실질 내용이 이번 머지다.**
-
-⚠️ **`main` 머지는 T9d(연동 테스트) 뒤로 미룬다.** `main` push = App Runner 자동 재배포이고
-`apprunner.yaml`이 T9c에서야 생겼다 — 지금 올리면 두 번 머지하게 된다.
-
-**T9b — 로컬 프로덕션 모드 검증** ✅ 완료 (2026-08-02)
-
-`APP_ENV=production` + `INTERNAL_API_KEY=<test>`로 실제 기동해 확인:
-기동 성공 · `/api/health` 200 무인증 · 업무 경로 키 없거나 틀리면 401(`{error,message,retryable}`) ·
-올바른 키면 통과(404 `JOB_NOT_FOUND`).
-
-🔴 **네 번째 항목이 실제로는 깨져 있었다 — 고쳤다.** "키를 비우면 기동 거부"가 사실이 아니었다.
-`get_settings()`가 **첫 인증 요청 때 처음 호출**돼서 서버는 정상 기동하고 `/api/health`도 200이었다.
-App Runner에선 **헬스체크가 통과해 배포가 성공으로 판정된 뒤 업무 요청만 전부 500**이 된다 —
-가드가 막으려던 바로 그 상황이다. `app/main.py`가 import 시점에 `get_settings()`를 부르도록 고쳤고
-(uvicorn 종료코드 1 확인), `tests/test_auth.py::test_production_without_key_fails_at_import`가 지킨다.
-
-**T9c — `apprunner.yaml` 작성** ✅ 완료 (2026-08-02, 저장소 루트)
-
-로컬 venv는 3.13이지만 3.12+ 전용 문법(PEP 695 제네릭 · `type` 문 · `itertools.batched` · `@override`)이
-코드에 없음을 확인해서 3.11로 간다.
-
-```yaml
-version: 1.0
-runtime: python311
-build:
-  commands:
-    build:
-      - pip install -r requirements.txt
-run:
-  runtime-version: 3.11
-  command: uvicorn app.main:app --host 0.0.0.0 --port 8080
-  network:
-    port: 8080
-```
-
-3.11로 도는 것을 확인했다 — 3.12+ 전용 문법이 없고 의존성도 순수 wheel이다.
-`requirements.txt`는 **버전 고정**이라 빌드가 재현된다(2026-08-02 고정).
-
-**T9d — 백엔드 연동 테스트 (develop · 로컬 · $0)**
+| | 값 |
+|---|---|
+| 리전 / 인스턴스 | 서울 `ap-northeast-2` · **t3.small**(2 vCPU / 2 GB) · Amazon Linux 2023 · gp3 16GB |
+| 보안그룹 | **인바운드 SSH(22) ← 내 IP 하나뿐.** 80·443·8080 전부 닫힘 |
+| 파이썬 | `dnf install python3.11` → `~/AI/.venv` |
+| 코드 | `git clone https://github.com/Team-IZ/AI.git ~/AI` → `main`. **저장소가 공개라 인증 불필요**(배포 키·토큰 없음) |
+| 비밀값 | `~/AI/.env` (`chmod 600`). 로컬 `.env`를 `scp`로 옮기고 `APP_ENV=production`·`ENGINE_MODE=real`로 교체 |
+| 스왑 | 2GB (`/swapfile`). 분석 피크 대비 |
+| 서비스 | `iz-get-ai.service`(uvicorn 127.0.0.1:8080) · `cloudflared.service`(quick tunnel). 둘 다 `Restart=always` + `enable` |
 
 ```bash
-# develop 체크아웃 상태에서
-uvicorn app.main:app --host 0.0.0.0 --port 8080     # ENGINE_MODE=real
-cloudflared tunnel --url http://localhost:8080
+# 배포
+cd ~/AI && git pull && .venv/bin/pip install -r requirements.txt && sudo systemctl restart iz-get-ai
+# 상태·주소
+systemctl is-active iz-get-ai cloudflared
+sudo journalctl -u cloudflared -n 60 --no-pager | grep trycloudflare.com
 ```
-나온 HTTPS URL + `INTERNAL_API_KEY`를 백엔드에 전달한다. **계약 불일치는 전부 여기서 잡는다.**
-AWS는 그 다음이다 — 클라우드에서 디버깅할 이유가 없다.
 
-**T9e — App Runner 배포 (main)**
+#### 제약 (EC2 기준으로 갱신)
 
-1. `apprunner.yaml`을 `main`에 포함
-2. 콘솔: 서비스 생성 → Source = GitHub → 저장소 연결 → **브랜치 `main`** → 자동배포 ON
-3. 환경변수: `APP_ENV=production` · `INTERNAL_API_KEY` · `ENGINE_MODE=real` ·
-   `NVIDIA_API_KEY_1~8` · 모델 3종
-4. 헬스체크 경로 `/api/health` (인증 면제라 그대로 쓴다)
-5. **오토스케일 max instances = 1** (제약 1번)
+| # | 사실 | 대응 |
+|---|---|---|
+| **1** | `jobs.py`·`sessions.py`·`reports.py`·`curricula.py`가 **인메모리 dict**다 | **인스턴스 1대라 자연히 충족.** Redis로 옮기기 전에는 절대 2대로 늘리지 않는다 |
+| **2** | 재시작 시 진행 중 job·세션 유실 | `systemctl restart` 시점을 백엔드와 맞춘다 |
+| **3** | **Cloudflare 터널은 100초를 넘는 응답을 끊는다(524)** | 동기 경로는 채점뿐이고 실측 4.5~7.7초. 분석·교안·보고서는 202+폴링이라 무관 |
+| **4** | 분석 626초, 교안 464초 | 백그라운드 작업이라 요청 수명과 무관 |
+| **5** | 터널 URL이 재시작마다 바뀐다 | 백엔드가 **AI 주소를 설정값으로** 갖고 있어야 한다. 이 요청이 전제다 |
+
+#### 단계 기록
+
+**T9a ✅ 브랜치 정리** — `feature/engine-transplant`(+27) → `develop` → `main`.
+낡은 브랜치(`develop-old`·머지 끝난 feature 2개) 삭제. 남은 것은 `develop`·`main`과 팀원 4개.
+
+**T9b ✅ 로컬 프로덕션 모드 검증** — 기동 · `/api/health` 200 무인증 · 401 · 404 전부 확인.
+
+🔴 **"키를 비우면 기동 거부"가 거짓이었다 — 고쳤다.** `get_settings()`가 **첫 인증 요청 때 처음
+호출**돼서 서버는 정상 기동하고 헬스체크도 200이었다. 관리형 플랫폼이라면 **배포가 성공으로
+판정된 뒤 업무 요청만 전부 500**이 된다. `app/main.py`가 import 시점에 `get_settings()`를 부르게
+고쳤고(종료코드 1 확인), `tests/test_auth.py::test_production_without_key_fails_at_import`가 지킨다.
+
+**T9c ⛔ `apprunner.yaml`** — 작성했다가 App Runner 차단 확인 후 삭제.
+
+**T9d — 백엔드 연동 테스트 ← 다음 작업**
+
+터널 HTTPS URL + `INTERNAL_API_KEY`를 백엔드에 전달한다(키는 별도 채널).
+백엔드에 요청할 것 3가지:
+1. **AI 주소를 설정값으로 뺄 것** — 터널 URL은 바뀌고, 나중에 고정 도메인으로 이사한다
+2. **채점 호출 타임아웃 30초 이상** — 동기 경로는 `POST /sessions/{id}/answers` 하나뿐이고
+   실측 4.5~7.7초, 무료 티어 혼잡 시 더 걸린다
+3. **AI 쪽 IP 화이트리스트 계획이 있는지** — 터널에는 고정 출발 IP가 없다
+
+**T9e ✅ EC2 구축** — 위 "실제 구성".
 
 **T9f — 운영**
 
 ```
-평소     develop + 로컬 + cloudflared        $0
-시연     main → App Runner resume            시간당
-끝나면   pause                               $0
+평소      인스턴스 Stop                    EBS만 월 약 $1.5
+쓸 때     Start → 자동 기동 → 새 URL 확인 → 백엔드에 전달
+배포      git pull && pip install -r && systemctl restart iz-get-ai
 ```
 
-`main` 머지 = 자동 재배포이므로 **머지 시점을 백엔드와 맞춘다**(제약 2번).
+⚠️ **`Terminate`는 절대 금지.** 루트 볼륨이 삭제돼 코드·`.venv`·`.env`·systemd 설정이 전부 사라진다.
+`Stop`은 디스크를 남긴다.
 
-#### 착수 전 결정 (2026-08-02 확정)
+#### 후속 — 고정 HTTPS 주소 (미착수, 백엔드가 붙기 전까지는 급하지 않다)
+
+| | 주소 | TLS | 비용 | 작업 |
+|---|---|---|---|---|
+| **A. 현행 유지** | 재시작마다 변경 | ✅ | $0 | 없음 |
+| **B. 8080 직접 개방** | 고정(Elastic IP) | ❌ **평문** | $0 | 보안그룹 1줄. **키가 인터넷에 노출된다 — 권하지 않음** |
+| **C. 무료 도메인 + Caddy** | **고정** | ✅ Let's Encrypt | $0 | DuckDNS 서브도메인 + Caddy 리버스 프록시(자동 발급·갱신) + Elastic IP + 80·443 개방 |
+
+**C를 권한다.** 백엔드가 주소를 설정값으로 갖고 있으면 이사 비용은 0이다.
+팀 도메인이 이미 있으면 DuckDNS 대신 그것을 쓴다.
+
+#### 결정 기록
 
 | | 결정 |
 |---|---|
-| **AWS 리전** | ✅ **`ap-northeast-1`(도쿄).** ⚠️ **App Runner는 서울에 없다** — 지원 리전은 버지니아·오하이오·오레곤·뭄바이·싱가포르·시드니·도쿄·프랑크푸르트·아일랜드·런던·파리. 백엔드 EC2(서울, `13.209.190.34`)와 리전이 갈리지만 왕복 30~35ms라 채점 4.5~7.7초에 묻힌다. 요금표에도 서울이 없어 도쿄 단가($0.009/GB-hour · $0.081/vCPU-hour)가 기준이다 |
-| **AWS 계정 플랜** | ⚠️ **Free plan은 App Runner를 못 만든다.** "Complete your account setup" 안내로 막힌다 — Paid plan 업그레이드(결제 수단 + 신원 확인) 필요. 신규 계정 크레딧($100, 최대 $200/6개월)이 청구서에 먼저 차감되므로 업그레이드 = 즉시 과금은 아니다 |
-| **`INTERNAL_API_KEY`** | ✅ **develop 단계에서는 지금 `.env`의 키를 그대로 쓴다.** 백엔드에 그 값을 전달한다. ⚠️ **평문으로 이슈·커밋·문서에 옮기지 않는다** — 별도 채널로 전달 |
-| **`MODEL_CODE_SESSION`** | 🟡 **`deepseek-v4-flash`는 후보군으로만 둔다.** 기본값은 지금 그대로(`mistral-medium-3.5`). **설정 없이 띄웠을 때의 기본값 동작을 먼저 확인**하고 그 다음에 정한다(P-10) |
-| **org 승인** | 🟡 미확인. App Runner의 GitHub 연결에서 막히면 그때 처리한다 |
+| **리전** | ✅ **서울 `ap-northeast-2`** (EC2). 백엔드와 동일 |
+| **AWS 계정** | Paid plan 업그레이드 완료. 신규 계정 크레딧($100, 최대 $200/6개월)에서 차감된다 |
+| **`INTERNAL_API_KEY`** | ✅ 로컬 `.env`의 키를 서버에도 그대로 쓴다. ⚠️ **저장소가 공개다** — 키를 코드·커밋·문서·이슈에 절대 넣지 않는다 |
+| **`MODEL_CODE_SESSION`** | 🟡 기본값 유지(`mistral-medium-3.5`). `deepseek-v4-flash`는 후보군 (P-10) |
+| **동시 처리** | ✅ `POST /sessions/{id}/answers`를 `def`로 되돌려 스레드풀에서 돌린다. `async def`면 블로킹 LLM 호출이 이벤트 루프를 잡아 **동시 1명**이 된다. `tests/test_sessions.py::test_answer_endpoint_stays_sync`가 지킨다 |
 
-**main 단계의 키는 아직 안 정했다.** develop(로컬)과 같은 키를 쓸지, 운영용을 따로 발급할지는
-App Runner를 실제로 붙일 때 정한다 — 같은 키를 쓰면 로컬 실험이 운영 원장(`ai_usage`)에
-섞여 보일 수 있다는 점만 유의한다.
-
-**DoD**: 백엔드가 HTTPS 주소 하나로 11개 엔드포인트를 전부 호출할 수 있고,
-`main`에 push하면 재배포되며, 안 쓸 때 pause로 과금이 0이 된다.
+**DoD**: ✅ 백엔드가 HTTPS 주소 하나로 11개 엔드포인트를 전부 호출할 수 있다.
+안 쓸 때 인스턴스 Stop으로 과금이 사실상 0이 된다.
 
 
 ### T10 — 🔴 기능 동결 스펙 (2026-08-02 최종. 이 절이 기준이다)
@@ -1570,10 +1538,10 @@ feature/*  개발은 여기서만 한다
    ↓  동작·테스트 전부 통과하면
 develop    통합 브랜치. GitHub 기본 브랜치
    ↓  검증 끝난 것만
-main       배포 브랜치. App Runner가 이 브랜치를 본다 (T9)
+main       배포 브랜치. EC2가 이 브랜치를 체크아웃해 둔다 (T9)
 ```
 
-**`main`은 항상 백엔드가 붙어 있는 통신 가능 상태로 놔둔다.** 고도화는 `develop`과 `feature/*`를 오가며 하고, `main`에는 검증된 것만 올린다. `main` 머지 = 자동 재배포이므로 머지 시점을 백엔드와 맞춘다.
+**`main`은 항상 백엔드가 붙어 있는 통신 가능 상태로 놔둔다.** 고도화는 `develop`과 `feature/*`를 오가며 하고, `main`에는 검증된 것만 올린다. **배포는 자동이 아니라 수동이다** — EC2에서 `git pull && systemctl restart iz-get-ai`. 그래서 `main` 머지 자체는 안전하지만, 재시작은 진행 중 job을 끊으므로 **restart 시점을 백엔드와 맞춘다.**
 
 ⚠️ 예전 전략(`feature` → `main` → `main`에서 `develop` 생성)은 폐기됐다.
 
