@@ -10,12 +10,12 @@
 
 | | |
 |---|---|
-| 갱신 | **2026-08-02** · 브랜치 `feature/engine-transplant` (`develop` 대비 +25커밋) |
+| 갱신 | **2026-08-02** · 브랜치 `feature/engine-transplant` (`develop` 대비 +27커밋, fast-forward 가능) |
 | 엔드포인트 | 11/11 동작. **`engine_mode="real"` 배선 완료** |
-| 테스트 | **191 passed** |
+| 테스트 | **192 passed** |
 | 기능 | **6/6 완성 + 전부 실호출 검증.** 교안 · 코드 분석 · 문제 생성 · 힌트 · 채점 · 보고서 |
 | 계약 | `openapi.json` 재생성 완료(2026-08-02). `tests/test_openapi.py`가 드리프트를 막는다 |
-| 다음 | **🔴 T9 배포.** `feature/engine-transplant` → `develop` → `main`. **develop = 로컬(백엔드 연동 테스트) · main = AWS.** 상세는 §T9 |
+| 다음 | **🔴 T9 배포.** T9b·T9c 완료(`apprunner.yaml` 작성됨). **다음은 T9a 머지(사용자 git) → T9d 백엔드 연동.** **develop = 로컬(백엔드 연동 테스트) · main = AWS.** 상세는 §T9 |
 | 기준 | **§T10**(기능 동결) · **§T10-B**(PM 설계 v2 대조) · **§T10-C**(vendor 정책). 앞선 절과 충돌하면 이 셋이 이긴다 |
 | 막힌 것 | **없다.** 백엔드를 기다리지 않는다(§T0) — 우리가 확정해 통보한다 |
 | 🔴 위험 | **무료 티어.** 채점 5회 중 4회 실패한 시각이 있었다. 유료 전환이 근본 해결(`../output_docs/미결_논의사항.md` P-3) |
@@ -928,19 +928,32 @@ App Runner는 요청이 없어도 프로비저닝된 메모리 요금이 나간�
 
 #### 단계
 
-**T9a — 브랜치 정리 (git. 사용자가 직접 실행)**
+**T9a — 브랜치 정리 (git. 사용자가 직접 실행)** — 명령 전달됨, 실행 대기
 
 ```
-feature/engine-transplant (+25커밋) → develop → main
+feature/engine-transplant (+27커밋) → develop        # fast-forward 확인됨
 ```
 `main`은 아직 README 한 줄짜리다(`db751a9`). **`main`의 첫 실질 내용이 이번 머지다.**
 
-**T9b — 로컬 프로덕션 모드 검증**
+⚠️ **`main` 머지는 T9d(연동 테스트) 뒤로 미룬다.** `main` push = App Runner 자동 재배포이고
+`apprunner.yaml`이 T9c에서야 생겼다 — 지금 올리면 두 번 머지하게 된다.
 
-`APP_ENV=production` + `INTERNAL_API_KEY`로 띄워 확인:
-기동 성공 · `/api/health` 200 무인증 · 업무 경로 키 없으면 401 · **키를 비우면 기동 거부**(`config.py`).
+**T9b — 로컬 프로덕션 모드 검증** ✅ 완료 (2026-08-02)
 
-**T9c — `apprunner.yaml` 작성**
+`APP_ENV=production` + `INTERNAL_API_KEY=<test>`로 실제 기동해 확인:
+기동 성공 · `/api/health` 200 무인증 · 업무 경로 키 없거나 틀리면 401(`{error,message,retryable}`) ·
+올바른 키면 통과(404 `JOB_NOT_FOUND`).
+
+🔴 **네 번째 항목이 실제로는 깨져 있었다 — 고쳤다.** "키를 비우면 기동 거부"가 사실이 아니었다.
+`get_settings()`가 **첫 인증 요청 때 처음 호출**돼서 서버는 정상 기동하고 `/api/health`도 200이었다.
+App Runner에선 **헬스체크가 통과해 배포가 성공으로 판정된 뒤 업무 요청만 전부 500**이 된다 —
+가드가 막으려던 바로 그 상황이다. `app/main.py`가 import 시점에 `get_settings()`를 부르도록 고쳤고
+(uvicorn 종료코드 1 확인), `tests/test_auth.py::test_production_without_key_fails_at_import`가 지킨다.
+
+**T9c — `apprunner.yaml` 작성** ✅ 완료 (2026-08-02, 저장소 루트)
+
+로컬 venv는 3.13이지만 3.12+ 전용 문법(PEP 695 제네릭 · `type` 문 · `itertools.batched` · `@override`)이
+코드에 없음을 확인해서 3.11로 간다.
 
 ```yaml
 version: 1.0

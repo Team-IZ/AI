@@ -1,0 +1,24 @@
+# AWS App Runner 배포 설정 (PLAN_FASTAPI_MIGRATION.md §T9c)
+#
+# App Runner가 `main` 브랜치를 직접 물고 빌드·배포한다 — Dockerfile·ECR·Actions 없음.
+# 관리형 런타임이라 시스템 패키지(poppler 등)를 못 깐다. 그래서 의존성은 전부 순수 wheel이다.
+#
+# 환경변수는 여기 두지 않고 App Runner 콘솔에서 설정한다(비밀값이라 저장소에 못 넣는다):
+#   APP_ENV=production · INTERNAL_API_KEY · ENGINE_MODE=real
+#   NVIDIA_API_KEY_1~8 · MODEL_CODE_ANALYSIS · MODEL_CODE_SESSION · MODEL_CODE_CURRICULUM
+# APP_ENV=production인데 INTERNAL_API_KEY가 비면 앱이 import 단계에서 죽는다(배포 실패로 보인다).
+#
+# 콘솔에서 같이 잡아야 하는 것:
+#   헬스체크 경로 = /api/health (인증 면제)
+#   오토스케일 max instances = 1 — job·세션이 인메모리 dict라 2개로 늘면 폴링이 404가 난다
+version: 1.0
+runtime: python311
+build:
+  commands:
+    build:
+      - pip install -r requirements.txt
+run:
+  runtime-version: 3.11
+  command: uvicorn app.main:app --host 0.0.0.0 --port 8080
+  network:
+    port: 8080
