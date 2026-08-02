@@ -1,4 +1,5 @@
 """ LLM 래퍼(T7a). 네트워크 없이 응답 해석·실패 분류만 검증한다. """
+import os
 import urllib.error
 
 import pytest
@@ -77,3 +78,42 @@ def test_429_is_rate_limited():
 
     assert client._classify(err, str(err)) == "RATE_LIMITED"
     
+
+def test_env_file_keys_reach_the_pool(tmp_path, monkeypatch):
+    """`.env`에 키를 넣어도 풀이 못 찾던 버그(2026-08-02 실호출에서 발견).
+
+    pydantic-settings는 .env를 읽어 Settings만 채우고 os.environ은 안 건드린다.
+    그런데 vendor의 NvidiaKeyPool.from_env()는 os.environ만 본다 — 로컬 실행에서
+    키가 영영 안 보인다. AWS는 진짜 환경변수라 안 터지지만 로컬이 운영 계획의 절반이다.
+    """
+    from app import config
+
+    env = tmp_path / ".env"
+    env.write_text('NVIDIA_API_KEY_2=second\nNVIDIA_API_KEY_1="first"\nAPP_ENV=local\n',
+                   encoding="utf-8")
+    monkeypatch.setattr(config, "ENV_FILE", env)
+    config.load_api_keys_into_env.cache_clear()
+    monkeypatch.delenv("NVIDIA_API_KEY_1", raising=False)
+    monkeypatch.delenv("NVIDIA_API_KEY_2", raising=False)
+
+    assert config.load_api_keys_into_env() == 2
+    assert os.environ["NVIDIA_API_KEY_1"] == "first"    # 따옴표는 벗긴다
+    assert os.environ["NVIDIA_API_KEY_2"] == "second"
+
+    config.load_api_keys_into_env.cache_clear()
+
+
+def test_real_env_wins_over_the_env_file(tmp_path, monkeypatch):
+    """배포 환경의 값이 저장소 .env보다 우선해야 한다 — 반대면 운영 키가 밀린다."""
+    from app import config
+
+    env = tmp_path / ".env"
+    env.write_text("NVIDIA_API_KEY_1=from-file\n", encoding="utf-8")
+    monkeypatch.setattr(config, "ENV_FILE", env)
+    monkeypatch.setenv("NVIDIA_API_KEY_1", "from-deployment")
+    config.load_api_keys_into_env.cache_clear()
+
+    assert config.load_api_keys_into_env() == 0
+    assert os.environ["NVIDIA_API_KEY_1"] == "from-deployment"
+
+    config.load_api_keys_into_env.cache_clear()

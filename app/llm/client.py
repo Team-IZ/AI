@@ -134,6 +134,11 @@ def get_pool():
     if _pool is None:
         with _pool_lock:
             if _pool is None:
+                # vendor의 from_env()는 os.environ만 본다. .env에 있는 키를 먼저
+                # 올려주지 않으면 로컬 실행에서 키를 못 찾는다(config 주석 참고).
+                from app.config import load_api_keys_into_env
+
+                load_api_keys_into_env()
                 _, NvidiaKeyPool, _ = _load_vendor()
                 _pool = NvidiaKeyPool.from_env()
     return _pool

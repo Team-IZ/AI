@@ -160,6 +160,12 @@ class RealAnalysisEngine:
         focus_ids = [item["id"] for item in (request.get("focus_items") or [])]
         problems: list[dict[str, Any]] = []
 
+        # 질문을 먼저 다 만들고, 힌트는 **한 배치로 몰아 병렬 호출한다.**
+        # 실측(2026-08-02): 힌트 8콜이 616초로 전체 902초의 68%였고 서로 완전히
+        # 독립이다. 문제 3개면 24콜인데 순차로 돌면 그것만 30분이 넘는다.
+        planned: list[dict[str, Any]] = []
+        hint_specs: list[dict[str, Any]] = []
+
         for no, topic in enumerate(selection.topics, start=1):
             teach = teach_map.get(topic.get("teach_id"))
             qset = questions.freeze(topic, files, teach, model_code=model_code)
@@ -174,17 +180,35 @@ class RealAnalysisEngine:
             # 질문 생성이 막혔어도 문제는 만든다. 스키마가 4단계를 요구하므로 빈 자리를
             # 두면 응답 전체가 검증에서 깨진다 — 그러면 성공한 문제 2개까지 같이 잃는다.
             by_axis = {lv["axis_code"]: lv["question"] for lv in qset.levels}
+            axis_questions = [
+                by_axis.get(axis) or _blocked_question(axis, code_ref_str)
+                for axis in scoring.AXIS_CODES
+            ]
+            planned.append({
+                "no": no, "topic": topic, "ref": ref, "snippet": snippet,
+                "code_ref": code_ref_str, "flagged": qset.flagged,
+                "questions": axis_questions,
+                "hint_offset": len(hint_specs),
+            })
+            hint_specs += [
+                {"question": q, "teach": teach,
+                 "code_snippet": snippet, "code_ref": code_ref_str}
+                for q in axis_questions
+            ]
 
-            stage_rows = []
-            for axis in scoring.AXIS_CODES:
-                question = by_axis.get(axis) or _blocked_question(axis, code_ref_str)
-                hint_list = hints.freeze_for_stage(
-                    question, model_code=model_code, teach=teach,
-                    code_snippet=snippet, code_ref=code_ref_str,
-                )
-                for h in hint_list:
-                    usages.extend(_stamp(h.usages, "QUESTION_GENERATION"))
-                stage_rows.append(_stage(axis, question, hint_list, qset.flagged))
+        hint_sets = hints.freeze_many(hint_specs, model_code=model_code)
+        for hint_list in hint_sets:
+            for h in hint_list:
+                usages.extend(_stamp(h.usages, "QUESTION_GENERATION"))
+
+        for plan in planned:
+            no, topic, ref = plan["no"], plan["topic"], plan["ref"]
+            snippet = plan["snippet"]
+            offset = plan["hint_offset"]
+            stage_rows = [
+                _stage(axis, plan["questions"][i], hint_sets[offset + i], plan["flagged"])
+                for i, axis in enumerate(scoring.AXIS_CODES)
+            ]
 
             problems.append({
                 "problem_id": str(uuid.uuid4()),

@@ -22,14 +22,25 @@ App Runner 관리형 런타임은 시스템 패키지를 못 깐다. `pypdf`는 
 
 import io
 import re
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.engines.analysis import stages
+from app.engines.analysis.hints import MAX_PARALLEL
 
-# 청크 하나에 담을 페이지 수. PoC 기본값과 같다 — 매니페스트의 chunk_text 상한
-# (18,000자)이 이 크기를 전제로 잡혀 있다.
+# 청크 하나의 상한. **쪽 수와 글자 수 둘 다 본다 — 먼저 걸리는 쪽이 이긴다.**
+#
+# 🔴 쪽 수만 보면 깨진다 (2026-08-02 실측). PoC 기본값 10쪽은 **슬라이드 교안**
+# 기준이다(쪽당 200~400자). 텍스트가 빽빽한 PDF는 쪽당 1,600자여서 10쪽이면
+# 9,800자가 되고, `p01-2`의 `max_tokens=3600`으로는 그 안의 개념을 다 못 쓴다.
+# 실제로 응답 JSON이 중간에서 잘렸고(`INVALID_JSON`, 출력 3600 소진),
+# 예산을 2배로 올린 재시도는 302초를 태우고 `PROVIDER_ERROR`로 끝났다.
+#
+# **출력 예산을 늘리는 방향은 답이 아니다.** 긴 응답일수록 지연이 그대로 늘고,
+# 실패율 32%인 채널에서 잘릴 확률도 같이 커진다. 입력을 줄이는 쪽이 맞다.
 PAGES_PER_CHUNK = 10
+CHARS_PER_CHUNK = 4000
 
 # 분석 파이프라인 버전. 결과 재현성의 근거라 로직이 바뀌면 올린다.
 ANALYSIS_VERSION = 1
@@ -60,15 +71,40 @@ def extract_pages(pdf_bytes: bytes) -> list[str]:
     return pages
 
 
-def build_chunks(pages: list[str], pages_per_chunk: int = PAGES_PER_CHUNK
-                 ) -> list[tuple[int, int, str]]:
-    """(시작쪽, 끝쪽, 본문). 쪽 번호는 1부터다."""
-    chunks = []
-    for start in range(1, len(pages) + 1, pages_per_chunk):
-        end = min(start + pages_per_chunk - 1, len(pages))
-        text = "\n\n".join(pages[start - 1:end]).strip()
+def build_chunks(pages: list[str], pages_per_chunk: int = PAGES_PER_CHUNK,
+                 chars_per_chunk: int = CHARS_PER_CHUNK) -> list[tuple[int, int, str]]:
+    """(시작쪽, 끝쪽, 본문). 쪽 번호는 1부터다.
+
+    쪽 수와 글자 수 중 **먼저 걸리는 쪽**에서 끊는다. 쪽을 쪼개지는 않는다 —
+    쪽 경계를 넘어 자르면 개념 하나가 두 청크에 걸쳐 양쪽 다 반쪽만 보게 된다.
+
+    한 쪽이 혼자 상한을 넘으면 그 쪽만 담아 보낸다. 더 잘게 나눌 수단이 없고,
+    매니페스트의 `chunk_text` 상한(18,000자)이 최종 방어선이다.
+    """
+    chunks: list[tuple[int, int, str]] = []
+    start: int | None = None
+    buffer: list[str] = []
+    size = 0
+
+    def flush(end: int) -> None:
+        text = "\n\n".join(buffer).strip()
         if text:      # 그림만 있는 구간은 보낼 것이 없다
             chunks.append((start, end, text))
+
+    for no, text in enumerate(pages, start=1):
+        too_many_pages = len(buffer) >= pages_per_chunk
+        too_many_chars = buffer and size + len(text) > chars_per_chunk
+        if too_many_pages or too_many_chars:
+            flush(no - 1)
+            start, buffer, size = None, [], 0
+
+        if start is None:
+            start = no
+        buffer.append(text)
+        size += len(text)
+
+    if buffer:
+        flush(len(pages))
     return chunks
 
 
@@ -173,20 +209,37 @@ def analyse(pdf_bytes: bytes, *, model_code: str, course_label: str = "") -> Cur
     전체를 버리면 나머지 24청크의 토큰까지 헛돈다.
     """
     chunks = build_chunks(extract_pages(pdf_bytes))
+    if not chunks:
+        return Curriculum(sections=[])
+
+    # 청크는 서로를 모른 채 독립으로 돈다 — 순차로 돌 이유가 없다.
+    # 251쪽 교안이면 26청크이고, 콜당 1~2분이면 순차는 30분을 넘는다.
+    ordered: list[Any] = [None] * len(chunks)
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL) as pool:
+        futures = {
+            pool.submit(analyse_chunk, start, end, text,
+                        model_code=model_code, course_label=course_label): i
+            for i, (start, end, text) in enumerate(chunks)
+        }
+        for future in as_completed(futures):
+            i = futures[future]
+            try:
+                ordered[i] = future.result()
+            except stages.StageError as exc:
+                ordered[i] = exc
 
     results: list[dict[str, Any]] = []
     usages: list[dict[str, Any]] = []
     failed: list[str] = []
 
-    for start, end, text in chunks:
-        try:
-            result = analyse_chunk(start, end, text,
-                                   model_code=model_code, course_label=course_label)
-        except stages.StageError as exc:
-            usages.extend(exc.usages)
+    # **병합 순서는 청크 순서여야 한다.** 개념 중복은 "먼저 온 것"을 남기는데,
+    # 완료 순서로 합치면 그 "먼저"가 실행마다 달라져 결과가 재현되지 않는다.
+    for (start, end, _), outcome in zip(chunks, ordered):
+        if isinstance(outcome, stages.StageError):
+            usages.extend(outcome.usages)
             failed.append(f"{start}-{end}")
             continue
-        usages.extend(result.usages)
-        results.append({**result.data, "_range": (start, end)})
+        usages.extend(outcome.usages)
+        results.append({**outcome.data, "_range": (start, end)})
 
     return Curriculum(sections=_merge(results), usages=usages, failed_chunks=failed)

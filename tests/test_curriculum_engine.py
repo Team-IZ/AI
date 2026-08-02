@@ -121,3 +121,36 @@ def test_failed_chunk_does_not_lose_the_others(monkeypatch):
     assert built.failed_chunks == ["1-10"]
     assert [s["title"] for s in built.sections] == ["예외"]   # 살아남은 청크는 나온다
     assert len(built.usages) == 2                             # 실패한 호출의 토큰도 남는다
+
+
+def test_dense_pages_are_split_by_chars_not_pages():
+    """쪽 수만 보면 깨진다 (2026-08-02 실측).
+
+    PoC 기본값 10쪽은 슬라이드 교안(쪽당 200~400자) 기준이다. 텍스트가 빽빽한
+    PDF는 쪽당 1,600자여서 10쪽이면 9,800자가 되고, p01-2의 max_tokens=3600으로는
+    응답 JSON이 중간에서 잘린다 — 실제로 INVALID_JSON으로 끝났다.
+    """
+    dense = ["가" * 1600] * 6
+
+    chunks = curriculum.build_chunks(dense)
+
+    assert len(chunks) > 1
+    for _, _, text in chunks:
+        assert len(text) <= curriculum.CHARS_PER_CHUNK + 2   # 쪽 사이 "\n\n"
+
+    # 쪽을 쪼개지 않는다 — 쪼개면 개념 하나가 두 청크에 반쪽씩 걸린다
+    assert [(s, e) for s, e, _ in chunks] == [(1, 2), (3, 4), (5, 6)]
+
+
+def test_page_limit_still_applies_to_sparse_pages():
+    """짧은 쪽만 있으면 글자 상한에 안 걸리므로 쪽 수 상한이 이긴다."""
+    chunks = curriculum.build_chunks(["짧음"] * 25, pages_per_chunk=10)
+
+    assert [(s, e) for s, e, _ in chunks] == [(1, 10), (11, 20), (21, 25)]
+
+
+def test_single_oversized_page_goes_alone():
+    """한 쪽이 혼자 상한을 넘으면 더 나눌 수단이 없다. 그 쪽만 보낸다."""
+    chunks = curriculum.build_chunks(["가" * 9000, "나" * 100])
+
+    assert [(s, e) for s, e, _ in chunks] == [(1, 1), (2, 2)]

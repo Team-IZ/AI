@@ -14,6 +14,7 @@ DB `stage_answer_attempt`의 `attempt_no IN (2,3) AND hint_text IS NOT NULL` CHE
 항상 만족되려면 힌트가 반드시 나와야 한다.
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -121,14 +122,51 @@ def generate(hint_level: int, question: str, *, model_code: str,
 
 def freeze_for_stage(question: str, *, model_code: str, teach: dict[str, Any] | None = None,
                      code_snippet: str = "", code_ref: str = "") -> list[Hint]:
-    """동결 단계(L1·L2)의 힌트 2개를 답변 없이 미리 만든다.
+    """질문 하나의 힌트 2개를 답변 없이 미리 만든다."""
+    return freeze_many(
+        [{"question": question, "teach": teach,
+          "code_snippet": code_snippet, "code_ref": code_ref}],
+        model_code=model_code,
+    )[0]
 
-    분석 배치에서만 부른다. 문제 3개 × 단계 2개 × 힌트 2개 = 12콜이 여기서 나온다.
-    서로 독립이라 병렬화 대상이다(T7c).
+
+# 동시 호출 상한. 키 8개 × (키·모델)당 분당 40회 = 320 RPM이라 여유가 크지만,
+# 무한정 던지면 공급자 큐 혼잡(실패율 32%의 원인)에 우리가 기여하게 된다.
+MAX_PARALLEL = 8
+
+
+def freeze_many(specs: list[dict[str, Any]], *, model_code: str,
+                max_workers: int = MAX_PARALLEL) -> list[list[Hint]]:
+    """여러 질문의 힌트를 **동시에** 만든다. 반환 순서는 `specs` 순서와 같다.
+
+    **분석 배치 전체 시간의 대부분이 여기다.** 실측(2026-08-02, 문제 1개):
+    힌트 8콜이 616초로 전체 902초의 68%였다. 각 콜이 47~129초인데 **서로 완전히
+    독립**이라 순차로 도는 것은 순수한 낭비다 — 병렬로 던지면 총 시간이 최장 1콜로 줄어든다.
+
+    세션 중 채점은 이렇게 못 한다. 학생 답변이 있어야 다음이 시작되므로 본질적으로 순차다.
+
+    **예외를 밖으로 내보내지 않는다.** `generate()`가 실패해도 폴백 문장을 돌려주므로
+    (`generated=False`) 한 힌트가 깨져도 나머지 배치가 멈추지 않는다.
     """
-    return [
-        generate(level, question, model_code=model_code, attempts=[], teach=teach,
-                 code_snippet=code_snippet, code_ref=code_ref,
-                 timeout_s=client.DEFAULT_TIMEOUT_S)   # 배치라 넉넉히
-        for level in (1, 2)
-    ]
+    if not specs:
+        return []
+
+    out: list[list[Hint | None]] = [[None, None] for _ in specs]
+    jobs = [(i, level) for i in range(len(specs)) for level in (1, 2)]
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(
+                generate, level, specs[i]["question"], model_code=model_code,
+                attempts=[], teach=specs[i].get("teach"),
+                code_snippet=specs[i].get("code_snippet", ""),
+                code_ref=specs[i].get("code_ref", ""),
+                timeout_s=client.DEFAULT_TIMEOUT_S,   # 배치라 넉넉히
+            ): (i, level)
+            for i, level in jobs
+        }
+        for future in as_completed(futures):
+            i, level = futures[future]
+            out[i][level - 1] = future.result()
+
+    return [[h for h in pair if h is not None] for pair in out]
