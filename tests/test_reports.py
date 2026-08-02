@@ -1,4 +1,8 @@
-""" 보고서 엔드포인트 스텁 테스트. 분석과 같은 비동기 job 패턴. """
+""" 보고서 엔드포인트 스텁 테스트. 분석과 같은 비동기 job 패턴.
+
+**보고서는 문제 단위다**(2026-08-02). 문제 하나가 끝날 때마다 한 번 부르고,
+세션 1회에 보고서가 3개 나온다. 스텁은 problemId로 시나리오를 고른다.
+"""
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
@@ -7,17 +11,18 @@ from app.main import app
 client = TestClient(app)
 HEADERS = {"X-Internal-Key": get_settings().internal_api_key}
 
-BODY = {"sessionId": "s-1", "scoreRunId": "run-1", "transcript": []}
+BODY = {"problemId": "prob-stub-1", "sessionId": "s-1", "scoreRunId": "run-1", "transcript": []}
 
 
-def _create() -> str:
-    r = client.post("/api/v0/reports", json=BODY, headers=HEADERS)
+def _create(problem_id: str = "prob-stub-1") -> str:
+    r = client.post("/api/v0/reports", json={**BODY, "problemId": problem_id}, headers=HEADERS)
     assert r.status_code == 202
     return r.json()["jobId"]
 
 
-def _result() -> dict:
-    return client.get(f"/api/v0/reports/{_create()}", headers=HEADERS).json()["result"]
+def _result(problem_id: str = "prob-stub-1") -> dict:
+    job_id = _create(problem_id)
+    return client.get(f"/api/v0/reports/{job_id}", headers=HEADERS).json()["result"]
 
 
 def test_accepts_report_request():
@@ -29,26 +34,33 @@ def test_accepts_report_request():
     assert r.json()["jobId"]
 
 
+def test_problem_id_is_required():
+    """보고서는 문제 단위다 — 어느 문제인지 없이 만들 수 없다."""
+    body = {k: v for k, v in BODY.items() if k != "problemId"}
+
+    assert client.post("/api/v0/reports", json=body, headers=HEADERS).status_code == 422
+
+
 def test_report_completes():
     """폴링하면 SUCCEEDED. status는 analysis_job과 같은 어휘를 쓴다."""
     body = client.get(f"/api/v0/reports/{_create()}", headers=HEADERS).json()
 
     assert body["status"] == "SUCCEEDED"
-    assert body["status"] in {"QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"}
+    assert body["problemId"] == "prob-stub-1"   # 어느 문제의 보고서인지 응답에 남는다
 
 
-def test_summary_has_four_axes_per_question():
-    """문제마다 L1~L4 네 축이 순서대로 다 있어야 한다(미도달 포함)."""
-    problems = _result()["problems"]
+def test_result_carries_one_problem():
+    """결과는 문제 하나 분량이다. 세션 전체를 담지 않는다."""
+    result = _result()
 
-    assert len(problems) == 3
-    for p in problems:
-        assert [s["axisCode"] for s in p["stages"]] == ["L1", "L2", "L3", "L4"]
+    assert "problems" not in result           # 옛 세션 단위 필드
+    assert result["problem"]["problemId"] == "prob-stub-1"
+    assert [s["axisCode"] for s in result["problem"]["stages"]] == ["L1", "L2", "L3", "L4"]
 
 
 def test_hint_cap_lowers_recorded_score():
     """힌트 2회를 쓰면 원점수 5여도 기록 점수는 상한 3으로 깎인다."""
-    l4 = _result()["problems"][0]["stages"][3]
+    l4 = _result()["problem"]["stages"][3]
 
     assert l4["bestScore"] == 5
     assert l4["confirmedScore"] == 3
@@ -59,8 +71,7 @@ def test_hint_cap_lowers_recorded_score():
 
 def test_unreached_level_has_no_score():
     """도달 못 한 단계는 attemptCount=0이고 점수가 비어 있다."""
-    # prob-stub-3은 L1에서 끝난다 → L2~L4 미도달
-    stages = _result()["problems"][2]["stages"]
+    stages = _result("prob-stub-3")["problem"]["stages"]   # L1에서 끝난다
 
     assert stages[0]["attemptCount"] > 0
     for s in stages[1:]:
@@ -69,24 +80,20 @@ def test_unreached_level_has_no_score():
         assert s["bestScore"] is None
 
 
-def test_retest_targets_match_l1_failures():
-    """재시험 대상은 L1에서 막힌 문제뿐이다(L2 실패는 대상 아님)."""
-    result = _result()
-
-    assert result["problems"][0]["stages"][0]["passed"] is True   # 완주
-    assert result["problems"][1]["stages"][0]["passed"] is True   # L2에서 종료
-    assert result["problems"][2]["stages"][0]["passed"] is False  # L1에서 종료
-    assert result["retestTargets"] == ["prob-stub-3"]
+def test_retest_needs_both_l1_and_l2():
+    """재시험은 L1·L2 둘 다 통과해야 아니다 — L2 실패도 재시험이다."""
+    assert _result("prob-stub-1")["retest"] is False   # 완주
+    assert _result("prob-stub-2")["retest"] is True    # L1 통과, L2 미달
+    assert _result("prob-stub-3")["retest"] is True    # L1 미달
 
 
 def test_max_score_is_twenty_per_problem():
     """문제 만점 = 4단계 × 5점 = 20. 세션 총점은 AI가 보내지 않는다."""
-    result = _result()
+    problem = _result()["problem"]
 
-    for p in result["problems"]:
-        assert p["maxScore"] == 20
-        assert 0 <= p["totalScore"] <= 20
-    assert "summary" not in result
+    assert problem["maxScore"] == 20
+    assert 0 <= problem["totalScore"] <= 20
+    assert "summary" not in _result()
 
 
 def test_report_carries_curriculum_refs():
@@ -104,6 +111,7 @@ def test_unknown_report_job_returns_404():
     assert r.status_code == 404
     assert r.json()["error"] == "JOB_NOT_FOUND"
     assert r.json()["retryable"] is False
+
 
 def test_report_stages_must_be_four_in_order():
     """도달 못 한 단계를 빼고 보내면 막는다 — Spring이 어느 problem_stage 행인지 못 찾는다."""

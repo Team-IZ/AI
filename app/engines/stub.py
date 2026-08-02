@@ -4,29 +4,22 @@ from typing import Any
 
 from app.schemas.analysis import FROZEN_AXES
 
-# 진행 순서. AxisCode와 같은 순서여야 한다(analysis.py의 Problem validator가 검사).
-_AXES = ("L1", "L2", "L3", "L4")
-
 
 def _stub_stages() -> list[dict[str, Any]]:
-    """단계 4개. 구조는 분석 때 확정되고 내용은 단계마다 시점이 다르다.
-
-    L1·L2  질문·힌트를 여기서 동결한다
-    L3·L4  세션 중 직전 답변을 근토로 만든다 — 여기서는 비워 보낸다
-    """
-    stages = []
-    for axis in _AXES:
-        frozen = axis in FROZEN_AXES
-        stages.append({
+    """단계 4개. 전면 동결이라 4축 전부 질문 1개 + 힌트 2개를 채운다."""
+    return [
+        {
             "axis_code": axis,
-            "question_text": f"[stub] {axis} 질문" if frozen else None,
+            "question_text": f"[stub] {axis} 질문",
             "flagged": False,
             "hints": [
                 {"hint_level": 1, "hint_text": f"[stub] {axis} 힌트 1"},
                 {"hint_level": 2, "hint_text": f"[stub] {axis} 힌트 2"},
-            ] if frozen else [],
-        })
-    return stages
+            ],
+        }
+        # 진행 순서 = AxisCode 순서. analysis.py의 Problem validator가 검사한다.
+        for axis in FROZEN_AXES
+    ]
 
 
 def _stub_problem(problem_no: int, focus_item_id: str | None = None) -> dict[str, Any]:

@@ -1,7 +1,6 @@
 """ p04-4 질문 동결(T7b). 생성물을 믿지 않는 지점이다.
 
-**동결 대상은 L1·L2뿐이다** (2026-07-31 PM 확정 혼합 모드).
-L3·L4는 세션 중 직전 답변을 근거로 만든다.
+**동결 대상은 L1~L4 전부다** (2026-08-02 전면 동결). 세션 중 질문 생성은 없다.
 """
 from app.engines.analysis import questions, stages
 
@@ -37,17 +36,14 @@ def _fake(monkeypatch, *responses):
     return calls
 
 
-def test_only_frozen_axes_are_kept(monkeypatch):
-    """모델이 4개를 줘도 분석 배치가 동결하는 것은 L1·L2뿐이다.
-
-    L3·L4를 여기서 동결하면 세션 중 적응 생성분이 갈 자리가 없어진다.
-    """
+def test_all_four_axes_are_frozen(monkeypatch):
+    """4축 전부 동결한다. 하나라도 빠지면 그 단계에 질문 없는 화면이 뜬다."""
     _fake(monkeypatch, {"levels": _levels()})
 
     qs = questions.freeze(TOPIC, {}, None, model_code="m")
 
     assert qs.flagged is False
-    assert [lv["axis_code"] for lv in qs.levels] == ["L1", "L2"]
+    assert [lv["axis_code"] for lv in qs.levels] == ["L1", "L2", "L3", "L4"]
 
 
 def test_shuffled_axes_are_reordered(monkeypatch):
@@ -56,7 +52,7 @@ def test_shuffled_axes_are_reordered(monkeypatch):
 
     qs = questions.freeze(TOPIC, {}, None, model_code="m")
 
-    assert [lv["axis_code"] for lv in qs.levels] == ["L1", "L2"]
+    assert [lv["axis_code"] for lv in qs.levels] == ["L1", "L2", "L3", "L4"]
 
 
 def test_missing_frozen_axis_is_rejected(monkeypatch):
@@ -82,17 +78,18 @@ def test_choices_trigger_regeneration_then_flag(monkeypatch):
     assert len(calls) == 3          # 최초 1회 + 재생성 2회 (max_regenerations)
 
 
-def test_violation_outside_frozen_axes_is_ignored(monkeypatch):
-    """L3에 선택지가 섞여도 우리가 안 쓰는 축이라 재생성하지 않는다.
+def test_violation_in_late_axis_is_caught(monkeypatch):
+    """L3에 선택지가 섞이면 재생성하고, 끝내 안 고쳐지면 flagged로 남긴다.
 
-    쓰지도 않을 질문 때문에 3콜을 태우면 배치 시간만 늘어난다.
+    전면 동결 전에는 L3·L4를 안 써서 무시했다. 이제는 저장돼 학생에게 그대로
+    나가므로 앞 축과 똑같이 막아야 한다.
     """
     _fake(monkeypatch, {"levels": _levels(L3_대안="다음 중 무엇인가요?")})
 
     qs = questions.freeze(TOPIC, {}, None, model_code="m")
 
-    assert qs.flagged is False
-    assert [lv["axis_code"] for lv in qs.levels] == ["L1", "L2"]
+    assert qs.flagged is True
+    assert "L3" in (qs.reason or "")
 
 
 def test_regeneration_recovers(monkeypatch):

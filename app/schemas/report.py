@@ -28,12 +28,19 @@ AutonomyCode = Literal["SELF", "SELF_MAINTAINED", "PARTIAL"]
 
 
 class ReportRequest(BaseSchema):
-    """POST /reports 요청. 세션이 끝난 뒤 전사와 재료를 함께 넘긴다."""
+    """POST /reports 요청. **문제 하나가 끝날 때마다 한 번씩** 부른다.
 
+    2026-08-02 확정: 보고서는 세션 단위가 아니라 **문제 단위**다. 세션 1회에
+    문제 3개면 보고서도 3개다. 학생이 다음 문제를 푸는 동안 병렬로 돌리므로
+    학생 체감 대기가 0이다 — 세션 끝에 몰아 만들면 그만큼 기다리게 된다.
+    """
+
+    problem_id: str = Field(description="이 보고서가 다루는 문제. 문제 단위의 키")
     session_id: str | None = None
     score_run_id: str | None = Field(default=None, description="Spring ScoreRun 키(에코용)")
     transcript: list[dict[str, Any]] = Field(
-        default_factory=list, description="점수가 이미 확정된 턴 기록"
+        default_factory=list,
+        description="**이 문제의 턴만.** 점수가 이미 확정된 기록 (최대 4단계 × 3시도)",
     )
     analysis_documents: list[dict[str, Any]] = Field(
         default_factory=list, description="[{kind, content}] 코드 분석 문서"
@@ -98,12 +105,16 @@ class ReportVersions(BaseSchema):
 
 
 class ReportResult(BaseSchema):
-    """보고서가 완성됐을 때의 본문."""
+    """보고서가 완성됐을 때의 본문. **문제 하나 분량이다.**"""
 
     report_markdown: str
-    problems: list[ProblemResult]          # summary: ReportSummary 였던 자리
-    curriculum_refs: list[dict[str, Any]] = Field(...)   # 그대로
-    retest_targets: list[str] = Field(...)               # 그대로
+    problem: ProblemResult
+    curriculum_refs: list[dict[str, Any]] = Field(default_factory=list)
+    retest: bool = Field(
+        description="이 문제가 재시험 대상인가. **L1·L2 둘 다 통과해야 아니다** "
+                    "(scoring.RETEST_TRIGGER_AXES). 세션 전체의 재시험 여부는 "
+                    "Spring이 문제 3개의 이 값을 모아 판단한다",
+    )
     versions: ReportVersions
 
 
@@ -122,6 +133,7 @@ class ReportJobStatus(BaseSchema):
     """
 
     job_id: str
+    problem_id: str | None = Field(default=None, description="이 job이 다루는 문제")
     session_id: str | None = None
     status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
     failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
