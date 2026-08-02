@@ -22,9 +22,7 @@ from app.schemas.report import (
 # job_id -> 보고서 job 상태·결과
 _jobs: dict[str, ReportJobStatus] = {}
 
-# 단계당 만점. scoring-config.js의 값 단계(0~5)와 같다.
-_MAX_PER_STAGE = 5
-# 통과선. 미달이면 힌트 후 재질의.
+# 통과선. 미달이면 힌트 후 재질의. 총점은 만들지 않는다(ProblemResult 주석 참고).
 _PASS_SCORE = 3
 
 
@@ -84,12 +82,17 @@ def _stub_problem(problem_id: str) -> ProblemResult:
             }
         )
 
+    reached = 0
+    for s in stages:
+        if not s["passed"]:
+            break
+        reached += 1
+
     return ProblemResult.model_validate(
         {
             "problem_no": 1,
             "problem_id": problem_id,
-            "total_score": sum(s.get("confirmed_score") or 0 for s in stages),
-            "max_score": len(axes) * _MAX_PER_STAGE,
+            "reached_stage": reached,
             "stages": stages,
         }
     )

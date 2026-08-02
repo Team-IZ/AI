@@ -53,16 +53,19 @@ def format_attempts(question: str, attempts: list[dict[str, Any]]) -> str:
     return "\n\n".join(blocks)
 
 
-def fallback(hint_level: int, code_ref: str) -> str:
+def fallback(hint_level: int) -> str:
     """규칙 위반·빈 응답이 계속될 때 쓰는 결정론적 문장.
 
-    사다리 강도는 지킨다 — 1은 관점 되짚기, 2는 범위 좁힘. 정답도 선택지도 주지 않는다.
+    **재진술이지 범위 축소가 아니다**(scoring.HINT_LADDER 주석). 폴백이라고 범위를
+    좁히면, 하필 생성이 실패한 학생만 다른 것을 측정당한다.
+
+    ⚠️ 여기서 code_ref를 말하지 않는다. 위치를 짚어주는 것은 답의 일부를 주는 것이다.
     """
     if int(hint_level) == 1:
-        return (f"방금 답변에서 다루지 않은 부분이 있습니다. {code_ref}을 다시 살펴보고, "
-                "이전 답변에 빠진 관점이 무엇인지 스스로 점검해보세요.")
-    return (f"질문 범위를 좁혀 다시 묻습니다. {code_ref}에서 가장 핵심적인 한 부분만 골라, "
-            "그 부분만 설명해보세요.")
+        return ("같은 질문을 다시 드릴게요. 이 코드가 하는 일과 그렇게 만든 이유를, "
+                "짧은 문장 여러 개로 나눠서 이야기해 주세요.")
+    return ("한 번에 여러 가지를 묻고 있었어요. 나눠서 여쭤볼게요 — "
+            "먼저 가장 먼저 떠오르는 것 하나부터, 아는 만큼만 이야기해 주세요.")
 
 
 def generate(hint_level: int, question: str, *, model_code: str,
@@ -112,7 +115,7 @@ def generate(hint_level: int, question: str, *, model_code: str,
             return Hint(hint_level=hint_level, kind=spec["kind"], text=text,
                         generated=True, usages=usages)
 
-    return Hint(hint_level=hint_level, kind=spec["kind"], text=fallback(hint_level, ref),
+    return Hint(hint_level=hint_level, kind=spec["kind"], text=fallback(hint_level),
                 generated=False, usages=usages)
 
 

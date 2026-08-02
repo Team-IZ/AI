@@ -175,6 +175,13 @@ class Problem(BaseSchema):
         default=None,
         description="요청 focusItems[].id를 그대로 돌려준다. 강사 지정 없이 뽑았으면 null",
     )
+    is_general: bool = Field(
+        default=False,
+        description="teach에 연결되지 않은 일반 문제. 제출 코드가 teaches를 만족하지 "
+                    "않아 그 개념으로 문제를 못 만들었을 때 나온다. **화면에 '일반 문제'로 "
+                    "표기해야 한다** — 검증 개념 앵커가 없어 다른 문제와 성격이 다르고, "
+                    "보고서의 교안 복습 위치 지목도 붙지 않는다 (2026-08-02 PM 확정)",
+    )
     source_path: str
     line_start: int
     line_end: int

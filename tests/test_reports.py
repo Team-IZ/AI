@@ -87,13 +87,35 @@ def test_retest_needs_both_l1_and_l2():
     assert _result("prob-stub-3")["retest"] is True    # L1 미달
 
 
-def test_max_score_is_twenty_per_problem():
-    """문제 만점 = 4단계 × 5점 = 20. 세션 총점은 AI가 보내지 않는다."""
+def test_no_total_score_anywhere():
+    """총점을 만들지 않는다 — 보상 금지(§5-1). 대신 reachedStage가 판정값이다."""
     problem = _result()["problem"]
 
-    assert problem["maxScore"] == 20
-    assert 0 <= problem["totalScore"] <= 20
+    assert "totalScore" not in problem
+    assert "maxScore" not in problem
     assert "summary" not in _result()
+
+
+def test_reached_stage_matches_passes():
+    """도달 단계 = 앞에서부터 연속 통과한 개수. 계단이라 건너뛴 통과는 없다."""
+    assert _result("prob-stub-1")["problem"]["reachedStage"] == 4   # 완주
+    assert _result("prob-stub-2")["problem"]["reachedStage"] == 1   # L1만 통과
+    assert _result("prob-stub-3")["problem"]["reachedStage"] == 0   # L1 미달
+
+
+def test_reached_stage_cannot_contradict_stages():
+    """파생값이라 따로 보내면 어긋날 수 있다. 어긋나면 판정과 근거가 다른 말을 한다."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.report import ProblemResult
+
+    all_failed = [
+        {"axisCode": a, "attemptCount": 3, "passed": False, "hintsUsed": 2}
+        for a in ("L1", "L2", "L3", "L4")
+    ]
+    with pytest.raises(ValidationError):
+        ProblemResult(problemNo=1, problemId="p-1", reachedStage=2, stages=all_failed)
 
 
 def test_report_carries_curriculum_refs():

@@ -37,3 +37,34 @@ def test_axis_intent_block_uses_poc_ids():
 
     assert "L1_코드기술" in block
     assert "L4_반례한계" in block
+
+
+def test_hint_ladder_forbids_narrowing():
+    """힌트는 재진술이다. 범위를 좁히면 측정 대상이 바뀌어 비교가 깨진다(PM v2 §4-2).
+
+    2차가 "분해이지 축소가 아니다"라는 것이 가장 흔한 위반 지점이라 문구로 못 박는다.
+    """
+    specs = {level: spec["spec"] for level, spec in scoring.HINT_LADDER.items()}
+
+    assert "축소가 아니다" in specs[2]
+    assert "범위를 줄이거나" in specs[2]
+    for spec in specs.values():
+        # 정보 추가 0 — 위치·선택지·답의 방향은 힌트가 아니라 답의 일부다
+        assert "코드 위치를 짚어주지 말고" in spec
+        assert "정답의 집합이 바뀌면 안 된다" in spec
+
+
+def test_rubric_block_carries_reach_criterion():
+    """채점기가 점수와 함께 도달 여부를 판단하려면 3점의 행동 정의가 프롬프트에 있어야 한다.
+
+    매니페스트는 vendor라 못 고친다 — rubric_block은 우리가 만드는 문자열이라 여기로 넣는다.
+    """
+    block = scoring.rubric_block("L3")
+
+    assert "도달 경계는 3점" in block
+    assert "대안 하나를 구체적으로 말했는가" in block
+
+
+def test_every_axis_has_a_reach_criterion():
+    """축 하나라도 기준이 비면 그 축만 다른 잣대로 채점된다."""
+    assert set(scoring.REACH_CRITERIA) == set(scoring.AXIS_CODES)

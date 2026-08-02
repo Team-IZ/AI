@@ -130,6 +130,9 @@ def _general_topics(files: dict[str, str], analysis_document: dict[str, Any],
         used.add(key)
         picked.append({
             "teach_id": None,
+            # 조립기가 Problem.is_general로 옮긴다. 화면에 "일반 문제"로 표기해야 한다
+            # (2026-08-02 PM 확정) — teach 앵커가 없어 다른 문제와 성격이 다르다.
+            "is_general": True,
             "title": dp.get("title", ""),
             "rationale": dp.get("why_it_matters", ""),
             "code_ref": {

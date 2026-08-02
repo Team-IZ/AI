@@ -99,6 +99,11 @@ def test_shortfall_is_filled_with_general_topics(fake_stage):
     assert [t["teach_id"] for t in s.topics] == ["t1", None]
     assert s.topics[1]["code_ref"]["line_start"] == 4
 
+    # 화면에 "일반 문제"로 표기해야 한다(2026-08-02 PM 확정). teach 앵커가 없어
+    # 다른 문제와 성격이 다르고 교안 복습 위치 지목도 안 붙는다.
+    assert s.topics[1]["is_general"] is True
+    assert s.topics[0].get("is_general") is not True
+
 
 def test_general_topic_does_not_reuse_a_used_location(fake_stage):
     """1차와 같은 지점을 다시 쓰면 같은 문제가 두 번 나간다."""

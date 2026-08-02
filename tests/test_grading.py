@@ -71,3 +71,53 @@ def test_non_integer_score_is_an_error(monkeypatch):
 
     with pytest.raises(stages.StageError):
         grading.grade("L1", "q", "a", model_code="m")
+
+def test_reach_criterion_reaches_the_grader(monkeypatch):
+    """축별 도달 기준이 프롬프트에 실려야 모델이 도달을 따로 판정할 수 있다.
+
+    매니페스트는 vendor라 본문을 못 고친다 — rubric_block으로 넣는다(scoring.REACH_CRITERIA).
+    """
+    call = _fake(monkeypatch, _data())
+
+    grading.grade("L3", "q", "a", model_code="m")
+
+    assert "도달 경계는 3점" in call.values["rubric_block"]
+    assert "대안 하나를 구체적으로 말했는가" in call.values["rubric_block"]
+
+
+def test_model_reach_is_recorded(monkeypatch):
+    """vendor P-1 — 모델이 낸 도달 판정을 그대로 들고 있는다."""
+    _fake(monkeypatch, {**_data(score=4), "reached": True})
+
+    g = grading.grade("L1", "q", "a", model_code="m")
+
+    assert g.model_reached is True
+    assert g.passed is True
+    assert g.reach_conflict is False
+
+
+def test_score_wins_when_reach_disagrees(monkeypatch):
+    """모델 판정과 점수가 어긋나면 점수를 따르고, 어긋났다는 사실을 남긴다.
+
+    점수를 따르는 이유: 힌트 상한이 점수에 걸리므로 통과가 점수와 따로 놀면
+    "5점인데 미달" 같은 상태가 생긴다. 불일치를 버리지 않는 이유: 루브릭 문구와
+    도달 기준이 다른 말을 하고 있다는 신호다.
+    """
+    _fake(monkeypatch, {**_data(score=5), "reached": False})
+
+    g = grading.grade("L1", "q", "a", model_code="m")
+
+    assert g.passed is True            # 점수를 따른다
+    assert g.model_reached is False
+    assert g.reach_conflict is True    # 어긋난 사실은 남는다
+
+
+def test_missing_reach_field_does_not_break_grading(monkeypatch):
+    """P-1이 사라져도(갱신으로 덮이거나 상류가 다르게 가도) 채점은 계속 돌아야 한다."""
+    _fake(monkeypatch, _data(score=4))   # reached 없음
+
+    g = grading.grade("L1", "q", "a", model_code="m")
+
+    assert g.model_reached is None
+    assert g.reach_conflict is False
+    assert g.passed is True

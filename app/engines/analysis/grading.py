@@ -29,6 +29,8 @@ class Grade:
     matched_level: str           # 이 점수를 준 근거가 된 루브릭 단계 서술
     evidence: str                # 답변에서 그 판단의 근거가 된 부분
     missing: str                 # 한 단계 위를 받으려면 뭐가 더 있어야 했는지
+    model_reached: bool | None = None   # 모델이 낸 도달 판정. 없으면 None (vendor P-1)
+    reach_conflict: bool = False        # 모델 판정과 점수 기준이 어긋났다
     usages: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -69,13 +71,26 @@ def grade(axis_code: str, question: str, answer: str, *, model_code: str,
         raise stages.StageError(f"p04-5: score가 정수가 아닙니다: {raw!r}", result.usages)
 
     confirmed = min(best, scoring.cap_for(hints_used))
+    passed = confirmed >= scoring.PASS_SCORE
+
+    # 모델이 낸 도달 판정(vendor P-1). 점수(척도)와 도달(판정)을 따로 받아 교차 검증한다.
+    #
+    # **어긋나면 점수를 따른다.** 힌트 상한이 점수에 걸리므로 통과 판정이 점수와 따로 놀면
+    # "5점인데 미달" 같은 상태가 생긴다 — 점수가 상한·자력 판정·정렬 tie-break의 근거라
+    # 그쪽을 단일 기준으로 둔다. 불일치는 버리지 않고 남긴다: 루브릭 문구와 도달 기준이
+    # 서로 다른 말을 하고 있다는 신호이고, 쌓이면 루브릭을 고쳐야 한다는 뜻이다.
+    raw_reached = result.data.get("reached")
+    model_reached = bool(raw_reached) if isinstance(raw_reached, bool) else None
+
     return Grade(
         axis_code=axis_code,
         best_score=best,
         confirmed_score=confirmed,
         hints_used=hints_used,
-        passed=confirmed >= scoring.PASS_SCORE,
+        passed=passed,
         autonomy=scoring.autonomy_for(hints_used),
+        model_reached=model_reached,
+        reach_conflict=model_reached is not None and model_reached != passed,
         matched_level=str(result.data.get("matched_level") or ""),
         evidence=str(result.data.get("evidence") or ""),
         missing=str(result.data.get("missing") or ""),

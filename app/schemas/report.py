@@ -70,12 +70,26 @@ class StageScore(BaseSchema):
 
 
 class ProblemResult(BaseSchema):
-    """문제(DB assessment_problem) 하나의 결과. 단계 4개를 순서대로 담는다."""
+    """문제(DB assessment_problem) 하나의 결과. 단계 4개를 순서대로 담는다.
+
+    🔴 **총점이 없다** (2026-08-02, PM 설계 v2 §5-1). 이유 둘:
+
+    ① **이 구인은 보상을 허용하지 않는다.** 자기 코드가 무엇을 하는지 설명하지
+       못하는데 대안을 잘 알아서 총점이 높은 상태는 성립하면 안 된다.
+    ② **총합은 결측을 0으로 만든다.** L1에서 막혀 L2~L4를 받지 않은 학생의 나머지를
+       0으로 계산하면 "못한 것"과 "안 물어본 것"이 섞인다.
+
+    대신 `reachedStage`가 판정값이다. 축별 0~5점은 그대로 보낸다 — 저장·정렬
+    tie-break·재채점 실험의 입력이다(화면에 표기할지는 프론트가 정한다).
+    """
 
     problem_no: int = Field(ge=1)
     problem_id: str
-    total_score: int = Field(ge=0, description="stages의 confirmedScore 합")
-    max_score: int = Field(ge=0, description="4단계 × 5점 = 20")
+    reached_stage: int = Field(
+        ge=0, le=4,
+        description="통과한 최고 단계. 0=L1 미달 · 1=L1까지 · 2=L2까지 · 3=L3까지 · 4=완주. "
+                    "위험·우수·재시험 판정이 전부 이 값으로 돈다",
+    )
     stages: list[StageScore] = Field(
         min_length=4, max_length=4,
         description="항상 4개. 도달 못 한 단계도 attemptCount=0으로 채워 보낸다",
@@ -83,16 +97,30 @@ class ProblemResult(BaseSchema):
 
     @model_validator(mode="after")
     def _check_stages(self) -> "ProblemResult":
-        """L1→L4 순서로 정확히 한 벌인지 검사.
+        """L1→L4 순서로 한 벌인지, reachedStage가 실제 통과 기록과 맞는지 검사.
 
         DB problem_stage가 문제당 4행으로 미리 만들어져 있다. 도달 못 한 단계를
         빼고 보내면 Spring이 어느 행을 채울지 몰라 순서로 짐작하게 되고,
         그때 L3 점수가 L4 행에 들어간다 — 에러 없이 점수만 틀린다.
+
+        reachedStage는 파생값이라 따로 보내면 어긋날 수 있다. 어긋난 채로 나가면
+        화면에 뜨는 판정과 근거가 다른 말을 한다 — 여기서 막는다.
         """
         axes = [s.axis_code for s in self.stages]
         expected = list(get_args(AxisCode))
         if axes != expected:
             raise ValueError(f"stages의 axisCode는 {expected} 순서여야 합니다: {axes}")
+
+        # 계단이라 중간에 건너뛴 통과는 없다. 앞에서부터 연속으로 통과한 개수가 도달 단계다.
+        reached = 0
+        for stage in self.stages:
+            if not stage.passed:
+                break
+            reached += 1
+        if reached != self.reached_stage:
+            raise ValueError(
+                f"reachedStage가 통과 기록과 다릅니다: {self.reached_stage} != {reached}"
+            )
         return self
 
 
