@@ -26,6 +26,11 @@ _VENDOR = Path(__file__).parent / "vendor"
 MAX_ENTRIES = 20_000
 MAX_TOTAL_BYTES = 500 * 1024 * 1024
 
+# 프롬프트로 옮길 소스 파일 하나의 크기 상한. 이보다 큰 단일 파일은 번들·생성물이라
+# 판단 근거가 아니면서 컨텍스트 예산만 먹는다(스캐너의 GENERATED_FILENAME_RE가
+# 놓치는 것들이 여기서 걸린다).
+MAX_SOURCE_BYTES = 200 * 1024
+
 # finding id 접두사 → assessment_problem.problem_type (이슈 #31 D-5의 5종)
 # REQUIREMENT_IMPL·EXTERNAL_INTEGRATION은 룰이 만들지 않는다. LLM 선정 단계의 몫이다.
 _PROBLEM_TYPE_BY_PREFIX = {
@@ -141,10 +146,37 @@ def _to_candidate(finding: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def find_candidates(zip_bytes: bytes) -> dict[str, Any]:
-    """ZIP → 룰 기반 문제 후보 목록. rank 내림차순으로 이미 정렬돼 있다.
+def _read_sources(two_tier_scan, root: str) -> dict[str, str]:
+    """스캔 대상 소스를 {상대경로: 본문}으로 읽는다.
 
-    임시 디렉터리는 빠져나갈 때 지워진다 — 코드 원문을 남기지 않는다(명세 §3.3).
+    **스캐너와 같은 목록을 쓴다**(`find_src_files`). 우리가 확장자 목록을 따로 들면
+    "룰이 본 파일"과 "LLM이 본 파일"이 갈리고, 그러면 finding이 가리키는 파일이
+    프롬프트에 없는 상황이 생긴다 — 모델은 그걸 "없는 파일"로 취급한다.
+
+    임시 디렉터리는 곧 지워지므로 **여기서 메모리로 옮기지 않으면 못 읽는다.**
+    디스크에 남기지 않는다는 원칙(명세 §3.3)은 그대로다.
+    """
+    files: dict[str, str] = {}
+    root_path = Path(root)
+    for path in two_tier_scan.find_src_files(root):
+        p = Path(path)
+        try:
+            if p.stat().st_size > MAX_SOURCE_BYTES:
+                continue      # 번들·생성물. 프롬프트 예산만 먹고 판단 근거가 안 된다
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        files[p.relative_to(root_path).as_posix()] = text
+    return files
+
+
+def find_candidates(zip_bytes: bytes) -> dict[str, Any]:
+    """ZIP → 룰 기반 문제 후보 목록 + 소스 본문. rank 내림차순으로 이미 정렬돼 있다.
+
+    임시 디렉터리는 빠져나갈 때 지워진다 — 코드 원문을 디스크에 남기지 않는다(명세 §3.3).
+    소스 본문은 **메모리로만** 들고 나온다. 다운스트림(p04-1·p04-2·질문·줄 번호 산정)이
+    전부 파일 내용을 봐야 하는데, 여기서 안 읽으면 ZIP을 두 번 풀어야 한다.
+
     CPU 작업이라 이벤트 루프에서 직접 부르면 안 된다. 지금은 run_analysis가
     동기 함수(`def`)라 Starlette이 threadpool로 돌려준다. async def로 바꾸지 말 것.
     """
@@ -155,6 +187,7 @@ def find_candidates(zip_bytes: bytes) -> dict[str, Any]:
         root = str(_repo_root(Path(tmp)))
         scan = two_tier_scan.scan(root)
         judged = score_findings.score(scan, root)
+        files = _read_sources(two_tier_scan, root)
 
     return {
         "extractor_version": extractor_version(),
@@ -162,4 +195,5 @@ def find_candidates(zip_bytes: bytes) -> dict[str, Any]:
         "file_count": scan.get("total_source_files", 0),
         "language_notice": scan.get("language_coverage_notice"),
         "candidates": [_to_candidate(f) for f in judged.get("findings", [])],
+        "files": files,
     }

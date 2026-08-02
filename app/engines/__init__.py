@@ -11,12 +11,13 @@ from app.engines.stub import StubAnalysisEngine
 
 def get_analysis_engine() -> AnalysisEngine:
     mode = get_settings().engine_mode
-    
+
     # 스텁 모드면 스텁으로
     if mode == "stub":
         return StubAnalysisEngine()
-    
-    # 실제 기능인데 아직 구현이 없어서 일단 실패 경고
-    raise NotImplementedError(
-        f"engine_mode={mode!r}의 엔진이 아직 없습니다. 이식 필요"
-    )
+
+    # 실물은 vendor 규칙부와 NVIDIA 키를 끌고 오므로 필요할 때만 import한다.
+    # 최상단에 두면 stub으로 띄울 때도(테스트·로컬) 그것들이 따라 올라온다.
+    from app.engines.analysis.engine import RealAnalysisEngine
+
+    return RealAnalysisEngine()

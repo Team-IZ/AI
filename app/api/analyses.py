@@ -154,7 +154,9 @@ async def create_analysis(
     
     # 분석 백그라운드로 넘김. 이 줄은 즉시 반환, run_analysis는
     # 응답 전송 후 실행되어 QUEUED->RUNNING->SUCCEDED로 전이
-    background_tasks.add_task(jobs.run_analysis, job.job_id, body, engine, zip_bytes)
+    # 헤더 2개는 ai_usage 원장에 그대로 실린다 — Spring이 과금·추적을 이 값으로 잇는다.
+    background_tasks.add_task(jobs.run_analysis, job.job_id, body, engine, zip_bytes,
+                              idempotency_key=idempotency_key, trace_id=x_trace_id)
 
     # 202는 "접수했다"는 뜻이다. 실제 job이 이미 끝났는지는 별개이고,
     # 호출자는 GET으로 상태를 확인한다.

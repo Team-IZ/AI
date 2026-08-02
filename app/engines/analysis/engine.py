@@ -1,0 +1,237 @@
+""" 실물 분석 엔진. 부품을 순서대로 엮어 `AnalysisResult`를 만든다.
+
+**이 파일에 판단 로직을 두지 않는다.** 각 단계의 판단은 자기 모듈에 있고 여기는
+순서·연결·스키마 채우기만 한다. 여기에 규칙이 새면 "어디를 고쳐야 하는가"가 흐려진다.
+
+    룰 스캔          rules.find_candidates()   ZIP → 후보 + 소스 본문
+      ↓
+    p04-1 분석 문서  analysis_doc.build()      후보·교안·코드 → 문서
+      ↓
+    p04-2 요구사항   requirements.judge()      요구사항 P/F (있을 때만)
+      ↓
+    p04-3 문제 선정  topics.select()           teach당 문제 1개, 부족분은 일반 문제
+      ↓
+    p04-4 질문       questions.freeze()        문제당 L1~L4 질문 4개
+      ↓
+    p04-7 힌트       hints.freeze_for_stage()  질문당 힌트 2개
+      ↓
+    AnalysisResult
+
+**전면 동결이라 세션 중 생성이 없다**(PLAN §T10). 문제 3개면 여기서 질문 12개 +
+힌트 24개가 전부 만들어져 나간다.
+
+## 실패를 어떻게 다루나
+
+**부분 실패를 통째 실패로 만들지 않는다.** LLM 콜이 30회를 넘고 무료 티어 실패율이
+32%라, 하나 깨졌다고 전체를 버리면 완주 확률이 거의 없다.
+
+    p04-1 실패      전체 실패 — 뒤 단계가 전부 이 문서를 입력으로 받는다
+    p04-2 실패      요구사항만 비우고 계속 — 문답과 독립이다
+    질문 생성 실패   그 문제만 flagged로 남기고 계속 (questions.py가 처리)
+    힌트 생성 실패   결정론적 폴백 문장 (hints.py가 처리)
+
+`usages`는 실패한 콜까지 전부 모은다 — 실패한 호출도 토큰을 태우기 때문이다.
+"""
+
+import hashlib
+import uuid
+from typing import Any
+
+from app.config import get_settings
+from app.engines.analysis import (
+    analysis_doc,
+    fragments,
+    hints,
+    questions,
+    requirements,
+    rules,
+    scoring,
+    stages,
+    topics,
+)
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _stamp(usages: list[dict[str, Any]], feature_code: str) -> list[dict[str, Any]]:
+    """호출 기록에 "어느 기능이 불렀나"를 찍는다.
+
+    `llm/client.py`는 자기가 어느 기능에 쓰이는지 모른다(알아야 할 이유도 없다).
+    나머지 요청 범위 값(`sourceId`·`traceId` 등)은 job 계층이 채운다 — 엔진은
+    job_id도 헤더도 모르기 때문이다.
+    """
+    return [{**u, "feature_code": feature_code} for u in usages]
+
+
+def _problem_type(topic: dict[str, Any], candidates: list[dict[str, Any]]) -> str:
+    """룰이 같은 파일에서 잡은 후보가 있으면 그 분류를 쓴다.
+
+    없으면 `DESIGN_CHOICE`다 — LLM이 "판단이 개입된 지점"으로 고른 것이므로
+    기본값이 `COMPLEXITY_HOTSPOT`(룰의 기본값)이면 선정 이유와 어긋난다.
+    """
+    path = (topic.get("code_ref") or {}).get("file")
+    for c in candidates:
+        if path and c.get("source_path") == path:
+            return c.get("problem_type") or "DESIGN_CHOICE"
+    return "DESIGN_CHOICE"
+
+
+def _priority(topic: dict[str, Any], candidates: list[dict[str, Any]]) -> float:
+    path = (topic.get("code_ref") or {}).get("file")
+    for c in candidates:
+        if path and c.get("source_path") == path:
+            return float(c.get("priority") or 0.0)
+    return 0.0
+
+
+def _stage(axis_code: str, question: str | None, hint_list: list[hints.Hint],
+           flagged: bool) -> dict[str, Any]:
+    return {
+        "axis_code": axis_code,
+        "question_text": question,
+        "flagged": flagged,
+        "hints": [{"hint_level": h.hint_level, "hint_text": h.text} for h in hint_list],
+    }
+
+
+def _teach_by_id(teaches: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    return {t["id"]: t for t in teaches if t.get("id")}
+
+
+class RealAnalysisEngine:
+    """`engine_mode="real"`일 때 쓰이는 엔진."""
+
+    def analyze(self, request: dict[str, Any],
+                zip_bytes: bytes | None = None) -> dict[str, Any]:
+        settings = get_settings()
+        model_code = request.get("model_code") or settings.model_code_analysis
+
+        teaches = request.get("teaches") or []
+        reqs = request.get("requirements") or []
+        budget = int(request.get("question_budget") or scoring.QUESTIONS_PER_SUBMISSION)
+
+        usages: list[dict[str, Any]] = []
+
+        # ── 룰 스캔 ────────────────────────────────────────────────────────────
+        # ZIP이 없으면(GITHUB_URL 방식) 아직 받아올 경로가 없다. 조용히 빈 결과를
+        # 내면 "문제 0개"가 정상처럼 보이므로 여기서 끊는다.
+        if zip_bytes is None:
+            raise NotImplementedError(
+                "GITHUB_URL 방식은 아직 지원하지 않습니다. ZIP 업로드로 보내주세요."
+            )
+
+        scan = rules.find_candidates(zip_bytes)
+        files, candidates = scan["files"], scan["candidates"]
+
+        # ── p04-1 분석 문서 ────────────────────────────────────────────────────
+        # 실패하면 전체 실패다. 뒤 단계가 전부 이 문서를 입력으로 받는다.
+        doc = analysis_doc.build(files, teaches, candidates, model_code=model_code)
+        usages.extend(_stamp(doc.usages, "CODE_ANALYSIS"))
+
+        # ── p04-2 요구사항 P/F ────────────────────────────────────────────────
+        # 문답과 독립이라 실패해도 계속 간다 — 이해도 측정이 요구사항 판정에 걸려
+        # 통째로 무너지면 안 된다(PM 설계 v2 §8-3: "이해도 점수와 섞지 않는다").
+        requirement_results: list[dict[str, Any]] = []
+        if reqs:
+            try:
+                judged = requirements.judge(reqs, files, model_code=model_code)
+                requirement_results = judged.results
+                usages.extend(_stamp(judged.usages, "CODE_ANALYSIS"))
+            except stages.StageError as exc:
+                usages.extend(_stamp(exc.usages, "CODE_ANALYSIS"))
+                requirement_results = [
+                    {"requirement_id": str(r.get("requirement_id") or r.get("requirementId")
+                                           or f"req-{i + 1}"),
+                     "verdict": "F", "evidence": None,
+                     "note": f"판정 실패: {exc}"}
+                    for i, r in enumerate(reqs)
+                ]
+
+        # ── p04-3 문제 선정 ───────────────────────────────────────────────────
+        selection = topics.select(files, teaches, doc.document, candidates,
+                                  model_code=model_code, question_budget=budget)
+        usages.extend(_stamp(selection.usages, "QUESTION_GENERATION"))
+
+        # ── p04-4 질문 + p04-7 힌트 ───────────────────────────────────────────
+        teach_map = _teach_by_id(teaches)
+        # 강사 지정 초점 후보를 문제에 순서대로 물린다(C-1 확정 — 받은 id를 그대로 에코).
+        focus_ids = [item["id"] for item in (request.get("focus_items") or [])]
+        problems: list[dict[str, Any]] = []
+
+        for no, topic in enumerate(selection.topics, start=1):
+            teach = teach_map.get(topic.get("teach_id"))
+            qset = questions.freeze(topic, files, teach, model_code=model_code)
+            usages.extend(_stamp(qset.usages, "QUESTION_GENERATION"))
+
+            ref = topic.get("code_ref") or {}
+            code_ref_str = fragments.format_ref(
+                ref.get("file", "?"), ref.get("line_start"), ref.get("line_end")
+            )
+            snippet = ref.get("snippet") or ""
+
+            # 질문 생성이 막혔어도 문제는 만든다. 스키마가 4단계를 요구하므로 빈 자리를
+            # 두면 응답 전체가 검증에서 깨진다 — 그러면 성공한 문제 2개까지 같이 잃는다.
+            by_axis = {lv["axis_code"]: lv["question"] for lv in qset.levels}
+
+            stage_rows = []
+            for axis in scoring.AXIS_CODES:
+                question = by_axis.get(axis) or _blocked_question(axis, code_ref_str)
+                hint_list = hints.freeze_for_stage(
+                    question, model_code=model_code, teach=teach,
+                    code_snippet=snippet, code_ref=code_ref_str,
+                )
+                for h in hint_list:
+                    usages.extend(_stamp(h.usages, "QUESTION_GENERATION"))
+                stage_rows.append(_stage(axis, question, hint_list, qset.flagged))
+
+            problems.append({
+                "problem_id": str(uuid.uuid4()),
+                "problem_no": no,
+                "status": "READY",
+                "problem_type": _problem_type(topic, candidates),
+                "priority": _priority(topic, candidates),
+                "question_focus_item_id": focus_ids[no - 1] if no <= len(focus_ids) else None,
+                "is_general": bool(topic.get("is_general")),
+                "source_path": ref.get("file", ""),
+                "line_start": ref.get("line_start") or 1,
+                "line_end": ref.get("line_end") or ref.get("line_start") or 1,
+                "code_snippet": snippet,
+                "evidence_hash": _sha256(snippet),
+                "extractor_version": scan["extractor_version"],
+                "references": [],
+                "stages": stage_rows,
+            })
+
+        return {
+            "snapshot_id": str(uuid.uuid4()),
+            "snapshot_meta": {
+                # ZIP 원본 기준이다 — 같은 코드를 다시 올리면 같은 값이 나와야
+                # "같은 제출물"임을 Spring이 판정할 수 있다.
+                "content_hash": hashlib.sha256(zip_bytes).hexdigest(),
+                "file_count": len(files),
+                "byte_count": len(zip_bytes),
+            },
+            "applied_scope": request["extraction_scope"],
+            # OWN_COMMIT은 아직 구현이 없다. 요청이 오면 TOTAL로 물러나되 그 사실을 알린다.
+            "scope_fallback": request["extraction_scope"] == "OWN_COMMIT",
+            "fallback_reason": ("OWN_COMMIT 범위는 아직 지원하지 않아 전체를 분석했습니다"
+                                if request["extraction_scope"] == "OWN_COMMIT" else None),
+            "commit_sha": request.get("commit_sha"),
+            "analysis_document": analysis_doc.to_schema(doc.document, files),
+            "requirement_results": requirement_results,
+            "problems": problems,
+            "question_count_planned": budget,
+            "ai_usage": usages,
+        }
+
+
+def _blocked_question(axis_code: str, code_ref: str) -> str:
+    """질문 생성이 재생성 상한까지 막혔을 때 그 자리를 채우는 문장.
+
+    **flagged=True와 함께만 나간다** — 화면에 "검수 필요"로 뜨고, 사람이 보기 전까지
+    이 문장이 학생에게 그대로 나갈 수 있으므로 축의 의도는 지킨다.
+    """
+    intent = scoring.AXES[axis_code]["question_intent"]
+    return f"{code_ref}에 대해 이야기해 주세요 — {intent}."

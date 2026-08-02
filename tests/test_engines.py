@@ -63,12 +63,17 @@ def test_problems_use_db_columns():
     assert all(s["question_text"] and len(s["hints"]) == 2 for s in problem["stages"])
 
 
-def test_real_mode_raises_not_implemented(monkeypatch):
-    """engine_mode=real인데 구현이 없으면 NotImplementedError. 조용한 폴백 금지."""
+def test_real_mode_returns_the_real_engine(monkeypatch):
+    """engine_mode=real이면 실물 엔진이 나온다. 스텁으로 조용히 폴백하지 않는다.
+
+    폴백하면 운영에서 `[stub]` 문구가 학생에게 그대로 나가고, 에러가 없어서
+    아무도 모른다.
+    """
+    from app.engines.analysis.engine import RealAnalysisEngine
+
     monkeypatch.setattr(get_settings(), "engine_mode", "real")
     try:
-        with pytest.raises(NotImplementedError):
-            get_analysis_engine()
+        assert isinstance(get_analysis_engine(), RealAnalysisEngine)
     finally:
         monkeypatch.setattr(get_settings(), "engine_mode", "stub")
 
