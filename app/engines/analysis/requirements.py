@@ -1,0 +1,142 @@
+""" p04-2 요구사항 P/F 판정. Requirements.judge() 포팅.
+
+강사가 정한 요구사항 각각에 대해 제출 코드가 충족하는지 P/F를 낸다. 문답과는 별개
+경로다 — 이 결과는 문제 선정에 쓰이지 않고 `AnalysisResult.requirement_results`로
+바로 나간다.
+
+**결과는 요청 requirements와 1:1이어야 한다.** `jobs.py:60`이 개수 일치를 검사하고,
+개수가 어긋나면 분석 전체가 실패한다. 그래서 모델이 몇 개를 주든 우리는 항상 요청
+개수만큼 만들어 낸다 — 모자란 자리는 `F` + note로 채운다.
+
+**매칭은 텍스트 우선, 위치는 폴백이다.** 프롬프트가 "순서와 개수를 일치시키라"고
+지시하지만 그걸 믿고 인덱스로만 붙이면, 모델이 하나를 빠뜨렸을 때 그 뒤가 통째로
+한 칸씩 밀린다 — **에러 없이 다른 요구사항의 판정이 붙는다.** 학생이 통과한 항목이
+F가 되는 종류의 사고라 조용히 넘길 수 없다.
+"""
+
+from dataclasses import dataclass, field
+from typing import Any
+
+from app.engines.analysis import fragments, stages
+
+# 근거를 못 찾았을 때의 판정. 프롬프트 규칙과 같다 — 추정으로 P를 주지 않는다.
+_FAIL = "F"
+
+
+@dataclass
+class Judgement:
+    """p04-2 결과. `results`는 항상 요청 requirements와 같은 길이·순서다."""
+
+    results: list[dict[str, Any]]
+    usages: list[dict[str, Any]] = field(default_factory=list)
+    unmatched: list[str] = field(default_factory=list)   # 모델 응답에서 못 찾은 요구사항 id
+
+
+def _requirements_block(requirements: list[dict[str, Any]]) -> str:
+    return "\n".join(
+        f"{i}. {r.get('text', '')}" for i, r in enumerate(requirements, start=1)
+    )
+
+
+def _norm(text: Any) -> str:
+    """비교용 정규화. 모델이 공백·따옴표를 흔들어도 같은 요구사항으로 본다."""
+    return " ".join(str(text or "").split()).strip().lower()
+
+
+def _format_evidence(raw: Any) -> str | None:
+    """{file, lines, quote} → "app/pay.py:12-20 — quote" 한 줄로.
+
+    스키마의 evidence가 문자열이라 평탄화한다. 위치와 인용을 둘 다 남기는 이유:
+    위치만 있으면 코드가 바뀐 뒤 무엇을 봤는지 알 수 없고, 인용만 있으면 어디인지
+    못 찾는다.
+    """
+    if isinstance(raw, str):
+        return raw.strip() or None
+    if not isinstance(raw, dict):
+        return None
+
+    source_file = str(raw.get("file") or "").strip()
+    quote = " ".join(str(raw.get("quote") or "").split()).strip()
+    lines = raw.get("lines")
+    start = end = None
+    if isinstance(lines, list) and lines:
+        start = lines[0] if isinstance(lines[0], int) else None
+        end = lines[-1] if isinstance(lines[-1], int) else start
+
+    where = fragments.format_ref(source_file, start, end) if source_file else ""
+    if where and quote:
+        return f"{where} — {quote}"
+    return where or quote or None
+
+
+def _index_results(raw: Any) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    """모델 결과를 (요구사항 텍스트 → 결과) 맵과 원래 순서 목록으로."""
+    ordered: list[dict[str, Any]] = []
+    by_text: dict[str, dict[str, Any]] = {}
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        ordered.append(item)
+        key = _norm(item.get("requirement"))
+        if key and key not in by_text:
+            by_text[key] = item
+    return by_text, ordered
+
+
+def _verdict(item: dict[str, Any] | None) -> str:
+    """P가 아닌 것은 전부 F다. 모델이 'PASS'·'partial' 같은 값을 줘도 마찬가지."""
+    return "P" if str((item or {}).get("verdict", "")).strip().upper() == "P" else _FAIL
+
+
+def judge(requirements: list[dict[str, Any]], files: dict[str, str], *,
+          model_code: str, timeout_s: float | None = None) -> Judgement:
+    """요구사항 전체를 한 번의 호출로 판정한다.
+
+    요구사항이 없으면 호출하지 않는다 — 빈 목록에 토큰을 태울 이유가 없다.
+    """
+    if not requirements:
+        return Judgement(results=[])
+
+    stage = stages.get_stage("p04-2")
+    code_budget = (stage.get("truncation") or {}).get("code_block", 12000)
+
+    result = stages.call("p04-2", {
+        "requirements_block": _requirements_block(requirements),
+        "code_block": fragments.build_code_block(files, max_chars=code_budget),
+    }, model_code=model_code, timeout_s=timeout_s)
+
+    by_text, ordered = _index_results(result.data.get("results"))
+
+    results: list[dict[str, Any]] = []
+    unmatched: list[str] = []
+    for i, req in enumerate(requirements):
+        req_id = str(req.get("requirement_id") or req.get("requirementId") or f"req-{i + 1}")
+
+        item = by_text.get(_norm(req.get("text")))
+        if item is None:
+            # 텍스트로 못 찾았다. 같은 자리의 결과가 **요구사항 텍스트를 아예 안 달고
+            # 있을 때만** 폴백으로 쓴다. 다른 요구사항 텍스트를 달고 있다면 목록이
+            # 밀린 것이므로 쓰면 안 된다 — 그게 오판정의 원인이다.
+            candidate = ordered[i] if i < len(ordered) else None
+            if candidate is not None and not _norm(candidate.get("requirement")):
+                item = candidate
+
+        if item is None:
+            unmatched.append(req_id)
+            results.append({
+                "requirement_id": req_id,
+                "verdict": _FAIL,
+                "evidence": None,
+                "note": "모델 응답에서 이 요구사항의 판정을 찾지 못했습니다",
+            })
+            continue
+
+        note = str(item.get("note") or "").strip() or None
+        results.append({
+            "requirement_id": req_id,
+            "verdict": _verdict(item),
+            "evidence": _format_evidence(item.get("evidence")),
+            "note": note,
+        })
+
+    return Judgement(results=results, usages=result.usages, unmatched=unmatched)
