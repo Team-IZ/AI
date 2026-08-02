@@ -12,7 +12,9 @@
 #   헬스체크 경로 = /api/health (인증 면제)
 #   오토스케일 max instances = 1 — job·세션이 인메모리 dict라 2개로 늘면 폴링이 404가 난다
 version: 1.0
-runtime: python311
+# 관리형 런타임 이름은 `python3`다. 버전 고정은 아래 run.runtime-version이 한다.
+# (`python311`처럼 쓰면 빌드가 실패한다 — AWS 설정 파일 레퍼런스 기준)
+runtime: python3
 build:
   commands:
     build:
