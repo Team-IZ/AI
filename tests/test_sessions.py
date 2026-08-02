@@ -269,3 +269,17 @@ def test_failed_turn_is_not_recorded(monkeypatch, score):
     view = client.get(f"/api/v0/sessions/{sid}", headers=HEADERS).json()
     assert view["transcript"] == []
     assert view["current"]["axisCode"] == "L1"    # 커서 그대로
+
+
+def test_answer_endpoint_stays_sync():
+    """채점 경로는 `def`여야 한다 — `async def`로 되돌리면 동시 처리가 1명이 된다.
+
+    LLM 호출(`nvidia_client`)이 `urllib.request` 기반 블로킹이라 `async def`
+    안에서 부르면 이벤트 루프가 채점 내내 멈춘다. FastAPI는 `def` 엔드포인트만
+    스레드풀로 옮겨준다. LLM 호출을 비동기로 바꾸기 전까지 이 시그니처를 지킨다.
+    """
+    import inspect
+
+    from app.api.sessions import submit_answer
+
+    assert not inspect.iscoroutinefunction(submit_answer)

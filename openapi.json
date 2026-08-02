@@ -647,7 +647,7 @@
           "sessions"
         ],
         "summary": "답변 제출 -> 다음 질문/종료 (P03)",
-        "description": "답변 받고 다음 질문(또는 종료)를 돌려줌.\n\n같은 client_request_id 재전송 -> 처음 응답 그대로(멱등).\n세션 유실이면 404 -> Spring이 restore 호출",
+        "description": "답변 받고 다음 질문(또는 종료)를 돌려줌.\n\n같은 client_request_id 재전송 -> 처음 응답 그대로(멱등).\n세션 유실이면 404 -> Spring이 restore 호출\n\n🔴 **`async def`가 아니라 `def`여야 한다.** 이 경로는 세션에서 유일하게 LLM을\n호출하는데(`grading.grade`), vendor 클라이언트가 `urllib.request` 기반의 블로킹\n호출이다. `async def`로 두면 채점 4.5~7.7초 동안 **이벤트 루프가 통째로 멈춰**\n다른 학생의 채점은 물론 폴링·헬스체크까지 대기한다(동시 처리 1명).\n`def`면 FastAPI가 스레드풀에서 돌려 동시 40건까지 처리한다.\nLLM 호출을 비동기로 바꾸기 전까지 이 시그니처를 되돌리지 않는다.",
         "operationId": "submit_answer_api_v0_sessions__session_id__answers_post",
         "parameters": [
           {

@@ -36,11 +36,18 @@ async def start_session(body: SessionStart) -> SessionView:
               "description": "채점 실패. 같은 clientRequestId로 재전송하면 된다"},
     },
 )
-async def submit_answer(session_id: str, body: AnswerSubmit) -> SessionView:
+def submit_answer(session_id: str, body: AnswerSubmit) -> SessionView:
     """ 답변 받고 다음 질문(또는 종료)를 돌려줌.
 
     같은 client_request_id 재전송 -> 처음 응답 그대로(멱등).
     세션 유실이면 404 -> Spring이 restore 호출
+
+    🔴 **`async def`가 아니라 `def`여야 한다.** 이 경로는 세션에서 유일하게 LLM을
+    호출하는데(`grading.grade`), vendor 클라이언트가 `urllib.request` 기반의 블로킹
+    호출이다. `async def`로 두면 채점 4.5~7.7초 동안 **이벤트 루프가 통째로 멈춰**
+    다른 학생의 채점은 물론 폴링·헬스체크까지 대기한다(동시 처리 1명).
+    `def`면 FastAPI가 스레드풀에서 돌려 동시 40건까지 처리한다.
+    LLM 호출을 비동기로 바꾸기 전까지 이 시그니처를 되돌리지 않는다.
     """
     try:
         view = sessions.submit_answer(session_id, body)
