@@ -10,13 +10,44 @@
 
 | | |
 |---|---|
-| 갱신 | **2026-08-02** · 브랜치 `feature/engine-transplant` |
-| 엔드포인트 | 11/11 동작 (전부 스텁 — `engine_mode="real"` 미배선) |
-| 테스트 | **138 passed** |
-| 엔진 부품 | p04-1 ✅ · p04-2 ✅ · p04-3 ✅ · p04-4 ✅ · p04-5 ✅ · p04-7 ✅ · 룰 ✅ — **전부 개별 완성, 조립 안 됨** |
-| 다음 | **🔴 조립기 + `engine_mode="real"`.** 룰 → p04-1 → p04-2 → p04-3 → p04-4 → p04-7 → `AnalysisResult`. 여기서 질문 12 + 힌트 24가 실제로 만들어진다. 이어서 세션 채점 배선 · p04-6 · 교안 분석 → **T9 배포** |
+| 갱신 | **2026-08-02** · 브랜치 `feature/engine-transplant` (`develop` 대비 +25커밋) |
+| 엔드포인트 | 11/11 동작. **`engine_mode="real"` 배선 완료** |
+| 테스트 | **191 passed** |
+| 기능 | **6/6 완성 + 전부 실호출 검증.** 교안 · 코드 분석 · 문제 생성 · 힌트 · 채점 · 보고서 |
+| 계약 | `openapi.json` 재생성 완료(2026-08-02). `tests/test_openapi.py`가 드리프트를 막는다 |
+| 다음 | **🔴 T9 배포.** `feature/engine-transplant` → `develop` → `main`. **develop = 로컬(백엔드 연동 테스트) · main = AWS.** 상세는 §T9 |
 | 기준 | **§T10**(기능 동결) · **§T10-B**(PM 설계 v2 대조) · **§T10-C**(vendor 정책). 앞선 절과 충돌하면 이 셋이 이긴다 |
 | 막힌 것 | **없다.** 백엔드를 기다리지 않는다(§T0) — 우리가 확정해 통보한다 |
+| 🔴 위험 | **무료 티어.** 채점 5회 중 4회 실패한 시각이 있었다. 유료 전환이 근본 해결(`../output_docs/미결_논의사항.md` P-3) |
+
+### 실호출로만 잡힌 버그 5개 (2026-08-02)
+
+**가짜 LLM 테스트 190개가 전부 초록인 상태에서 나온 것들이다.** 다섯 개 다 **에러가 안 나거나
+엉뚱한 곳에서 났고**, 실호출을 안 했으면 배포까지 갔다.
+
+| # | 증상 | 원인 | 고친 곳 |
+|---|---|---|---|
+| 1 | 첫 콜부터 "키 없음" | `.env`는 `Settings`만 채우고 `os.environ`은 안 건드리는데 vendor 키 풀은 `os.environ`만 본다. **AWS는 진짜 환경변수라 안 터진다 — 로컬만 죽는다** | `config.load_api_keys_into_env()` |
+| 2 | 교안 모듈 0개 | 청크를 **쪽 수로만** 잘랐다. PoC 기본값 10쪽은 슬라이드(쪽당 200~400자) 기준인데 실제 PDF는 쪽당 1,600자 → 9,800자 → 응답 JSON이 잘림 | `CHARS_PER_CHUNK` 추가 |
+| 3 | 채점 실패 시 화면이 죽음 | `StageError`를 아무도 안 잡아 **본문 없는 500**. 프론트가 파싱조차 못 한다 | `503 GRADING_UNAVAILABLE` + `retryable` |
+| 4 | 보고서가 "문답 기록이 없다"고 씀 | `transcript`만 `list[dict]` 원시 타입이라 **camelCase가 변환 없이 통과.** 엔진은 `axis_code`를 찾는데 `axisCode`가 왔다 → 도달 0단·재시험 True | `reports._to_snake()` |
+| 5 | 교안 결과가 한/영 혼재 | 프롬프트에 **`{course_label}`이 문자 그대로** 나갔다. 매니페스트 `params`의 문자열 기본값을 `stages.call`이 안 썼다 | `stages.call`이 문자열 param을 자리표시자로 채움 |
+
+**계약 구멍도 하나 있었다**: `/analyses`·`/curricula`가 multipart라 **요청 스키마가
+`openapi.json`에 아예 없었다.** 백엔드는 이 파일로 구현하는데 필드를 하나도 못 본다.
+OpenAPI 3.1 `contentSchema`로 실었다(`app/api/multipart_docs.py`).
+
+### 실측값 (2026-08-02, `mistral-medium-3.5` / 무료 티어)
+
+```
+/analyses    문제 3 · 질문 12 · 힌트 24 · LLM 30콜 · 626초 · 토큰 24,875 · 실패 0
+             (병렬화 전 문제 1개가 963초였다 — 순차면 3개는 31분)
+/curricula   6쪽 · 3청크 병렬 · 464초 · 모듈 10개 · fallbackUsed=False
+채점         deepseek-v4-flash 성공 시 4.5~7.7초
+```
+
+**힌트 병렬화가 가장 컸다** — 힌트가 전체의 68%였고 서로 완전히 독립이다.
+세션 채점은 학생 답변을 기다려야 해서 **구조상 병렬화가 불가능하다.**
 
 ### 완료된 것
 
@@ -835,62 +866,81 @@ stages.call        CONTEXT_OVERFLOW만 재시도
 
 ---
 
-### T9 — 배포 (AWS App Runner + GitHub 자동배포)
+### T9 — 배포 (2026-08-02 전략 확정)
 
-**목표는 "백엔드가 언제든 붙을 수 있는 주소"다.** 엔진 완성이 아니다.
+**목표는 "백엔드가 언제든 붙을 수 있는 주소"다.** 기능은 6/6 완성됐고 실호출 검증도 끝났다.
 
-**배포는 `main`이 한다.** `main`은 항상 백엔드가 붙어 있는 통신 가능 상태로 놔둔다. 고도화는 `feature/*` → `develop`에서 돌리고, 검증이 끝난 것만 `main`으로 올린다(§브랜치·커밋).
+#### 🔴 브랜치 두 개의 역할이 다르다
 
-#### 왜 지금 배포할 수 있나
+```
+feature/*   개발
+   ↓  동작·테스트 통과
+develop     **로컬 테스트용.** 백엔드 연동 테스트를 여기서 한다 — 내 PC에서 돌리고
+            cloudflared로 주소만 노출한다. AWS를 안 쓰므로 비용 0
+   ↓  검증 끝난 것만
+main        **AWS 배포용.** App Runner가 이 브랜치를 본다. 시연·상시 필요할 때만
+```
 
-엔드포인트 11/11이 스텁으로 동작하고 인증·에러 형식·camelCase·`openapi.json`이 이미 있다. **백엔드가 붙이는 데 필요한 면은 엔진과 무관하게 완성돼 있다.** p04-2·`engine_mode="real"` 배선·세션 채점 배선·배치 병렬화·T8은 **전부 배포와 독립이다** — 나중에 `develop`에서 만들어 `main`으로 올리면 자동 재배포된다.
+**핵심: 백엔드 연동 테스트에 AWS를 쓰지 않는다.** 통합 과정은 요청을 수십·수백 번
+주고받는데 그동안 App Runner를 켜두면 그게 다 돈이다. **`develop` + 로컬 + cloudflared로
+붙이고, `main`은 실제로 보여줘야 할 때만 켠다.**
 
-#### 배포 전에 확인된 제약
+| | develop | main |
+|---|---|---|
+| 어디서 도나 | 내 PC (`uvicorn`) | AWS App Runner |
+| 주소 | cloudflared 임시 HTTPS | App Runner 고정 HTTPS |
+| 비용 | **0** | 시간당 (pause하면 0) |
+| 쓰는 때 | **백엔드 연동 테스트 · 개발 중 상시** | 시연 · 상시 가동이 필요할 때 |
+| 배포 방식 | 없음 (그냥 실행) | `main` push → 자동 재배포 |
+
+⚠️ **백엔드에 "AI 주소는 설정값으로 빼라"고 요청해야 한다.** 코드에 박으면 로컬↔AWS를
+오갈 때마다 백엔드를 재배포해야 한다. 이 요청이 이 전략의 전제다.
+
+#### 배포 전 확인된 제약
 
 | # | 사실 | 영향 | 대응 |
 |---|---|---|---|
-| **1** | `jobs.py`·`sessions.py`가 **인메모리 dict**다 | 인스턴스가 2개로 늘면 A에 만든 job을 B가 못 찾아 404 | **오토스케일 max = 1로 고정.** Redis 이전은 나중 |
+| **1** | `jobs.py`·`sessions.py`·`reports.py`·`curricula.py`가 **인메모리 dict**다 | 인스턴스가 2개로 늘면 A에 만든 job을 B가 못 찾아 404 | **오토스케일 max = 1로 고정.** Redis 이전은 나중 |
 | **2** | 재배포·pause 시 진행 중 job·세션 유실 | 통합테스트 도중 배포하면 상대가 깨진다 | 배포 창을 백엔드와 맞춘다 |
-| **3** | App Runner 요청 타임아웃 기본 120초 | `/analyses`는 202+폴링이라 안전. **세션 채점은 동기**고 최악 8초 × 10회 = 80초 | 지금은 여유. 재시도 예산을 늘리면 다시 계산한다 |
-| **4** | `requirements.txt`가 `>=` 범위 + pytest 포함 | 빌드 시점마다 다른 버전이 깔린다(재현성 없음) | 배포 직전에 고정 여부를 정한다 |
+| **3** | App Runner 요청 타임아웃 기본 120초 | `/analyses`·`/curricula`·`/reports`는 202+폴링이라 안전. **세션 채점만 동기** | 실측 4.5~7.7초(flash). 여유 있음 |
+| **4** | 분석이 626초, 교안이 464초 | App Runner가 요청을 끊어도 백그라운드는 계속 돈다 | 202+폴링 구조라 문제없음 |
 
 **1번이 진짜 제약이다.** 오토스케일을 켜두면 에러 없이 조용히 깨진다 — 폴링만 404가 난다.
 
 #### 왜 App Runner인가
 
-GitHub 저장소를 직접 물릴 수 있어 **Dockerfile·ECR·GitHub Actions가 전부 필요 없다.** `main`에 push하면 알아서 빌드·배포한다. 파이프라인 코드 0줄.
+GitHub 저장소를 직접 물릴 수 있어 **Dockerfile·ECR·GitHub Actions가 전부 필요 없다.**
+`main`에 push하면 알아서 빌드·배포한다.
 
-EC2+ALB는 설정이 3배인데 얻는 게 없다. GitHub Actions → ECR → App Runner도 마찬가지 — 빌드를 커스터마이징해야 할 때 옮긴다.
+⚠️ **`X-Internal-Key`는 공유 비밀이라 TLS가 필수다.** EC2에 평문 HTTP로 띄우면 인터넷
+구간에 키가 그대로 흐른다. App Runner는 HTTPS URL을 그냥 준다. cloudflared도 마찬가지다.
 
-⚠️ **`X-Internal-Key`는 공유 비밀이라 TLS가 필수다.** EC2에 평문 HTTP로 띄우면 인터넷 구간에 키가 그대로 흐른다. App Runner는 HTTPS URL을 그냥 준다.
+⚠️ **poppler 같은 시스템 바이너리를 못 깐다.** 그래서 교안 PDF 추출을 `pypdf`(순수 파이썬)로
+했다 — PoC의 `pdftotext` 방식을 그대로 가져왔으면 배포에서 막혔다.
 
 #### 비용 — idle에도 과금된다
 
-App Runner는 요청이 없어도 프로비저닝된 메모리 요금이 나간다(2GB 기준 월 $3~5). **일시중지(pause)하면 0이다.** 평소에는 로컬 + cloudflared로 붙이고 AWS는 필요할 때만 켠다.
+App Runner는 요청이 없어도 프로비저닝된 메모리 요금이 나간다(2GB 기준 월 $3~5).
+**일시중지(pause)하면 0이다.**
 
-```
-평소      로컬 uvicorn + cloudflared 터널     $0
-붙일 때   App Runner resume (1~2분)          시간당 과금
-끝나면    pause                              $0
-```
-
-⚠️ **pause 중에는 자동배포도 멈춘다.** resume하면 그 시점의 최신 `main`으로 뜬다. 문제가 아니라 오히려 원하는 동작이다.
+⚠️ **pause 중에는 자동배포도 멈춘다.** resume하면 그 시점의 최신 `main`으로 뜬다.
+문제가 아니라 오히려 원하는 동작이다.
 
 #### 단계
 
-**T9a — 로컬 프로덕션 모드 검증 (AWS 전에)**
+**T9a — 브랜치 정리 (git. 사용자가 직접 실행)**
 
-`APP_ENV=production` + `INTERNAL_API_KEY`를 채우고 `uvicorn app.main:app --host 0.0.0.0 --port 8080`.
+```
+feature/engine-transplant (+25커밋) → develop → main
+```
+`main`은 아직 README 한 줄짜리다(`db751a9`). **`main`의 첫 실질 내용이 이번 머지다.**
 
-확인할 것: 기동 성공(키 없으면 `config.py:48`이 거부한다) · `/api/health` 200 무인증 · 업무 경로가 키 없으면 401, 키 있으면 200.
+**T9b — 로컬 프로덕션 모드 검증**
 
-목적은 **AWS에서 처음 터질 것을 여기서 다 터뜨리는 것**이다. 원격 로그로 디버깅하는 것보다 싸다.
+`APP_ENV=production` + `INTERNAL_API_KEY`로 띄워 확인:
+기동 성공 · `/api/health` 200 무인증 · 업무 경로 키 없으면 401 · **키를 비우면 기동 거부**(`config.py`).
 
-**T9b — 배포 전 최소 수정**
-
-- `apprunner.yaml` 작성 (아래)
-- `openapi.json` 2차 재생성 (T3·T4 반영분) — 백엔드에 넘길 계약
-- 선택: `requirements.txt` 버전 고정 / pytest를 `requirements-dev.txt`로 분리
+**T9c — `apprunner.yaml` 작성**
 
 ```yaml
 version: 1.0
@@ -906,38 +956,49 @@ run:
     port: 8080
 ```
 
-**3.11로 도는 것을 확인했다** — 3.12+ 전용 문법이 없고 의존성도 순수 wheel이라 빌드 단계에서 컴파일이 필요 없다.
+3.11로 도는 것을 확인했다 — 3.12+ 전용 문법이 없고 의존성도 순수 wheel이다.
+`requirements.txt`는 **버전 고정**이라 빌드가 재현된다(2026-08-02 고정).
 
-**T9c — cloudflared로 백엔드 1차 통신 ($0)**
+**T9d — 백엔드 연동 테스트 (develop · 로컬 · $0)**
 
-로컬 서버 + `cloudflared tunnel --url http://localhost:8080`. 나온 HTTPS URL과 `INTERNAL_API_KEY`를 백엔드에 전달한다.
+```bash
+# develop 체크아웃 상태에서
+uvicorn app.main:app --host 0.0.0.0 --port 8080     # ENGINE_MODE=real
+cloudflared tunnel --url http://localhost:8080
+```
+나온 HTTPS URL + `INTERNAL_API_KEY`를 백엔드에 전달한다. **계약 불일치는 전부 여기서 잡는다.**
+AWS는 그 다음이다 — 클라우드에서 디버깅할 이유가 없다.
 
-**백엔드에 요청할 것: AI 베이스 URL을 설정값으로 뺄 것.** 코드에 박으면 로컬↔AWS를 오갈 때마다 백엔드를 재배포해야 한다.
+**T9e — App Runner 배포 (main)**
 
-계약 불일치는 여기서 다 잡는다. AWS는 그 다음이다 — 클라우드에서 디버깅할 이유가 없다.
-
-**T9d — App Runner 배포**
-
-1. `apprunner.yaml`을 `develop`에서 검증 후 `main`으로 머지
-2. 콘솔: 서비스 생성 → Source = GitHub → 저장소 연결(org 저장소면 org 권한 승인 1회) → **브랜치 `main`** → 자동배포 ON
-3. 환경변수: `APP_ENV=production` · `INTERNAL_API_KEY` · `ENGINE_MODE=stub` · `NVIDIA_API_KEY_1~8` · 모델 3종
+1. `apprunner.yaml`을 `main`에 포함
+2. 콘솔: 서비스 생성 → Source = GitHub → 저장소 연결 → **브랜치 `main`** → 자동배포 ON
+3. 환경변수: `APP_ENV=production` · `INTERNAL_API_KEY` · `ENGINE_MODE=real` ·
+   `NVIDIA_API_KEY_1~8` · 모델 3종
 4. 헬스체크 경로 `/api/health` (인증 면제라 그대로 쓴다)
 5. **오토스케일 max instances = 1** (제약 1번)
-6. HTTPS URL을 백엔드에 전달하고 T9c와 같은 시나리오로 재확인
 
-**T9e — 운영**
+**T9f — 운영**
 
-`main`은 켜두면 계속 붙어 있는 상태다. 고도화는 `feature/*` → `develop`에서 하고, 검증 끝난 것만 `main`으로 올린다. `main` 머지 = 자동 재배포이므로 **머지 시점을 백엔드와 맞춘다**(제약 2번).
+```
+평소     develop + 로컬 + cloudflared        $0
+시연     main → App Runner resume            시간당
+끝나면   pause                               $0
+```
+
+`main` 머지 = 자동 재배포이므로 **머지 시점을 백엔드와 맞춘다**(제약 2번).
 
 #### 되짚을 결정 (착수 전에 확인)
 
 - **AWS 리전** — 기본 `ap-northeast-2`(서울)
 - **저장소 소유자** — org 저장소면 App Runner의 GitHub 연결에 org 승인이 필요하다
-- **`INTERNAL_API_KEY` 값** — 백엔드와 합의된 값이 있는지 미확인. 없으면 새로 만들어 전달한다. **평문으로 이슈·커밋에 옮기지 않는다**
+- **`INTERNAL_API_KEY` 값** — 백엔드와 합의된 값이 있는지 미확인. **평문으로 이슈·커밋에 옮기지 않는다**
+- **`MODEL_CODE_SESSION`** — 지금 `mistral-medium-3.5`. 실측에서 5/5 실패했고
+  `deepseek-v4-flash`는 4.5~7.7초에 성공했다. **한산할 때 재측정 후 결정**
 
-**DoD**: 백엔드가 HTTPS 주소 하나로 11개 엔드포인트를 전부 호출할 수 있고, `main`에 push하면 재배포되며, 안 쓸 때 pause로 과금이 0이 된다.
+**DoD**: 백엔드가 HTTPS 주소 하나로 11개 엔드포인트를 전부 호출할 수 있고,
+`main`에 push하면 재배포되며, 안 쓸 때 pause로 과금이 0이 된다.
 
----
 
 ### T10 — 🔴 기능 동결 스펙 (2026-08-02 최종. 이 절이 기준이다)
 

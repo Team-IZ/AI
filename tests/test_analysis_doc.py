@@ -131,3 +131,41 @@ def test_unfound_symbol_has_no_line_numbers():
     assert dp["line_start"] is None and dp["line_end"] is None
     assert dp["source_path"] == "app/pay.py"   # 검수 단서로 모델이 지목한 경로는 남긴다
     AnalysisDocument.model_validate(schema)
+
+
+def test_string_params_fill_their_placeholders(monkeypatch):
+    """문자열 param은 프롬프트 자리표시자이기도 하다 — 안 채우면 그대로 나간다.
+
+    2026-08-02 실측: p01-2가 "KT AIVLE School {course_label} curriculum"으로 나갔고
+    교안 결과가 한/영 혼재로 돌아왔다. 에러는 안 났다.
+    """
+    seen = {}
+
+    def _chat(model_code, messages, **kwargs):
+        seen["user"] = messages[1]["content"]
+        raise stages.client.LlmError("stop", {"status": "FAILED", "failure_code": "TIMEOUT"})
+
+    monkeypatch.setattr(stages.client, "chat", _chat)
+
+    with pytest.raises(stages.StageError):
+        stages.call("p01-2", {"chunk_range": "1-2", "chunk_text": "본문"},
+                    model_code="m", max_attempts=1)
+
+    assert "{course_label}" not in seen["user"]
+    assert "KT AIVLE School Java curriculum" in seen["user"]   # 매니페스트 기본값
+
+
+def test_caller_value_beats_the_manifest_default(monkeypatch):
+    seen = {}
+
+    def _chat(model_code, messages, **kwargs):
+        seen["user"] = messages[1]["content"]
+        raise stages.client.LlmError("stop", {"status": "FAILED", "failure_code": "TIMEOUT"})
+
+    monkeypatch.setattr(stages.client, "chat", _chat)
+
+    with pytest.raises(stages.StageError):
+        stages.call("p01-2", {"chunk_range": "1-2", "chunk_text": "본문",
+                              "course_label": "SQL"}, model_code="m", max_attempts=1)
+
+    assert "KT AIVLE School SQL curriculum" in seen["user"]

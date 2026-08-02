@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from app import jobs
 from app.api.errors import ApiError, format_validation_message
+from app.api.multipart_docs import multipart_body
 from app.schemas.analysis import (
     AnalysisAccepted,
     AnalysisJobStatus,
@@ -61,54 +62,19 @@ def _validate(payload: Any) -> AnalysisRequest:
     except ValueError as exc:
         raise _invalid(format_validation_message(exc.errors())) from exc
 
-# 수동 인라인 스키마. 자동 바인딩을 포기해 AnalysisRequest가 components에 없으므로
-# $ref로 중첩 모델을 가리키면 Swagger가 해석 못 한다($defs 경로가 문서에 없음).
-# → 중첩 모델을 참조 자리에 직접 펼쳐(self-contained) $ref를 없앤다.
-_raw_schema = AnalysisRequest.model_json_schema()
-_defs = _raw_schema.pop("$defs", {})
-
-def _inline_refs(node: Any) -> Any:
-    """스키마 트리를 훑어 '#/$defs/X' 참조를 그 정의로 치환한다(재귀)."""
-    if isinstance(node, dict):
-        ref = node.get("$ref")
-        if isinstance(ref, str) and ref.startswith("#/$defs/"):
-            return _inline_refs(_defs[ref.split("/")[-1]])
-        return {key: _inline_refs(value) for key, value in node.items()}
-    if isinstance(node, list):
-        return [_inline_refs(item) for item in node]
-    return node
-
-
-_ANALYSIS_REQUEST_SCHEMA = _inline_refs(_raw_schema)
-
-_REQUEST_BODY = {
-    "required": True,
-    "content": {
-        "application/json": {
-            "schema": _ANALYSIS_REQUEST_SCHEMA,
-            "example": {
-                "method": "GITHUB_URL",
-                "source": {"repoUrl": "https://github.com/owner/repo", "branch": "main"},
-                "extractionScope": "TOTAL",
-                "questionBudget": 4,
-            },
-        },
-        "multipart/form-data": {
-            "schema": {
-                "type": "object",
-                "required": ["payload", "file"],
-                "properties": {
-                    "payload": {
-                        "type": "string",
-                        "description": "요청 JSON을 문자열로. method는 ZIP_WITH_GITLOG",
-                        "example": '{"method":"ZIP_WITH_GITLOG","extractionScope":"TOTAL"}',
-                    },
-                    "file": {"type": "string", "format": "binary", "description": "제출 ZIP"},
-                },
-            }
-        },
+# 자동 바인딩을 포기해 AnalysisRequest가 components에 안 잡힌다 — 스펙에 직접 실어야
+# 백엔드가 요청 필드를 볼 수 있다. 방식·근거는 multipart_docs 모듈 주석 참고.
+_REQUEST_BODY = multipart_body(
+    AnalysisRequest,
+    file_description="제출 ZIP",
+    payload_example='{"method":"ZIP_WITH_GITLOG","extractionScope":"TOTAL"}',
+    json_example={
+        "method": "GITHUB_URL",
+        "source": {"repoUrl": "https://github.com/owner/repo", "branch": "main"},
+        "extractionScope": "TOTAL",
+        "questionBudget": 3,
     },
-}
+)
 
 @router.post(
     "/analyses",

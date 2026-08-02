@@ -9,6 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, Header, UploadFile, 
 
 from app import curricula
 from app.api.errors import ApiError, format_validation_message
+from app.api.multipart_docs import multipart_body
 from app.schemas.common import ErrorResponse
 from app.schemas.curriculum import (
     CurriculumAccepted,
@@ -23,12 +24,23 @@ def _invalid(message: str) -> ApiError:
     return ApiError(status_code=422, error="INVALID_REQUEST", message=message)
 
 
+# PDF가 필수라 multipart만 문서화한다. payload의 구조를 스펙에 실어야
+# 백엔드가 versionId·courseLabel 같은 필드를 볼 수 있다(multipart_docs 주석 참고).
+_REQUEST_BODY = multipart_body(
+    CurriculumRequest,
+    file_description="교안 PDF",
+    payload_example='{"versionId":"ver-1","courseLabel":"SQL"}',
+    json_content=False,
+)
+
+
 @router.post(
     "/curricula",
     status_code=status.HTTP_202_ACCEPTED,
     response_model=CurriculumAccepted,
     summary="교안 분석 요청",
     responses={422: {"model": ErrorResponse, "description": "요청 스키마 위반"}},
+    openapi_extra={"requestBody": _REQUEST_BODY},
 )
 async def create_curriculum(
     background_tasks: BackgroundTasks,

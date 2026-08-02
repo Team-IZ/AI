@@ -302,7 +302,7 @@
                   "branch": "main"
                 },
                 "extractionScope": "TOTAL",
-                "questionBudget": 4
+                "questionBudget": 3
               }
             },
             "multipart/form-data": {
@@ -315,7 +315,184 @@
                 "properties": {
                   "payload": {
                     "type": "string",
-                    "description": "요청 JSON을 문자열로. method는 ZIP_WITH_GITLOG",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "description": "POST /api/v0/analyses 요청 본문 ",
+                      "properties": {
+                        "attemptId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Spring 측 측정수행 키(에코용)",
+                          "title": "Attemptid"
+                        },
+                        "submissionId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "title": "Submissionid"
+                        },
+                        "callbackUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현",
+                          "title": "Callbackurl"
+                        },
+                        "method": {
+                          "enum": [
+                            "GITHUB_URL",
+                            "ZIP_WITH_GITLOG"
+                          ],
+                          "title": "Method",
+                          "type": "string"
+                        },
+                        "source": {
+                          "properties": {
+                            "repoUrl": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "method=GITHUB_URL일 때 필수. 공개 레포만 지원",
+                              "title": "Repourl"
+                            },
+                            "branch": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "생략 시 기본 브랜치",
+                              "title": "Branch"
+                            }
+                          },
+                          "title": "AnalysisSource",
+                          "type": "object"
+                        },
+                        "extractionScope": {
+                          "default": "TOTAL",
+                          "enum": [
+                            "TOTAL",
+                            "OWN_COMMIT"
+                          ],
+                          "title": "Extractionscope",
+                          "type": "string"
+                        },
+                        "commitEmail": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "OWN_COMMIT일 때 필수",
+                          "title": "Commitemail"
+                        },
+                        "questionBudget": {
+                          "default": 3,
+                          "description": "계획 문제 수",
+                          "minimum": 1,
+                          "title": "Questionbudget",
+                          "type": "integer"
+                        },
+                        "focusItems": {
+                          "description": "강사 지정 초점 후보. 비면 AI 자율 선정",
+                          "items": {
+                            "description": "강사가 지정한 질문 초점 후보. Spring question_focus_item 행 대응.\n\nAI는 이 중 하나의 id를 골라 problem.questionFocusItemId로 돌려준다.\nPK가 랜덤 UUID라 AI 코드에 값을 박을 수 없어서 후보를 받아 고르는 방식이다(C-1).",
+                            "properties": {
+                              "id": {
+                                "title": "Id",
+                                "type": "string"
+                              },
+                              "name": {
+                                "title": "Name",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "name"
+                            ],
+                            "title": "FocusItem",
+                            "type": "object"
+                          },
+                          "title": "Focusitems",
+                          "type": "array"
+                        },
+                        "requirements": {
+                          "description": "[{requirementId, text}] P/F 판정 대상",
+                          "items": {
+                            "additionalProperties": true,
+                            "type": "object"
+                          },
+                          "title": "Requirements",
+                          "type": "array"
+                        },
+                        "teaches": {
+                          "description": "[{id, label, unitId, sourcePages}] 교안 참조용",
+                          "items": {
+                            "additionalProperties": true,
+                            "type": "object"
+                          },
+                          "title": "Teaches",
+                          "type": "array"
+                        },
+                        "curriculumId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "title": "Curriculumid"
+                        },
+                        "modelCode": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "생략 시 서버 기본값. operator가 고른다",
+                          "title": "Modelcode"
+                        }
+                      },
+                      "required": [
+                        "method"
+                      ],
+                      "title": "AnalysisRequest",
+                      "type": "object"
+                    },
+                    "description": "요청 JSON을 문자열로. 구조는 AnalysisRequest",
                     "example": "{\"method\":\"ZIP_WITH_GITLOG\",\"extractionScope\":\"TOTAL\"}"
                   },
                   "file": {
@@ -323,6 +500,11 @@
                     "format": "binary",
                     "description": "제출 ZIP"
                   }
+                }
+              },
+              "encoding": {
+                "payload": {
+                  "contentType": "application/json"
                 }
               }
             }
@@ -881,7 +1063,93 @@
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_create_curriculum_api_v0_curricula_post"
+                "$ref": "#/components/schemas/Body_create_curriculum_api_v0_curricula_post",
+                "type": "object",
+                "required": [
+                  "payload",
+                  "file"
+                ],
+                "properties": {
+                  "payload": {
+                    "type": "string",
+                    "contentMediaType": "application/json",
+                    "contentSchema": {
+                      "description": "POST /api/v0/curricula 요청. PDF는 multipart의 file 파트로 온다.",
+                      "properties": {
+                        "versionId": {
+                          "description": "Spring curriculum_version 키(에코용)",
+                          "title": "Versionid",
+                          "type": "string"
+                        },
+                        "curriculumId": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "title": "Curriculumid"
+                        },
+                        "courseLabel": {
+                          "anyOf": [
+                            {
+                              "maxLength": 80,
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "과정명(예: 'SQL', 'Java'). 프롬프트 프레이밍에 쓴다 — 생략하면 매니페스트 기본값('Java')이 들어가고, 다른 과정 교안이면 모델이 흔들려 결과 언어·용어가 섞인다",
+                          "title": "Courselabel"
+                        },
+                        "modelCode": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "생략 시 서버 기본값. operator가 고른다",
+                          "title": "Modelcode"
+                        },
+                        "callbackUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현",
+                          "title": "Callbackurl"
+                        }
+                      },
+                      "required": [
+                        "versionId"
+                      ],
+                      "title": "CurriculumRequest",
+                      "type": "object"
+                    },
+                    "description": "요청 JSON을 문자열로. 구조는 CurriculumRequest",
+                    "example": "{\"versionId\":\"ver-1\",\"courseLabel\":\"SQL\"}"
+                  },
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "교안 PDF"
+                  }
+                }
+              },
+              "encoding": {
+                "payload": {
+                  "contentType": "application/json"
+                }
               }
             }
           }

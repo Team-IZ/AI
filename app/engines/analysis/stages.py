@@ -127,8 +127,14 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
         if not str(values.get(key, "")).strip():
             raise ValueError(f"{stage_id}({stage['title']}): 필수 값 누락 — {key}")
 
-    filled = _truncate(values, stage.get("truncation", {}))
     params = {p["key"]: p["default"] for p in stage.get("params", [])}
+
+    # 🔴 문자열 param은 **프롬프트 자리표시자이기도 하다.** 안 채우면 `{course_label}`이
+    # 문자 그대로 모델에게 나간다 (2026-08-02 실측: p01-2가 "KT AIVLE School
+    # {course_label} curriculum"으로 나갔고, 교안 결과가 한/영 혼재로 돌아왔다).
+    # 호출부가 준 값이 우선이고, 안 주면 매니페스트 기본값을 쓴다.
+    defaults = {k: v for k, v in params.items() if isinstance(v, str)}
+    filled = _truncate({**defaults, **values}, stage.get("truncation", {}))
     messages = [
         {"role": "system", "content": stage["system"]},
         {"role": "user", "content": _fill(stage["user_template"], filled)},

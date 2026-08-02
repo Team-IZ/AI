@@ -113,6 +113,7 @@ def _real_result(body: CurriculumRequest, pdf_bytes: bytes) -> CurriculumResult:
     built = engine.analyse(
         pdf_bytes,
         model_code=body.model_code or settings.model_code_curriculum,
+        course_label=body.course_label or "",
     )
     return CurriculumResult.model_validate({
         "version_id": body.version_id,

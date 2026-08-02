@@ -73,3 +73,28 @@ def test_grading_failure_is_documented():
 
     assert "503" in answers["responses"]
     assert "clientRequestId" in answers["responses"]["503"]["description"]
+
+
+def test_multipart_request_fields_are_readable():
+    """multipart 엔드포인트의 요청 필드가 스펙에 드러나야 한다.
+
+    `/analyses`·`/curricula`는 JSON 문자열(payload) + 파일을 받아 자동 바인딩을
+    안 쓴다 — 그래서 FastAPI가 요청 모델을 못 보고 **components에 안 실린다.**
+    설명 문장만 두면 백엔드는 versionId·questionBudget 같은 필드를 알 수 없다
+    (2026-08-02 발견). OpenAPI 3.1의 contentSchema로 구조를 싣는다.
+    """
+    spec = _spec()
+    assert spec["openapi"].startswith("3.1")
+
+    def payload_fields(path):
+        part = (spec["paths"][path]["post"]["requestBody"]["content"]
+                ["multipart/form-data"]["schema"]["properties"]["payload"])
+        assert part["contentMediaType"] == "application/json"
+        return set(part["contentSchema"]["properties"])
+
+    analyses = payload_fields("/api/v0/analyses")
+    assert {"method", "extractionScope", "questionBudget", "teaches",
+            "requirements", "focusItems", "modelCode"} <= analyses
+
+    curricula = payload_fields("/api/v0/curricula")
+    assert {"versionId", "courseLabel", "modelCode"} <= curricula
