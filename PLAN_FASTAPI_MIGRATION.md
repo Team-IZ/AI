@@ -15,7 +15,7 @@
 | 테스트 | **192 passed** |
 | 기능 | **6/6 완성 + 전부 실호출 검증.** 교안 · 코드 분석 · 문제 생성 · 힌트 · 채점 · 보고서 |
 | 계약 | `openapi.json` 재생성 완료(2026-08-02). `tests/test_openapi.py`가 드리프트를 막는다 |
-| 다음 | ✅ **T9 배포 완료** — 서울 EC2 + cloudflared(systemd 상시 가동, 외부 검증 끝). **App Runner는 신규 고객 차단으로 사용 불가.** 다음은 **T9d 백엔드 연동** — 터널 URL + 키 전달. 상세는 §T9 |
+| 다음 | ✅ **T9 배포 완료**(서울 EC2 + cloudflared, 외부 검증 끝. App Runner는 신규 고객 차단으로 사용 불가). 지금은 **§T11 안정화** — `aiUsage` 누락(F1)·`/reports` 헤더(F2) 수정, 계약 확정 D-1~D-3, **세션 무상태화 여부가 미결**. 그 다음 §T9d 백엔드 연동 |
 | 기준 | **§T10**(기능 동결) · **§T10-B**(PM 설계 v2 대조) · **§T10-C**(vendor 정책). 앞선 절과 충돌하면 이 셋이 이긴다 |
 | 막힌 것 | **없다.** 백엔드를 기다리지 않는다(§T0) — 우리가 확정해 통보한다 |
 | 🔴 위험 | **무료 티어.** 채점 5회 중 4회 실패한 시각이 있었다. 유료 전환이 근본 해결(`../output_docs/미결_논의사항.md` P-3) |
@@ -1164,6 +1164,120 @@ L1  concept 정의     L2  gap.missing     L3  siblings     L4  warns     ← �
 **1번이 먼저다.** `topics.select()`가 `analysis_document`를 필수 인자로 받는데 만드는 모듈이 없다. 그거 없이 `engine_mode="real"`을 꽂으면 `/analyses`가 500이 난다.
 
 **DoD**: `ENGINE_MODE=real`로 `/analyses`를 부르면 분석 문서 + 요구사항 P/F + 문제 3개(질문 12 + 힌트 24)가 스키마 검증을 통과해 나오고, `/sessions/*/answers`가 실제 채점 점수를 돌려주며, `/reports`가 문제 단위 보고서를 만든다.
+
+---
+
+### T11 — 안정화 + 백엔드 계약 확정 (2026-08-03 착수, 브랜치 `feature/stabilize`)
+
+**배경**: 배포(§T9)가 끝나 주소가 생겼다. 백엔드가 기획·구현을 아직 확정하지 못하고 있어
+**우리가 계약을 확정해 통보하는 방향**으로 간다. 그 전에 지금 만든 API가 우리가 의도한
+로직대로 도는지 감사했다.
+
+#### 감사 결과 (2026-08-03)
+
+**사양대로 도는 것** — 코드로 확인:
+
+| 항목 | 근거 |
+|---|---|
+| 4축 전면 동결 | `scoring.py:95` `FROZEN_AXES = tuple(AXIS_CODES)` |
+| 통과 3점 · 힌트 단계당 2회 · 상한 5/4/3 | `scoring.py` `PASS_SCORE`·`MAX_HINTS_PER_LEVEL`·`HINT_CAPS` |
+| 사다리 진행(통과→다음 축 / 미달→힌트 / 소진→다음 문제) | `sessions.py:222-231` |
+| 세션 중 LLM 호출 = 채점 1회 | `start_session`·`restore_session`에 호출 없음 |
+| 멱등(`clientRequestId` 재전송) | `sessions.py:181` |
+| 보고서 문제 단위(`problemId`) | `schemas/report.py:38` |
+| 타이머 1200초 | `schemas/session.py:58,115` |
+| 응답에 금액 필드 없음 | `schemas/usage.py` — 토큰·모델만 |
+
+**🔴 F1 — `aiUsage`가 분석 외 전 경로에서 빈 배열이다 (계약 위반, 미수정)**
+
+```
+분석    jobs.py:_to_ai_usage 로 채워짐                          ✅
+채점    sessions.py:204 가 sess.usages 에 모으지만
+        _to_view(127행)가 SessionView.ai_usage 를 안 채운다      ❌ 항상 []
+보고서  report.py 엔진이 usages 를 돌려주는데(38·237행)
+        reports.py:_real_result 가 버린다                        ❌ 항상 []
+교안    curriculum.py:245 가 usages 를 돌려주는데
+        curricula.py:_real_result 가 버린다                      ❌ 항상 []
+```
+
+**비용은 Spring이 계산한다**가 계약인데 AI가 토큰을 안 보내면 근거가 없다. 채점은
+학생 수 × 문제 3 × 축 4라 **호출 건수가 가장 많은 경로**인데 통째로 원장에서 빠진다.
+엔진은 이미 `usages`를 돌려주므로 **API 계층 배선만 하면 된다.**
+
+**🟠 F2 — `POST /reports`가 `Idempotency-Key`·`X-Trace-Id`를 안 받는다 (미수정)**
+
+`/analyses`·`/curricula`는 받는다(`api/analyses.py:95`). `/reports`(`api/reports.py:16`)만 body만 받아,
+백엔드가 재전송하면 같은 문제의 보고서 job이 두 개 생기고 추적이 끊긴다. 보고서는 문제마다
+1건이라 중복이 곧 비용이다.
+
+**🟡 F3 — `sessions.py:172` 주석이 "라우터가 502"인데 실제는 503 `GRADING_UNAVAILABLE`** (미수정)
+
+**🟡 F4 — 워크스페이스 `CLAUDE.md`의 힌트 사다리 설명이 폐기된 버전이다** (미수정)
+
+"힌트1=관점 되짚기 / 힌트2=**범위 좁힘**"으로 적혀 있으나 2026-08-02에 **재진술 사다리**로
+교체됐다(`scoring.py` `HINT_LADDER`). PM 설계 v2 §4-2가 범위 축소를 금지한다 —
+**범위를 좁히면 측정 대상이 바뀌어 비교가 깨진다.** 문서를 그대로 두면 반대로 구현될 위험.
+
+#### 확정 (2026-08-03, 사용자 결정)
+
+| # | 항목 | 결정 |
+|---|---|---|
+| **D-1** | `aiUsage.sourceType` 값 집합 | ✅ **`ANALYSIS` · `GRADING` · `REPORT` · `CURRICULUM`** 4개. 대문자 스네이크로 `errorCode`·`featureCode`와 표기 일치. `schemas/usage.py:41`의 "백엔드 확정 대기(C-4)" 주석을 이 값으로 교체한다 |
+| **D-2** | `POST /reports` 멱등키 형식 | ✅ **`{problemId}:{scoreRunId}`**. 같은 키면 기존 `jobId`를 그대로 돌려주고 LLM을 다시 부르지 않는다(`/analyses`와 같은 규칙) |
+| **D-3** | 요청 스키마의 `callbackUrl` | ✅ **필드 삭제.** 202+폴링으로 확정한다. AI→백엔드 방향 통신은 0이 된다 — 백엔드가 HTTP만 열려 있어 콜백을 구현하면 그 구간이 평문이 되고 인증·방화벽을 새로 정해야 한다. `schemas/analysis.py`·`schemas/curriculum.py` 양쪽에서 뺀다 |
+
+#### 🔴 미결 — 세션을 무상태로 바꿀 것인가 (논의 중, 결정 안 됨)
+
+**문제 제기 두 가지**
+
+① **AI 메모리는 반드시 날아간다.** 배포(`systemctl restart`)·EC2 Stop/Start·프로세스 재시작이면
+진행 중 세션이 사라진다. 그래서 `restore`가 있는데, 뒤집으면 **백엔드가 시작/진행/404복원
+세 갈래를 다 구현해야 한다.** 예외가 아니라 상시 경로다.
+
+② **질문·힌트 전면 동결이라 AI가 세션에서 할 일이 채점뿐이다.** 질문 12·힌트 24는 분석 배치에서
+만들어져 이미 백엔드 DB에 있다. "몇 번 문제·몇 번 축·힌트 몇 개"는 백엔드 데이터로 계산되는
+장부일 뿐인데 AI가 그 장부를 따로 들고 있다 — **같은 상태가 두 곳에 있고 한쪽만 날아간다.**
+
+| | 백엔드 구현 | AI 재시작 시 | 진행 규칙 소유 |
+|---|---|---|---|
+| **A. 현행 유지** | 시작+진행+복원 3갈래 | 세션 유실 → 복원 필요 | AI |
+| **B. 무상태 + AI가 규칙 소유** ← **권장** | **1갈래** | **영향 없음** | AI |
+| **C. 채점만 남김** | 진행 규칙까지 백엔드 | 영향 없음 | 백엔드 (규칙 중복) |
+
+**B 권장 근거**: ⓐ 백엔드가 문답 도메인을 하나도 안 만들어서 지금이 가장 싼 시점 ⓑ 배포·인스턴스
+중지가 세션을 안 깬다(현행은 **연동 테스트 중 우리가 재시작만 해도 백엔드 세션이 깨진다**)
+ⓒ 상한 5/4/3 같은 규칙이 한 곳에만 있다(C는 양쪽에 생겨 한쪽만 고치면 점수가 어긋난다)
+ⓓ 대가인 payload 증가(후반 턴 약 32KB)는 서비스 간 내부 통신이라 무시할 수준 — §T8도 같은 판단
+ⓔ 세션에 한해 인메모리 제약(§T9 제약 1)이 사라진다.
+
+**B로 갈 때의 계약**
+
+```
+POST /api/v0/sessions/{id}/answers      ← 이것 하나만 남는다
+  요청: clientRequestId · answerText · problems · transcript
+        · cursor(problemId · axisCode · hintsUsed)
+  응답: 채점 결과 · 다음 커서 · 다음 질문/힌트 텍스트 · state · aiUsage
+
+삭제: POST /sessions · GET /sessions/{id} · POST /sessions/{id}/restore
+```
+
+`restore`가 불필요해진다 — **모든 요청이 곧 restore**다.
+
+**A를 골라야 하는 경우**: 백엔드가 매 요청에 transcript·problems를 싣는 것을 거부하거나,
+프론트가 AI를 직접 호출하는 구조로 바뀔 때. 현재는 둘 다 아니다.
+
+#### 작업 순서 (예정)
+
+1. **F1 배선** — `jobs.py:_to_ai_usage`를 공용으로 올려 세션·보고서·교안이 함께 쓴다. 경로마다 회귀 테스트 1개
+2. **F2 헤더** — `/reports`에 `Idempotency-Key`(D-2 형식)·`X-Trace-Id` 추가
+3. **D-3** — `callbackUrl` 삭제
+4. **F3·F4** — 주석 정정, `CLAUDE.md` 힌트 사다리 갱신
+5. **세션 미결 결정 후** 반영 (B면 엔드포인트 3개 삭제 + `/answers` 스키마 확장)
+6. `openapi.json` 재생성 (1·2·3·5가 전부 계약 변경이다)
+7. **백엔드 전달 문서 1장** — `output_docs/`에 주소·헤더·엔드포인트·타임아웃·폴링 간격·에러 코드·재시도 규칙
+
+**백엔드에 요청할 것 3가지**(§T9d와 동일, 아직 전달 안 됨): AI 주소를 설정값으로 뺄 것 ·
+채점 호출 타임아웃 30초 이상 · AI IP 화이트리스트 계획 유무.
 
 ---
 
