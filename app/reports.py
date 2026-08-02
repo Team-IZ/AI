@@ -11,6 +11,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import get_args
 
+from app.config import get_settings
+from app.engines.analysis import stages
 from app.schemas.report import (
     AxisCode,
     ProblemResult,
@@ -117,14 +119,45 @@ def _stub_result(problem_id: str) -> ReportResult:
     )
 
 
-def run_report(job_id: str) -> None:
-    """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED (스텁은 항상 성공)."""
+def _real_result(body: ReportRequest) -> ReportResult:
+    """p04-6으로 서술을 만들고, 판정은 transcript에서 결정론으로 계산한다.
+
+    `problemNo`는 요청에 없다 — 문제 단위 호출이라 Spring이 문제를 알고 있고,
+    보고서 안에서 순번이 필요한 자리가 없다. 1로 고정한다.
+    """
+    from app.engines.analysis import report as report_engine
+
+    built = report_engine.build(
+        body.problem_id, 1,
+        [t if isinstance(t, dict) else dict(t) for t in body.transcript],
+        model_code=get_settings().model_code_analysis,
+        teaches=body.teaches,
+        analysis_documents=body.analysis_documents,
+    )
+    return ReportResult.model_validate({
+        "report_markdown": built.report_markdown,
+        "problem": built.problem,
+        "curriculum_refs": built.curriculum_refs,
+        "retest": built.retest,
+        "versions": {
+            "model_code": get_settings().model_code_analysis,
+            "prompt_version": stages.manifest_version(),
+            "rubric_version": "scoring-2026-08-02",
+        },
+    })
+
+
+def run_report(job_id: str, body: ReportRequest | None = None) -> None:
+    """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED."""
     job = _jobs[job_id]
     job.status = "RUNNING"
     job.started_at = datetime.now(timezone.utc)
 
     try:
-        job.result = _stub_result(job.problem_id or "prob-stub-1")
+        if get_settings().engine_mode == "real" and body is not None:
+            job.result = _real_result(body)
+        else:
+            job.result = _stub_result(job.problem_id or "prob-stub-1")
         job.status = "SUCCEEDED"
     except Exception as exc:
         job.status = "FAILED"

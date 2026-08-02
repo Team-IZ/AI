@@ -16,7 +16,7 @@ router = APIRouter(tags=["reports"])
 async def create_report(body: ReportRequest, background_tasks: BackgroundTasks) -> ReportAccepted:
     """요청을 접수하고 즉시 202. 실제 생성은 백그라운드에서."""
     job = reports.create_job(body)
-    background_tasks.add_task(reports.run_report, job.job_id)
+    background_tasks.add_task(reports.run_report, job.job_id, body)
     return ReportAccepted(job_id=job.job_id, status="QUEUED")
 
 
