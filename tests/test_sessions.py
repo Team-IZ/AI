@@ -230,3 +230,42 @@ def test_restore_replays_the_transcript(score):
     assert body["current"]["axisCode"] == "L1"
     assert body["current"]["hintsUsed"] == 2
     assert body["current"]["hintText"] == "L1 힌트 2"
+
+
+def test_grading_failure_returns_a_retryable_error(monkeypatch, score):
+    """채점이 깨지면 **파싱 가능한 503**이 나가야 한다.
+
+    안 잡으면 처리되지 않은 500이 나가는데 본문이 비어 있어 프론트가 파싱조차
+    못 한다 — 학생 화면에 아무 안내도 못 띄운다(2026-08-02 실호출에서 발견).
+    무료 티어 실패율이 32%라 드문 경로가 아니다.
+    """
+    from app.engines.analysis.stages import StageError
+
+    sid = _start()
+
+    def _boom(*a, **k):
+        raise StageError("p04-5: PROVIDER_ERROR", [{"status": "FAILED"}])
+
+    monkeypatch.setattr(sessions_mod.grading, "grade", _boom)
+
+    r = client.post(f"/api/v0/sessions/{sid}/answers",
+                    json={"clientRequestId": "boom", "answerText": "답변"}, headers=HEADERS)
+
+    assert r.status_code == 503
+    assert r.json()["error"] == "GRADING_UNAVAILABLE"
+    assert r.json()["retryable"] is True          # 같은 키로 재전송하면 된다
+
+
+def test_failed_turn_is_not_recorded(monkeypatch, score):
+    """실패한 턴이 기록되면 재전송이 중복 턴을 만든다. 커서도 안 움직여야 한다."""
+    from app.engines.analysis.stages import StageError
+
+    sid = _start()
+    monkeypatch.setattr(sessions_mod.grading, "grade",
+                        lambda *a, **k: (_ for _ in ()).throw(StageError("터짐", [])))
+    client.post(f"/api/v0/sessions/{sid}/answers",
+                json={"clientRequestId": "same", "answerText": "답변"}, headers=HEADERS)
+
+    view = client.get(f"/api/v0/sessions/{sid}", headers=HEADERS).json()
+    assert view["transcript"] == []
+    assert view["current"]["axisCode"] == "L1"    # 커서 그대로

@@ -3,6 +3,7 @@ from fastapi import APIRouter, status
 
 from app import sessions
 from app.api.errors import ApiError
+from app.engines.analysis.stages import StageError
 from app.schemas.common import ErrorResponse
 from app.schemas.session import AnswerSubmit, SessionRestore, SessionStart, SessionView
 
@@ -29,15 +30,33 @@ async def start_session(body: SessionStart) -> SessionView:
 @router.post(
     "/sessions/{session_id}/answers", response_model=SessionView,
     summary="답변 제출 -> 다음 질문/종료 (P03)",
-    responses={404: {"model": ErrorResponse, "description": "모르는 세션"}},
+    responses={
+        404: {"model": ErrorResponse, "description": "모르는 세션"},
+        503: {"model": ErrorResponse,
+              "description": "채점 실패. 같은 clientRequestId로 재전송하면 된다"},
+    },
 )
 async def submit_answer(session_id: str, body: AnswerSubmit) -> SessionView:
     """ 답변 받고 다음 질문(또는 종료)를 돌려줌.
-    
+
     같은 client_request_id 재전송 -> 처음 응답 그대로(멱등).
     세션 유실이면 404 -> Spring이 restore 호출
     """
-    view = sessions.submit_answer(session_id, body)
+    try:
+        view = sessions.submit_answer(session_id, body)
+    except StageError as exc:
+        # 🔴 채점은 세션에서 유일한 LLM 호출이고, 무료 티어 실패율이 32%다.
+        # 안 잡으면 처리되지 않은 500이 나가는데 **본문이 비어 있어 프론트가
+        # 파싱조차 못 한다** — 학생 화면에 아무 안내도 못 띄운다(2026-08-02 실측).
+        #
+        # 이 턴은 기록되지 않았으므로 **같은 clientRequestId로 재전송하면 된다.**
+        # 멱등키가 같아 중복 턴이 되지 않는다. 그래서 retryable=True다.
+        raise ApiError(
+            status_code=503, error="GRADING_UNAVAILABLE",
+            message=f"채점에 실패했습니다. 같은 clientRequestId로 다시 보내주세요: {exc}",
+            retryable=True,
+        ) from exc
+
     if view is None:
         raise _not_found(session_id)
     return view

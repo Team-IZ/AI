@@ -7,9 +7,10 @@
 세션 1회에 job이 3개 만들어진다.
 """
 
+import re
 import uuid
 from datetime import datetime, timezone
-from typing import get_args
+from typing import Any, get_args
 
 from app.config import get_settings
 from app.engines.analysis import stages
@@ -119,6 +120,21 @@ def _stub_result(problem_id: str) -> ReportResult:
     )
 
 
+_CAMEL = re.compile(r"(?<!^)(?=[A-Z])")
+
+
+def _to_snake(row: dict[str, Any]) -> dict[str, Any]:
+    """와이어(camelCase) 키를 엔진이 읽는 이름으로 바꾼다.
+
+    🔴 **`transcript`가 `list[dict]` 원시 타입이라 pydantic이 별칭을 안 풀어준다.**
+    다른 필드는 스키마가 `alias_generator`로 변환하는데 여기만 그대로 통과한다.
+    안 바꾸면 엔진이 `axis_code`를 찾다가 `axisCode`를 못 보고 **턴이 하나도 없는
+    것처럼 계산한다** — 도달 0단·재시험 True가 되고 에러는 안 난다
+    (2026-08-02 실호출에서 발견: 턴 3개를 넘겼는데 모델이 "문답 기록이 없다"고 썼다).
+    """
+    return {_CAMEL.sub("_", key).lower(): value for key, value in row.items()}
+
+
 def _real_result(body: ReportRequest) -> ReportResult:
     """p04-6으로 서술을 만들고, 판정은 transcript에서 결정론으로 계산한다.
 
@@ -127,10 +143,15 @@ def _real_result(body: ReportRequest) -> ReportResult:
     """
     from app.engines.analysis import report as report_engine
 
+    # 기본값은 **채점과 같은 모델**이다(`model_code_session`).
+    # 보고서는 문제가 끝날 때마다 세션 흐름 안에서 돌고(학생이 다음 문제를 푸는 동안
+    # 병렬), 분석 배치와 지연 요구가 다르다. 분석 기본값(nemotron-ultra)을 쓰면
+    # 세션이 끝나도 보고서가 안 나온다.
+    model_code = body.model_code or get_settings().model_code_session
     built = report_engine.build(
         body.problem_id, 1,
-        [t if isinstance(t, dict) else dict(t) for t in body.transcript],
-        model_code=get_settings().model_code_analysis,
+        [_to_snake(t if isinstance(t, dict) else dict(t)) for t in body.transcript],
+        model_code=model_code,
         teaches=body.teaches,
         analysis_documents=body.analysis_documents,
     )
@@ -140,7 +161,7 @@ def _real_result(body: ReportRequest) -> ReportResult:
         "curriculum_refs": built.curriculum_refs,
         "retest": built.retest,
         "versions": {
-            "model_code": get_settings().model_code_analysis,
+            "model_code": model_code,
             "prompt_version": stages.manifest_version(),
             "rubric_version": "scoring-2026-08-02",
         },

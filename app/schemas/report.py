@@ -38,6 +38,11 @@ class ReportRequest(BaseSchema):
     problem_id: str = Field(description="이 보고서가 다루는 문제. 문제 단위의 키")
     session_id: str | None = None
     score_run_id: str | None = Field(default=None, description="Spring ScoreRun 키(에코용)")
+    model_code: str | None = Field(
+        default=None,
+        description="생략 시 서버 기본값. `/analyses`·`/curricula`와 같은 규칙이다 — "
+                    "모델 선택은 operator 권한이고, 없으면 보고서만 비용·지연을 못 고른다",
+    )
     transcript: list[dict[str, Any]] = Field(
         default_factory=list,
         description="**이 문제의 턴만.** 점수가 이미 확정된 기록 (최대 4단계 × 3시도)",

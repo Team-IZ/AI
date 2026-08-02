@@ -145,3 +145,39 @@ def test_report_stages_must_be_four_in_order():
     only_l1 = [{"axisCode": "L1", "attemptCount": 3, "passed": False, "hintsUsed": 2}]
     with pytest.raises(ValidationError):
         ProblemResult(problemNo=1, problemId="p-1", totalScore=2, maxScore=20, stages=only_l1)
+
+
+def test_camelcase_transcript_reaches_the_engine(monkeypatch):
+    """와이어는 camelCase인데 엔진은 snake_case를 읽는다 — 안 바꾸면 조용히 다 버린다.
+
+    2026-08-02 실호출에서 발견: 턴 3개를 넘겼는데 도달 0단·재시험 True가 나왔고
+    모델이 "문답 기록이 없다"고 썼다. **에러는 안 났다.**
+
+    transcript만 list[dict] 원시 타입이라 pydantic의 alias 변환을 안 탄다.
+    """
+    from app.config import get_settings
+    from app.engines.analysis import stages
+
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
+    monkeypatch.setattr(
+        stages, "call",
+        lambda *a, **k: stages.StageResult(data={"summary": "요약"}, usages=[]),
+    )
+
+    wire_turn = {
+        "problemId": "prob-1", "axisCode": "L1", "questionText": "q",
+        "answerText": "a", "answeredAt": "2026-08-02T00:00:00Z",
+        "bestScore": 4, "confirmedScore": 4, "attemptCount": 1, "autonomy": "SELF",
+    }
+    try:
+        r = client.post("/api/v0/reports", headers=HEADERS, json={
+            "problemId": "prob-1", "transcript": [wire_turn], "modelCode": "m",
+        })
+        result = client.get(f"/api/v0/reports/{r.json()['jobId']}",
+                            headers=HEADERS).json()["result"]
+    finally:
+        monkeypatch.setattr(get_settings(), "engine_mode", "stub")
+
+    assert result["problem"]["reachedStage"] == 1        # 0이면 턴을 못 읽은 것
+    assert result["problem"]["stages"][0]["attemptCount"] == 1
+    assert result["retest"] is True                      # L2 미도달이라 재시험은 맞다
