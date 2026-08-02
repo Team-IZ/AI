@@ -1,0 +1,109 @@
+{
+  "manifest_version": "1.0.0",
+  "generated_from_commit_note": "extracted by hand-reading the real source files during D-web-lab implementation, 2026-07-14",
+  "pipelines": {
+    "p01": {
+      "label": "교안 분석",
+      "source_file": "scripts/java_curriculum_nvidia_pipeline.py",
+      "has_llm_calls": true,
+      "stages": [
+        {
+          "id": "p01-1",
+          "title": "PDF → 청크 분할",
+          "kind": "params",
+          "function": "build_chunks() / pdf_page_count() / extract_pages()",
+          "note": "LLM 호출 없음 — pdftotext -layout으로 페이지 텍스트 추출 (웹 도구에선 pdf.js로 대체, 완전히 동일한 결과는 아님).",
+          "params": [
+            { "key": "chunk_size", "type": "int", "default": 10, "note": "몇 페이지씩 한 청크로 묶을지" }
+          ]
+        },
+        {
+          "id": "p01-2",
+          "title": "청크 분석",
+          "kind": "prompt",
+          "function": "analyse_chunk()",
+          "system": "You are a precise curriculum-analysis extractor. Output strict JSON only.",
+          "user_template": "KT AIVLE School {course_label} curriculum PDF page range: {chunk_range}.\n\nReturn ONLY valid JSON with this exact shape:\n{{\n  \"chunk_range\": \"{chunk_range}\",\n  \"units\": [{{\"unit_id\": \"02\", \"unit_title\": \"<specific topic on these pages, e.g. Variables and Data Types>\", \"source_pages\": [4, 5]}}],\n  \"concepts\": [\n    {{\n      \"name\": \"short concept name\",\n      \"kind\": \"concept|code_example|caution\",\n      \"unit_id\": \"<must match one of the unit_id values in units above>\",\n      \"summary\": \"one sentence grounded in the slides\",\n      \"source_pages\": [1],\n      \"evidence\": \"short paraphrase of the page evidence\"\n    }}\n  ]\n}}\n\nRules:\n- unit_title must name the actual topic on these pages (e.g. \"Variables and Data Types\", \"Loops\", \"Exception Handling\") -- never a generic label like \"Overview\", \"Introduction\", or \"Chapter N\" unless these exact pages are a title/table-of-contents slide with no substantive teaching content.\n- If this chunk covers more than one distinct topic, list each as its own entry in units, and set each concept's unit_id to whichever unit it actually belongs to.\n- Every concept's unit_id must exactly match one of the unit_id values listed in units above.\n- Every concept must have at least one concrete page number from {chunk_start}..{chunk_end}.\n- Do not invent content outside the given pages.\n- If a page is just title/table-of-contents, preserve it only if it affects unit mapping.\n\nPDF text:\n{chunk_text}",
+          "required_placeholders": ["chunk_range", "chunk_text"],
+          "optional_placeholders": ["course_label", "chunk_start", "chunk_end"],
+          "truncation": { "chunk_text": 18000 },
+          "note": "D1/D2 (2026-07-21): concepts[].unit_id added + 'Overview' literal example replaced with a <placeholder> pattern. WHY: a real 251-page run had nearly every concept land in one giant 'Overview' unit (p.1-251) -- root-caused to (a) concepts had no unit_id so makeUnitMap() could only guess chunk.units[0] for multi-unit chunks, and (b) the old example's literal \"unit_id\":\"01\",\"unit_title\":\"Overview\" got echoed verbatim across many of the 26 independent chunk calls, so unrelated chunks collided under the same unit_id at merge time. COST: response schema changed -- only affects new runs, not past saved data. EXIT: if collisions persist even with unit_id present, escalate to a code-level fix (namespace unit_id by chunk at collection time) instead of further prompt tweaks.",
+          "params": [
+            { "key": "course_label", "type": "string", "default": "Java", "note": "D131: 프롬프트 프레이밍용, 다른 커리큘럼(LLMOps 등)에 재사용할 때 바꾼다" },
+            { "key": "max_tokens", "type": "int", "default": 3600, "note": "D161: 1800이 실측으로 부족했음(D158) — 그 재시도가 성공한 값(2배)을 기본값으로 승격, 임의 숫자 아님" },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true, "note": "고정 — 재현성 요구사항" },
+            { "key": "response_format_json", "type": "bool", "default": true }
+          ]
+        },
+        {
+          "id": "p01-3",
+          "title": "Refine 루프",
+          "kind": "prompt",
+          "function": "refine_once()",
+          "system": "You are a strict graph/refinement auditor. Output strict JSON only.",
+          "user_template": "Audit this page-grounded {course_label} curriculum unit_map for refinement iteration {iteration}.\n\nReturn ONLY valid JSON:\n{{\n  \"iteration\": {iteration},\n  \"status\": \"pass|needs_refine\",\n  \"coverage_summary\": \"short summary\",\n  \"issues\": [\n    {{\"severity\": \"high|medium|low\", \"issue\": \"specific issue\", \"issue_type\": \"duplicate_exact|missing_pages|overbroad_unit|boundary_split_needed|coverage_gap_failed_chunk|other\", \"affected_unit_ids\": [\"01\"], \"source_pages\": [1, 2], \"suggested_fix\": \"fix\"}}\n  ],\n  \"checklist\": {{\n    \"all_concepts_have_pages\": true,\n    \"unit_boundaries_clear\": true,\n    \"duplicates_detected\": false,\n    \"question_generation_ready\": true\n  }}\n}}\n\nChecklist standard:\n- page provenance must be concrete.\n- concepts without pages are a hard failure.\n- duplicate or overly broad concept nodes should be called out.\n- graph should support asking \"where in the PDF does this concept come from?\"\n\nissue_type guide:\n- duplicate_exact: near-identical concept/code_example/caution nodes that should be merged.\n- overbroad_unit / boundary_split_needed: a unit spans clearly distinct topics and should be split.\n- missing_pages: an existing item's page citation looks incomplete or wrong (do NOT use this to mean \"invent more pages\").\n- coverage_gap_failed_chunk: content is missing because a chunk failed to analyze, not something restructuring can fix.\n- other: anything not covered above.\naffected_unit_ids must list the real unit_id values (from unit_map's own keys) this issue concerns.\n\nunit_map:\n{unit_map_json}",
+          "required_placeholders": ["iteration", "unit_map_json"],
+          "optional_placeholders": ["course_label"],
+          "truncation": { "unit_map_json": 24000 },
+          "note": "D174 Phase 2: issue_type/affected_unit_ids added so p01-runner.js can route only genuinely-actionable issues (duplicate_exact/overbroad_unit/boundary_split_needed) to the new p01-3b apply stage -- missing_pages and coverage_gap_failed_chunk are surfaced but never auto-\"fixed\" (the former risks inventing pages, the latter is D169's failed-chunk gap, explicitly out of scope for restructuring).",
+          "params": [
+            { "key": "refine_iters", "type": "int", "default": 5, "note": "D172: 최대 반복 횟수(안전 상한) -- checklist.question_generation_ready가 true가 되면 그 전에 멈춤. D174 이후: 이 상한은 감사(p01-3) 호출뿐 아니라 그 안에서 조건부로 호출되는 자동수정(p01-3b) 시도 횟수까지 같이 제한함 -- 자동수정은 수렴 '확률'을 높일 뿐 보장하지 않으므로(missing_pages/coverage_gap_failed_chunk는 애초에 자동수정 대상이 아니고, 시도해도 근거검증 실패로 거부될 수 있음) 이 상한 자체는 여전히 필요. 실측 수렴 데이터 없어 2에서 잠정적으로 상향, 실사용 데이터 쌓이면 재조정" },
+            { "key": "max_tokens", "type": "int", "default": 1600 },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true }
+          ]
+        },
+        {
+          "id": "p01-3b",
+          "title": "Refine 자동수정",
+          "kind": "prompt",
+          "function": "(D174 Phase 3 신설 -- 원본 파이프라인엔 대응 함수 없음, refine_once()는 unit_map을 수정하지 않음)",
+          "system": "You revise a page-grounded curriculum unit_map to address specific audit issues, without inventing content or page citations that aren't backed by the provided source chunk evidence.",
+          "user_template": "Revise this {course_label} curriculum unit_map to address the listed issues. You may split/merge/rename units, merge duplicate items, and adjust groupings -- but every item in your revised unit_map must keep (or derive from) real evidence and source_pages already present in unit_map or source_chunks below. Never invent a page number or a concept that isn't backed by this data.\n\nReturn ONLY valid JSON:\n{{\n  \"revised_unit_map\": {{ \"<unit_id>\": {{\"unit_id\": \"...\", \"unit_title\": \"...\", \"source_pages\": [1, 2], \"concepts\": [], \"code_examples\": [], \"cautions\": []}} }},\n  \"changes\": [\"short description of each change made\"],\n  \"unresolved_issues\": [\"issue text you could not safely address with the given evidence\"]\n}}\n\nRules:\n- If you cannot safely address an issue without inventing content, list it in unresolved_issues instead of guessing.\n- Every concept/code_example/caution must keep non-empty source_pages and a non-empty evidence field.\n- Do not drop existing valid items unless the issue explicitly calls for merging/removing a duplicate.\n- revised_unit_map must include EVERY unit from the current unit_map, not just the ones you changed.\n\nIssues to address:\n{issues_json}\n\nCurrent unit_map:\n{unit_map_json}\n\nSource chunk evidence (for grounding -- do not cite pages outside what's shown here or already in unit_map):\n{source_chunks_json}",
+          "required_placeholders": ["unit_map_json", "issues_json", "source_chunks_json"],
+          "optional_placeholders": ["course_label"],
+          "truncation": { "unit_map_json": 24000, "issues_json": 8000, "source_chunks_json": 16000 },
+          "note": "D174 Phase 3: NEW stage, no real-pipeline equivalent (refine_once() is audit-only there) -- the actual 'apply the fix' step Codex's plan recommended keeping separate from p01-3's own audit call, so the auditor never grades its own edit. Only invoked for actionable issue_types (duplicate_exact/overbroad_unit/boundary_split_needed); its output is REJECTED by p01-runner.js's validateUnitMapGrounding() if it fails grounding checks, never accepted blindly.",
+          "params": [
+            { "key": "max_tokens", "type": "int", "default": 3600 },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true }
+          ]
+        },
+        {
+          "id": "p01-4",
+          "title": "질문 생성",
+          "kind": "prompt",
+          "function": "generate_questions()",
+          "system": "You design graph-grounded diagnostic questions. Output strict JSON only.",
+          "user_template": "Use this page-grounded {course_label} curriculum graph (scoped to a single unit) to generate diagnostic interview questions.\n\nReturn ONLY valid JSON:\n{{\n  \"questions\": [\n    {{\n      \"unit\": \"Unit 01\",\n      \"question\": \"question text\",\n      \"source_node_ids\": [\"concepts:01:1\"],\n      \"source_pages\": [4, 5],\n      \"rationale\": \"why this checks understanding\",\n      \"good_answer_signal\": \"what a strong answer includes\",\n      \"common_gap\": \"what learners often miss\"\n    }}\n  ]\n}}\n\nRules:\n- Every question must cite source_node_ids and concrete source_pages.\n- Prefer questions that require trade-off, counterexample, or code reasoning.\n- Do not cite a page unless a source node carries that page.\n- Cover a SPREAD of distinct nodes in this unit (different concepts/code_examples/cautions) -- do not ask multiple questions that all cite the same one or two source_node_ids.\n\nGraph nodes:\n{graph_nodes_json}",
+          "required_placeholders": ["graph_nodes_json"],
+          "optional_placeholders": ["course_label"],
+          "truncation": { "graph_nodes_json": 24000 },
+          "note": "D173: called once PER UNIT now (p01-runner.js loops unitMap's units), not once for the whole multi-unit graph -- this is the second place P01 intentionally diverges from the real pipeline's generate_questions(), after D172's refine loop. graph_nodes_json here is scoped to a single unit's own nodes.",
+          "params": [
+            { "key": "max_tokens", "type": "int", "default": 1800 },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true }
+          ]
+        },
+        {
+          "id": "p01-json-repair",
+          "title": "(고급) JSON 복구 프롬프트",
+          "kind": "prompt",
+          "function": "chat_json() 내부, 위 3단계 전부 공유",
+          "advanced": true,
+          "system": "You repair malformed JSON. Output strict JSON only.",
+          "user_template": "Repair the following malformed JSON into one valid JSON object. Preserve all fields and content where possible. Return JSON only.\n\n{malformed_content}",
+          "required_placeholders": ["malformed_content"],
+          "truncation": { "malformed_content": 14000 },
+          "note": "위 세 단계 중 어느 하나가 유효한 JSON을 반환하지 못했을 때만 자동으로 한 번 더 호출됨."
+        }
+      ]
+    }
+  },
+
+  "shared": {
+    "nvidia_endpoint": "https://integrate.api.nvidia.com/v1/chat/completions",
+    "cors_note": "이 엔드포인트는 Access-Control-Allow-Origin 헤더가 없어 브라우저 직접 호출이 차단된다(2026-07-14 실측). 모든 LLM 호출은 proxy_url을 거친다.",
+    "default_model": "qwen/qwen3-next-80b-a3b-instruct",
+    "locked_temperature": 0.0
+  }
+}

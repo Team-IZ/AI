@@ -15,7 +15,12 @@ from typing import Any
 
 from app.llm import client
 
-_MANIFEST = Path(__file__).parent / "vendor" / "prompt_manifest.json"
+_VENDOR = Path(__file__).parent / "vendor"
+
+# 매니페스트가 두 개다 — 출처가 다른 PoC 브랜치라 한 파일로 합치지 않는다.
+# 합치면 어느 쪽 갱신인지 구분이 사라지고 SOURCE.md의 기준 커밋도 하나만 남는다.
+_MANIFEST = _VENDOR / "prompt_manifest.json"            # p04 · feat/poc_full
+_CURRICULUM_MANIFEST = _VENDOR / "curriculum_manifest.json"   # p01 · feat/pdf_analysis
 
 # ```json ... ``` 울타리. JSON 모드를 켜도 모델이 가끔 감싸서 준다.
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
@@ -41,11 +46,31 @@ def _manifest() -> dict[str, Any]:
     return json.loads(_MANIFEST.read_text(encoding="utf-8"))
 
 
+@lru_cache(maxsize=1)
+def _stages_by_id() -> dict[str, dict[str, Any]]:
+    """두 매니페스트의 모든 파이프라인을 stage_id 하나로 평탄화한다.
+
+    stage_id에 파이프라인 접두사가 들어 있어(`p01-2`·`p04-5`) 충돌하지 않는다.
+    호출부가 "이게 어느 매니페스트에 있나"를 몰라도 되게 하려는 것 — 그건
+    vendor 사정이지 우리 로직이 아니다.
+    """
+    found: dict[str, dict[str, Any]] = {}
+    for path in (_MANIFEST, _CURRICULUM_MANIFEST):
+        if not path.exists():
+            continue
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for pipeline in (data.get("pipelines") or {}).values():
+            for stage in pipeline.get("stages") or []:
+                if stage.get("id") and stage.get("kind") == "prompt":
+                    found[stage["id"]] = stage
+    return found
+
+
 def get_stage(stage_id: str) -> dict[str, Any]:
-    for stage in _manifest()["pipelines"]["p04"]["stages"]:
-        if stage["id"] == stage_id:
-            return stage
-    raise KeyError(f"알 수 없는 p04 stage: {stage_id}")
+    stage = _stages_by_id().get(stage_id)
+    if stage is None:
+        raise KeyError(f"알 수 없는 stage: {stage_id}")
+    return stage
 
 
 def manifest_version() -> str:

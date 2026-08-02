@@ -10,6 +10,7 @@ LMS 업로드 시점에 도는 것이 전제다 — 그래서 멱등키로 중�
 import uuid
 from datetime import datetime, timezone
 
+from app.config import get_settings
 from app.schemas.curriculum import (
     CurriculumJobStatus,
     CurriculumRequest,
@@ -100,14 +101,41 @@ def _stub_result(body: CurriculumRequest, pdf_bytes: bytes | None) -> Curriculum
     )
 
 
+def _real_result(body: CurriculumRequest, pdf_bytes: bytes) -> CurriculumResult:
+    """PDF를 실제로 분석한다.
+
+    **청크가 하나라도 깨지면 `fallback_used`를 세운다.** 결과는 나오지만 그 페이지
+    범위의 개념이 빠져 있다는 뜻이라, 강사가 teach 3건을 고르기 전에 알아야 한다.
+    """
+    from app.engines import curriculum as engine
+
+    settings = get_settings()
+    built = engine.analyse(
+        pdf_bytes,
+        model_code=body.model_code or settings.model_code_curriculum,
+    )
+    return CurriculumResult.model_validate({
+        "version_id": body.version_id,
+        "analysis_version": engine.ANALYSIS_VERSION,
+        "prompt_version": None,
+        "extraction_status": "EXTRACTED" if built.sections else "EMPTY",
+        "quality_status": "OK" if not built.failed_chunks else "PARTIAL",
+        "fallback_used": bool(built.failed_chunks),
+        "sections": built.sections,
+    })
+
+
 def run_curriculum(job_id: str, body: CurriculumRequest, pdf_bytes: bytes | None) -> None:
-    """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED (스텁은 항상 성공)."""
+    """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED."""
     job = _jobs[job_id]
     job.status = "RUNNING"
     job.started_at = datetime.now(timezone.utc)
 
     try:
-        job.result = _stub_result(body, pdf_bytes)
+        if get_settings().engine_mode == "real" and pdf_bytes:
+            job.result = _real_result(body, pdf_bytes)
+        else:
+            job.result = _stub_result(body, pdf_bytes)
         job.status = "SUCCEEDED"
     except Exception as exc:
         # 엔진 터지거나 계약 어기면 FAILED로. 예외 삼키지 말고 사유 기록

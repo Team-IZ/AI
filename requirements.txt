@@ -2,8 +2,11 @@
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.30,<1.0
 pydantic-settings>=2.4,<3.0
-python-multipart>=0.0.9        # Phase 2 ZIP 업로드 대비
-httpx>=0.27,<1.0               # NVIDIA API 호출(Phase 3+) 및 테스트 클라이언트
+python-multipart>=0.0.9        # ZIP·PDF 업로드(multipart)
+httpx>=0.27,<1.0               # NVIDIA API 호출 및 테스트 클라이언트
+# 교안 PDF 텍스트 추출. 순수 파이썬이라 poppler 같은 시스템 바이너리를 안 쓴다 —
+# 관리형 런타임(App Runner)에서는 시스템 패키지를 깔 수 없다.
+pypdf>=5.0,<7.0
 
 # dev/test
 pytest>=8.0,<9.0

@@ -22,13 +22,23 @@
 원본이 고쳐지는 쪽이 낫다 — 그러면 패치를 지울 수 있다. `PATCHES.md`의 "상류 반영" 칸이
 그 상태를 추적한다.
 
-| | |
-|---|---|
-| 출처 | `Team-IZ/AI` 브랜치 `feat/poc_full` 의 `cognition/` · `judgment/` · `feedback/` + `app/prompt_manifest.json` |
-| 기준 커밋 | `15b02fb` (2026-07-30) |
-| 복사 일자 | 2026-07-31 |
-| 구성 | `.py` 12개 + `.json` 데이터 19개 + `prompt_manifest.json`(p04-0.2.0) |
-| 의존성 | 없음 (Python stdlib만) |
+**출처가 두 브랜치다.** 갱신 주기가 서로 다르므로 표도 따로 본다.
+
+| | 규칙부 + p04 | 교안 p01 |
+|---|---|---|
+| 출처 | `feat/poc_full` 의 `cognition/`·`judgment/`·`feedback/` + `app/prompt_manifest.json` | `feat/pdf_analysis` 의 `docs/lab/prompt_manifest.json` |
+| 받는 파일 | 위 3개 디렉터리 + `prompt_manifest.json` | `curriculum_manifest.json` (개명해 둔다) |
+| 기준 커밋 | `15b02fb` (2026-07-30) | `5c7f84f` (2026-08-02) |
+| 복사 일자 | 2026-07-31 | 2026-08-02 |
+| 구성 | `.py` 12개 + `.json` 데이터 19개 + 매니페스트(p04-0.2.0) | 매니페스트 1개(p01-1.0.0) |
+| 의존성 | 없음 (Python stdlib만) | 없음 (프롬프트 문자열뿐) |
+
+⚠️ **`feat/poc_full`의 상류가 `756c4cb`로 앞서 있다**(Tier B 제거). 동기화는 선별 로직
+교체와 함께 판단한다 — `PLAN_FASTAPI_MIGRATION.md` §T10-B §7-8.
+
+**`stages.py`가 두 매니페스트를 함께 읽는다.** stage id에 파이프라인 접두사가 있어
+(`p01-2`·`p04-5`) 충돌하지 않으므로 호출부는 어느 파일에 있는지 몰라도 된다.
+**한 파일로 합치지 않는다** — 합치면 어느 쪽 갱신인지 구분이 사라진다.
 
 ## `prompt_manifest.json`은 계약이다
 
@@ -51,10 +61,15 @@ JSON 데이터 파일도 `os.path.dirname(__file__)` 기준으로 열리므로 *
 
 ```powershell
 # AI/ 에서. ai_poc/ 워크트리를 먼저 최신화해 둘 것
-$src = "..\ai_poc\poc_full"
 $dst = "app\engines\analysis\vendor"
+
+# 규칙부 + p04
+$src = "..\ai_poc\poc_full"
 foreach ($d in @("cognition","judgment","feedback")) { Copy-Item -Recurse -Force "$src\$d" "$dst\$d" }
 Copy-Item -Force "$src\app\prompt_manifest.json" "$dst\prompt_manifest.json"
+
+# 교안 p01 (다른 브랜치 · 개명해서 받는다)
+Copy-Item -Force "..\ai_poc\pdf\docs\lab\prompt_manifest.json" "$dst\curriculum_manifest.json"
 ```
 
 **복사는 우리 패치를 덮어쓴다.** 그래서 갱신은 세 단계다:
