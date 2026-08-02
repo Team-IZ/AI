@@ -1,75 +1,199 @@
-""" 7단계 세션 엔드포인트 스텁 테스트. """
+""" 문답 세션 진행 + 채점.
+
+**AI는 세션 중에 아무것도 만들지 않는다** — 문제·질문·힌트는 요청에 실려 오고
+LLM 호출은 채점 하나뿐이다. 그래서 여기 테스트는 **계단 규칙**을 잰다:
+언제 다음 단계로 가고, 언제 힌트가 열리고, 언제 문제가 끝나는가.
+
+채점기는 가짜다. 재는 것은 모델 품질이 아니라 판정에 따른 **진행 규칙**이다.
+"""
+import pytest
 from fastapi.testclient import TestClient
 
+from app import sessions as sessions_mod
 from app.config import get_settings
+from app.engines.analysis import grading
 from app.main import app
 
 client = TestClient(app)
 HEADERS = {"X-Internal-Key": get_settings().internal_api_key}
 
-START_BODY = {"attemptId": "a-1", "timeLimitSec": 1200}
+
+def _stage(axis: str) -> dict:
+    return {
+        "axisCode": axis,
+        "questionText": f"{axis} 질문",
+        "hints": [
+            {"hintLevel": 1, "hintText": f"{axis} 힌트 1"},
+            {"hintLevel": 2, "hintText": f"{axis} 힌트 2"},
+        ],
+    }
+
+
+def _problem(no: int) -> dict:
+    return {
+        "problemId": f"prob-{no}", "problemNo": no, "problemType": "DESIGN_CHOICE",
+        "priority": 1.0, "sourcePath": "app/pay.py", "lineStart": 4, "lineEnd": 7,
+        "codeSnippet": "def pay(order, method):", "evidenceHash": "a" * 64,
+        "extractorVersion": "v0",
+        "stages": [_stage(a) for a in ("L1", "L2", "L3", "L4")],
+    }
+
+
+START_BODY = {"attemptId": "a-1", "timeLimitSec": 1200,
+              "problems": [_problem(1), _problem(2)]}
+
+
+@pytest.fixture
+def score(monkeypatch):
+    """채점 점수를 시나리오로 준다. 다 쓰면 마지막 값을 반복한다."""
+    plan: list[int] = [4]
+
+    def _grade(axis_code, question, answer, *, model_code, hints=None, **kw):
+        value = plan[0] if len(plan) == 1 else plan.pop(0)
+        used = len(hints or [])
+        confirmed = min(value, grading.scoring.cap_for(used))
+        return grading.Grade(
+            axis_code=axis_code, best_score=value, confirmed_score=confirmed,
+            hints_used=used, passed=confirmed >= grading.scoring.PASS_SCORE,
+            autonomy=grading.scoring.autonomy_for(used),
+            matched_level="", evidence="", missing="", usages=[],
+        )
+
+    monkeypatch.setattr(sessions_mod.grading, "grade", _grade)
+    return plan
 
 
 def _start() -> str:
-    """세션 하나 만들고 sessionId 반환."""
     r = client.post("/api/v0/sessions", json=START_BODY, headers=HEADERS)
     assert r.status_code == 201
     return r.json()["sessionId"]
 
 
-def test_start_returns_first_question():
-    """세션 시작 → 201 + IN_PROGRESS + 첫 질문(sequenceNo 1)."""
-    r = client.post("/api/v0/sessions", json=START_BODY, headers=HEADERS)
+def _answer(sid: str, request_id: str, text: str = "답변입니다") -> dict:
+    return client.post(f"/api/v0/sessions/{sid}/answers",
+                       json={"clientRequestId": request_id, "answerText": text},
+                       headers=HEADERS).json()
 
-    assert r.status_code == 201
-    body = r.json()
+
+def test_start_serves_the_frozen_first_question(score):
+    """세션 시작 → 분석이 동결해 둔 L1 질문이 그대로 나온다. 만들지 않는다."""
+    body = client.post("/api/v0/sessions", json=START_BODY, headers=HEADERS).json()
+
     assert body["state"] == "IN_PROGRESS"
-    assert body["current"]["sequenceNo"] == 1
+    assert body["current"]["axisCode"] == "L1"
+    assert body["current"]["questionText"] == "L1 질문"
+    assert body["current"]["hintText"] is None        # 첫 시도엔 힌트 없음
+    assert body["current"]["codeContext"]["path"] == "app/pay.py"
     assert body["progress"]["problemTotal"] == 2
 
 
-def test_answer_advances_to_next_question():
-    """답변 1개 제출 → 다음 질문(sequenceNo 2)."""
-    sid = _start()
+def test_no_problems_means_no_session(score):
+    """문제를 안 주면 물을 것이 없다. 지어내지 않는다 — 그게 근거 전제를 깬다."""
+    body = client.post("/api/v0/sessions", json={"timeLimitSec": 1200},
+                       headers=HEADERS).json()
 
-    r = client.post(
-        f"/api/v0/sessions/{sid}/answers",
-        json={"clientRequestId": "req-1", "answerText": "제 의도는..."},
-        headers=HEADERS,
-    )
-
-    assert r.json()["current"]["sequenceNo"] == 2
-
-
-def test_answering_all_questions_completes_session():
-    """질문 다 답하면 COMPLETED + transcript 2턴."""
-    sid = _start()
-    client.post(f"/api/v0/sessions/{sid}/answers",
-                json={"clientRequestId": "r1", "answerText": "a1"}, headers=HEADERS)
-    r = client.post(f"/api/v0/sessions/{sid}/answers",
-                    json={"clientRequestId": "r2", "answerText": "a2"}, headers=HEADERS)
-
-    body = r.json()
     assert body["state"] == "COMPLETED"
-    assert len(body["transcript"]) == 2
     assert body["current"] is None
 
 
-def test_same_client_request_id_is_idempotent():
-    """같은 clientRequestId 재전송 → 동일 응답, 중복 턴 없음."""
+def test_pass_climbs_to_the_next_axis(score):
+    """통과하면 다음 단계로. 계단은 건너뛰지 않는다."""
     sid = _start()
-    first = client.post(f"/api/v0/sessions/{sid}/answers",
-                        json={"clientRequestId": "dup", "answerText": "a"}, headers=HEADERS)
-    second = client.post(f"/api/v0/sessions/{sid}/answers",
-                         json={"clientRequestId": "dup", "answerText": "a"}, headers=HEADERS)
 
-    assert first.json() == second.json()  # 응답 동일
-    # 커서가 두 번 안 밀렸는지: 여전히 2번 질문
-    assert first.json()["current"]["sequenceNo"] == 2
+    body = _answer(sid, "r1")
+
+    assert body["current"]["axisCode"] == "L2"
+    assert body["current"]["hintsUsed"] == 0
 
 
-def test_get_session_returns_state():
-    """GET으로 현재 상태 조회."""
+def test_fail_opens_a_hint_and_keeps_the_question(score):
+    """미달이면 힌트가 열리고 **같은 질문을 다시 묻는다**.
+
+    힌트는 재진술이라 원 질문을 대체하지 않는다 — questionText가 그대로여야 한다.
+    """
+    score[:] = [2]
+    sid = _start()
+
+    body = _answer(sid, "r1")
+
+    assert body["current"]["axisCode"] == "L1"           # 같은 단계
+    assert body["current"]["questionText"] == "L1 질문"   # 같은 질문
+    assert body["current"]["hintText"] == "L1 힌트 1"
+    assert body["current"]["hintsUsed"] == 1
+
+
+def test_second_failure_opens_the_second_hint(score):
+    score[:] = [2]
+    sid = _start()
+    _answer(sid, "r1")
+
+    body = _answer(sid, "r2")
+
+    assert body["current"]["hintText"] == "L1 힌트 2"
+    assert body["current"]["hintsUsed"] == 2
+
+
+def test_exhausted_hints_end_the_problem(score):
+    """힌트를 다 쓰고도 미달이면 그 문제는 끝이다. 다음 단계를 던지지 않는다."""
+    score[:] = [2]
+    sid = _start()
+    _answer(sid, "r1")
+    _answer(sid, "r2")
+
+    body = _answer(sid, "r3")
+
+    assert body["current"]["problemId"] == "prob-2"      # 다음 문제로
+    assert body["current"]["axisCode"] == "L1"           # 그 문제의 L1부터
+    assert len(body["transcript"]) == 3                  # 세 시도가 다 기록된다
+
+
+def test_hint_cap_is_recorded_in_the_turn(score):
+    """힌트를 쓰고 통과하면 원점수는 보존되고 기록 점수만 상한에 걸린다."""
+    score[:] = [2, 5]
+    sid = _start()
+    _answer(sid, "r1")                                   # 미달 → 힌트 1
+
+    turn = _answer(sid, "r2")["transcript"][1]
+
+    assert turn["bestScore"] == 5
+    assert turn["confirmedScore"] == 4                   # 힌트 1회 상한
+    assert turn["autonomy"] == "SELF_MAINTAINED"
+    assert turn["hintText"] == "L1 힌트 1"               # 어떤 힌트를 보고 답했는지
+    assert turn["attemptCount"] == 2
+
+
+def test_completing_all_axes_moves_to_the_next_problem(score):
+    """L4까지 통과하면 그 문제는 완주. 다음 문제의 L1로 간다."""
+    sid = _start()
+    for i, _ in enumerate(("L1", "L2", "L3", "L4"), start=1):
+        body = _answer(sid, f"r{i}")
+
+    assert body["current"]["problemId"] == "prob-2"
+    assert body["current"]["axisCode"] == "L1"
+
+
+def test_session_completes_after_the_last_problem(score):
+    """문제 2개 × 4단계 = 8턴이면 끝."""
+    sid = _start()
+    for i in range(8):
+        body = _answer(sid, f"r{i}")
+
+    assert body["state"] == "COMPLETED"
+    assert body["current"] is None
+    assert len(body["transcript"]) == 8
+
+
+def test_same_client_request_id_is_idempotent(score):
+    """같은 clientRequestId 재전송 → 동일 응답. 커서가 두 번 밀리지 않는다."""
+    sid = _start()
+    first = _answer(sid, "dup")
+    second = _answer(sid, "dup")
+
+    assert first == second
+    assert first["current"]["axisCode"] == "L2"
+
+
+def test_get_session_returns_state(score):
     sid = _start()
 
     r = client.get(f"/api/v0/sessions/{sid}", headers=HEADERS)
@@ -88,33 +212,21 @@ def test_unknown_session_returns_404():
     assert r.json()["retryable"] is False
 
 
-def test_restore_rebuilds_from_transcript():
-    """transcript 1턴으로 복원 → 이어질 질문(sequenceNo 2)부터."""
-    r = client.post(
-        "/api/v0/sessions/restored-1/restore",
-        json={
-            "timeLimitSec": 1200,
-            "transcript": [
-                {"problemId": "prob-stub-1", "axisCode": "L1",
-                 "questionText": "q1", "answerText": "a1", "answeredAt": "2026-07-23T00:00:00Z",
-                 "bestScore": 4, "confirmedScore": 4, "attemptCount": 1, "autonomy": "SELF"}
-            ],
-        },
-        headers=HEADERS,
-    )
+def test_restore_replays_the_transcript(score):
+    """턴 수만 세면 안 된다 — 힌트 후 재질의도 한 턴이라 커서가 밀린다.
 
-    body = r.json()
-    assert body["state"] == "IN_PROGRESS"
-    assert body["current"]["sequenceNo"] == 2
-    
-def test_turn_carries_score():
-    """턴마다 채점 결과가 실려야 Spring이 problem_stage에 쓸 값이 있다."""
-    sid = _start()
-    body = client.post(f"/api/v0/sessions/{sid}/answers",
-                       json={"clientRequestId": "s1", "answerText": "a"},
+    아래는 L1에서 두 번 미달한 기록이다. 커서는 여전히 L1이고 힌트가 2개 열려 있어야 한다.
+    """
+    turn = {"problemId": "prob-1", "axisCode": "L1", "questionText": "L1 질문",
+            "answerText": "a", "answeredAt": "2026-08-02T00:00:00Z",
+            "bestScore": 2, "confirmedScore": 2, "attemptCount": 1, "autonomy": "SELF"}
+
+    body = client.post("/api/v0/sessions/restored-1/restore",
+                       json={"timeLimitSec": 1200, "transcript": [turn, {**turn, "attemptCount": 2}],
+                             "problems": [_problem(1), _problem(2)]},
                        headers=HEADERS).json()
 
-    turn = body["transcript"][0]
-    assert turn["confirmedScore"] is not None
-    assert turn["attemptCount"] >= 1
-    assert turn["autonomy"] in {"SELF", "SELF_MAINTAINED", "PARTIAL"}
+    assert body["state"] == "IN_PROGRESS"
+    assert body["current"]["axisCode"] == "L1"
+    assert body["current"]["hintsUsed"] == 2
+    assert body["current"]["hintText"] == "L1 힌트 2"

@@ -15,23 +15,46 @@ class CodeContext(BaseSchema):
     line_start: int
     
 class Question(BaseSchema):
-    """ 지금 물어보는 질문 하나 """
+    """지금 물어보는 질문 하나.
+
+    질문은 **분석 때 동결돼 DB에 있다.** 세션은 그걸 꺼내 보여줄 뿐 만들지 않는다.
+    같은 단계를 다시 물을 때도 `questionText`는 그대로고 `hintText`만 붙는다 —
+    힌트는 재진술이라 원 질문을 대체하지 않는다(scoring.HINT_LADDER).
+    """
     problem_id: str               # DB assessment_problem 키
     axis_code: AxisCode           # 문답 깊이(축) L1~L4
     sequence_no: int
     question_text: str
     code_context: CodeContext | None = None
+    hint_text: str | None = Field(
+        default=None, description="재질의면 직전에 보여줄 힌트. 첫 시도면 null",
+    )
+    hints_used: int = Field(
+        default=0, ge=0, le=2,
+        description="이 단계에서 지금까지 쓴 힌트 수. 화면의 '2번 쓸 수 있어요' 표기 근거",
+    )
 
 class Progress(BaseSchema):
     problem_index: int            # 몇 번째 문제인지(1부터)
     problem_total: int
 
 class SessionStart(BaseSchema):
-    """POST /sessions 요청."""
+    """POST /sessions 요청.
+
+    🔴 **`problems`가 필수다** (2026-08-02, 전면 동결). 문제·질문·힌트는 분석 때
+    만들어져 DB에 있고 세션은 그것을 받아 진행한다. **AI는 세션 중에 아무것도
+    생성하지 않는다** — 채점만 한다. 안 주면 물을 것이 없어 세션이 성립하지 않는다.
+    """
     attempt_id: str | None = None
     analysis_job_id: str | None = None
     session_id: str | None = Field(default=None, description="Spring AssessmentSession 키(에코용)")
-    selected_problem_ids: list[str] = Field(default_factory=list, description="세션에 포함할 문제. 생략 시 전체")
+    problems: list[Problem] = Field(
+        default_factory=list,
+        description="분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다",
+    )
+    selected_problem_ids: list[str] = Field(
+        default_factory=list, description="problems 중 이 세션에 쓸 것. 생략 시 전체",
+    )
     time_limit_sec: int = Field(
         default=1200, ge=1,
         description="**문제 1개당** 제한 시간(초). 세션 전체가 아니다 — 문제가 바뀌면 "
