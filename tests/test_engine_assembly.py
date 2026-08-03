@@ -190,7 +190,22 @@ def test_focus_item_id_is_echoed(fake_llm):
     assert AnalysisResult.model_validate(raw).problems[0].question_focus_item_id == "focus-1"
 
 
-def test_github_url_method_fails_loudly(fake_llm):
-    """ZIP이 없으면 받아올 경로가 없다. 빈 결과를 내면 '문제 0개'가 정상처럼 보인다."""
-    with pytest.raises(NotImplementedError):
+def test_github_url_without_repo_url_fails_loudly(fake_llm):
+    """받아올 곳이 없으면 끊는다. 빈 결과를 내면 '문제 0개'가 정상처럼 보인다."""
+    with pytest.raises(ValueError, match="repoUrl"):
         engine_mod.RealAnalysisEngine().analyze({**REQUEST, "method": "GITHUB_URL"}, None)
+
+
+def test_code_snippet_is_the_whole_file(fake_llm):
+    """파편만 주면 학생이 판단할 재료가 없다. 화면에 띄울 것은 파일 전체다."""
+    files = {"a/b.py": "\n".join(f"line {i}" for i in range(1, 41))}
+    ref = {"file": "a/b.py", "line_start": 10, "line_end": 12}
+
+    assert engine_mod._display_source(files, ref, "fragment") == files["a/b.py"]
+
+
+def test_oversized_file_falls_back_to_the_fragment(fake_llm):
+    """통째로 띄우는 것이 도움이 안 되는 크기다. 잘라서 줄 번호를 어긋나게 하지 않는다."""
+    files = {"a/b.py": "x" * (engine_mod._MAX_DISPLAY_CHARS + 1)}
+
+    assert engine_mod._display_source(files, {"file": "a/b.py"}, "fragment") == "fragment"

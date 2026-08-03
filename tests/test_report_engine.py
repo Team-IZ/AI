@@ -120,6 +120,35 @@ def test_invented_teach_id_is_dropped(monkeypatch):
     built = report.build("p-1", 1, [_turn("L1", 4)], model_code="m", teaches=TEACHES)
 
     assert built.curriculum_refs == []
+    # 구조화 필드에도 새면 안 된다 — 두 필드가 다른 교안을 가리키게 된다.
+    assert built.narrative["gaps"][0]["teach_id"] is None
+
+
+def test_narrative_mirrors_the_markdown(monkeypatch):
+    """마크다운과 구조화 필드는 같은 내용이다. 프론트가 헤딩을 다시 파싱하지 않도록."""
+    _fake(monkeypatch, NARRATIVE)
+
+    built = report.build("p-1", 1, [_turn("L1", 4)], model_code="m", teaches=TEACHES)
+
+    assert built.narrative["summary"] == NARRATIVE["summary"]
+    assert built.narrative["gaps"][0]["teach_id"] == "t1"
+    # 앞 단계에서 끝나 안 물어본 축. "못한 것"이 아니라 "안 물어본 것"이다.
+    assert built.narrative["unreached_axes"] == ["L2", "L3", "L4"]
+
+
+def test_failed_narrative_is_empty_not_an_apology(monkeypatch):
+    """실패 안내 문장을 summary로 내보내면 백엔드가 '요약이 있다'로 읽는다."""
+    def _boom(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+        raise stages.StageError("p04-6: 터짐", [{"status": "FAILED"}])
+
+    monkeypatch.setattr(report.stages, "call", _boom)
+
+    built = report.build("p-1", 1, [_turn("L1", 4)], model_code="m", teaches=TEACHES)
+
+    assert built.narrative_failed is True
+    assert built.narrative["summary"] is None
+    assert built.narrative["strengths"] == built.narrative["gaps"] == []
+    assert "서술 생성에 실패" in built.report_markdown    # 마크다운에는 사유가 남는다
 
 
 def test_curriculum_refs_come_from_gaps(monkeypatch):

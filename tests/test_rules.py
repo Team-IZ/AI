@@ -100,6 +100,20 @@ def test_top_level_folder_is_stripped():
     assert not any(p.startswith("repo-main") for p in paths)
 
 
+def test_source_dir_at_top_is_not_stripped():
+    """`src/` 하나만 있는 ZIP에서 `src/`를 벗기면 백엔드가 파일을 못 찾는다.
+
+    학생이 프로젝트 폴더 안에서 압축하면 이 모양이 나온다. 벗기면
+    `src/main/java/A.java`가 `main/java/A.java`로 응답되는데 에러가 안 난다.
+    """
+    out = rules.find_candidates(_zip({
+        "src/billing.py": "def process_payment(order):\n    return order\n",
+        "src/checkout.py": "def process_payment(order):\n    return order\n",
+    }))
+
+    assert all(p.startswith("src/") for p in out["files"])
+
+
 def test_zip_slip_is_blocked():
     """`../` 가 섞인 항목은 거부한다 — 통과하면 서버 파일을 덮어쓴다."""
     with pytest.raises(ValueError, match="벗어납니다"):

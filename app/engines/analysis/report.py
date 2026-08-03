@@ -33,8 +33,16 @@ class Report:
 
     problem: dict[str, Any]                 # ProblemResult 모양
     report_markdown: str
+    # 마크다운을 만들기 전의 구조. **같은 내용이다** — 마크다운만 주면 프론트가
+    # 헤딩을 다시 파싱해야 해서, 모델이 이미 낸 구조를 버리지 않고 같이 내보낸다.
+    narrative: dict[str, Any]               # ReportNarrative 모양
     curriculum_refs: list[dict[str, Any]]
     retest: bool
+    # 서술(p04-6)이 실패해 판정만 남았는지. 이 경우에도 job은 SUCCEEDED다 —
+    # 확정된 점수·도달·재시험은 다 들어 있기 때문이다. 하지만 그러면 백엔드가
+    # 마크다운 문구를 읽지 않고는 "서술이 비었다"를 알 수 없어 재시도 판단을
+    # 못 한다(2026-08-03 실측: 보고서 3건 중 2건이 이 상태였다).
+    narrative_failed: bool = False
     usages: list[dict[str, Any]] = field(default_factory=list)
 
 
@@ -170,6 +178,35 @@ def _render_markdown(data: dict[str, Any], stage_rows: list[dict[str, Any]],
     return "\n".join(parts).strip()
 
 
+def _note(entry: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """모델이 낸 strengths/gaps 항목 하나를 응답 모양으로.
+
+    `teach_id`는 **요청 teaches에 있는 것만 남긴다** — `_curriculum_refs()`와 같은
+    필터다. 여기서 안 거르면 구조화 필드로는 지어낸 교안이 나가고 `curriculumRefs`
+    에는 없는, 두 필드가 다른 말을 하는 상태가 된다.
+    """
+    teach_id = entry.get("teach_id")
+    return {
+        "axis": str(entry.get("axis") or ""),
+        "detail": str(entry.get("detail") or ""),
+        "teach_id": teach_id if teach_id in by_id else None,
+        "study_pointer": entry.get("study_pointer"),
+    }
+
+
+def _narrative(data: dict[str, Any], teaches: list[dict[str, Any]],
+               stage_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    by_id = {t["id"]: t for t in teaches if t.get("id")}
+    take = lambda key: [_note(e, by_id) for e in (data.get(key) or []) if isinstance(e, dict)]
+    return {
+        "summary": data.get("summary"),
+        "strengths": take("strengths"),
+        "gaps": take("gaps"),
+        "autonomy_note": data.get("autonomy_note"),
+        "unreached_axes": [r["axis_code"] for r in stage_rows if r["attempt_count"] == 0],
+    }
+
+
 def _curriculum_refs(data: dict[str, Any],
                      teaches: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """gaps가 지목한 teach만 참조로 올린다.
@@ -210,17 +247,23 @@ def build(problem_id: str, problem_no: int, transcript: list[dict[str, Any]], *,
 
     usages: list[dict[str, Any]] = []
     data: dict[str, Any] = {}
+    narrative_failed = False
     try:
         result = stages.call("p04-6", {
             "teaches_block": _teaches_block(teaches),
             "analysis_block": _analysis_block(analysis_documents or []),
             "requirements_block": _requirements_block(requirement_results or []),
             "transcript_block": _transcript_block(transcript),
-        }, model_code=model_code)
+        }, model_code=model_code,
+           # 보고서는 202 + 폴링이라 **아무도 화면 앞에서 기다리지 않는다.** 기본 2회로는
+           # 529 Overloaded 한 번만 겹쳐도 서술이 통째로 빈다(2026-08-03 실측: 3건 중
+           # 3건). 시도 사이 백오프가 있으므로 늘리는 비용은 시간뿐이다.
+           max_attempts=6)
         data = result.data
         usages = result.usages
     except stages.StageError as exc:
         usages = exc.usages
+        narrative_failed = True
         data = {"summary": f"서술 생성에 실패했습니다({exc}). 아래 판정은 확정된 값입니다."}
 
     return Report(
@@ -231,8 +274,15 @@ def build(problem_id: str, problem_no: int, transcript: list[dict[str, Any]], *,
             "stages": stage_rows,
         },
         report_markdown=_render_markdown(data, stage_rows, reached),
+        # 서술이 실패하면 data에 남는 것은 실패 안내 문장뿐이다. 그걸 summary로
+        # 내보내면 백엔드가 "요약이 있다"로 읽는다 — narrativeFailed와 같이 비운다.
+        narrative=({"summary": None, "strengths": [], "gaps": [], "autonomy_note": None,
+                    "unreached_axes": [r["axis_code"] for r in stage_rows
+                                       if r["attempt_count"] == 0]}
+                   if narrative_failed else _narrative(data, teaches, stage_rows)),
         curriculum_refs=_curriculum_refs(data, teaches),
         # 재시험은 모델에게 묻지 않는다 — L1·L2 통과 여부로 결정된다(scoring).
         retest=scoring.is_retest_target(passed_by_axis),
+        narrative_failed=narrative_failed,
         usages=usages,
     )

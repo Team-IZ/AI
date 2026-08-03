@@ -36,6 +36,12 @@ class ReportRequest(BaseSchema):
     """
 
     problem_id: str = Field(description="이 보고서가 다루는 문제. 문제 단위의 키")
+    problem_no: int | None = Field(
+        default=None, ge=1,
+        description="세션 안에서 이 문제가 몇 번째인가(1~3). 응답 problem.problemNo로 "
+                    "그대로 돌아온다. 생략하면 1이 나가는데, 2·3번 문제의 보고서에도 "
+                    "1이 찍혀 화면 표기와 어긋난다",
+    )
     session_id: str | None = None
     score_run_id: str | None = Field(default=None, description="Spring ScoreRun 키(에코용)")
     provider_model_code: str | None = Field(
@@ -89,7 +95,11 @@ class ProblemResult(BaseSchema):
     tie-break·재채점 실험의 입력이다(화면에 표기할지는 프론트가 정한다).
     """
 
-    problem_no: int = Field(ge=1)
+    problem_no: int = Field(
+        ge=1,
+        description="요청의 problemNo를 그대로 돌려준다. 안 보내면 1이다 — "
+                    "**보내지 않으면 화면의 '문제 2 / 3'과 어긋난다**",
+    )
     problem_id: str
     reached_stage: int = Field(
         ge=0, le=4,
@@ -139,16 +149,68 @@ class ReportVersions(BaseSchema):
     rubric_version: str
 
 
+class ReportNote(BaseSchema):
+    """서술 한 덩어리. `strengths`·`gaps`가 같은 모양이라 하나로 쓴다."""
+
+    axis: str = Field(description="모델이 붙인 이름표. 축 코드(L1~L4)가 아니라 교안 개념명이 온다")
+    detail: str = Field(description="실제 답변을 근거로 한 서술")
+    teach_id: str | None = Field(
+        default=None,
+        description="gaps에만 있다. **요청 teaches에 없는 id는 버리고 null로 만든다** — "
+                    "모델이 지어낸 교안을 가리키면 학생이 없는 페이지를 뒤진다",
+    )
+    study_pointer: str | None = Field(
+        default=None,
+        description="'어느 unit 몇 페이지를 다시 볼 것인가'의 서술. 화면의 교안 링크는 "
+                    "이 문장이 아니라 `curriculumRefs`로 그려야 한다 — 이 문장은 검증을 "
+                    "거치지 않은 모델 출력이다",
+    )
+
+
+class ReportNarrative(BaseSchema):
+    """`reportMarkdown`을 만들기 전의 구조. **같은 내용을 두 모양으로 준다.**
+
+    마크다운 하나만 주면 "잘한 것만 카드로" 같은 화면을 만들 때 프론트가 헤딩을
+    다시 파싱해야 한다. 모델이 이미 이 구조로 답하므로 노출 비용이 0이다
+    (2026-08-03 확정). 마크다운도 계속 준다 — 그냥 렌더만 하면 되는 경로를
+    남겨두는 편이 프론트 미착수 시점에 싸다.
+
+    **`narrativeFailed: true`면 이 객체는 전부 비어 있다.** 판정(`problem`)은 그때도
+    확정값이다.
+    """
+
+    summary: str | None = None
+    strengths: list[ReportNote] = Field(default_factory=list)
+    gaps: list[ReportNote] = Field(default_factory=list)
+    autonomy_note: str | None = Field(
+        default=None,
+        description="힌트 없이 답한 부분과 힌트를 받고서야 답한 부분의 차이",
+    )
+    unreached_axes: list[AxisCode] = Field(
+        default_factory=list,
+        description="앞 단계에서 끝나 묻지 않은 축. **'못한 것'이 아니라 '안 물어본 것'이다** — "
+                    "화면에서 0점이나 실패로 그리면 안 된다",
+    )
+
+
 class ReportResult(BaseSchema):
     """보고서가 완성됐을 때의 본문. **문제 하나 분량이다.**"""
 
     report_markdown: str
+    narrative: ReportNarrative
     problem: ProblemResult
     curriculum_refs: list[dict[str, Any]] = Field(default_factory=list)
     retest: bool = Field(
         description="이 문제가 재시험 대상인가. **L1·L2 둘 다 통과해야 아니다** "
                     "(scoring.RETEST_TRIGGER_AXES). 세션 전체의 재시험 여부는 "
                     "Spring이 문제 3개의 이 값을 모아 판단한다",
+    )
+    narrative_failed: bool = Field(
+        default=False,
+        description="서술 생성(LLM)이 실패해 reportMarkdown에 판정만 들어 있는가. "
+                    "**true여도 job은 SUCCEEDED다** — 점수·도달·재시험은 LLM 없이 "
+                    "계산되므로 확정값이다. 서술이 필요하면 같은 요청을 다시 보내면 "
+                    "된다(무료 티어에서 실제로 발생한다)",
     )
     versions: ReportVersions
 

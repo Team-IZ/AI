@@ -2118,7 +2118,8 @@
           },
           "lineStart": {
             "type": "integer",
-            "title": "Linestart"
+            "title": "Linestart",
+            "description": "**파일 기준 절대 줄 번호.** codeSnippet 안에서 하이라이트할 구간의 시작이다. 화면은 파일을 그리고 이 구간을 강조한다"
           },
           "lineEnd": {
             "type": "integer",
@@ -2127,12 +2128,12 @@
           "codeSnippet": {
             "type": "string",
             "title": "Codesnippet",
-            "description": "evidenceHash를 계산한 원문 그대로. Spring이 다시 자르면 해시가 어긋난다"
+            "description": "🔴 **문제를 낸 파일 전체다**(2026-08-03 확정). 파편만 주면 학생이 판단할 재료가 없다 — 질문이 주변 코드를 언급하는데 화면엔 선언 한 줄만 뜨는 일이 실제로 났다. 보여줄 구간은 lineStart~lineEnd다. 예외: 파일이 100,000자를 넘으면 파편만 온다(그때도 줄 번호는 파일 기준). **Spring이 다시 자르지 마세요** — 자를 위치는 화면이 정한다"
           },
           "evidenceHash": {
             "type": "string",
             "title": "Evidencehash",
-            "description": "codeSnippet의 sha256 hex 64자"
+            "description": "🔴 **파편(lineStart~lineEnd 구간)의 sha256 hex 64자다.** codeSnippet 전체의 해시가 아니다 — 파일 전체 기준이면 무관한 한 줄 수정에도 '근거가 바뀌었다'가 되어 판정이 쓸모없어진다. ⚠️ 테이블정의서 evidence_hash 비고('code_snippet 기준 해시')와 어긋나므로 그 문구를 고쳐야 한다"
           },
           "extractorVersion": {
             "type": "integer",
@@ -2234,7 +2235,8 @@
           "problemNo": {
             "type": "integer",
             "minimum": 1.0,
-            "title": "Problemno"
+            "title": "Problemno",
+            "description": "요청의 problemNo를 그대로 돌려준다. 안 보내면 1이다 — **보내지 않으면 화면의 '문제 2 / 3'과 어긋난다**"
           },
           "problemId": {
             "type": "string",
@@ -2520,12 +2522,128 @@
         "title": "ReportJobStatus",
         "description": "GET /reports/{jobId} 응답.\n\nstatus 값은 analysis_job.status와 같은 집합을 쓴다. 별도 어휘를 만들면\nSpring이 enum을 하나 더 들어야 하고 DB CHECK와도 어긋난다."
       },
+      "ReportNarrative": {
+        "properties": {
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "strengths": {
+            "items": {
+              "$ref": "#/components/schemas/ReportNote"
+            },
+            "type": "array",
+            "title": "Strengths"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/ReportNote"
+            },
+            "type": "array",
+            "title": "Gaps"
+          },
+          "autonomyNote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autonomynote",
+            "description": "힌트 없이 답한 부분과 힌트를 받고서야 답한 부분의 차이"
+          },
+          "unreachedAxes": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "L1",
+                "L2",
+                "L3",
+                "L4"
+              ]
+            },
+            "type": "array",
+            "title": "Unreachedaxes",
+            "description": "앞 단계에서 끝나 묻지 않은 축. **'못한 것'이 아니라 '안 물어본 것'이다** — 화면에서 0점이나 실패로 그리면 안 된다"
+          }
+        },
+        "type": "object",
+        "title": "ReportNarrative",
+        "description": "`reportMarkdown`을 만들기 전의 구조. **같은 내용을 두 모양으로 준다.**\n\n마크다운 하나만 주면 \"잘한 것만 카드로\" 같은 화면을 만들 때 프론트가 헤딩을\n다시 파싱해야 한다. 모델이 이미 이 구조로 답하므로 노출 비용이 0이다\n(2026-08-03 확정). 마크다운도 계속 준다 — 그냥 렌더만 하면 되는 경로를\n남겨두는 편이 프론트 미착수 시점에 싸다.\n\n**`narrativeFailed: true`면 이 객체는 전부 비어 있다.** 판정(`problem`)은 그때도\n확정값이다."
+      },
+      "ReportNote": {
+        "properties": {
+          "axis": {
+            "type": "string",
+            "title": "Axis",
+            "description": "모델이 붙인 이름표. 축 코드(L1~L4)가 아니라 교안 개념명이 온다"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "실제 답변을 근거로 한 서술"
+          },
+          "teachId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teachid",
+            "description": "gaps에만 있다. **요청 teaches에 없는 id는 버리고 null로 만든다** — 모델이 지어낸 교안을 가리키면 학생이 없는 페이지를 뒤진다"
+          },
+          "studyPointer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Studypointer",
+            "description": "'어느 unit 몇 페이지를 다시 볼 것인가'의 서술. 화면의 교안 링크는 이 문장이 아니라 `curriculumRefs`로 그려야 한다 — 이 문장은 검증을 거치지 않은 모델 출력이다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "axis",
+          "detail"
+        ],
+        "title": "ReportNote",
+        "description": "서술 한 덩어리. `strengths`·`gaps`가 같은 모양이라 하나로 쓴다."
+      },
       "ReportRequest": {
         "properties": {
           "problemId": {
             "type": "string",
             "title": "Problemid",
             "description": "이 보고서가 다루는 문제. 문제 단위의 키"
+          },
+          "problemNo": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problemno",
+            "description": "세션 안에서 이 문제가 몇 번째인가(1~3). 응답 problem.problemNo로 그대로 돌아온다. 생략하면 1이 나가는데, 2·3번 문제의 보고서에도 1이 찍혀 화면 표기와 어긋난다"
           },
           "sessionId": {
             "anyOf": [
@@ -2603,6 +2721,9 @@
             "type": "string",
             "title": "Reportmarkdown"
           },
+          "narrative": {
+            "$ref": "#/components/schemas/ReportNarrative"
+          },
           "problem": {
             "$ref": "#/components/schemas/ProblemResult"
           },
@@ -2619,6 +2740,12 @@
             "title": "Retest",
             "description": "이 문제가 재시험 대상인가. **L1·L2 둘 다 통과해야 아니다** (scoring.RETEST_TRIGGER_AXES). 세션 전체의 재시험 여부는 Spring이 문제 3개의 이 값을 모아 판단한다"
           },
+          "narrativeFailed": {
+            "type": "boolean",
+            "title": "Narrativefailed",
+            "description": "서술 생성(LLM)이 실패해 reportMarkdown에 판정만 들어 있는가. **true여도 job은 SUCCEEDED다** — 점수·도달·재시험은 LLM 없이 계산되므로 확정값이다. 서술이 필요하면 같은 요청을 다시 보내면 된다(무료 티어에서 실제로 발생한다)",
+            "default": false
+          },
           "versions": {
             "$ref": "#/components/schemas/ReportVersions"
           }
@@ -2626,6 +2753,7 @@
         "type": "object",
         "required": [
           "reportMarkdown",
+          "narrative",
           "problem",
           "retest",
           "versions"

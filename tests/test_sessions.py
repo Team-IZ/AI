@@ -394,3 +394,27 @@ def test_answer_endpoint_stays_sync():
     from app.api.sessions import submit_answer
 
     assert not inspect.iscoroutinefunction(submit_answer)
+
+
+def test_grading_gets_the_fragment_not_the_whole_file():
+    """codeSnippet은 파일 전체다. 그대로 넣으면 4,000자 상한에 앞에서부터 잘려
+    문제 구간이 파일 뒤쪽일 때 근거가 사라진 채 채점된다."""
+    from app import sessions as sessions_mod
+
+    text = "\n".join(f"line {i}" for i in range(1, 501))
+    code = sessions_mod._grading_code(
+        {"code_snippet": text, "line_start": 400, "line_end": 402}
+    )
+
+    assert "line 400" in code and "line 402" in code
+    assert "line 1" not in code.splitlines()      # 앞부분은 안 들어간다
+    assert len(code) < len(text) / 5
+
+
+def test_grading_code_survives_a_fragment_only_snippet():
+    """파일이 너무 커서 파편만 온 경우 줄 번호가 그 문자열의 색인이 아니다."""
+    from app import sessions as sessions_mod
+
+    assert sessions_mod._grading_code(
+        {"code_snippet": "only one line", "line_start": 900, "line_end": 900}
+    ) == "only one line"

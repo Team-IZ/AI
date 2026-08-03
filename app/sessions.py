@@ -81,6 +81,32 @@ def _current_stage(walk: _Walk) -> tuple[dict[str, Any], dict[str, Any]] | None:
     return problem, stages_[walk.axis_index]
 
 
+# 채점에 넣을 근거 코드의 앞뒤 여유 줄. 파편만 주면 모델이 "이 메서드가 어디 소속인지"를
+# 못 보고, 넉넉히 주면 매니페스트의 code_block 상한(4,000자)에 걸려 뒤가 잘린다.
+_GRADING_CONTEXT_LINES = 8
+
+
+def _grading_code(problem: dict[str, Any]) -> str:
+    """채점 프롬프트에 넣을 근거 코드.
+
+    🔴 **`codeSnippet`을 그대로 넣으면 안 된다.** 2026-08-03부터 그 값은 **파일 전체**다
+    (학생 화면용). 채점 프롬프트의 `code_block` 상한이 4,000자라 큰 파일은 앞에서부터
+    잘리고, 문제 구간이 파일 뒤쪽이면 **근거가 통째로 사라진 채 채점된다** — 에러 없이
+    점수만 틀린다. 그래서 여기서 `lineStart`/`lineEnd`로 되잘라 낸다.
+    """
+    text = problem.get("code_snippet") or ""
+    start = problem.get("line_start") or 1
+    end = problem.get("line_end") or start
+    lines = text.splitlines()
+    # 파편이 그대로 온 경우(파일을 못 찾았거나 너무 커서 되돌린 경우)엔 줄 번호가
+    # 이 문자열의 색인이 아니다. 줄 수로 판별해 그때는 원문을 그대로 쓴다.
+    if len(lines) < end:
+        return text
+    lo = max(0, start - 1 - _GRADING_CONTEXT_LINES)
+    hi = min(len(lines), end + _GRADING_CONTEXT_LINES)
+    return "\n".join(lines[lo:hi])
+
+
 def _hint_text(stage: dict[str, Any], hints_used: int) -> str | None:
     """지금 보여줄 힌트. `hints_used`가 0이면 아직 없다.
 
@@ -246,7 +272,7 @@ def submit_answer(session_id: str, req: AnswerSubmit,
         # 요청이 이기고 없으면 서버 기본값. 채점 모델은 operator가 고른다(GradingPolicy).
         model_code=req.provider_model_code or get_settings().model_code_session,
         hints=shown_hints,
-        code_snippet=problem.get("code_snippet") or "",
+        code_snippet=_grading_code(problem),
         code_ref=problem.get("source_path") or "",
         analysis_context=req.analysis_context,
     )

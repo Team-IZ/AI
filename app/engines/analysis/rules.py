@@ -116,15 +116,33 @@ def _safe_extract(zip_bytes: bytes, dest: Path) -> None:
                 shutil.copyfileobj(src, out)
 
 
+# 벗기면 안 되는 최상위 폴더 이름. 이 이름들은 **프로젝트의 일부**라서 경로에 남아야
+# 한다. 나머지 이름(`repo-main`·`library-app` 등)은 감싸는 껍데기로 보고 벗긴다 —
+# 모르는 이름은 벗기는 쪽이 기존 동작이고, 실패해도 옛날과 같은 결과다.
+_SOURCE_DIR_NAMES = {
+    "src", "app", "lib", "source", "sources", "main", "java", "com", "org",
+    "test", "tests", "docs", "static", "public", "assets", "include", "script", "scripts",
+}
+
+
 def _repo_root(extracted: Path) -> Path:
     """GitHub ZIP처럼 최상위 폴더 하나로 감싸여 있으면 그 안으로 내려간다.
 
     안 내려가면 스캔이 파일을 하나도 못 찾는 게 아니라 경로가 `repo-main/app/x.py`로
     나와, 나중에 학생이 보는 코드 위치와 어긋난다.
+
+    🔴 **폴더가 하나라는 것만으로 내려가면 안 된다** (2026-08-03 실측). 학생이
+    프로젝트 폴더 안에서 압축하면 최상위가 `src/` 하나뿐인 ZIP이 나오고, 그러면
+    `src/`를 래퍼로 착각해 벗겨서 `src/main/java/App.java`가 `main/java/App.java`로
+    응답된다. 백엔드는 그 경로로 파일을 못 찾는데 에러도 안 난다.
+
+    그래서 **폴더 이름이 소스 폴더 이름이면 벗기지 않는다.** `repo-main`이나
+    `library-app`은 껍데기고 `src`는 프로젝트의 일부다.
     """
     entries = list(extracted.iterdir())
     if len(entries) == 1 and entries[0].is_dir():
-        return entries[0]
+        if entries[0].name.lower() not in _SOURCE_DIR_NAMES:
+            return entries[0]
     return extracted
 
 
@@ -189,14 +207,23 @@ def find_candidates(zip_bytes: bytes) -> dict[str, Any]:
     CPU 작업이라 이벤트 루프에서 직접 부르면 안 된다. 지금은 run_analysis가
     동기 함수(`def`)라 Starlette이 threadpool로 돌려준다. async def로 바꾸지 말 것.
     """
-    two_tier_scan, score_findings = _load_vendor()
-
     with tempfile.TemporaryDirectory(prefix="analysis-") as tmp:
         _safe_extract(zip_bytes, Path(tmp))
-        root = str(_repo_root(Path(tmp)))
-        scan = two_tier_scan.scan(root)
-        judged = score_findings.score(scan, root)
-        files = _read_sources(two_tier_scan, root)
+        return scan_directory(str(_repo_root(Path(tmp))))
+
+
+def scan_directory(root: str) -> dict[str, Any]:
+    """이미 풀려 있는(또는 클론된) 디렉터리를 스캔한다.
+
+    `find_candidates`에서 갈라져 나왔다 — GITHUB_URL은 ZIP 바이트가 없고
+    `materialize.py`가 클론한 디렉터리를 준다. 두 경로가 같은 스캔을 타야
+    "링크로 낸 제출물"과 "ZIP으로 낸 제출물"의 결과가 갈리지 않는다.
+    """
+    two_tier_scan, score_findings = _load_vendor()
+
+    scan = two_tier_scan.scan(root)
+    judged = score_findings.score(scan, root)
+    files = _read_sources(two_tier_scan, root)
 
     return {
         "extractor_version": extractor_version(),

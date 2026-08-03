@@ -8,6 +8,7 @@
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -172,7 +173,12 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
             # 그 턴을 통째로 버리면 안 된다 (실측: mistral 채점에서 HTTP 504).
             # 대신 재시도하는 동안 학생은 계속 기다린다 — 세션 경로의 타임아웃은
             # 배치보다 짧아야 한다(T7c 실측 후 결정).
-            if failure in ("PROVIDER_ERROR", "TIMEOUT") and attempt < max_attempts:
+            if failure in ("PROVIDER_ERROR", "TIMEOUT", "RATE_LIMITED") and attempt < max_attempts:
+                # 529 Overloaded는 0.3초에 즉답이라 쉬지 않고 재시도하면 6회가 2초 만에
+                # 소진된다 — 공급자가 회복할 틈을 안 주고 실패만 앞당긴다. 타임아웃으로
+                # 실패한 경우엔 이미 오래 기다렸으니 더 쉬지 않는다.
+                if failure != "TIMEOUT":
+                    time.sleep(min(0.5 * 2 ** (attempt - 1), 4.0))
                 continue
 
             raise StageError(f"{stage_id}: {exc}", usages) from exc

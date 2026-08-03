@@ -186,12 +186,25 @@ class Problem(BaseSchema):
                     "보고서의 교안 복습 위치 지목도 붙지 않는다 (2026-08-02 PM 확정)",
     )
     source_path: str
-    line_start: int
+    line_start: int = Field(
+        description="**파일 기준 절대 줄 번호.** codeSnippet 안에서 하이라이트할 구간의 "
+                    "시작이다. 화면은 파일을 그리고 이 구간을 강조한다",
+    )
     line_end: int
     code_snippet: str = Field(
-        description="evidenceHash를 계산한 원문 그대로. Spring이 다시 자르면 해시가 어긋난다"
+        description="🔴 **문제를 낸 파일 전체다**(2026-08-03 확정). 파편만 주면 학생이 "
+                    "판단할 재료가 없다 — 질문이 주변 코드를 언급하는데 화면엔 선언 한 "
+                    "줄만 뜨는 일이 실제로 났다. 보여줄 구간은 lineStart~lineEnd다. "
+                    "예외: 파일이 100,000자를 넘으면 파편만 온다(그때도 줄 번호는 파일 기준). "
+                    "**Spring이 다시 자르지 마세요** — 자를 위치는 화면이 정한다",
     )
-    evidence_hash: str = Field(description="codeSnippet의 sha256 hex 64자")
+    evidence_hash: str = Field(
+        description="🔴 **파편(lineStart~lineEnd 구간)의 sha256 hex 64자다.** codeSnippet "
+                    "전체의 해시가 아니다 — 파일 전체 기준이면 무관한 한 줄 수정에도 "
+                    "'근거가 바뀌었다'가 되어 판정이 쓸모없어진다. "
+                    "⚠️ 테이블정의서 evidence_hash 비고('code_snippet 기준 해시')와 "
+                    "어긋나므로 그 문구를 고쳐야 한다",
+    )
     extractor_version: int = Field(
         gt=0,
         description="이 문제를 뽑은 룰 버전. 재현성 근거. "

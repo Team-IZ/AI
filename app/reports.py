@@ -117,6 +117,13 @@ def _stub_result(problem_id: str) -> ReportResult:
     passed = {s.axis_code: s.passed for s in problem.stages}
     return ReportResult(
         report_markdown="# [stub] 검증 보고서\n\n실제 보고서는 엔진 이식 후 생성됩니다.",
+        narrative={
+            "summary": "[stub] 실제 서술은 엔진이 만듭니다.",
+            "strengths": [],
+            "gaps": [],
+            "autonomy_note": None,
+            "unreached_axes": [s.axis_code for s in problem.stages if s.attempt_count == 0],
+        },
         problem=problem,
         curriculum_refs=[
             {"teachId": "teach-stub-1", "unitId": "unit-stub-1", "sourcePages": [12, 13]}
@@ -150,8 +157,9 @@ def _real_result(body: ReportRequest, job: ReportJobStatus,
                  idempotency_key: str | None, trace_id: str | None) -> ReportResult:
     """p04-6으로 서술을 만들고, 판정은 transcript에서 결정론으로 계산한다.
 
-    `problemNo`는 요청에 없다 — 문제 단위 호출이라 Spring이 문제를 알고 있고,
-    보고서 안에서 순번이 필요한 자리가 없다. 1로 고정한다.
+    `problemNo`는 요청이 주면 그대로 돌려주고 없으면 1이다. 예전에는 1로 고정했는데,
+    **보고서가 문제 단위라 세션 하나에 3건이 나오고 세 건 모두 problemNo=1이 찍혔다**
+    (2026-08-03 실측). 화면은 "문제 2 / 3"을 그리는데 보고서만 1이라 조용히 어긋난다.
 
     원장(`job.ai_usage`)을 여기서 채우는 이유는 **검증 실패로 결과를 버려도 태운
     토큰은 남겨야 하기 때문**이다(jobs.py와 같은 순서). 아래 model_validate가 터지면
@@ -165,7 +173,7 @@ def _real_result(body: ReportRequest, job: ReportJobStatus,
     # 세션이 끝나도 보고서가 안 나온다.
     model_code = body.provider_model_code or get_settings().model_code_session
     built = report_engine.build(
-        body.problem_id, 1,
+        body.problem_id, body.problem_no or 1,
         [_to_snake(t if isinstance(t, dict) else dict(t)) for t in body.transcript],
         model_code=model_code,
         teaches=body.teaches,
@@ -176,9 +184,11 @@ def _real_result(body: ReportRequest, job: ReportJobStatus,
                                idempotency_key=idempotency_key, trace_id=trace_id)
     return ReportResult.model_validate({
         "report_markdown": built.report_markdown,
+        "narrative": built.narrative,
         "problem": built.problem,
         "curriculum_refs": built.curriculum_refs,
         "retest": built.retest,
+        "narrative_failed": built.narrative_failed,
         "versions": {
             "model_code": model_code,
             "prompt_version": stages.manifest_version(),

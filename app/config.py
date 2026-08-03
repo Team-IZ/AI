@@ -36,11 +36,20 @@ class Settings(BaseSettings):
     # 용도별 기본 모델. 값은 provider 식별자다(벤더 접두어 포함) — 요청에
     # providerModelCode가 오면 그쪽이 이긴다(모델 선택은 operator 권한).
     # 팀원 실측 기준값이고 언제든 바뀐다 — 그래서 코드가 아니라 설정이다.
-    #   분석  nemotron-3-ultra-550b  2시간  (목표 30~60분, 개선 과제)
-    #   문답  mistral-medium-3.5     3분    (개선 필요)
+    #   분석  nemotron-3-ultra-550b  271초  (2026-08-03 실측, 문제 3개 기준)
+    #   문답  deepseek-v4-flash      7~12초 (2026-08-03 실측)
     #   교안  minimax-m3             25분   (강사가 수업 전까지만 끝나면 되므로 허용)
+    #
+    # 🔴 채점 모델을 아무거나 바꾸지 마라. 2026-08-03에 12종을 같은 채점 프롬프트로
+    # 실측했는데 **루브릭을 적용해 JSON까지 내는 모델이 사실상 이것 하나였다.**
+    #   · 추론형(nemotron-3-super/nano, gpt-oss)  사고 과정을 본문에 뱉거나
+    #     max_tokens 1200을 사고가 먼저 써서 JSON이 잘린다
+    #   · 소형(llama-3.1-8b)  1.3초로 제일 빠른데 우수·보통·애매를 전부 2점으로 준다.
+    #     통과선이 3점이라 아무도 통과 못 하는 채점기가 된다 — 속도로 고르면 안 된다
+    #   · 대형(llama-3.3-70b, glm-5.2, mistral-medium-3.5)  무료 티어에서 30초 무응답
+    # 이전 값 mistralai/mistral-medium-3.5-128b는 **최소 프롬프트도 응답하지 않는다.**
     model_code_analysis: str = "nvidia/nemotron-3-ultra-550b-a55b"
-    model_code_session: str = "mistralai/mistral-medium-3.5-128b"
+    model_code_session: str = "deepseek-ai/deepseek-v4-flash"
     model_code_curriculum: str = "minimaxai/minimax-m3"
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
