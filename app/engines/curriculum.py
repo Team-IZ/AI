@@ -166,6 +166,29 @@ def analyse_chunk(start: int, end: int, text: str, *, model_code: str,
                        extra_user=_KOREAN_OUTPUT)
 
 
+# p01-2가 주는 kind를 우리 계약 값으로. 모르는 값은 CONCEPT로 떨어뜨린다 —
+# 알 수 없는 문자열을 그대로 내보내면 Spring CHECK에 걸린다.
+_KIND_MAP = {"concept": "CONCEPT", "code_example": "CODE_EXAMPLE", "caution": "CAUTION"}
+
+
+def _kind(raw: Any) -> str:
+    return _KIND_MAP.get(str(raw or "").strip().lower(), "CONCEPT")
+
+
+def _with_siblings(teaches: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """같은 unit의 다른 개념 이름을 각 teach에 달아준다.
+
+    **교안이 대안을 가르쳤다는 신호**다(PM 설계 v2 §7-3의 `siblings`). 형제가 있으면
+    "학생이 그중 하나를 골랐다"가 확실해지므로 문제로 내기 좋은 지점이 된다.
+
+    새로 받을 것이 없다 — unit 묶음이 이미 있으므로 계산만 하면 된다.
+    """
+    names = [t["normalized_name"] for t in teaches]
+    for teach in teaches:
+        teach["sibling_names"] = [n for n in names if n != teach["normalized_name"]]
+    return teaches
+
+
 def _merge(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """청크별 결과를 unit 단위로 합쳐 section 목록으로.
 
@@ -211,6 +234,10 @@ def _merge(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "canonical_description": (str(concept.get("summary") or "").strip() or None),
                 "description_page_start": page_start,
                 "description_page_end": page_end,
+                # 🔴 예전엔 버렸다. p01-2가 이미 답에 담아 보내는 값이라
+                # **LLM 호출이 늘지 않는다** — 문제 선정의 재료다(PM 설계 v2 §7).
+                "kind": _kind(concept.get("kind")),
+                "evidence": (str(concept.get("evidence") or "").strip() or None),
             }
 
     ordered = sorted(units.values(), key=lambda u: (u["page_start"], u["page_end"]))
@@ -220,7 +247,7 @@ def _merge(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "title": unit["title"][:200],
             "page_start": unit["page_start"],
             "page_end": max(unit["page_end"], unit["page_start"]),
-            "teaches": list(unit["teaches"].values()),
+            "teaches": _with_siblings(list(unit["teaches"].values())),
         }
         for no, unit in enumerate(ordered, start=1)
     ]

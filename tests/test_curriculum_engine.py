@@ -173,3 +173,40 @@ def test_chunk_analysis_asks_for_korean_output(monkeypatch):
 
     assert "한국어" in seen["extra_user"]
     assert "unit_id" in seen["extra_user"]      # 번역하면 안 되는 것도 명시한다
+
+
+def test_kind_and_evidence_are_not_dropped():
+    """p01-2가 이미 답에 담아 보내는 값이다 — 버리면 문제 선정 재료가 사라진다.
+
+    LLM 호출이 늘지 않는다. 예전엔 받고도 떨어뜨렸다(PM 설계 v2 §7의 재료).
+    """
+    sections = curriculum._merge([
+        _chunk(1, 10,
+               [{"unit_id": "01", "unit_title": "에이전트", "source_pages": [1, 3]}],
+               [{"name": "Runner.run 호출", "kind": "code_example", "unit_id": "01",
+                 "summary": "s", "source_pages": [2], "evidence": "Runner.run()으로 실행"},
+                {"name": "무한 재시도 주의", "kind": "caution", "unit_id": "01",
+                 "summary": "s", "source_pages": [3], "evidence": "비용 증가"},
+                {"name": "에이전트 정의", "unit_id": "01",
+                 "summary": "s", "source_pages": [1]}]),
+    ])
+
+    kinds = {t["canonical_name"]: t["kind"] for t in sections[0]["teaches"]}
+    assert kinds["Runner.run 호출"] == "CODE_EXAMPLE"
+    assert kinds["무한 재시도 주의"] == "CAUTION"
+    assert kinds["에이전트 정의"] == "CONCEPT"      # kind가 없으면 CONCEPT로 떨어진다
+    assert any(t["evidence"] == "Runner.run()으로 실행" for t in sections[0]["teaches"])
+
+
+def test_siblings_are_computed_from_the_same_unit():
+    """교안이 대안을 가르쳤다는 신호. 새로 받을 것 없이 unit 묶음에서 계산된다."""
+    sections = curriculum._merge([
+        _chunk(1, 10,
+               [{"unit_id": "01", "unit_title": "예외", "source_pages": [1, 3]}],
+               [{"name": "try-except", "unit_id": "01", "summary": "s", "source_pages": [1]},
+                {"name": "finally", "unit_id": "01", "summary": "s", "source_pages": [2]}]),
+    ])
+
+    by_name = {t["canonical_name"]: t["sibling_names"] for t in sections[0]["teaches"]}
+    assert by_name["try-except"] == ["finally"]
+    assert by_name["finally"] == ["try except"]
