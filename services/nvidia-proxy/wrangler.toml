@@ -1,6 +1,6 @@
 # D-H (2026-07-14, README D143): async job-queue redesign. Cloudflare's free-tier edge
 # gives up after ~100-125s of silence on a single request/response, but NVIDIA build-tier
-# models normally take up to several minutes under load (see feedback/nvidia_client.py's
+# models normally take up to several minutes under load (see cli/vendor/nvidia/nvidia_client.py's
 # DEFAULT_TIMEOUT_S=600 and its D98 history) -- no client-facing request can survive that
 # wait no matter how it's coded. This decouples the two: the client's HTTP request returns
 # almost instantly with a job_id: the actual NVIDIA call happens in a Queue consumer

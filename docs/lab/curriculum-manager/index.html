@@ -192,11 +192,11 @@
     <div class="me">Pipeline Lab 연동 목업 · P01 교안분석</div>
   </div>
   <div class="body">
+    <!-- 대시보드/프로젝트/리포트 항목은 실제 데이터 연동이 없는 정적 와이어프레임
+         목업(dashboard.html/projects.html/report.html)으로만 존재해서 함께 삭제했습니다.
+         이 도구가 실제로 제공하는 화면은 교안 하나뿐입니다. -->
     <div class="nav">
-      <a class="item" href="dashboard.html"><span class="ic">▦</span>대시보드</a>
       <a class="item on" href="index.html"><span class="ic">▧</span>교안</a>
-      <a class="item" href="projects.html"><span class="ic">▤</span>프로젝트</a>
-      <a class="item" href="report.html"><span class="ic">▥</span>리포트</a>
     </div>
     <div class="content">
 
@@ -300,16 +300,12 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/pyodide/v0.26.2/full/pyodide.js"
-  integrity="sha384-tVslJOEkg7nVRW3Y3/ReGX0NnonNrbcmt1R5qFbQXQdGa2chRkoJYHAjAsv3zoTq"
-  crossorigin="anonymous"></script>
 <script src="../config.js"></script>
 <script src="../db.js"></script>
 <script src="../lab-core.js"></script>
 <script src="labapp-shim.js"></script>
 <script src="labdb-shim.js"></script>
 <script src="../llm.js"></script>
-<script src="../pyodide-shared.js"></script>
 <script src="../pdfjs-loader.js"></script>
 <script src="../p01-runner.js"></script>
 <script src="p01-job-client.js"></script>
@@ -371,7 +367,8 @@
   // p01-runner.js's own maybeSaveRun() (unmodified, called inside P01Runner.run()) already
   // writes unit_map/graph/questions to the shared team DB whenever LabDB is configured
   // (always true -- config.js hardcodes the team project) AND the user is logged in. RLS
-  // (experiments/web_lab/supabase_schema.sql: "runs read all"/"artifacts read all") lets
+  // (Code_reviewer_with_feedback의 experiments/web_lab/supabase_schema.sql -- public 스키마
+  // 쪽 정의로, 이 저장소엔 vendoring돼 있지 않음: "runs read all"/"artifacts read all") lets
   // any authenticated team member read every p01 run, not just their own -- so once logged
   // in, this reconstructs state.curricula from the DB instead of just this tab's memory.
   // Reassembles the shape P01Runner.run() itself builds (see its result literal) from the
@@ -532,7 +529,7 @@
     await deleteCurriculum(id);
   }
 
-  // D-P01ORCH: cancels a server-side job (worker/p01-orchestrator/'s Durable Object) --
+  // D-P01ORCH: cancels a server-side job (services/p01-orchestrator/'s Durable Object) --
   // unlike the old in-tab cancel (labapp-shim.js's throw-based checkCancelled), this
   // takes effect on the NEXT alarm() tick, not instantly, since the job may currently be
   // mid-wave with no code running client-side to interrupt.
@@ -551,7 +548,7 @@
   // step that applies at all for a run that only ever lived in sessionStorage -- never
   // logged in, or DB not configured). If the id looks DB-backed, also try deleting the
   // real row -- RLS only allows deleting your OWN runs ("pdf_analysis runs delete own",
-  // experiments/web_lab/pdf_analysis_schema.sql), so a teammate's entry (visible to
+  // db/02_pdf_analysis.sql), so a teammate's entry (visible to
   // everyone via the "read all" policy) would be blocked server-side. Supabase reports
   // an RLS-blocked delete as a normal 0-rows-affected response, not an error -- checking
   // `count` is the only way to notice that and roll the optimistic removal back instead
@@ -613,7 +610,7 @@
     return versions;
   }
 
-  // D-P01ORCH: rows still being processed server-side (see worker/p01-orchestrator/) --
+  // D-P01ORCH: rows still being processed server-side (see services/p01-orchestrator/) --
   // shown in their own section since unit_map/graph are partial or empty for these.
   // D-debug-panel (2026-07-24): 사용자 요청 -- 실행중인 P01 작업의 등록자/모델/경과시간/
   // 재시도 회차/청크별 실패사유를 디버깅용으로 보여줌. email/model/경과시간은
@@ -892,7 +889,7 @@
       showUploadError("");
 
       // D-P01ORCH: a durable, close-the-browser-and-it-keeps-going job (see
-      // worker/p01-orchestrator/) requires an authenticated member_id for its DB row
+      // services/p01-orchestrator/) requires an authenticated member_id for its DB row
       // (RLS: "pdf_analysis runs insert own") -- there is no anonymous durable path.
       // Not logged in -> fall back to the exact original in-tab-only flow, unchanged
       // (nothing about this feature removes that mode).

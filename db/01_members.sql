@@ -1,6 +1,6 @@
--- Prerequisite for pdf_analysis_schema.sql -- pdf_analysis.runs.member_id references
+-- Prerequisite for 02_pdf_analysis.sql -- pdf_analysis.runs.member_id references
 -- public.members(id), so this must be applied FIRST on a fresh Supabase project (paste
--- into SQL Editor -> Run). Safe to re-run (IF NOT EXISTS guards) except the RLS policies
+-- into SQL Editor -> Run). The 01_/02_/03_ filename prefixes ARE the apply order. Safe to re-run (IF NOT EXISTS guards) except the RLS policies
 -- and trigger, which use CREATE without IF NOT EXISTS -- drop them first if re-applying
 -- after an edit.
 --
@@ -9,7 +9,7 @@
 -- experiments/web_lab/supabase_schema.sql. That file also defines runs/stage_events/
 -- artifacts/presets tables for the P01/P02/P03 shared Pipeline Lab tool this branch does
 -- NOT include (only docs/lab/curriculum-manager/ was ported here) -- applying the full
--- file would create tables with no corresponding UI in this repo. `pdf_analysis_schema.sql`
+-- file would create tables with no corresponding UI in this repo. `02_pdf_analysis.sql`
 -- doesn't reference any of those, only `members`.
 
 create table if not exists members (

@@ -1,6 +1,6 @@
 // D-C (PLAN.md): integrate.api.nvidia.com has no Access-Control-Allow-Origin header
 // (verified 2026-07-14) -- direct browser calls are impossible, so every LLM call in
-// this tool goes through a proxy the user configures (worker/nvidia-proxy.js is the
+// this tool goes through a proxy the user configures (services/nvidia-proxy/nvidia-proxy.js is the
 // reference implementation, deployable by anyone on the team). This file never talks
 // to NVIDIA directly and never persists the key past the in-memory config object.
 //
@@ -9,16 +9,16 @@
 // bytes -- it couldn't help when NVIDIA was slow to send the FIRST byte, which turned out
 // to be the actual failure mode (confirmed live: qwen3-next-80b took 92s on one call and
 // didn't answer at all within 150s on another -- normal variance for this tier per
-// feedback/nvidia_client.py's own 600s timeout and D98 history, not an outage). No
+// cli/vendor/nvidia/nvidia_client.py's own 600s timeout and D98 history, not an outage). No
 // client-facing request can survive that wait, streamed or not. So this doesn't try to --
-// worker/nvidia-proxy.js now answers the POST almost instantly with a job_id and does the
+// services/nvidia-proxy/nvidia-proxy.js now answers the POST almost instantly with a job_id and does the
 // real call in a Cloudflare Queue consumer (up to 15 minutes, no client watching), and
 // this file polls GET ?job=<id> until it's done. callPromptStage()/generateQuestion() etc.
 // still just get back a plain complete string or parsed object -- this file is the only
 // place that knows the transport is submit-and-poll now, same as it was the only place
 // that knew about streaming before that.
 //
-// D-I (2026-07-14, worker/nvidia-proxy.js): the consumer now retries a failed attempt
+// D-I (2026-07-14, services/nvidia-proxy/nvidia-proxy.js): the consumer now retries a failed attempt
 // (up to MAX_ATTEMPTS=3, each with its own fresh 600s-per-attempt / 15min-per-invocation
 // budget) instead of failing after one bad response -- see that file for why. MAX_POLL_MS
 // below has to cover that whole worst case, not just one invocation, or this file gives up
@@ -26,7 +26,7 @@
 const LabLLM = (() => {
   const POLL_INTERVAL_MS = 3000;
   // Worst case on the server: 3 attempts * 600s + 2 retry delays * 5s =~ 1810s (~30min),
-  // spread across separate queue-consumer invocations (see worker/nvidia-proxy.js D-I).
+  // spread across separate queue-consumer invocations (see services/nvidia-proxy/nvidia-proxy.js D-I).
   // 35min gives headroom for Cloudflare's own redelivery scheduling latency on top of that.
   const MAX_POLL_MS = 35 * 60 * 1000;
 
@@ -37,7 +37,7 @@ const LabLLM = (() => {
   // just an in-memory array, capped and trimmed below -- this is a debugging aid, not a
   // metrics store, and it only sees requests THIS tab initiated (D156's parallel chunk
   // calls are the actual client-visible submissions; server-side retries inside
-  // worker/nvidia-proxy.js's queue() happen invisibly to the browser and aren't counted
+  // services/nvidia-proxy/nvidia-proxy.js's queue() happen invisibly to the browser and aren't counted
   // here -- a real limitation, not an oversight, noted so this graph isn't over-trusted
   // as the complete picture of load on the key).
   const requestLog = [];
@@ -58,7 +58,7 @@ const LabLLM = (() => {
   // from the worker (each of up to 26 jobs independently deciding when to retry, per D-I)
   // to the client (this file + p01-runner.js), which can see all chunks' outcomes at once
   // and retry them together in coordinated, concurrency-capped rounds instead. opts.maxAttempts
-  // is forwarded as the x-max-attempts header -- worker/nvidia-proxy.js falls back to its
+  // is forwarded as the x-max-attempts header -- services/nvidia-proxy/nvidia-proxy.js falls back to its
   // existing MAX_ATTEMPTS=3 auto-retry when this header is absent, so P01's own
   // refine/question-gen calls (which never set it) are completely unaffected.
   async function submitAndPoll(proxyUrl, apiKey, body, opts = {}) {
@@ -94,7 +94,7 @@ const LabLLM = (() => {
       if (job.status === "pending") continue;
       if (job.status === "done") return JSON.parse(job.result);
       if (job.status === "error") {
-        // D169: job.retryable (set by worker/nvidia-proxy.js) lets a caller that owns its
+        // D169: job.retryable (set by services/nvidia-proxy/nvidia-proxy.js) lets a caller that owns its
         // own retry decide whether resubmitting this exact job later is worth it, without
         // string-matching the error message.
         const err = new Error(`NVIDIA 호출 실패: ${job.error || "알 수 없는 오류"}`);
@@ -108,12 +108,12 @@ const LabLLM = (() => {
 
   // D-fix (2026-07-23): NVIDIA sometimes returns HTTP 200 with an error-shaped body instead
   // of a proper 5xx -- observed live: vLLM's EngineCore crashing mid-request, body =
-  // {"error":{"code":500,"type":"InternalServerError",...}}. worker/nvidia-proxy.js's
+  // {"error":{"code":500,"type":"InternalServerError",...}}. services/nvidia-proxy/nvidia-proxy.js's
   // RETRYABLE_STATUSES check never sees this (the HTTP status looked fine to it), so every
   // "unexpected shape" throw below used to carry no .retryable at all -- silently treated as
   // non-retryable, the chunk/call abandoned after one attempt while a same-round HTTP 524
   // got a real retry for what's functionally the same kind of transient NVIDIA hiccup.
-  //   WHY: mirror worker/nvidia-proxy.js's own RETRYABLE_STATUSES set against the code
+  //   WHY: mirror services/nvidia-proxy/nvidia-proxy.js's own RETRYABLE_STATUSES set against the code
   //   NVIDIA embedded in the body -- same threshold, just read from a different place (these
   //   two files can't share a literal constant: Worker runtime vs. browser bundle).
   //   COST: if NVIDIA ever nests a genuinely permanent client error under one of these codes

@@ -14,7 +14,7 @@
  * D-H (2026-07-14, README D143): async job-queue redesign, replacing D-E's streaming
  * attempt. Cloudflare's free-tier edge gives up after ~100-125s of silence on a single
  * request -- and NVIDIA build-tier models normally take up to several minutes under load
- * (feedback/nvidia_client.py's DEFAULT_TIMEOUT_S=600, with D98's own history of "up to
+ * (cli/vendor/nvidia/nvidia_client.py's DEFAULT_TIMEOUT_S=600, with D98's own history of "up to
  * ~300s+ under load" -- confirmed live this session: qwen3-next-80b took 92s on one call
  * and didn't respond at all within 150s on another). Streaming (D-E) only helps once
  * NVIDIA starts sending bytes; it can't help if NVIDIA is slow to send the FIRST byte,
@@ -45,7 +45,7 @@
  * deterministic timeout; they're intermittent NVIDIA-side flakiness (same conclusion as
  * README's D142, now with more data) -- the same kind of request can fail once and
  * succeed on a later attempt. So each attempt now gets its own AbortController timeout
- * (600s, matching feedback/nvidia_client.py's DEFAULT_TIMEOUT_S so this isn't a new
+ * (600s, matching cli/vendor/nvidia/nvidia_client.py's DEFAULT_TIMEOUT_S so this isn't a new
  * made-up number), and a retryable failure (timeout, network error, or NVIDIA returning
  * 429/500/502/503/524) calls message.retry() instead of message.ack(). This relies on
  * Cloudflare's own queue redelivery (verified against
@@ -95,7 +95,7 @@ const RETRY_DELAY_SECONDS = 5; // brief gap before Cloudflare redelivers -- avoi
 // transient blips, not a "you're over budget, wait out the window" signal, so forcing
 // them to wait a full minute too would just slow down otherwise-quick recoveries.
 const RATE_LIMIT_RETRY_DELAY_SECONDS = 60;
-const PER_ATTEMPT_TIMEOUT_MS = 600_000; // 600s, == feedback/nvidia_client.py's DEFAULT_TIMEOUT_S (D98-derived, not a new guess)
+const PER_ATTEMPT_TIMEOUT_MS = 600_000; // 600s, == cli/vendor/nvidia/nvidia_client.py's DEFAULT_TIMEOUT_S (D98-derived, not a new guess)
 
 // D160 (2026-07-15): Pipeline Lab's debug-traffic.js (upstream Code_reviewer_with_feedback:
 // docs/lab/debug-traffic.js -- not vendored here)'s graph only counted requests one browser

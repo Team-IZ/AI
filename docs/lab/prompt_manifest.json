@@ -4,7 +4,7 @@
   "pipelines": {
     "p01": {
       "label": "교안 분석",
-      "source_file": "scripts/java_curriculum_nvidia_pipeline.py",
+      "source_file": "cli/java_curriculum_pipeline.py",
       "has_llm_calls": true,
       "stages": [
         {

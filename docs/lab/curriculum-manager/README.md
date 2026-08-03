@@ -8,10 +8,16 @@ Cloudflare Worker 프록시, DB 스키마)이 전부 포함되어 있어 **다�
 
 ## 배포 링크
 
-**https://team-iz.github.io/AI/lab/curriculum-manager/** (2026-07-21부터 라이브,
-`feat/pdf_analysis` 브랜치의 `/docs`를 GitHub Pages가 직접 서빙 — `develop`으로 머지된
-상태 아님). 인프라는 Team-IZ 전용으로 분리된 Supabase 프로젝트(`team-iz-curriculum-manager`)
-+ Cloudflare Worker(`team-iz-nvidia-proxy`)를 씀. 로그인/DB 저장 기능만 Google OAuth
+**https://team-iz.github.io/AI/lab/curriculum-manager/** (2026-07-21부터 라이브).
+
+배포 방식은 2026-07-28에 바뀌었습니다. 예전엔 GitHub Pages가 `feat/pdf_analysis` 브랜치의
+`/docs`를 **직접** 서빙했지만, 지금은 `.github/workflows/pages.yml`(GitHub Actions)이 네 개
+브랜치를 하나의 사이트로 **조립**합니다 — 자세한 건 아래 "§4 GitHub Pages 배포" 참고.
+Pages 설정을 예전처럼 "브랜치+/docs"로 되돌리면 나머지 세 도구의 배포가 전부 깨집니다.
+
+인프라는 Cloudflare Worker(`team-iz-nvidia-proxy`) + Supabase 공유 프로젝트
+(`code-reviewer-pipeline-lab`, ref `oziaeqcvrkrqkhwrybfj` — 2026-07-22에 전용 프로젝트에서
+다시 이쪽으로 옮김, `../config.js` 헤더 주석 참고)를 씀. 로그인/DB 저장 기능만 Google OAuth
 클라이언트 등록이 남아 있고(아래 "자체 배포" 5번), 분석 자체는 지금 바로 동작함.
 
 ## 구성
@@ -21,8 +27,6 @@ Cloudflare Worker 프록시, DB 스키마)이 전부 포함되어 있어 **다�
   표로 결과가 뜹니다. 실행 중 "취소"를 누르면 실제로 파이프라인이 중단됩니다(뒤로가기가
   아님 — 백그라운드에서 계속 도는 게 아니라 진행 중인 요청이 끝나는 대로 결과를 버림).
   목록 탭에서 "− 교안 삭제"로 항목을 지울 수 있습니다(본인이 등록한 항목만).
-- `dashboard.html` / `report.html` / `projects.html` — Team-IZ 와이어프레임을 그대로 포팅한
-  **정적 참고 화면**(실제 데이터 연동 없음, nav가 죽은 링크로 남지 않도록 붙여둔 것).
 - `labapp-shim.js` — `../p01-runner.js`(원본 파이프라인, 무수정)를 이 페이지에서 돌리기
   위한 어댑터. `p01-runner.js`가 원래 다른 DOM 구조를 전제로 짜여 있어서, 없는 7개
   `LabApp` 멤버(log/setStatus/startTimer/stopTimer/showResults/registerRunner/
@@ -33,13 +37,19 @@ Cloudflare Worker 프록시, DB 스키마)이 전부 포함되어 있어 **다�
 - `labdb-shim.js` — 결과 저장을 팀 공용 `public.runs`가 아니라 별도 스키마
   `pdf_analysis.runs`/`pdf_analysis.artifacts`로 보내는 어댑터. `../db.js`는 무수정.
 
-의존 파일(`../config.js ../db.js ../lab-core.js ../llm.js ../pyodide-shared.js
-../pdfjs-loader.js ../p01-runner.js ../prompt_manifest.json`)도 상대경로 그대로 동작하도록
-같이 들어 있습니다. `scripts/java_curriculum_nvidia_pipeline.py`는 이 웹 도구와 같은 로직의
-원본 CLI 파이프라인(참고용 — 브라우저 도구는 이 파일을 직접 실행하지 않고 JS로 이식한
-`p01-runner.js`를 씀). `worker/`는 NVIDIA API를 프록시하는 Cloudflare Worker 소스(아래
-"자체 배포" 참고). `experiments/web_lab/`엔 DB 스키마 2개(`members_schema.sql`,
-`pdf_analysis_schema.sql`)가 들어 있습니다.
+의존 파일(`../config.js ../db.js ../lab-core.js ../llm.js ../pdfjs-loader.js
+../p01-runner.js ../prompt_manifest.json`)도 상대경로 그대로 동작하도록 같이 들어 있습니다.
+`cli/java_curriculum_pipeline.py`는 이 웹 도구와 같은 로직의 원본 CLI 파이프라인(참고용 —
+브라우저 도구는 이 파일을 직접 실행하지 않고 JS로 이식한 `p01-runner.js`를 씀).
+`services/nvidia-proxy/`는 NVIDIA API를 프록시하는 Cloudflare Worker 소스,
+`services/p01-orchestrator/`는 브라우저를 닫아도 분석이 계속 진행되게 하는 서버측 잡
+오케스트레이터(Durable Object)입니다(아래 "자체 배포" 참고). `db/`엔 DB 스키마 3개
+(`01_members.sql`, `02_pdf_analysis.sql`, `03_model_notes.sql`)가 적용 순서대로 들어 있습니다.
+
+> **2026-08-03**: `dashboard.html` / `report.html` / `projects.html`(실제 데이터 연동이 전혀
+> 없는 정적 와이어프레임 목업 3개)과 `../pyodide-shared.js`(이 브랜치엔 브라우저측 파이썬
+> 실행 단계가 없어서 `LabPyodide`를 아무도 참조하지 않던 죽은 코드)를 삭제했습니다.
+> `index.html`의 nav도 그 3개 링크를 빼고 "교안" 하나만 남겼습니다.
 
 ## 빠른 실행 (지금 바로 켜보기)
 
@@ -65,9 +75,12 @@ Supabase 프로젝트/Cloudflare Worker/GitHub Pages 전부 이미 배포되어 
 ### 1) Supabase 프로젝트
 
 1. [supabase.com](https://supabase.com)에서 새 프로젝트 생성.
-2. SQL Editor에서 **순서대로** 실행: `experiments/web_lab/members_schema.sql` →
-   `experiments/web_lab/pdf_analysis_schema.sql` (`pdf_analysis.runs`가
-   `public.members`를 참조하므로 순서 중요).
+2. SQL Editor에서 **파일명 숫자 순서대로** 실행: `db/01_members.sql` →
+   `db/02_pdf_analysis.sql` → `db/03_model_notes.sql`.
+   순서가 중요한 이유: `pdf_analysis.runs`(02)가 `public.members`(01)를 참조하고,
+   `public.model_notes`(03)의 `updated_by`도 `public.members`를 참조합니다.
+   03은 모델 선택 UI의 "비고"를 팀 공유 메모로 저장하는 테이블입니다 — 없으면 비고가
+   `lab-core.js`의 정적 `CURATED_MODELS` 텍스트로만 표시되고 편집/저장이 안 됩니다.
 3. Settings → API → Data API에서 노출 스키마(`db_schema`)에 `pdf_analysis`를 추가
    (기본값 `public`에 콤마로 이어서 `public,pdf_analysis`). 반영까지 5-10초 정도 걸릴 수
    있음 — 저장 직후 안 바뀐 것처럼 보여도 잠시 후 재확인.
@@ -83,7 +96,7 @@ Supabase 프로젝트/Cloudflare Worker/GitHub Pages 전부 이미 배포되어 
 ### 2) Cloudflare Worker (NVIDIA 프록시)
 
 ```
-cd worker
+cd services/nvidia-proxy
 wrangler login
 wrangler kv namespace create NVIDIA_JOBS      # 출력된 id를 wrangler.toml에 반영
 wrangler queues create <새-큐-이름>            # 큐는 파일에서 자동 생성되지 않음, 먼저 생성 필요
@@ -109,12 +122,41 @@ Worker 이름도 Queue 이름도 계정 스코프라, 같은 이름을 다시 �
 - `TEAM_SUPABASE_URL` / `TEAM_SUPABASE_ANON_KEY` → 새 Supabase 프로젝트 값
 - `DEFAULT_PROXY_URL` → 새로 배포한 Worker URL
 
-### 4) GitHub Pages 배포 (완료)
+### 4) GitHub Pages 배포 (완료 — 2026-07-28부터 조립 방식)
 
-Settings → Pages에서 소스를 `feat/pdf_analysis` 브랜치의 `/docs`로 지정해 라이브
-(위 "배포 링크" 참고). `develop`이 아니라 이 브랜치를 직접 서빙하는 상태라, `develop`/
-`main`으로 나중에 머지하기로 하면 Pages 소스도 그쪽으로 다시 지정해야 링크가 계속
-유효합니다(머지 자체와는 독립적인 별도 설정이라 자동으로 안 따라감).
+**Pages 소스는 "브랜치 + 폴더"가 아니라 GitHub Actions입니다.** Settings → Pages를 예전처럼
+`feat/pdf_analysis` + `/docs`로 되돌리지 마세요 — 그러면 이 도구만 남고 나머지 세 도구
+(code-qna, poc, codemap)의 배포가 통째로 사라집니다.
+
+이유: GitHub Pages는 **저장소당 소스를 하나만** 가질 수 있는데 이 저장소는 도구 4개를 브랜치
+4개로 나눠 갖고 있습니다. 그래서 `.github/workflows/pages.yml`이 네 브랜치를 전부 checkout해
+하나의 `site/`로 조립한 뒤 그걸 Pages 아티팩트로 올립니다:
+
+| 소스 브랜치 | 가져오는 경로 | 사이트 URL |
+|---|---|---|
+| `feat/pdf_analysis` (이 브랜치) | `docs/` | `/lab/**` ← **이 도구** |
+| `feat/code_Q&A` | 저장소 루트 | `/lab/code-qna/**` |
+| `feat/poc_full` | 저장소 루트 | `/lab/poc/**` |
+| `feature/code-importance-map` | `docs/lab/codemap/` | `/lab/codemap/**` |
+
+사이트 루트 `index.html`(네 도구 링크 허브)은 `feat/poc_full`의 `pages-hub/index.html`에서
+복사됩니다.
+
+이 브랜치에서 실무적으로 중요한 점 3가지:
+
+1. **`docs/`의 내부 구조가 곧 배포 URL입니다.** 조립 단계가 `src-p01/docs/` → `site/`로
+   그대로 rsync하므로 `docs/lab/curriculum-manager/index.html`은 `/lab/curriculum-manager/`가
+   됩니다. `docs/` 안의 파일을 옮기거나 이름을 바꾸면 라이브 URL이 깨집니다.
+2. **워크플로의 smoke-check가 이 경로들을 하드코딩**해서 확인합니다 —
+   `site/lab/curriculum-manager/index.html`, `site/lab/p01-runner.js`,
+   `site/lab/prompt_manifest.json`. 셋 중 하나라도 없으면 빌드가 실패하고, **네 도구 전부**
+   배포가 멈춥니다.
+3. **`pages.yml` 자체가 네 브랜치에 복사본으로 존재**합니다(push 이벤트는 푸시된 브랜치의
+   워크플로 파일을 실행). 워크플로를 고칠 땐 네 곳 전부 같이 고쳐야 합니다.
+
+되돌리려면(단일 브랜치 Pages로): Pages 소스를 `{branch: feat/pdf_analysis, path: /docs}`로
+바꾸고, `feat/code_Q&A`의 트리를 이 브랜치의 `docs/lab/code-qna/`로 복원한 뒤, 네 브랜치에서
+`pages.yml`을 지우면 됩니다(= 2026-07-28 이전 상태, 중복 사본 드리프트 문제도 같이 돌아옴).
 
 ### 5) Google OAuth 클라이언트 (아직 안 됨 — 수동 단계 필요)
 

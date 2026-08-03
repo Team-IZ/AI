@@ -1,6 +1,6 @@
 // This page reuses p01-runner.js completely unmodified (see index.html script order:
-// config.js -> db.js -> lab-core.js -> THIS FILE -> llm.js -> pyodide-shared.js ->
-// pdfjs-loader.js -> p01-runner.js). lab-core.js already provides 13 of
+// config.js -> db.js -> lab-core.js -> THIS FILE -> llm.js -> pdfjs-loader.js ->
+// p01-runner.js). lab-core.js already provides 13 of
 // the 17 `LabApp.*` members p01-runner.js calls (it was extracted from the original
 // docs/lab/app.js specifically to support DOM-independent reuse -- see its own header
 // comment).
@@ -135,7 +135,7 @@
   // (see file header), so free to diverge from the original without a sync concern.
   //
   // D1 (2026-07-24): 비고를 CURATED_MODELS의 정적 텍스트에서 팀 공유 DB 메모
-  // (public.model_notes, experiments/web_lab/model_notes_schema.sql)로 확장. 정적
+  // (public.model_notes, db/03_model_notes.sql)로 확장. 정적
   // 텍스트는 여전히 "아무도 DB에 메모를 안 남긴 모델"의 fallback으로 남음.
   // LabApp.modelNotesCache는 index.html이 LabDB.fetchModelNotes()로 채움(로그인
   // 안 됐으면 빈 객체 -- 그 경우 이 함수는 정적 fallback만 보여주고 편집 UI도

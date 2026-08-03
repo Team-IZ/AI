@@ -1,4 +1,4 @@
-// D-P01ORCH (client side): talks to worker/p01-orchestrator/ instead of calling
+// D-P01ORCH (client side): talks to services/p01-orchestrator/ instead of calling
 // P01Runner.run() directly, for logged-in submissions -- see that Worker's own header
 // comment for the full WHY. p01-runner.js is NOT modified; this file only adds its own
 // independent listeners to the SAME DOM elements P01Runner.renderInput() creates
@@ -90,7 +90,7 @@ const P01JobClient = (() => {
   }
 
   // D-fix (security review): both endpoints now require the caller's own Supabase
-  // session (see worker/p01-orchestrator/index.js's own D-fix note) -- pulled fresh each
+  // session (see services/p01-orchestrator/index.js's own D-fix note) -- pulled fresh each
   // call rather than cached, same as submitAnalysis(), so a token refresh mid-session is
   // picked up automatically.
   async function currentAccessToken() {

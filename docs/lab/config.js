@@ -4,8 +4,8 @@
 //
 // Supabase URL/anon key are the one exception: this is the team's single shared DB, not a
 // per-teammate secret, so they're hardcoded below instead of typed in every session. This
-// is safe specifically because Supabase's RLS policies (members_schema.sql +
-// pdf_analysis_schema.sql) -- not anon key secrecy -- are what actually protects the
+// is safe specifically because Supabase's RLS policies (db/01_members.sql +
+// db/02_pdf_analysis.sql) -- not anon key secrecy -- are what actually protects the
 // data; the anon key is meant to ship in client code. Teammates still enter their own
 // NVIDIA key/PAT and sign in with their own email for per-member attribution.
 //
@@ -19,14 +19,14 @@
 // never accumulated any real data (confirmed via the Management API before switching
 // back), so nothing was migrated -- just re-pointed.
 // DEFAULT_PROXY_URL below is UNCHANGED and still points at Team-IZ's own dedicated
-// Cloudflare Worker ("team-iz-nvidia-proxy", worker/ in this repo) -- this switch was
+// Cloudflare Worker ("team-iz-nvidia-proxy", services/nvidia-proxy/ in this repo) -- this switch was
 // scoped to the DB only, not the NVIDIA proxy.
 const LabConfig = (() => {
   const TEAM_SUPABASE_URL = "https://oziaeqcvrkrqkhwrybfj.supabase.co";
   const TEAM_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96aWFlcWN2cmtycWtod3J5YmZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMDA4MTksImV4cCI6MjA5OTU3NjgxOX0.hBgzs0V7Nw3WLB8_zNuPDfluYrqOH2_Dto1weQF5iKo";
 
-  // Team-IZ's own deployed proxy (worker/nvidia-proxy.js, included in this repo -- see
-  // worker/wrangler.toml), pre-filled as a default -- unlike the Supabase values above
+  // Team-IZ's own deployed proxy (services/nvidia-proxy/nvidia-proxy.js, included in this
+  // repo -- see services/nvidia-proxy/wrangler.toml), pre-filled as a default -- unlike the Supabase values above
   // this is NOT force-hardcoded: it's just a starting value in an editable field, so
   // anyone can type in a different proxy's URL at runtime with no code change.
   const DEFAULT_PROXY_URL = "https://team-iz-nvidia-proxy.popixoxipop.workers.dev";

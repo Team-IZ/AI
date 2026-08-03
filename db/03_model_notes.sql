@@ -10,7 +10,7 @@
 --
 -- Already applied live (2026-07-24, via Supabase Management API against project
 -- oziaeqcvrkrqkhwrybfj) -- this file exists for reproducibility/reference, same
--- convention as pdf_analysis_schema.sql. Safe to re-run (IF NOT EXISTS guard) except the
+-- convention as 02_pdf_analysis.sql. Safe to re-run (IF NOT EXISTS guard) except the
 -- RLS policies, which use CREATE POLICY without IF NOT EXISTS -- drop them first if
 -- re-applying after editing a policy.
 create table if not exists public.model_notes (

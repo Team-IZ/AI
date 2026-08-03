@@ -23,8 +23,10 @@ from pathlib import Path
 from typing import Any
 
 REPO = Path(__file__).resolve().parents[1]
-FEEDBACK = REPO / "feedback"
-sys.path.insert(0, str(FEEDBACK))
+# Vendored NVIDIA client + key pool (nvidia_client.py imports nvidia_key_pool as a flat
+# sibling, so both must stay in this same directory -- see Readme.md's D-feedback-vendor).
+VENDOR_NVIDIA = Path(__file__).resolve().parent / "vendor" / "nvidia"
+sys.path.insert(0, str(VENDOR_NVIDIA))
 
 from nvidia_client import NvidiaRotatingClient  # noqa: E402
 from nvidia_key_pool import NvidiaKeyPool  # noqa: E402
@@ -757,7 +759,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pdf", default=DEFAULT_PDF)
     parser.add_argument("--pdf-password", default=os.environ.get("JAVA_CURRICULUM_PDF_PASSWORD"))
-    parser.add_argument("--out-dir", default=str(REPO / "docs" / "java_curriculum_pipeline_run"))
+    # D-runs-outdir (2026-08-03): the default used to be REPO/"docs"/"java_curriculum_pipeline_run".
+    # docs/ is this branch's GitHub Pages publish contract (.github/workflows/pages.yml rsyncs
+    # it verbatim into the assembled site), so a plain default-args run dropped chunks.json/
+    # unit_map.json/graph.json into the published tree and the next push shipped them live.
+    #   WHY: run artifacts are local scratch, not site content -- they should never be able to
+    #     reach the public site by default.
+    #   COST: output no longer lands in a fixed path, so a follow-up command can't hardcode it;
+    #     the run prints its own out_dir at the end ("[done] outputs: ..."). Pass --out-dir
+    #     explicitly for a stable location.
+    #   EXIT: runs/ is gitignored -- delete the directory to reclaim space, nothing references it.
+    parser.add_argument("--out-dir", default=str(REPO / "runs" / time.strftime("%Y%m%d-%H%M%S")))
     parser.add_argument("--model", default=DEFAULT_MODEL)
     parser.add_argument("--chunk-size", type=int, default=10)
     parser.add_argument("--max-chunks", type=int)

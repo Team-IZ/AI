@@ -1,4 +1,4 @@
-# D-P01ORCH: separate Worker from worker/nvidia-proxy.js (that file is shared with
+# D-P01ORCH: separate Worker from services/nvidia-proxy/nvidia-proxy.js (that file is shared with
 # code-qna and kept simple/stable -- this one owns curriculum-manager's chunk-analysis
 # orchestration and a Durable Object, and calls nvidia-proxy.js as a normal external
 # HTTP dependency, same submit-and-poll contract the browser used to call directly).

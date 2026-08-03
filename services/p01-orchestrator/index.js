@@ -36,7 +36,7 @@ const SUPABASE_URL = "https://oziaeqcvrkrqkhwrybfj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96aWFlcWN2cmtycWtod3J5YmZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMDA4MTksImV4cCI6MjA5OTU3NjgxOX0.hBgzs0V7Nw3WLB8_zNuPDfluYrqOH2_Dto1weQF5iKo";
 
 // D-cors-array: two legitimate origins serve curriculum-manager today (main repo's own
-// Pages deploy + the Team-IZ mirror) -- worker/nvidia-proxy.js's own D-fix15 EXIT note
+// Pages deploy + the Team-IZ mirror) -- services/nvidia-proxy/nvidia-proxy.js's own D-fix15 EXIT note
 // anticipated needing exactly this ("if a second legitimate origin needs access... an
 // array-aware check"). Reflects back whichever of these the request's Origin matches;
 // anything else gets no CORS header at all (browser blocks it client-side).
@@ -109,7 +109,7 @@ function markRetryableFromBody(err, data) {
 }
 
 // ---- ported from llm.js:63-106 (submitAndPoll) -- talks to the EXISTING
-// worker/nvidia-proxy.js over plain HTTPS, same contract the browser used to call
+// services/nvidia-proxy/nvidia-proxy.js over plain HTTPS, same contract the browser used to call
 // directly. nvidia-proxy.js itself needs zero changes for this. ----
 async function submitAndPoll(proxyUrl, apiKey, body, opts = {}) {
   const headers = { "content-type": "application/json", "x-nvidia-api-key": apiKey };

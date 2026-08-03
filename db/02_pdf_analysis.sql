@@ -8,7 +8,8 @@
 --
 -- Already applied live (2026-07-21, via Supabase Management API against project
 -- oziaeqcvrkrqkhwrybfj) -- this file exists for reproducibility/reference, same
--- convention as supabase_schema.sql. Safe to re-run (IF NOT EXISTS guards) except the
+-- convention as upstream Code_reviewer_with_feedback's experiments/web_lab/supabase_schema.sql
+-- (not vendored into this repo). Safe to re-run (IF NOT EXISTS guards) except the
 -- RLS policies, which use CREATE POLICY without IF NOT EXISTS -- drop them first if
 -- re-applying after editing a policy.
 --
@@ -49,7 +50,7 @@ create index if not exists pdf_analysis_artifacts_run_id_idx on pdf_analysis.art
 alter table pdf_analysis.runs enable row level security;
 alter table pdf_analysis.artifacts enable row level security;
 
--- Same RLS shape as supabase_schema.sql: any authenticated team member can read
+-- Same RLS shape as that upstream supabase_schema.sql: any authenticated team member can read
 -- everything (this is a comparison/review tool), writes restricted to your own member_id.
 create policy "pdf_analysis runs read all" on pdf_analysis.runs for select to authenticated using (true);
 create policy "pdf_analysis runs insert own" on pdf_analysis.runs for insert to authenticated with check (member_id = auth.uid());
