@@ -33,10 +33,8 @@ def _stub_problem(problem_no: int, focus_item_id: str | None = None,
         "priority": 1.0,
         # 요청 focusItems[].id를 그대로 돌려준다. 후보가 없으면 자율 선정(None).
         "question_focus_item_id": focus_item_id,
-        # 요청 teaches[].id를 순서대로 물린다. 후보가 없으면 일반 문제(None).
+        # 요청 teaches[].id를 순서대로 물린다.
         "teach_id": teach_id,
-        # teach 앵커가 없으면 일반 문제다. 둘은 항상 짝이다.
-        "is_general": teach_id is None,
         "source_path": "app/main.py",
         "line_start": 12,
         "line_end": 14,

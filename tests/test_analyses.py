@@ -286,7 +286,6 @@ def test_teach_id_is_echoed_on_problems():
 
     assert [p["teachId"] for p in problems] == ["tch-1", "tch-2", None]
     # teach 앵커가 없는 문제는 화면에 "일반 문제"로 표기된다. 둘은 짝이다.
-    assert [p["isGeneral"] for p in problems] == [False, False, True]
 
 def test_requirement_result_count_mismatch_fails_job():
     """판정이 빠진 채 SUCCEEDED가 되면 미판정 요구사항이 통과로 기록된다."""

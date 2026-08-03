@@ -20,6 +20,9 @@ class Selection:
     topics: list[dict[str, Any]]          # 검증 통과분. code_ref에 산정된 줄 번호가 들어 있다
     usages: list[dict[str, Any]]
     dropped: list[dict[str, str]] = field(default_factory=list)   # [{title, reason}]
+    # 문항을 못 만든 teach. **`problems`에 없는 teachId를 백엔드가 역산하지 않도록**
+    # 명시적으로 들고 나온다 — 화면의 `―`(문항 없음)이 이 값으로 그려진다.
+    unmatched: list[dict[str, str]] = field(default_factory=list)  # [{teach_id, reason}]
     budget: int = 3
 
     @property
@@ -74,72 +77,109 @@ def select(files: dict[str, str], teaches: list[dict[str, Any]],
 
     # 검증 ②: symbol이 실제 파일에서 잡혀야 한다. 산정된 줄 번호를 code_ref에 되먹여
     # 이후 단계가 symbol을 다시 찾지 않고 "산정된 사실"만 쓰게 한다.
-    verified = []
-    for t in kept:
-        ref = t.get("code_ref") or {}
+    verified, failed = _locate_all(files, kept, dropped)
+
+    # 🔴 **재시도 1회** (2026-08-03 PM 결정: "일단 최대한 teaches에 부합하는 거 찾아보고
+    # 그래도 없으면 없다고 박아라"). 개념이 코드에 **있는데 LLM이 엉뚱한 symbol을 지목**한
+    # 경우가 있다 — 한 번에 버리면 있는 개념을 없다고 박게 된다.
+    #
+    # 실패한 teach만 모아 다시 묻는다. 전부 성공하면 이 호출은 아예 없다.
+    if failed:
+        retried = _relocate(files, teaches, analysis_document, candidates, failed,
+                            model_code=model_code)
+        if retried is not None:
+            result.usages.extend(retried.usages)
+            more, _ = _locate_all(files, retried.topics, dropped)
+            verified.extend(more)
+
+    picked = verified[:question_budget]
+
+    # 요청받은 teach 중 문항이 안 나온 것. 지어내지 않고 "없음"으로 남긴다
+    # (2026-08-03 PM 결정). 사유는 화면에 그대로 띄울 수 있는 한 문장으로 만든다.
+    matched = {t.get("teach_id") for t in picked}
+    reason_by_teach = {d.get("teach_id"): d.get("reason") for d in dropped if d.get("teach_id")}
+    unmatched = [
+        {"teach_id": t["id"],
+         "reason": reason_by_teach.get(t["id"])
+                   or "제출 코드에서 이 개념의 근거를 찾지 못했습니다"}
+        for t in teaches[:question_budget] if t.get("id") and t["id"] not in matched
+    ]
+
+    return Selection(topics=picked, usages=result.usages, dropped=dropped,
+                     unmatched=unmatched, budget=question_budget)
+    
+def _locate_all(files: dict[str, str], topics: list[dict[str, Any]],
+                dropped: list[dict[str, str]]) -> tuple[list[dict[str, Any]],
+                                                        list[dict[str, Any]]]:
+    """symbol을 실제 파일에서 잡아 code_ref에 줄 번호를 되먹인다.
+
+    돌려주는 것은 (검증 통과, 위치를 못 잡은 것). 못 잡은 것도 `dropped`에 사유가
+    남는다 — 재시도가 실패하면 그 사유가 최종 기록이다.
+    """
+    verified: list[dict[str, Any]] = []
+    failed: list[dict[str, Any]] = []
+    for topic in topics:
+        ref = topic.get("code_ref") or {}
         located = fragments.extract_fragment(files, ref.get("file"), ref.get("symbol", ""))
         if not located["valid"]:
-            dropped.append({"title": t.get("title", ""), "reason": located["reason"]})
+            dropped.append({"title": topic.get("title", ""), "reason": located["reason"],
+                            "teach_id": topic.get("teach_id") or ""})
+            failed.append(topic)
             continue
-        t["code_ref"] = {
+        topic["code_ref"] = {
             "file": located["file"],
             "line_start": located["line_start"],
             "line_end": located["line_end"],
             "snippet": located["snippet"],
         }
-        verified.append(t)
+        verified.append(topic)
+    return verified, failed
 
-    # 폴백: teach 앵커로 예산을 못 채웠으면 teach 없는 일반 문제로 채운다.
-    #
-    # 같은 teach를 재사용하지 않는 이유: 강사가 (클래스, 상속, 캡슐화)로 정하면
-    # 프론트도 그 셋을 보여준다. 뒤에서 (클래스, 클래스, 캡슐화)로 바꾸면 화면과 어긋난다.
-    #
-    # 미구현 teach는 이미 requirementResults가 F로 보고한다. 그걸 점수 분모에도
-    # 반영하면(문제 2개 = 만점 40) 같은 사실을 두 번 벌하고, 학생마다 만점이 달라진다.
-    #
-    # LLM을 다시 부르지 않는다 — p04-1의 decision_points가 이미 코드에 앵커돼 있다.
-    if len(verified) < question_budget:
-        used = {(t["code_ref"]["file"], t["code_ref"]["line_start"]) for t in verified}
-        verified.extend(_general_topics(
-            files, analysis_document, need=question_budget - len(verified), used=used
-        ))
 
-    return Selection(topics=verified[:question_budget], usages=result.usages,
-                     dropped=dropped, budget=question_budget)
-    
-def _general_topics(files: dict[str, str], analysis_document: dict[str, Any],
-                    *, need: int, used: set[tuple[str, int]]) -> list[dict[str, Any]]:
-    """teach 없는 일반 문제. 분석 문서의 decision_points 중 안 쓰인 것을 쓴다.
+def _relocate(files: dict[str, str], teaches: list[dict[str, Any]],
+              analysis_document: dict[str, Any], candidates: list[dict[str, Any]],
+              failed: list[dict[str, Any]], *, model_code: str):
+    """위치를 못 잡은 teach만 모아 p04-3을 한 번 더 부른다.
 
-    decision_points는 p04-1이 "판단이 개입된 지점"으로 이미 골라둔 것이고 코드에
-    앵커돼 있다. 새로 LLM을 부를 이유가 없다.
+    **개념이 코드에 있는데 LLM이 엉뚱한 symbol을 지목한 경우를 구제한다.**
+    한 번에 버리면 있는 개념을 "없음"으로 박게 되고, 그건 오퍼레이터가 고른 개념을
+    조용히 빼는 것이다(2026-08-03 PM: "최대한 찾아보고 그래도 없으면 없다고 박아라").
 
-    teach_id가 None이라 **보고서의 교안 복습 위치 지목이 이 문제엔 안 붙는다.**
-    임시안이고, 미구현 teach를 어떻게 다룰지는 나중에 다시 본다.
+    **한 번만 한다.** 두 번째도 못 찾으면 실제로 코드에 없을 가능성이 훨씬 높고,
+    LLM 콜을 더 태울 값어치가 없다. 실패하면 조용히 None을 돌려준다 — 재시도가
+    깨져서 1차 결과까지 잃으면 안 된다.
     """
-    picked: list[dict[str, Any]] = []
-    for dp in analysis_document.get("decision_points") or []:
-        if len(picked) >= need:
-            break
-        located = fragments.extract_fragment(files, dp.get("file"), dp.get("symbol", ""))
-        if not located["valid"]:
-            continue
-        key = (located["file"], located["line_start"])
-        if key in used:
-            continue   # 1차에서 이미 쓴 지점. 같은 문제를 두 번 내지 않는다
-        used.add(key)
-        picked.append({
-            "teach_id": None,
-            # 조립기가 Problem.is_general로 옮긴다. 화면에 "일반 문제"로 표기해야 한다
-            # (2026-08-02 PM 확정) — teach 앵커가 없어 다른 문제와 성격이 다르다.
-            "is_general": True,
-            "title": dp.get("title", ""),
-            "rationale": dp.get("why_it_matters", ""),
-            "code_ref": {
-                "file": located["file"],
-                "line_start": located["line_start"],
-                "line_end": located["line_end"],
-                "snippet": located["snippet"],
-            },
-        })
-    return picked
+    failed_ids = {t.get("teach_id") for t in failed}
+    subset = [t for t in teaches if t.get("id") in failed_ids]
+    if not subset:
+        return None
+
+    values = {
+        "teaches_block": "\n".join(
+            f"- {t.get('id')}: {t.get('label', '')}" for t in subset),
+        "analysis_block": json.dumps(analysis_document, ensure_ascii=False),
+        "findings_block": json.dumps(candidates, ensure_ascii=False),
+        "question_count": len(subset),
+    }
+    missed = "\n".join(
+        f"- {t.get('teach_id')}: {(t.get('code_ref') or {}).get('symbol', '')!r}"
+        for t in failed
+    )
+    hint = (
+        "\n\n## 재시도\n"
+        "앞선 시도에서 아래 symbol을 코드에서 찾지 못했다. **파일에 실제로 존재하는 "
+        "선언·호출 문자열을 그대로** code_ref.symbol에 써라 — 요약하거나 다시 쓰지 마라.\n"
+        f"{missed}\n\n"
+        "해당 개념이 코드에 실제로 없으면 그 teach는 topics에서 빼라. "
+        "지어내지 마라 — 없는 것은 없다고 두는 편이 낫다."
+    )
+    try:
+        result = stages.call("p04-3", values, model_code=model_code, extra_user=hint)
+    except stages.StageError:
+        return None
+
+    raw = result.data.get("topics")
+    topics = raw if isinstance(raw, list) else []
+    # 재시도가 엉뚱한 teach를 들고 오면 무시한다. 1차에서 이미 성공한 것을 덮어쓰면 안 된다.
+    topics = [t for t in topics if t.get("teach_id") in failed_ids]
+    return Selection(topics=topics, usages=result.usages, budget=len(subset))

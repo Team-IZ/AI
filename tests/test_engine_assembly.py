@@ -120,7 +120,6 @@ def test_teach_id_is_carried_into_the_problem(fake_llm):
     problem = AnalysisResult.model_validate(raw).problems[0]
 
     assert problem.teach_id == "t1"
-    assert problem.is_general is False
 
 
 def test_provider_model_code_is_used(fake_llm):
@@ -209,3 +208,17 @@ def test_oversized_file_falls_back_to_the_fragment(fake_llm):
     files = {"a/b.py": "x" * (engine_mod._MAX_DISPLAY_CHARS + 1)}
 
     assert engine_mod._display_source(files, {"file": "a/b.py"}, "fragment") == "fragment"
+
+
+def test_unmatched_teach_reaches_the_response(monkeypatch, fake_llm):
+    """개념이 코드에 없으면 `―`로 그릴 값이 응답에 실려야 한다."""
+    request = {**REQUEST, "question_budget": 2,
+               "teaches": [{"id": "t1", "label": "결제 흐름"},
+                           {"id": "t-nope", "label": "동시성 제어"}]}
+
+    raw = engine_mod.RealAnalysisEngine().analyze(request, _zip())
+    raw.pop("ai_usage")
+    result = AnalysisResult.model_validate(raw)
+
+    assert [u.teach_id for u in result.unmatched_teaches] == ["t-nope"]
+    assert result.unmatched_teaches[0].reason

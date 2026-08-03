@@ -109,7 +109,7 @@ def _stamp(usages: list[dict[str, Any]], feature_code: str) -> list[dict[str, An
     """호출 기록에 "어느 기능이 불렀나"를 찍는다.
 
     `llm/client.py`는 자기가 어느 기능에 쓰이는지 모른다(알아야 할 이유도 없다).
-    나머지 요청 범위 값(`sourceId`·`traceId` 등)은 job 계층이 채운다 — 엔진은
+    나머지 요청 범위 값(`contextId`·`traceId` 등)은 job 계층이 채운다 — 엔진은
     job_id도 헤더도 모르기 때문이다.
     """
     return [{**u, "feature_code": feature_code} for u in usages]
@@ -270,7 +270,6 @@ class RealAnalysisEngine:
                 "problem_type": _problem_type(topic, candidates),
                 "priority": _priority(topic, candidates),
                 "question_focus_item_id": focus_ids[no - 1] if no <= len(focus_ids) else None,
-                "is_general": bool(topic.get("is_general")),
                 # 어느 교안 개념을 검증하는 문제인가. 일반 문제면 None이다
                 # (topics._general_topics가 teach_id를 비운다).
                 "teach_id": topic.get("teach_id"),
@@ -303,6 +302,7 @@ class RealAnalysisEngine:
             "analysis_document": analysis_doc.to_schema(doc.document, files),
             "requirement_results": requirement_results,
             "problems": problems,
+            "unmatched_teaches": selection.unmatched,
             "question_count_planned": budget,
             "ai_usage": usages,
         }

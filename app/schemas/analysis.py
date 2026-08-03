@@ -178,13 +178,9 @@ class Problem(BaseSchema):
         default=None,
         description="요청 focusItems[].id를 그대로 돌려준다. 강사 지정 없이 뽑았으면 null",
     )
-    is_general: bool = Field(
-        default=False,
-        description="teach에 연결되지 않은 일반 문제. 제출 코드가 teaches를 만족하지 "
-                    "않아 그 개념으로 문제를 못 만들었을 때 나온다. **화면에 '일반 문제'로 "
-                    "표기해야 한다** — 검증 개념 앵커가 없어 다른 문제와 성격이 다르고, "
-                    "보고서의 교안 복습 위치 지목도 붙지 않는다 (2026-08-02 PM 확정)",
-    )
+    # 🔴 `isGeneral`은 삭제됐다 (2026-08-03 PM 결정). teach 앵커 없는 "일반 문제"를
+    # 만들지 않는다 — 오퍼레이터가 고른 개념이 코드에 없으면 **그 개념은 문항 없음**이고,
+    # 다른 개념으로 갈아끼우거나 지어내지 않는다. 모든 학생이 같은 개념 3개를 본다.
     source_path: str
     line_start: int = Field(
         description="**파일 기준 절대 줄 번호.** codeSnippet 안에서 하이라이트할 구간의 "
@@ -213,7 +209,8 @@ class Problem(BaseSchema):
     )
     teach_id: str | None = Field(
         default=None,
-        description="이 문제가 검증하는 교안 개념(요청 teaches[].id). isGeneral=true면 null. "
+        description="이 문제가 검증하는 교안 개념(요청 teaches[].id). **항상 채워진다** — "
+                    "문제는 오퍼레이터가 고른 개념에만 붙는다(2026-08-03 PM 결정). "
                     "화면의 '클래스는 L3까지, 상속은 L2까지' 같은 개념별 도달 표시가 이 값으로 붙는다",
     )
     references: list[ProblemReference] = Field(default_factory=list)
@@ -293,6 +290,19 @@ class AnalysisDocument(BaseSchema):
     decision_points: list[DecisionPoint] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     
+class UnmatchedTeach(BaseSchema):
+    """문항을 못 만든 검증 개념. **`―`(문항 없음)의 근거다.**
+
+    🔴 **0단(L1 미달)과 다르다.** 0단은 물어봤는데 못 푼 것이고 이건 안 물어본 것이다.
+    도달 단계 컬럼에 0을 박으면 둘이 섞여 "안 물어봤다"가 "틀렸다"로 바뀐다 — NULL이어야 한다.
+
+    AI는 이 개념을 **두 번** 찾는다(p04-3 + 실패분 재시도 1회). 그래도 못 찾으면 여기 담긴다.
+    """
+
+    teach_id: str = Field(description="요청 teaches[].id 그대로")
+    reason: str = Field(description="왜 못 만들었는지. 화면에 그대로 띄워도 되는 한 문장")
+
+
 class AnalysisResult(BaseSchema):
     """분석이 성공했을 때의 결과 본문.
 
@@ -311,6 +321,13 @@ class AnalysisResult(BaseSchema):
     )
     requirement_results: list[RequirementResult] = Field(default_factory=list)
     problems: list[Problem] = Field(default_factory=list)
+    unmatched_teaches: list["UnmatchedTeach"] = Field(
+        default_factory=list,
+        description="🔴 **문항을 못 만든 개념.** 오퍼레이터가 고른 teach 중 제출 코드에서 "
+                    "근거를 못 찾은 것들이다(2026-08-03 PM 결정: 지어내지 않고 '없음'으로 둔다). "
+                    "`problems`에 없는 teachId를 역산하지 않도록 명시적으로 보낸다 — "
+                    "화면의 개념별 도달 격자에서 `―`(문항 없음)로 그릴 값이다",
+    )
     question_count_planned: int = Field(description="계획된 질문 수. 유효 문제가 적으면 축소된다")
     
 class AnalysisJobStatus(BaseSchema):
