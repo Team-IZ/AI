@@ -46,7 +46,35 @@
 #   copy, other copy silently stale) is now loud. To intentionally fork one of those files
 #   onto feat/poc_full, remove it from VENDORED/EXCLUDES there and say why.
 #
-name: Deploy Pages (P01 + code-qna + poc)
+# D-codemap1 (2026-07-31): a FOURTH source branch, feature/code-importance-map, joins the
+#   assembly, and the site gets a root index.html for the first time.
+#
+#   feature/code-importance-map -> docs/lab/codemap/ -> /lab/codemap/**  (independent
+#     codemap backend's static team-test page -- calls the Cloudflare Worker+Container
+#     deployment directly from the browser, no server-rendered page)
+#
+#   WHY: this branch is explicitly NOT one of the three PoC-ported pipelines (see its own
+#   README §6) -- it's a parallel FastAPI implementation with its own deploy target
+#   (wrangler.toml/Dockerfile), so it only contributes one static demo page, not a whole
+#   app/ tree like feat/poc_full. Naming it "codemap" (not "p04") avoids implying it
+#   replaces feat/poc_full's P04 -- both exist side by side per that README section.
+#   Four tools with no landing page was already awkward before this; adding a fourth
+#   made "no way to discover the others" worth fixing, hence pages-hub/index.html (this
+#   branch, feat/poc_full) -- the "Generate hub index" step just copies it from the
+#   already-checked-out src-poc/. It isn't rsynced under /lab/ like the other four
+#   sources: it deliberately lives at the site root as index.html, so /  itself is the
+#   landing page instead of 404ing. It lives on feat/poc_full specifically because that
+#   checkout was already happening anyway (no new checkout step needed) -- not because
+#   the hub is conceptually feat/poc_full's tool; it links to all four equally.
+#   COST: a 4th branch means a 4th place a broken commit can block the other three's
+#   deploy. The hub's links are hand-written paths, not generated from the checkouts, so
+#   they can silently drift from reality if a tool's entry-point path changes -- the smoke
+#   -check below only proves the four target files exist, not that the hub's <a href>
+#   values still point at them.
+#   EXIT: if feature/code-importance-map's demo page is retired, drop its checkout step,
+#   its rsync line, its smoke-check entry, and its card in pages-hub/index.html.
+#
+name: Deploy Pages (P01 + code-qna + poc + codemap)
 
 on:
   push:
@@ -54,6 +82,7 @@ on:
       - "feat/pdf_analysis"
       - "feat/code_Q&A"
       - "feat/poc_full"
+      - "feature/code-importance-map"
   workflow_dispatch:
 
 permissions:
@@ -91,6 +120,13 @@ jobs:
           path: src-poc
           fetch-depth: 1
 
+      - name: Checkout codemap source (feature/code-importance-map)
+        uses: actions/checkout@v4
+        with:
+          ref: "feature/code-importance-map"
+          path: src-codemap
+          fetch-depth: 1
+
       - name: Assemble site
         run: |
           set -euo pipefail
@@ -112,14 +148,26 @@ jobs:
             src-codeqna/ site/lab/code-qna/
 
           # poc half (D-poc1): same shape as code-qna -- the whole feat/poc_full tree,
-          # including its vendored cognition/judgment/feedback (runtime fetch targets, see
-          # above). Its pages live one directory deep (app/) because the vendored files
+          # including its vendored cognition/judgment (runtime fetch targets, see above --
+          # feedback/ was dropped from this branch, D-feedback1 below, since P04 never
+          # loaded it). Its pages live one directory deep (app/) because the vendored files
           # resolve "../" against the page: p02-engine.js's REPO_RAW_BASE and
           # lab-core.js's loadManifest() both assume it. Root index.html is a redirect stub.
           mkdir -p site/lab/poc
           rsync -a \
             --exclude='.git' --exclude='.github' --exclude='__pycache__' \
             src-poc/ site/lab/poc/
+
+          # codemap half (D-codemap1): just the one static demo page, not a whole tree --
+          # this branch's actual product is a server (Cloudflare Worker+Container), not a
+          # Pages-hosted app. See its docs/lab/codemap/index.html for what it does.
+          mkdir -p site/lab/codemap
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            src-codemap/docs/lab/codemap/ site/lab/codemap/
+
+      - name: Generate hub index (D-codemap1)
+        run: cp src-poc/pages-hub/index.html site/index.html
 
       - name: Show assembled tree
         run: find site -maxdepth 3 | sort
@@ -147,6 +195,8 @@ jobs:
             "site/lab/poc/shared/p02-engine.js" \
             "site/lab/poc/cognition/two_tier_scan.py" \
             "site/lab/poc/webtool_driver.py" \
+            "site/lab/codemap/index.html" \
+            "site/index.html" \
           ; do
             if [ -f "$f" ]; then echo "  OK   $f"; else echo "  MISS $f"; fail=1; fi
           done
@@ -171,6 +221,23 @@ jobs:
             echo "  FAIL site/lab/poc carries a duplicate of the code-qna tool"
             fail=1
           fi
+
+          # D-codemap1 ownership assertion: catches an empty/wrong rsync source silently
+          # producing a blank or stale page instead of failing loud.
+          if ! grep -q 'x-internal-key' site/lab/codemap/index.html; then
+            echo "  FAIL site/lab/codemap/index.html doesn't look like the codemap test page"
+            fail=1
+          fi
+
+          # D-codemap2: this site has no custom domain, so it serves at /AI/, not root.
+          # An absolute href="/lab/..." on the hub resolves against the origin root and
+          # 404s in production even though it looks fine when the file is opened locally.
+          # Caught this the hard way (real user clicked every link, all four 404'd) --
+          # guard it here instead of trusting a local open() check again.
+          if grep -q 'href="/lab' site/index.html; then
+            echo "  FAIL site/index.html has an absolute /lab href -- breaks under the /AI/ subpath, use a relative href"
+            fail=1
+          fi
           exit $fail
 
       # D-poc1: feat/poc_full was branched from feat/code_Q&A and vendors its P02 scanner
@@ -193,7 +260,22 @@ jobs:
           # positive assertions below replace the byte-identity check for these two
           # forked files, so excluding them here cannot silently re-hide the exact
           # collision this step's exclusion is carved out for.
-          for p in cognition judgment feedback shared worker prompt_manifest.json webtool_driver.py; do
+          #
+          # D-feedback1 (2026-08-03): feedback/ dropped from this loop entirely -- it's
+          # deleted from feat/poc_full's tree (not just excluded here), unlike the
+          # wrangler.toml/config.js forks above which still exist on both sides.
+          #   WHY: confirmed feat/poc_full's own app/*.js and shared/p02-engine.js never
+          #   referenced feedback/ (not in PIPELINE_FILES, no import anywhere) -- it was
+          #   vendored at the original branch-off but P04 never actually loaded it (P03's
+          #   own p03-engine.js is the one that uses feedback/reflection_hook.py etc, and
+          #   P04 has no equivalent). feat/code_Q&A still genuinely uses it, so it's not
+          #   removed there.
+          #   COST: if P04 ever needs reflection-style feedback later, this file has to
+          #   be re-vendored from feat/code_Q&A at that point (not currently drift-checked
+          #   so it can silently go stale in the meantime -- acceptable since it doesn't
+          #   exist here to go stale FROM).
+          #   EXIT: copy feedback/ back from feat/code_Q&A and add it back to this loop.
+          for p in cognition judgment shared worker prompt_manifest.json webtool_driver.py; do
             if diff -r -q \
                  --exclude='__pycache__' --exclude='p03-engine.js' \
                  --exclude='wrangler.toml' --exclude='config.js' \
