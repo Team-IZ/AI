@@ -3,7 +3,8 @@
 > 갱신: **2026-08-03** · 작업 브랜치 `feature/stabilize` (`develop`에서 분기)
 > **이 문서는 실행용이다.** 무엇을 어떤 순서로, 어떤 방법으로 할지만 적는다.
 > 구조·계약의 설명은 `README.md`(팀원용). 기계용 계약은 `openapi.json`.
-> 백엔드 전달본은 `../qna/2026-08-03/issue-body.md`.
+> **백엔드 전달본은 `../qna/2026-08-03/issue-body-v2.md` = GitHub 이슈 `Team-IZ/Backend#42`.**
+> ⚠️ 옛 `issue-body.md`와 이슈 `#31`은 폐기다 — `테이블정의서_v06` 기준이라 낡았다.
 
 ---
 
@@ -14,20 +15,27 @@
 | 갱신 | **2026-08-03** · 브랜치 `feature/stabilize` |
 | 엔드포인트 | **8개**. 세션이 무상태로 바뀌며 11 → 8 |
 | 기능 | **6/6 완성 + 전부 실호출 검증.** 교안 · 코드 분석 · 문제 생성 · 힌트 · 채점 · 보고서 |
+| 제출 | **ZIP · GitHub 링크 둘 다 동작.** 링크는 서버에서 `git clone --depth 1` |
 | 배포 | 서울 EC2 t3.small + cloudflared. systemd 상시 가동, 수동 배포 |
 | 계약 | `openapi.json`. `tests/test_openapi.py`가 드리프트를 막는다 |
-| 다음 | **§T12 계약 변경 6건 → 이슈 전달**. 그 다음 §T13 백엔드 연동 |
+| 다음 | **§T15 새 MEAS 정의서 대응.** 그 다음 §T13 백엔드 연동 |
 | 기준 | **§기능 동결 스펙** · **§계약 기준값**. 앞선 절과 충돌하면 이 둘이 이긴다 |
-| 막힌 것 | **없다.** 백엔드를 기다리지 않는다 — 우리가 확정해 통보한다 |
-| 🔴 위험 | **무료 티어 실패율 32%.** 유료 전환이 근본 해결(`../output_docs/미결_논의사항.md` P-3) |
+| 막힌 것 | **DDL 2건**(`code_text`·`analysis_document`). 이슈 `#42`로 요청함 |
+| 🔴 위험 | **무료 티어 529 실패율 64%.** 유료 전환이 근본 해결(`../output_docs/미결_논의사항.md` P-3) |
 
-### 실측값 (2026-08-02, 무료 티어)
+### 실측값 (2026-08-03, 무료 티어 · 전 구간 실호출)
 
 ```
-/analyses    문제 3 · 질문 12 · 힌트 24 · LLM 30콜 · 626초 · 토큰 24,875 · 실패 0
-/curricula   6쪽 · 3청크 병렬 · 464초 · 모듈 10개 · fallbackUsed=False
-채점         성공 시 4.5~7.7초
+/analyses    ZIP 6파일     271초  문제 3 · 질문 12 · 힌트 24
+             GitHub 링크   270초  clone 1.0초 + 스캔 0.6초 포함 (petclinic 49파일)
+채점         성공 시 5.8~11.7초 · 실제 중앙값 17.2초(529 재시도 포함) · 최대 50.1초
+/reports     20~45초 (문제 1건당)
+/curricula   6쪽 · 3청크 병렬 · 464초 · 모듈 10개 (2026-08-02 측정, 갱신 안 함)
 ```
+
+🔴 **LLM 호출 39회 중 25회(64%)가 `HTTP 529 Overloaded`였다.** 0.3초에 즉답하는 실패라
+재시도로 넘기지만, 채점 목표(15초)를 못 지키는 원인이 이것이다. **모델 교체로 안 풀린다**
+— 12종 실측(§T15-1).
 
 **소요 특성이 서로 다르다 — 한 덩어리로 말하면 안 된다.**
 
@@ -38,7 +46,7 @@
            → ceil(청크/8) 라운드. **실측이 6쪽 1건뿐이라 100쪽을 외삽할 수 없다**
 ```
 
-⚠️ **교안 소요 상한은 아직 못 준다.** 폴링이라 타임아웃 문제는 아니지만 ① operator가 언제 끝나는지 모르고 ② 청크가 많아지면 실패율 32%와 겹쳐 `PARTIAL`이 정상 상태가 된다.
+⚠️ **교안 소요 상한은 아직 못 준다.** 폴링이라 타임아웃 문제는 아니지만 ① operator가 언제 끝나는지 모르고 ② 청크가 많아지면 529 실패율 64%와 겹쳐 `PARTIAL`이 정상 상태가 된다.
 
 ⚠️ **p04-1 지연 편차가 크다: 36초 → 115초 → 195초.** 같은 프롬프트인데 5배 넘게 흔들린다. **배치 소요시간을 예측값으로 쓰지 않는다.**
 
@@ -74,7 +82,7 @@ L1~L4  질문 동결 · 힌트 동결   전부 분석 배치에서 만들어 DB�
 
 배치는 **질문 12 + 힌트 24**. 문제 3 × 축 4 = 질문 12, 질문마다 힌트 2 = 24.
 
-**왜 전면 동결인가**: ⓐ 세션 중 생성 배선이 통째로 사라진다 ⓑ **무료 티어 실패율 32%에서 학생을 기다리게 하며 LLM을 세 번 부르는 구조가 가장 위험하다** — 배치는 실패해도 재시도하면 되고 아무도 안 기다린다 ⓒ 백엔드가 문답 도메인을 아직 하나도 안 만들어서 "전부 미리 저장, 세션 중엔 꺼내 쓰기"가 가장 단순한 계약이다.
+**왜 전면 동결인가**: ⓐ 세션 중 생성 배선이 통째로 사라진다 ⓑ **무료 티어 실패율 64%에서 학생을 기다리게 하며 LLM을 세 번 부르는 구조가 가장 위험하다** — 배치는 실패해도 재시도하면 되고 아무도 안 기다린다 ⓒ 백엔드가 문답 도메인을 아직 하나도 안 만들어서 "전부 미리 저장, 세션 중엔 꺼내 쓰기"가 가장 단순한 계약이다.
 
 **대가**: L3·L4가 학생 답변을 겨냥하지 못해 질이 떨어진다. 속도 개선 단계에서 되돌린다 — `hints.py`가 두 모드를 다 갖고 있어(`attempts=[]`면 동결) 비용이 낮다.
 
@@ -133,7 +141,7 @@ POST /api/v0/sessions/{id}/answers      ← 세션 API는 이것 하나뿐
 에러          {error, message, retryable}  평탄 구조. timestamp·path 안 씀
 헤더 3종      X-Internal-Key(인증, health 면제) · Idempotency-Key · X-Trace-Id
 비동기        /analyses · /curricula · /reports = 202 + 폴링
-              /answers 만 동기 (4.5~7.7초)
+              /answers 만 동기 (성공 5.8~11.7초 · 재시도 포함 중앙 17초)
 콜백          없다. AI→백엔드 방향 통신은 0이다
 ```
 
@@ -233,15 +241,21 @@ code_analysis.analysis_document (JSONB)                 분석 문서 — B-5로
 
 ```
 단계당 0~5점, 통과선 3점
-힌트 상한   {0회: 5, 1회: 4, 2회: 3}
-🔴 총점 없다                              문제당 만점 20도 폐기
+🔴 점수 상한 없다  {0회:5, 1회:4, 2회:3} 폐기 (2026-08-03, §T15-1)
+🔴 총점 없다       문제당 만점 20도 폐기
 도달 단계   0~4. 앞에서부터 연속 통과한 개수 = reachedStage
-attempt_count  0~3  (0 = 미도달)
-자력도         0회=SELF / 1회=SELF_MAINTAINED / 2회=PARTIAL
-실패 시        그 문제 종료, 다음 문제의 L1로
-가중치         쓰지 않는다 (PM 설계 v2 — "어떤 결정도 임의 숫자의 합산으로 나지 않는다")
-재시험         문제 단위. L1·L2 둘 다 통과해야 재시험 아님
+힌트         단계당 2개. 소진 후에도 미달이면 그 문제는 거기서 끝
+자력도       파생값이다. 응답에 싣지 않는다 — 어느 슬롯이 통과했는지로 계산된다
+             (질문 통과=SELF / 힌트1 통과=SELF_MAINTAINED / 힌트2 통과=PARTIAL)
+실패 시      그 문제 종료, 다음 문제의 L1로
+가중치       쓰지 않는다 (PM 설계 v2 — "어떤 결정도 임의 숫자의 합산으로 나지 않는다")
+재시험       문제 단위. L1·L2 둘 다 통과해야 재시험 아님
 ```
+
+🔴 **점수 상한을 뺀 이유** (2026-08-03): 새 `problem_stage`가 **질문·힌트1·힌트2 각각의
+점수를 따로 저장**한다. 어느 답변이 몇 점이었는지가 DB에 그대로 남으므로, AI가 미리 눌러서
+보낼 이유가 없어졌다. **AI는 채점만 하고 가공하지 않는다** — 상한이 필요하면 백엔드·화면이
+정한다. 비교 가능성은 "사다리 강도·횟수가 같다"로 이미 보장된다(상한은 그 근거가 아니었다).
 
 **힌트 = 재진술이다** (PM 설계 v2 §4-2).
 
@@ -263,7 +277,7 @@ L3  대안 하나를 구체적으로 말했는가
 L4  언제 문제가 되는지 조건을 특정했는가
 ```
 
-**채점 프롬프트에 들어가는 것** (좁게 유지한다 — 4.5~7.7초가 나오는 이유다)
+**채점 프롬프트에 들어가는 것** (좁게 유지한다 — 성공 시 5.8~11.7초가 나오는 이유다)
 
 ```
 rubric_block    축별 루브릭
@@ -359,48 +373,71 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
 
 🔴 **`references[]`는 현재 항상 빈 배열이다**(`engine.py`). 스키마·DB 테이블은 다 있는데 엔진이 안 채운다. §T13에서 채운다.
 
-### DB CHECK 제약 (테이블정의서 v06 기준)
+### DB CHECK 제약 (새 MEAS 기준, 2026-08-03)
 
 이 값을 어기면 Spring INSERT가 깨진다. **AI가 실제로 채우는 것만 남긴다.**
 
+⚠️ **`테이블정의서_v06`은 낡았다.** 새 MEAS(v03 동기화, 기준일 2026-08-03)에서 구조가 크게
+바뀌었다 — 아래는 그 기준이다. 옛 v06 기준 표를 근거로 쓰지 않는다.
+
 ```
-analysis_job.status         QUEUED, RUNNING, SUCCEEDED, PARTIAL, FAILED
-assessment_problem.status   READY, IN_PROGRESS, COMPLETED, TERMINATED   ← 기본값 READY
+analysis_job.status          QUEUED, RUNNING, SUCCEEDED, PARTIAL, FAILED
 assessment_problem.problem_no        BETWEEN 1 AND 3   ← questionBudget 상한이 3이다
-assessment_problem.line_end          >= line_start
-assessment_problem.extractor_version INTEGER, > 0      ← 문자열이면 깨진다
-assessment_session.status   READY, IN_PROGRESS, PAUSED, COMPLETED, FAILED, EXPIRED
-problem_stage.axis_code     L1, L2, L3, L4
-problem_stage.status        LOCKED, READY, IN_PROGRESS, PASSED, FAILED, NOT_REACHED, COMPLETED
-problem_stage.attempt_count BETWEEN 0 AND 2   ← B-1로 0~3 요청 중. 회신 전에는 0~2가 진짜 한계
-problem_stage.best_score / confirmed_score    NULL 또는 0~5
-stage_answer_attempt.attempt_no      IN (1, 2, 3)   ← B-2로 CHECK 수정 요청 중
-stage_answer_attempt.score_value     BETWEEN 0 AND 5
-submission.method           GITHUB_URL, ZIP_WITH_GITLOG
-*_scope_code                TOTAL, OWN_COMMIT
-termination_reason          COMPLETED_L4, TERMINATED_AT_L2, TERMINATED_AT_L3 (+L1 요청 중)
+assessment_problem.problem_scope     TEAM_COMMON, INDIVIDUAL_OWN_COMMIT
+assessment_problem.final_score       NULL 또는 0~5     ← TEAM_COMMON은 NULL 유지 요청(#42 C-3)
+assessment_session.status    READY, IN_PROGRESS, PAUSED, COMPLETED,
+                             INTERRUPTED, INVALID, FAILED, SUPERSEDED
+problem_stage.axis_code      L1, L2, L3, L4
+problem_stage.status         PREPARED, IN_PROGRESS, PASSED, NOT_PASSED,
+                             NOT_REACHED, NOT_ANSWERED
+problem_stage.*_score        NUMERIC(18,6), NULL 또는 0~5
+problem_stage.*_passed       score>=3 이면 TRUE, <3 이면 FALSE (CHECK가 강제한다)
+assessment_problem_reference.reference_type
+                             PRIMARY_BLOCK, QUESTION_HIGHLIGHT, CALLER,
+                             RELATED_CONTEXT, CURRICULUM_EVIDENCE
+submission.method            GITHUB_URL, ZIP_WITH_GITLOG
+*_scope_code                 TOTAL, OWN_COMMIT
 ```
 
-**폐기된 값** — 쓰면 INSERT가 깨진다: `assessment_problem.status`의 `OPEN`·`CANDIDATE`·`USED`·`SKIPPED`·`INVALID`, `assessment_session.status`의 `TIMEOUT`·`ABANDONED`, `session_turn.state` 전체.
+🔴 **사라진 것** — 옛 계약이 여기에 기대고 있었다.
+
+```
+stage_answer_attempt 테이블      통째로 사라짐 (답변 3슬롯이 problem_stage 한 행에 들어감)
+problem_stage.attempt_count      사라짐  → 우리 응답에서도 뺀다 (§T15-3)
+problem_stage.termination_reason 사라짐  → 응답에는 남기되 저장 요청 안 함 (§T15)
+code_analysis.analysis_document_markdown  사라짐  → JSONB 신설 요청 (#42 B-13)
+assessment_problem 의 코드 스니펫 자리     아예 없음 → code_text 신설 요청 (#42 B-12)
+```
 
 **AI만 아는 NOT NULL 값** — 응답에 없으면 Spring이 행을 만들 수 없다.
 
 | 테이블 | 컬럼 |
 |---|---|
-| `code_snapshot` | `content_hash`, `file_count`, `byte_count` |
-| `commit_attribution` | `commit_hash`, `authored_at`, `changed_line_count`, `contribution_ratio` |
-| `file_attribution` | `path`, `attribution_type`, `commit_count`, `changed_line_count`, `changed_function_count`, `confidence` |
-| `assessment_problem` | `problem_no`, `problem_type`, `source_path`, `line_start`, `line_end`, `code_snippet`, `evidence_hash`, `extractor_version` |
-| `problem_reference` | `source_path`, `line_start`, `line_end`, `evidence_hash`, `reference_type` |
+| `code_snapshot` | `content_hash`, `file_count` |
+| `assessment_problem` | `problem_no`, `title` |
+| `assessment_problem_reference` | `reference_type`, `display_order`, `evidence_hash`, (코드 유형이면) `path`·`line_start`·`line_end` |
+| `problem_stage` | `question_text`, `first_hint_text`, `second_hint_text` |
 
 ### 제출 방식
 
+**둘 다 동작한다** (2026-08-03, `materialize.py`).
+
 ```
-GITHUB_URL        source.repoUrl.  **public 레포 전제** (교육생 프로젝트는 무조건 public)
-ZIP_WITH_GITLOG   **.git 포함 필수.** commit_attribution·file_attribution 이 git log 에서 나온다
-extractionScope   TOTAL 고정.  OWN_COMMIT 은 빅프로젝트용으로 남긴다 (현재 미구현 — 요청 시
-                  TOTAL 로 물러나고 scopeFallback=true 로 알린다)
+GITHUB_URL        source.repoUrl (+branch).  AI가 서버에서 git clone --depth 1
+                  **public 레포만.** 인증이 없어서 비공개면 즉시 실패한다
+                  commitSha 를 여기서만 실제 값으로 채운다 (ZIP은 요청 값 그대로)
+ZIP_WITH_GITLOG   multipart/form-data 로 payload(JSON 문자열) + file
+extractionScope   TOTAL 고정.  OWN_COMMIT 은 미구현 — 요청 시 TOTAL 로 물러나고
+                  scopeFallback=true 로 알린다
 ```
+
+🔴 **`--depth 1` 얕은 클론이라 `.git`은 남지만 커밋이 tip 하나뿐이다.** `OWN_COMMIT`(작성자별
+필터)은 이걸로 못 한다. **`.git`을 지우지는 않는다** — 지우면 그 시점에 복구가 불가능해진다.
+필요해지면 depth를 푸는 것이 그때의 변경 지점이다.
+
+**GitHub API로 파일을 긁지 않는다.** 팀 PoC가 그 방식이었는데 실사고가 났다 — 비인증 한도가
+IP당 60회/시간이라 **같은 망의 다른 교육생까지 막혔고**(2026-07-16, 8분간 87회 연속 403),
+큰 repo는 tree API가 목록을 잘라 소스가 조용히 빠진다. 서버 클론은 두 한도에 안 걸린다.
 
 ### `ai_usage` 매핑
 
@@ -477,11 +514,70 @@ NVIDIA 무료 티어   (키, 모델) 쌍당 분당 40회      ← 키당이 아�
 
 ⚠️ **`README.md`의 `/reports` 절이 낡아 있었다** — `problems[]`·`totalScore`·`retestTargets`는 T10에서 폐기된 것들이다. 현재 스키마(`problem`·`reachedStage`·`retest`)로 함께 고쳤다.
 
-### T12b — 백엔드 이슈 전달 (오늘)
+### T12b — 백엔드 이슈 전달 ✅ 완료 (2026-08-03)
 
-`../qna/2026-08-03/issue-body.md` 1장. **두 번 쪼개지 않는다** — DDL만 먼저 보내면 "왜 이 컬럼이 필요한지"를 따로 설명하게 되고 같은 말을 두 번 한다.
+**`Team-IZ/Backend#42`로 게시했다.** 본문은 `../qna/2026-08-03/issue-body-v2.md`.
+새 이슈로 열었다 — 새 MEAS 정의서 기준으로 전면 재작성이라 `#31` 본문 교체로는 이력이 섞인다.
 
-담을 것: DDL 요청·철회 · 계약 변경 · OpenAPI로 표현 안 되는 규칙 · 에러/재시도 · 폴링 · ID 발급 주체 · 재시험 · 시간 초과 · 앞으로 채울 것.
+⚠️ **`#31`과 `issue-body.md`는 폐기다.** `테이블정의서_v06` 기준이고, DDL 요청 4건이 이미
+해결됐다(백엔드가 `problem_stage`를 새로 짜면서). 옛 문서를 근거로 쓰지 않는다.
+
+`extractorVersion` 순서 문제는 **미결로 남긴다** — 지금 값은 vendor 해시를
+`% 2_147_483_647 + 1`로 접은 것이라 동일성만 보장되고 순서가 없다. "같은 룰이면 같은 값"만
+필요한 자리라 충분하고, 순서가 필요해지면 손으로 올리는 정수 카운터로 바꾼다.
+
+### T14b — 실호출 안정화 ✅ 완료 (2026-08-03, 226 tests)
+
+전 구간 실호출에서 나온 버그와 계약 구멍을 고쳤다. **§T15와 달리 이것들은 이미 반영돼 있다.**
+
+| # | 고친 것 | 왜 |
+|---|---|---|
+| 1 | **세션 모델 교체** `mistral-medium-3.5` → `deepseek-v4-flash` | 옛 모델이 **"1+1은?" 최소 프롬프트도 3/3 타임아웃**한다. 죽은 모델이었다 |
+| 2 | `SESSION_TIMEOUT_S` 8 → 20초, 재시도 10 → 6 | 8초는 죽은 모델의 TTFT 분포에서 나온 값이라 근거가 사라졌다. 지금 모델 정상 지연이 6.9~11.7초라 8초면 성공할 호출을 죽인다 |
+| 3 | **529를 `RATE_LIMITED`로 분류 + 지수 백오프** | 529는 0.3초 즉답이라 백오프 없이 재시도하면 6회가 2초에 소진된다. `PROVIDER_ERROR`에 섞이면 진짜 장애와 통계가 안 갈린다 |
+| 4 | **`GITHUB_URL` 지원** (`materialize.py` 이식) | 스키마는 받는데 엔진이 `NotImplementedError`였다. 팀원 브랜치 `feature/code-importance-map`(`f2db763`)에서 이식 |
+| 5 | **`codeSnippet` = 파일 전체** | 파편이 1줄(29~51자)로 나오는 경우가 있어 학생이 판단할 재료가 없었다. `evidenceHash`는 파편 기준 유지 |
+| 6 | ZIP 최상위 소스 폴더 오벗김 | `src/` 하나만 있는 ZIP에서 `src/`를 GitHub 래퍼로 착각해 벗겼다. 백엔드가 그 경로로 파일을 못 찾는데 에러도 안 난다 |
+| 7 | 리포트 `problemNo` 반향 · `narrativeFailed` · `narrative` 구조화 · 재시도 2 → 6 | 보고서 3건이 전부 `problemNo=1`이었고, 서술 실패를 백엔드가 알 방법이 없었다 |
+
+**갈린 판단 2개**
+
+| 판단 | 내용 |
+|---|---|
+| 채점 입력을 파편으로 되자른다 | `codeSnippet`이 파일 전체가 되면서, 그대로 채점에 넣으면 매니페스트 `code_block` 상한 4,000자에 **앞에서부터 잘려** 문제 구간이 파일 뒤쪽일 때 근거가 사라진 채 채점된다. `sessions._grading_code()`가 `lineStart`/`lineEnd`로 ±8줄을 되잘라 쓴다 |
+| `_repo_root` 판정 기준 | "안에 마커 파일이 있나"로 하면 README 없는 레포에서 오작동한다. **폴더 이름이 소스 폴더 이름(`src`·`app`·`main`…)이면 안 벗긴다**로 갔다 — 모르는 이름은 예전처럼 벗기므로 실패해도 옛 동작이다 |
+
+### T15 — 새 MEAS 정의서 대응 ← **지금 여기**
+
+백엔드가 `problem_stage`를 새로 짜면서 **한 행에 질문 1 + 힌트 2 + 답변 3 + 점수 3 + 통과 3**을
+담는 구조가 됐다. `stage_answer_attempt` 테이블이 사라졌고 `attempt_count`·`termination_reason`
+컬럼도 없다. 우리 응답을 그 모양에 맞춘다. **이슈 `#42` §4에 통보한 내용이다.**
+
+| # | 할 일 | 내용 |
+|---|---|---|
+| 1 | 🔴 **점수 상한 제거** | `scoring.HINT_CAPS`·`cap_for()` 삭제. `bestScore`/`confirmedScore` 두 필드 → `score` 하나. **AI는 채점만 하고 가공하지 않는다** — 새 구조가 답변 3개 점수를 따로 저장하므로 상한은 백엔드·화면이 정한다 |
+| 2 | **`StageScore`를 `problem_stage`와 1:1** | `axisCode` · `questionScore`/`Passed` · `firstHintScore`/`Passed` · `secondHintScore`/`Passed` · `status`. 백엔드가 변환 없이 INSERT할 수 있게 |
+| 3 | `attemptCount`·`hintsUsed`·`autonomy` 제거 | 전부 위 6필드에서 파생된다. **그래서 컬럼 추가 요청도 하지 않았다**(옛 B-14 철회) |
+| 4 | 세션 상태 어휘 8종 | `assessment_session.status`로. AI의 `EXPIRED`는 없앤다 — `end_reason_code`로 표현된다 |
+| 5 | 잡 상태에 `PARTIAL` 추가 | 요구사항 판정만 실패하고 문제는 정상으로 나가는 경로가 실제로 있다(실측 확인). 지금은 `SUCCEEDED`라 부분 실패가 안 보인다 |
+| 6 | `ai_usage` → `context_type`/`context_id` | 새 MEAS 비고가 두 곳에서 그렇게 쓴다. **`#42` §3-1 회신(시트 갱신본) 후에 한다** |
+
+**1·2번이 계약 파괴 변경이다.** 백엔드가 AI 연동 도메인을 아직 하나도 안 만들어서 **지금이
+가장 싸다.** 회신을 기다리지 않고 진행한다 — 6번만 시트를 받고 한다.
+
+`terminationReason`은 **응답에 계속 실어 보내되 저장 요청은 하지 않는다.**
+`problem_stage.status` 조합으로 완전히 파생되기 때문이다(마지막 `NOT_PASSED` 축 = 종료 축).
+
+**미커밋 상태다** (T14b 전체 + 문서). 커밋 명령:
+
+```
+git add app tests openapi.json
+git commit -m "fix: swap dead grading model and stabilize retries (#42)"
+git add PLAN_FASTAPI_MIGRATION.md README.md
+git commit -m "docs: sync plan and api reference with issue #42 (#42)"
+```
+
+`output_docs/`·`qna/`·루트 `CLAUDE.md`는 git 저장소 밖이라 커밋 대상이 아니다.
 
 ### T13 — 백엔드 연동 + `references[]` 채우기
 
@@ -501,7 +597,7 @@ NVIDIA 무료 티어   (키, 모델) 쌍당 분당 40회      ← 키당이 아�
 ### 후속 (순서 미정)
 
 ```
-· 유료 전환         실패율 32%의 근본 해결. 팀 논의 필요
+· 유료 전환         529 실패율 64%의 근본 해결. 팀 논의 필요
 · 교안 소요 실측     100쪽 상한을 아직 못 준다
 · 폴링 응답에 진행률  operator가 언제 끝나는지 모른다 (교안 대형 PDF)
 · 재시험용 별도 시험지 분석 때 병렬로 한 벌 더

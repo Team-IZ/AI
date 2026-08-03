@@ -1,6 +1,12 @@
 # AI 서비스 (FastAPI)
 
-> 갱신: 2026-07-30
+> 갱신: **2026-08-03** · **이 문서는 지금 코드가 실제로 하는 일을 적는다.**
+>
+> ⚠️ **곧 바뀌는 것이 있다.** 백엔드가 `problem_stage`를 새로 짜면서(새 MEAS 정의서,
+> 기준일 2026-08-03) 채점 응답 모양이 달라진다 — **점수 상한 제거**, `bestScore`/
+> `confirmedScore` → `score` 하나, `StageScore`를 `problem_stage`와 1:1로. 이슈
+> `Team-IZ/Backend#42` §4에 통보했고 작업 계획은 `PLAN_FASTAPI_MIGRATION.md` §T15다.
+> **아래 설명은 그 작업 전 기준이다.**
 
 교육생이 제출한 코드를 분석해 **문답 문제를 뽑고**, 학생과 **문답을 진행하며 채점**하고, 끝나면 **보고서**를 내는 서비스. Spring Boot가 호출하는 내부 서비스다.
 
@@ -203,6 +209,7 @@ cloudflared tunnel --url http://localhost:8000
 {
   "attemptId": "att-1", "submissionId": "sub-1",
   "method": "GITHUB_URL",                    // 또는 ZIP_WITH_GITLOG (multipart로 ZIP 첨부)
+  "source": { "repoUrl": "https://github.com/owner/repo", "branch": "main" },
   "source": { "repoUrl": "https://github.com/...", "branch": "main" },
   "extractionScope": "TOTAL",                // 또는 OWN_COMMIT (이때 commitEmail 필수)
   "questionBudget": 3,
@@ -217,6 +224,8 @@ cloudflared tunnel --url http://localhost:8000
 // → 202
 { "jobId": "1b40467e-…", "status": "QUEUED" }
 ```
+
+**`GITHUB_URL`은 AI가 서버에서 `git clone --depth 1`로 받는다** (2026-08-03). GitHub API로 파일을 긁지 않는다 — 비인증 한도가 IP당 60회/시간이라 **같은 망의 다른 교육생까지 막히고**, 큰 repo는 tree API가 목록을 잘라 소스가 조용히 빠진다(팀 PoC 실사고). **공개 레포만** 되고, 얕은 클론이라 `.git`은 남지만 커밋이 tip 하나뿐이라 `OWN_COMMIT`은 못 한다. `commitSha`는 이 경로에서만 실제 값이 채워진다.
 
 **`focusItems`를 Spring이 보내주는 이유**: `question_focus_item`의 PK가 랜덤 UUID라 AI가 그 값을 알 방법이 없다. 후보를 받아 **AI가 그중 하나의 `id`를 그대로 돌려준다.** 강사 지정 범위를 벗어날 수 없고, 항목 이름이 바뀌어도 AI 재배포가 필요 없다.
 
@@ -272,7 +281,7 @@ cloudflared tunnel --url http://localhost:8000
   "isGeneral": false,                  // teach 앵커 없이 뽑은 "일반 문제"
   "sourcePath": "app/main.py",
   "lineStart": 12, "lineEnd": 14,
-  "codeSnippet": "def main():\n    …",  // evidenceHash의 대상
+  "codeSnippet": "…파일 전체…",         // 🔴 문제를 낸 파일 전체 (화면에 띄울 것)
   "evidenceHash": "…",
   "extractorVersion": 1739284412,      // 정수. INTEGER CHECK (> 0)
   "references": [
@@ -292,7 +301,11 @@ cloudflared tunnel --url http://localhost:8000
 
 **Spring이 받아서 할 일**: 문제 3행 + `problem_stage` 12행 + `stage_answer_attempt` 36행(질문 12개·힌트 24개를 넣고 답변란은 NULL)을 미리 만들어 두면, 세션 진행 중 AI에 질문을 물을 필요가 없다.
 
-**`codeSnippet`을 AI가 보내는 이유**: `evidenceHash`가 `codeSnippet` 기준 해시이고 해시를 AI가 만든다. Spring이 ZIP을 따로 잘라내면 줄바꿈·BOM이 1바이트만 달라도 해시가 안 맞는다.
+🔴 **`codeSnippet`은 문제를 낸 파일 전체다** (2026-08-03 확정). 파편만 주면 학생이 판단할 재료가 없다 — 실측에서 L2 질문이 `checkOut`·`checkIn`을 언급하는데 화면엔 선언 한 줄(41자)만 뜨는 일이 났다. **보여줄 구간은 `lineStart`~`lineEnd`**이고 이 값은 codeSnippet의 부분범위가 아니라 **파일 기준 절대 줄 번호**다. 파일이 100,000자를 넘으면 파편만 보낸다(그때도 줄 번호는 파일 기준).
+
+**`evidenceHash`는 파일 전체가 아니라 파편(`lineStart`~`lineEnd`) 기준이다.** 파일 전체 기준이면 무관한 한 줄 수정에도 "근거가 바뀌었다"가 되어 판정이 쓸모없어진다. Spring이 따로 잘라 해시를 다시 만들면 안 된다 — 줄바꿈·BOM이 1바이트만 달라도 안 맞는다.
+
+**채점에는 파일 전체를 넣지 않는다.** 매니페스트 `code_block` 상한이 4,000자라 큰 파일은 앞에서부터 잘리고, 문제 구간이 파일 뒤쪽이면 근거가 사라진 채 채점된다. `sessions._grading_code()`가 줄 범위로 ±8줄을 되잘라 쓴다.
 
 **`extractorVersion`은 정수다** — `assessment_problem.extractor_version`이 `INTEGER CHECK (> 0)`이다. 값은 룰 vendor의 `.py`+`.json` 전부를 해시해 산정한 값이라 **같은 룰이면 같은 값, 데이터 파일만 바뀌어도 다른 값**이다(재현성 근거). 사람이 읽는 버전 번호가 아니고 순서도 없다.
 
@@ -324,7 +337,7 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
   "problems": [ /* 분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다 */ ],
   "transcript": [ /* 지금까지 확정된 턴 전부 */ ],
   "cursor": { "problemId": "prob-1", "axisCode": "L3", "hintsUsed": 0 },
-  "providerModelCode": "mistralai/mistral-medium-3.5-128b",   // 생략 시 서버 기본값
+  "providerModelCode": "deepseek-ai/deepseek-v4-flash",       // 생략 시 서버 기본값
   "analysisContext": {                       // 선택. 분석 문서에서 두 필드만
     "overview": "주문을 받아 결제로 넘기는 …",
     "structure": [ { "area": "컨트롤러", "files": ["app/api.py"], "role": "요청 수신" } ]
@@ -431,8 +444,9 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 
 ```jsonc
 // POST /api/v0/reports          → 202
-{ "problemId": "prob-1", "sessionId": "sess-abc",
-  "providerModelCode": "mistralai/mistral-medium-3.5-128b",   // 생략 시 서버 기본값
+{ "problemId": "prob-1", "problemNo": 2,                      // 🔴 안 보내면 3건 다 1이 찍힌다
+  "sessionId": "sess-abc",
+  "providerModelCode": "deepseek-ai/deepseek-v4-flash",       // 생략 시 서버 기본값
   "transcript": [ /* 이 문제의 턴만 */ ],
   "analysisDocuments": [ { "kind": "CODE_ANALYSIS", "content": { /* AnalysisDocument */ } } ],
   "teaches": [ … ] }
@@ -442,7 +456,15 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 ```jsonc
 // GET /api/v0/reports/{jobId}   → 200 (result 부분)
 {
-  "reportMarkdown": "…",
+  "reportMarkdown": "…",                     // 사람이 읽는 본문 (헤딩 5개 고정)
+  "narrative": {                             // 같은 내용의 구조화본. 프론트가 파싱하지 않도록
+    "summary": "…",
+    "strengths": [ { "axis": "캡슐화", "detail": "…", "teachId": null, "studyPointer": null } ],
+    "gaps":      [ { "axis": "캡슐화", "detail": "…", "teachId": "tch-1", "studyPointer": "…" } ],
+    "autonomyNote": "…",
+    "unreachedAxes": ["L3", "L4"]            // 앞 단계에서 끝나 안 물어본 축
+  },
+  "narrativeFailed": false,                  // true면 narrative가 전부 빈다. 판정은 그때도 확정값
   "problem": {
     "problemNo": 1, "problemId": "…",
     "reachedStage": 2,                       // 0~4. 앞에서부터 연속 통과한 단계 수
