@@ -17,11 +17,13 @@ class CurriculumRequest(BaseSchema):
 
     version_id: str = Field(description="Spring curriculum_version 키(에코용)")
     curriculum_id: str | None = None
-    course_label: str | None = Field(
-        default=None, max_length=80,
-        description="과정명(예: 'SQL', 'Java'). 프롬프트 프레이밍에 쓴다 — 생략하면 "
-                    "매니페스트 기본값('Java')이 들어가고, 다른 과정 교안이면 "
-                    "모델이 흔들려 결과 언어·용어가 섞인다",
+    course_label: str = Field(
+        min_length=1, max_length=80,
+        description="🔴 **필수다.** 과정명(예: 'SQL', 'Java', 'AI Agent'). 프롬프트 "
+                    "프레이밍에 쓴다 — 없으면 매니페스트 기본값('Java')이 들어가고, "
+                    "다른 과정 교안이면 모델이 흔들려 결과 언어·용어가 섞인다. "
+                    "**교안 업로드 화면이 과정을 이미 알고 있으므로 기본값을 두지 않는다** "
+                    "(2026-08-03 확정)",
     )
     provider_model_code: str | None = Field(
         default=None,

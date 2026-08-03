@@ -128,6 +128,29 @@ def _pages(value: Any, lo: int, hi: int) -> tuple[int | None, int | None]:
     return nums[0], nums[-1]
 
 
+# 사람이 읽는 필드를 한국어로 고정한다.
+#
+# 매니페스트(p01-2)는 영어로 쓰였고 언어 지시가 없다. 영어 교안을 넣으면 `unit_title`·
+# `summary`·`evidence`가 전부 영어로 나오는데, **교육생과 강사가 읽는 화면이라 한국어여야
+# 한다**(2026-08-03). 교안 언어가 무엇이든 결과는 한국어다.
+#
+# vendor를 고치지 않고 우리 소유 경로(`stages.call(extra_user=...)`)로 붙인다 —
+# 매니페스트를 건드리면 팀원 갱신(덮어쓰기 복사)마다 재적용해야 한다.
+#
+# 🔴 **번역하면 안 되는 것을 명시한다.** JSON 키·`unit_id`·`kind` 값은 계약이고,
+# 기술 용어를 억지로 옮기면(예: "handoff" → "인계") 나중에 그 개념으로 문제를 낼 때
+# 교안 원문과 대조가 안 된다.
+_KOREAN_OUTPUT = (
+    "\n\n## 출력 언어\n"
+    "사람이 읽는 값은 **한국어**로 써라 — `unit_title`, `summary`, `evidence`.\n"
+    "교안이 영어로 쓰여 있어도 마찬가지다.\n"
+    "- JSON 키와 `unit_id`·`kind`의 값은 그대로 둔다(계약이다).\n"
+    "- 기술 용어·API 이름·코드 식별자는 원문 그대로 쓴다"
+    "(예: guardrail, handoff, function calling). 억지로 옮기지 마라.\n"
+    "- 원문 용어를 처음 쓸 때만 괄호로 짧게 풀어도 된다 — 예: guardrail(안전장치)."
+)
+
+
 def analyse_chunk(start: int, end: int, text: str, *, model_code: str,
                   course_label: str = "") -> dict[str, Any]:
     """청크 하나 → {units, concepts}. p01-2 호출."""
@@ -139,7 +162,8 @@ def analyse_chunk(start: int, end: int, text: str, *, model_code: str,
     }
     if course_label:
         values["course_label"] = course_label
-    return stages.call("p01-2", values, model_code=model_code)
+    return stages.call("p01-2", values, model_code=model_code,
+                       extra_user=_KOREAN_OUTPUT)
 
 
 def _merge(results: list[dict[str, Any]]) -> list[dict[str, Any]]:

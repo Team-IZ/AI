@@ -103,7 +103,8 @@ def test_merged_sections_pass_the_contract():
 
 def test_failed_chunk_does_not_lose_the_others(monkeypatch):
     """251쪽 실측에서 26청크 중 2건이 깨졌다. 전체를 버리면 24청크 토큰이 헛돈다."""
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+              extra_user=""):
         if values["chunk_range"] == "1-10":
             raise stages.StageError("p01-2: 터짐", [{"status": "FAILED"}])
         return stages.StageResult(
@@ -154,3 +155,21 @@ def test_single_oversized_page_goes_alone():
     chunks = curriculum.build_chunks(["가" * 9000, "나" * 100])
 
     assert [(s, e) for s, e, _ in chunks] == [(1, 1), (2, 2)]
+
+
+def test_chunk_analysis_asks_for_korean_output(monkeypatch):
+    """영어 교안을 넣어도 사람이 읽는 값은 한국어여야 한다 — 화면이 한국어다.
+
+    매니페스트(vendor)에는 언어 지시가 없어서 우리 쪽에서 붙인다.
+    """
+    seen = {}
+
+    def _call(stage_id, values, *, model_code, extra_user="", **kw):
+        seen["extra_user"] = extra_user
+        return {"units": [], "concepts": []}
+
+    monkeypatch.setattr(curriculum.stages, "call", _call)
+    curriculum.analyse_chunk(1, 3, "text", model_code="m", course_label="AI Agent")
+
+    assert "한국어" in seen["extra_user"]
+    assert "unit_id" in seen["extra_user"]      # 번역하면 안 되는 것도 명시한다

@@ -11,7 +11,8 @@ from app.main import app
 client = TestClient(app)
 HEADERS = {"X-Internal-Key": get_settings().internal_api_key}
 
-PAYLOAD = {"versionId": "ver-1", "providerModelCode": "vendor/stub-0"}
+PAYLOAD = {"versionId": "ver-1", "courseLabel": "Java",
+           "providerModelCode": "vendor/stub-0"}
 PDF = ("teach.pdf", b"%PDF-1.4 stub", "application/pdf")
 
 
@@ -92,7 +93,7 @@ def test_ai_usage_is_reported_for_curricula(monkeypatch):
 
     assert len(job["aiUsage"]) == 1
     assert job["aiUsage"][0]["featureCode"] == "CURRICULUM_ANALYSIS"
-    assert job["aiUsage"][0]["sourceType"] == "CURRICULUM"
+    assert job["aiUsage"][0]["contextType"] == "CURRICULUM"
     assert job["aiUsage"][0]["traceId"] == "trace-8"        # 헤더가 원장으로 이어진다
 
 
@@ -138,3 +139,17 @@ def test_unknown_curriculum_job_returns_404():
     assert r.status_code == 404
     assert r.json()["error"] == "JOB_NOT_FOUND"
     assert r.json()["retryable"] is False
+
+def test_course_label_is_required():
+    """생략하면 매니페스트 기본값('Java')이 들어가 다른 과정 교안에서 용어가 섞인다.
+
+    교안 업로드 화면이 과정을 이미 알고 있으므로 기본값을 두지 않는다(2026-08-03).
+    """
+    r = client.post(
+        "/api/v0/curricula", headers=HEADERS,
+        data={"payload": json.dumps({"versionId": "ver-1"})},
+        files={"file": ("t.pdf", b"%PDF-1.4\n", "application/pdf")},
+    )
+
+    assert r.status_code == 422
+    assert "courseLabel" in r.text or "course_label" in r.text
