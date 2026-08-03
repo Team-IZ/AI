@@ -191,3 +191,18 @@ def test_teach_id_echoed_with_the_label_is_recovered():
 
     # 여러 id가 걸리면 어느 것인지 모른다 — 되살리지 않는다.
     assert topics._resolve_teach_id("t1 과 t2 둘 다", ids) == "t1 과 t2 둘 다"
+
+
+def test_prose_anchor_is_rejected():
+    """🔴 문자열 리터럴에는 설계 판단이 없다 — L2·L4가 물을 대상을 잃는다.
+
+    2026-08-03 반복 실행에서 모델이 프롬프트 한복판을 앵커로 잡았다.
+    """
+    assert topics._is_prose(
+        "역할: 당신은 제공받은 PPT 슬라이드 지식 데이터베이스(Context)에만 "
+        "철저히 기반하여 답변하는 교육 비서입니다.") is True
+    assert topics._is_prose("") is True
+
+    # 코드는 식별자·연산자라 거의 ASCII다. 한글 주석이 꼬리에 붙어도 통과한다.
+    assert topics._is_prose("is_relevant = min_score < 0.95") is False
+    assert topics._is_prose("worker = state.get('next_worker', 'FINISH')  # 다음 워커") is False

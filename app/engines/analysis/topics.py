@@ -200,6 +200,24 @@ def select(files: dict[str, str], teaches: list[dict[str, Any]],
     return Selection(topics=picked, usages=result.usages, dropped=dropped,
                      unmatched=unmatched, budget=question_budget)
     
+def _is_prose(snippet: str) -> bool:
+    """앵커가 코드가 아니라 산문(프롬프트 문자열·주석)인가.
+
+    🔴 **문자열 리터럴에는 설계 판단이 없다.** 2026-08-03 반복 실행에서 모델이
+    프롬프트 한복판을 앵커로 잡았다 — `역할: 당신은 제공받은 PPT 슬라이드...`.
+    그러면 L2("왜 이렇게 했나")·L4("언제 깨지나")가 물을 대상 자체를 잃는다.
+
+    판별은 **비ASCII 비율**로 한다. 코드 줄은 식별자·연산자라 거의 ASCII이고,
+    한국어가 절반을 넘으면 주석이거나 문자열 본문이다. 언어에 안 묶이는 신호라
+    파서 없이 쓸 수 있다 — 다만 한국어 문서에만 유효한 휴리스틱이다.
+    """
+    text = (snippet or "").strip()
+    if not text:
+        return True
+    non_ascii = sum(1 for c in text if ord(c) > 127)
+    return non_ascii / len(text) > 0.5
+
+
 def _locate_all(files: dict[str, str], topics: list[dict[str, Any]],
                 dropped: list[dict[str, str]]) -> tuple[list[dict[str, Any]],
                                                         list[dict[str, Any]]]:
@@ -215,6 +233,12 @@ def _locate_all(files: dict[str, str], topics: list[dict[str, Any]],
         located = fragments.extract_fragment(files, ref.get("file"), ref.get("symbol", ""))
         if not located["valid"]:
             dropped.append({"title": topic.get("title", ""), "reason": located["reason"],
+                            "teach_id": topic.get("teach_id") or ""})
+            failed.append(topic)
+            continue
+        if _is_prose(located.get("snippet", "")):
+            dropped.append({"title": topic.get("title", ""),
+                            "reason": "코드가 아니라 문자열·주석을 가리킵니다",
                             "teach_id": topic.get("teach_id") or ""})
             failed.append(topic)
             continue
