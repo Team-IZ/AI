@@ -32,11 +32,20 @@
 // Everything else -- constants, the D164/D166/D179/D180/D181-documented resolvers,
 // fetchGithubRepo's batching, the Pyodide bootstrap, collectOverrides -- is unchanged.
 //
-// P02 has zero LLM calls (verified against cognition/two_tier_scan.py + judgment/*.py --
-// pure re/os/sys/json stdlib): no API key, no proxy, no external account needed for this
-// stage. Runs the REAL, unmodified pipeline source in-browser via Pyodide. The only new
-// Python is webtool_driver.py, which just applies parameter overrides as module attribute
-// writes, then calls the real scan()/score().
+// P02Engine.run() itself still makes zero LLM calls (verified against
+// cognition/two_tier_scan.py + judgment/*.py -- pure re/os/sys/json stdlib): the scan and
+// scoring below need no API key, no proxy, no external account. Runs the REAL, unmodified
+// pipeline source in-browser via Pyodide. The only new Python is webtool_driver.py, which
+// just applies parameter overrides as module attribute writes, then calls the real
+// scan()/score().
+// D-ground2 (2026-08-03): the P02 *phase* is no longer LLM-free end to end, even though
+// this file still is. p02-6("코드 분석 문서", shared/code-locate.js §4) is wired at the
+// PAGE level -- trainee/submission.html calls LabLLM.chatJSON once, after run() has already
+// resolved, to produce the grounded decision_points P03 uses. Deliberately kept outside
+// this engine: run()'s contract ("give me files, get back the real pipeline's scan result")
+// stays key-free and testable, and a failed/absent LLM call cannot corrupt or block the
+// scan result -- see submission.html's own D-ground2 comment for that best-effort wiring,
+// and prompt_manifest.json's p02 banner/has_llm_calls, which now describe the phase.
 // D208: REPO_RAW_BASE used to be an absolute raw.githubusercontent.com URL pointing at
 // popixoxipop-collab/Code_reviewer_with_feedback's `main` branch -- every P02/P03 run
 // fetched this branch's own pipeline source live over the network, from a repo this team
@@ -451,6 +460,13 @@ shutil.rmtree("/target", ignore_errors=True)
       const ov = LabApp.getOverride("p02", stage.id);
       if (ov && ov.params) {
         const mod = moduleForStage[stage.id];
+        // D-ground2: p02-6("코드 분석 문서", kind:"prompt")은 Python 모듈 파라미터가 아니라
+        // 브라우저 프롬프트라 moduleForStage에 매핑이 없다 -- 매핑 없는 stage에 override가
+        // 하나라도 저장돼 있으면 mod === undefined가 되고 Object.assign(undefined, ...)가
+        // TypeError("Cannot convert undefined or null to object")를 던져 **P02 실행 전체가**
+        // 죽는다(shared/code-locate.js §7이 stub을 미루면서 미리 지목해 둔 실측 크래시 경로).
+        // 여기서 건너뛰는 게 맞다: Python 쪽에 넘길 override가 애초에 존재하지 않는 단계다.
+        if (!mod) continue;
         Object.assign(overrides[mod], ov.params);
       }
     }

@@ -215,6 +215,11 @@
 <!-- D200: P03's live fact-check tools reuse P02Engine.githubRateLimitError -- loading this
      is side-effect-free (Pyodide/DOM only touched by explicitly-called functions). -->
 <script src="../shared/p02-engine.js"></script>
+<!-- D-ground2: p03-engine.js의 buildCombinedCodeContext가 p02-6의 decision point를 받았을 때
+     CodeLocate.buildFragment로 근거 줄 주변을 잘라낸다. 이게 없으면 해석기가 null을 돌려받아
+     조용히 기존 앞부분 슬라이스로 폴백하므로, 이 <script>는 기능의 전제다.
+     p02-engine.js보다 뒤여도 되지만 p03-engine.js보다는 앞이어야 한다. -->
+<script src="../shared/code-locate.js"></script>
 <script src="../shared/p03-engine.js"></script>
 <script>
 (function () {
@@ -306,6 +311,10 @@
 
   document.addEventListener("DOMContentLoaded", async () => {
     const submission = SessionState.loadSubmission();
+    // D-ground2: p02-6이 만들고 CodeLocate로 검증된 decision point들 (없으면 null --
+    // 이 스캔이 p02-6 이전이거나, 호출이 실패했거나, 검증을 통과한 항목이 하나도 없는 경우).
+    // null이면 P03Engine.run()은 배선 전과 완전히 동일하게 동작한다.
+    const decisionPoints = SessionState.loadDecisionPoints();
     if (!submission) {
       document.getElementById("fallback").classList.remove("hidden");
       return;
@@ -501,6 +510,7 @@
           {
             finding: submission.finding, codeContexts: submission.codeContexts, model: selectedModel,
             repoRef: submission.repoRef, zipFiles: zipFileMap, resume: submission.resume,
+            decisionPoints,
           },
           hooks
         );

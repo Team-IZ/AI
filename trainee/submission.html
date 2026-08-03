@@ -147,6 +147,9 @@
         <div class="pstep wait" data-key="pyodide"><span class="ic">•</span><div>분석 엔진 준비<div class="sub"></div></div></div>
         <div class="pstep wait" data-key="scan"><span class="ic">•</span><div>구조/판단 스캔 실행<div class="sub"></div></div></div>
         <div class="pstep wait" data-key="save"><span class="ic">•</span><div>결과 저장<div class="sub"></div></div></div>
+        <!-- D-ground2: 이 단계만 LLM을 호출한다(p02-6). 실패해도 위 4단계 결과는 그대로
+             남으므로 별도 행으로 분리해 "스캔은 됐는데 분석 문서만 실패"가 구분되게 한다. -->
+        <div class="pstep wait" data-key="analysis"><span class="ic">•</span><div>코드 분석 문서 (LLM 1회)<div class="sub"></div></div></div>
       </div>
     </div>
 
@@ -177,6 +180,11 @@
 <script src="../shared/config.js"></script>
 <script src="../shared/db.js"></script>
 <script src="../shared/lab-core.js"></script>
+<!-- D-ground2: p02-6("코드 분석 문서")이 이 페이지에서 LabLLM.chatJSON을 1회 호출하고,
+     그 응답의 {file, symbol}을 CodeLocate로 실제 제출 파일과 대조해 검증한다. 이 페이지가
+     LLM 모듈을 로드하는 것은 이번이 처음이다(P02Engine 자체는 여전히 LLM을 안 쓴다). -->
+<script src="../shared/llm.js"></script>
+<script src="../shared/code-locate.js"></script>
 <script src="../shared/pyodide-shared.js"></script>
 <script src="../shared/session-state.js"></script>
 <script src="../shared/p02-engine.js"></script>
@@ -276,6 +284,12 @@
     try {
       const { result, files, repoRef } = await P02Engine.run(input, hooks);
       ["fetch", "pyodide", "scan", "save"].forEach((k) => progState(k, "done"));
+      // D-ground2: p02-6("코드 분석 문서") -- P02Engine.run()이 끝난 뒤, finding 목록을
+      // 만들기 전에 딱 한 번. best-effort라 await하되 절대 throw하지 않는다(아래 함수가
+      // 자기 안에서 전부 삼킨다) -- 이 호출이 실패해도 트레이니가 지금 볼 스캔 결과는
+      // 그대로 나와야 한다. 실패 시 decision point는 빈 배열로 저장되고, P03은
+      // buildCombinedCodeContext의 기존 앞부분 슬라이스 동작으로 폴백한다.
+      await runCodeAnalysisDoc(result, files);
       const basket = buildFindingsBasket(result, files);
       const saved = SessionState.saveFindingsList(basket);
       if (!saved.ok) console.error("findings list save failed (뒤로가기 restore won't work this run):", saved.error);
@@ -304,6 +318,128 @@
       if (!document.getElementById("submit-error").textContent) showError(`오류: ${err.message}`);
     }
   });
+
+  // ── D-ground2 (2026-08-03): p02-6 "코드 분석 문서" ────────────────────────────────
+  // 설계 전문은 shared/code-locate.js 헤더 D-ground1 §4~§6. 요지만:
+  //   - P02Engine.run() **안**이 아니라 여기(페이지 레벨)에서 호출한다. 엔진의 계약
+  //     ("파일을 주면 원본 파이프라인의 스캔 결과를 준다")을 키 없이 도는 상태로 유지하고,
+  //     LLM 실패가 스캔 결과를 오염시키거나 막을 수 없게 하기 위해서다.
+  //   - P03이 아니라 P02 끝인 이유: 제출물 전체를 한 번 읽는 하향식 판단은 세션당 1회면
+  //     충분하고, P03은 사람이 답을 타이핑하는 동안 도는 루프라 거기에 호출을 더하면 매 턴
+  //     지연이 늘어난다(§4).
+  //   - LLM이 말한 줄 번호는 절대 쓰지 않는다. LLM은 "실제로 있는 한 줄"을 인용만 하고,
+  //     그 줄이 몇 번째인지는 CodeLocate.locateSymbol이 실제 제출 파일에서 찾아 산정한다.
+  //     찾지 못한 항목은 통째로 버린다(§6) -- 학생에게 자기 코드에 없는 근거를 보여주지
+  //     않기 위한, 타협하지 않는 규율이다.
+
+  // §4: code_block은 알파벳순이 아니라 Tier A의 fan_in 내림차순으로 채운다(fan_in은 스캔이
+  // 이미 계산해 둔 값이라 추가 비용 0). 예산 초과 파일은 stop이 아니라 skip --
+  // CodeLocate.orderFilesByImportance()의 주석이 근거(첫 파일이 예산보다 크다고 뒤를 통째로
+  // 버리면 결과가 비어버린다). 잘라 넣는 방식 자체는 p03-engine.js의
+  // buildCombinedCodeContext와 같은 "--- 경로 ---\n내용" 포맷이고, p02-6 프롬프트의 규칙 2가
+  // 그 포맷을 그대로 가리킨다.
+  function buildAnalysisCodeBlock(result, files, cap) {
+    const fanIn = ((result.scan || {}).tier_a_structural || {}).fan_in || null;
+    const ordered = CodeLocate.orderFilesByImportance(files, fanIn);
+    const parts = [];
+    let used = 0;
+    for (const path of ordered) {
+      const chunk = `--- ${path} ---\n${files[path]}`;
+      const cost = parts.length ? chunk.length + 2 : chunk.length; // "\n\n" join
+      if (used + cost > cap) continue;
+      parts.push(chunk);
+      used += cost;
+    }
+    return parts.join("\n\n");
+  }
+
+  // §4: 이미 judgment/importance_rank.py가 랭킹해 둔 순서 그대로, finding당
+  // {id, file, finding, rank_score}만. subrubric 원점수/버킷은 일부러 뺀다 -- 넣으면 LLM이
+  // 우리 채점을 되읊는 쪽으로 끌려가(anchoring) "독립적인 하향식 신호"라는 존재 이유가
+  // 사라진다. 상한은 문자 예산 하나뿐이다(별도의 "상위 N건" 컷은 두지 않는다 -- 이미 문자
+  // 예산이 같은 일을 하는데 측정되지 않은 상수를 하나 더 만들 이유가 없다).
+  function buildAnalysisFindingsBlock(result, cap) {
+    const findings = (result.judgment && result.judgment.findings) || [];
+    const lines = [];
+    let used = 0;
+    for (const f of findings) {
+      const line = JSON.stringify({ id: f.id, file: f.file, finding: f.finding, rank_score: f.rank_score });
+      const cost = lines.length ? line.length + 1 : line.length; // "\n" join
+      if (used + cost > cap) continue;
+      lines.push(line);
+      used += cost;
+    }
+    return lines.join("\n");
+  }
+
+  // 실패해도 절대 throw하지 않는다 -- 호출부의 try 블록은 "스캔이 실패했다"를 의미해야 하고,
+  // 분석 문서 실패는 거기에 섞이면 안 된다. 어떤 경로로 끝나든 SessionState에 결과(성공분
+  // 배열 또는 빈 배열)를 반드시 한 번 쓴다: 같은 탭에서 앞선 스캔의 decision point가 남아
+  // 새 제출물의 근거로 둔갑하는 것이 조용한 오답 중 최악이다(D210의 clearZipFileMap과 같은
+  // 이유).
+  async function runCodeAnalysisDoc(result, files) {
+    const save = (points) => {
+      const saved = SessionState.saveDecisionPoints(points);
+      if (!saved.ok) console.error("decision points save failed (P03 falls back to front-slice):", saved.hint || saved.error);
+    };
+    save([]); // 먼저 비운다 -- 아래에서 어디로 빠지든 이전 스캔 값이 남지 않는다.
+
+    let stage = null;
+    try {
+      stage = LabApp.getStage("p02", "p02-6");
+    } catch (e) {
+      stage = null; // 이전 버전 매니페스트 -- 이 단계가 없던 시절과 동일하게 조용히 건너뛴다.
+    }
+    if (!stage) { progState("analysis", "wait"); progSub("analysis", "이 매니페스트에는 p02-6 단계가 없어 건너뜀"); return; }
+
+    if (!LabConfig.get("nvidia-key") || !LabConfig.get("proxy-url")) {
+      // 스캔 자체는 키 없이 도는 게 이 도구의 성질이므로(배너 참조) 이건 오류가 아니라
+      // "이 단계만 못 했다"이다. 붉은 오류 배너(showError)는 일부러 띄우지 않는다.
+      progState("analysis", "error");
+      progSub("analysis", "NVIDIA 키/프록시 미설정 — 분석 문서 없이 진행합니다 (인터뷰는 파일 앞부분 코드로 진행됨)");
+      return;
+    }
+
+    progState("analysis", "now");
+    progSub("analysis", "제출물 전체를 읽고 결정 지점 추출 중...");
+    try {
+      const truncation = stage.truncation || {};
+      const params = stage.params || {};
+      const userMsg = LabApp.fillTemplate(LabApp.resolveTemplate("p02", "p02-6", "user_template"), {
+        findings_block: buildAnalysisFindingsBlock(result, truncation.findings_block),
+        code_block: buildAnalysisCodeBlock(result, files, truncation.code_block),
+      });
+      const model = (LabApp.getManifest().shared || {}).default_model;
+      const res = await LabLLM.chatJSON({
+        model,
+        maxTokens: params.max_tokens,
+        temperature: params.temperature,
+        messages: [
+          { role: "system", content: LabApp.resolveTemplate("p02", "p02-6", "system") },
+          { role: "user", content: userMsg },
+        ],
+        onProgress: (msg) => progSub("analysis", msg),
+      });
+      // llm.js의 chatJSON은 파싱된 객체가 아니라 {role, content, finishReason}를 준다 --
+      // 코드펜스/앞뒤 잡텍스트까지 흡수하는 extractJsonObject로 파싱한다(같은 모듈의 기존 관례).
+      const doc = LabLLM.extractJsonObject(res.content);
+      // §6의 규율이 모여 있는 진입점을 쓴다(직접 filter를 쓰다 무효 항목을 흘리는 사고 방지).
+      // fragment(코드 본문)는 저장하지 않는다 -- P03이 located로 그때그때 잘라 쓴다.
+      const { kept, dropped } = CodeLocate.groundDecisionPoints(files, doc.decision_points);
+      const points = kept.map((dp) => ({
+        title: dp.title, file: dp.file, symbol: dp.symbol, why_it_matters: dp.why_it_matters, located: dp.located,
+      }));
+      save(points);
+      progState("analysis", points.length ? "done" : "error");
+      // §6: 버린 개수는 호출부가 알린다("검증 못 한 위치는 조용히 사라지지 않는다").
+      progSub("analysis", `결정 지점 ${points.length}건 확정${dropped.length ? ` (실제 코드에서 확인 안 돼 ${dropped.length}건 버림)` : ""}`);
+      if (dropped.length) console.warn("p02-6 dropped decision points:", dropped.map((d) => d.reason));
+    } catch (err) {
+      console.error("p02-6 코드 분석 문서 실패 (스캔 결과에는 영향 없음):", err);
+      progState("analysis", "error");
+      progSub("analysis", `분석 문서 생성 실패 — 스캔 결과는 정상입니다 (${err.message})`);
+    }
+  }
 
   // `files` (the full scanned source map) never survives a page navigation (see
   // session-state.js D1) -- so every finding's connectable code context is resolved and

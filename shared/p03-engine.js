@@ -148,15 +148,73 @@ const P03Engine = (() => {
   //         설계 전문은 shared/code-locate.js 헤더 D-ground1 §4.
   //     (C) 트리거 정규식 JS 재구현 -- **불필요**. 재구현할 정규식 자체가 사라졌다.
   //   grounding 로직은 예고한 대로 shared/code-locate.js로 분리돼 있고 테스트도 있다
-  //   (tests/code-locate.test.js). **아직 이 함수에 배선하지 않았다** -- 배선은 p02-6가
-  //   실제로 decision_points를 만들기 시작한 다음이다. 그때 여기서 할 일은:
-  //   contexts를 앞에서부터 자르는 대신, 해당 finding에 연결된 decision point의
-  //   located.lines 주변만 CodeLocate.buildFragment로 잘라 넣는 것.
-  function buildCombinedCodeContext(contexts, cap) {
+  //   (tests/code-locate.test.js).
+  //
+  // D-ground2 (2026-08-03): **배선됨.** p02-6("코드 분석 문서")이 실제로 decision_points를
+  // 만들기 시작했으므로(prompt_manifest.json p02-6, trainee/submission.html), 위 D-poc13이
+  // 예고한 마지막 한 단계를 여기서 적용한다.
+  //   무엇이 바뀌나: 선택적 3번째 인자 `decisionPoint`가 주어지고 그게 이 호출의 contexts 중
+  //   **한 파일과 일치하면**(decisionPoint.file === c.path) 그 파일만 앞에서부터가 아니라
+  //   located.lines 주변(CodeLocate.buildFragment)에서 잘라 넣는다. 나머지 파일은 기존
+  //   앞부분 슬라이스 그대로다.
+  //   WHY 순수 가산(additive): decisionPoint가 없거나(가장 흔한 경우 -- p02-6이 실패했거나,
+  //   이 세션이 p02-6 이전 스캔이거나, LLM이 이 finding의 파일을 안 짚은 경우), contexts 중
+  //   무엇과도 매칭되지 않거나, located.valid가 false면 **오늘과 100% 동일하게** 동작한다.
+  //   grounding 데이터를 신뢰할 수 있을 만큼 쌓기 전까지는 그게 정상 경로이므로, 이 변경이
+  //   그 경로를 조금이라도 바꾸면 안 된다(tests/p03-code-context.test.js가 회귀로 고정).
+  //   COST: (1) 발췌한 조각도 perFileCap을 그대로 적용받는다 -- 예산 규율(D-fix10)이
+  //   grounding 유무에 따라 달라지면 안 되기 때문이다. 조각은 앞이 곧 근거 줄이라
+  //   여기서 앞부분을 자르는 것은 D-poc13이 지적한 "정작 논점이 뒤에 있는데 앞을 자른다"와
+  //   방향이 반대다(근거 줄은 조각 맨 앞 ±CONTEXT_LINES 안에 있다).
+  //   (2) 한 호출에 decision point는 하나만 반영한다 -- 호출부(run())가 finding.file과
+  //   일치하는 것 하나를 이미 골라서 넘긴다.
+  //   EXIT: 한 finding에 여러 decision point를 붙이고 싶어지면 이 인자를 배열로 바꾸고
+  //   아래 map에서 c.path별로 조회하면 된다(호출부의 find -> filter 한 줄 변경).
+  //
+  // 브라우저에서는 code-locate.js가 정의한 전역 `CodeLocate`를 쓰고, node --test
+  // (tests/p03-code-context.test.js)에서는 같은 파일을 require해서 **실제 구현 그대로**
+  // 검증한다 -- 조각 추출 규칙을 여기에 복제하지 않기 위한 해석기다. 둘 다 없으면 null을
+  // 돌려주고, 그 경우 아래는 grounding 없는 기존 경로로 조용히 되돌아간다(기능이 없는 것과
+  // 잘못된 근거를 보여주는 것 중 전자를 택한다 -- D-ground1 §6).
+  function resolveCodeLocate() {
+    if (typeof CodeLocate !== "undefined") return CodeLocate;
+    if (typeof require !== "undefined") {
+      try { return require("./code-locate.js"); } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  // D-ground2b (2026-08-03, 갈림길 닫음): dp.file(p02-6이 LLM 출력에서 그대로 돌려준 경로)이
+  // 전체 경로("src/pay.py")인지 베이스네임("pay.py")인지는 LLM이 code_block(전체 경로 헤더)과
+  // findings_block(finding.file = 베이스네임, two_tier_scan.py의 os.path.basename 규약, D179)
+  // 중 어느 쪽을 따라 적었는지에 달려 있어 예측할 수 없다 -- 프롬프트 입력 자체가 두 표기를
+  // 섞어서 보여준다. 그래서 한쪽 표기로 정규화하는 대신(어느 쪽이든 또 틀릴 수 있음) 항상
+  // 베이스네임끼리 비교한다 -- 이 저장소가 이미 파일 동일성 판정에 쓰는 유일한 공통 규약이다
+  // (P02Engine.findFileByBasename, finding.file, fan_in_keys 전부 베이스네임).
+  function basenameOf(p) {
+    return String(p == null ? "" : p).split("/").pop();
+  }
+
+  function buildCombinedCodeContext(contexts, cap, decisionPoint) {
     if (!contexts || !contexts.length) return null;
     const perFileCap = cap ? Math.floor(cap / contexts.length) : null;
+    const dp = (decisionPoint && decisionPoint.located && decisionPoint.located.valid) ? decisionPoint : null;
+    const CL = dp ? resolveCodeLocate() : null;
     return contexts
-      .map((c) => `--- ${c.path} ---\n${perFileCap ? c.content.slice(0, perFileCap) : c.content}`)
+      .map((c) => {
+        if (dp && CL && basenameOf(dp.file) === basenameOf(c.path)) {
+          // buildFragment는 files 맵에서 located.file 키로 내용을 찾는다 -- 여기서 가진 건
+          // 이 한 파일뿐이므로 그 한 칸짜리 맵을 만들어 넘긴다(내용은 P02가 스캔한 바로 그
+          // 원본이므로 located의 줄 번호와 정합한다).
+          const fragment = CL.buildFragment({ [dp.located.file]: c.content }, dp.located);
+          if (fragment && fragment.text) {
+            const body = perFileCap ? fragment.text.slice(0, perFileCap) : fragment.text;
+            return `--- ${c.path} (${fragment.contextLines[0]}-${fragment.contextLines[1]}행 발췌 · p02-6이 지목한 지점) ---\n${body}`;
+          }
+          // 조각을 만들지 못하면(내용 불일치 등) 조용히 기존 동작으로 폴백한다.
+        }
+        return `--- ${c.path} ---\n${perFileCap ? c.content.slice(0, perFileCap) : c.content}`;
+      })
       .join("\n\n");
   }
 
@@ -841,7 +899,11 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     // D210: zipFiles ({path: content} loaded from IndexedDB via SessionState.loadZipFileMap(),
     // or null) is the ZIP-upload equivalent -- see generateQuestion()'s D210 comment for how
     // the two sources are picked between.
-    const { finding, codeContexts, model, repoRef, zipFiles, resume } = input;
+    // D-ground2: decisionPoints (p02-6이 만들고 CodeLocate로 검증된 것만 남은 배열, 또는
+    // null) -- session.html이 SessionState.loadDecisionPoints()로 실어 보낸다. null/빈
+    // 배열이면 아래 matchedDp가 null이 되고 buildCombinedCodeContext는 배선 전과 완전히
+    // 동일하게 동작한다.
+    const { finding, codeContexts, model, repoRef, zipFiles, resume, decisionPoints } = input;
     if (!finding) {
       hooks.onStatus("먼저 finding을 불러오고 선택하세요", "error");
       throw new Error("먼저 finding을 불러오고 선택하세요");
@@ -874,9 +936,14 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       // built from ALL matched files (buildCombinedCodeContext), not just the first.
       const stage1 = LabApp.getStage("p03", "p03-1");
       const codeCap = stage1 && stage1.truncation && stage1.truncation.code_context;
-      const codeContext = buildCombinedCodeContext(codeContexts, codeCap);
+      // D-ground2: 이 finding이 가리키는 파일에 대해 p02-6이 지목한 decision point가 있으면
+      // 그 파일만 근거 줄 주변에서 잘라 넣는다(없으면 null -> 기존 동작). 매칭은 D-ground2b
+      // (buildCombinedCodeContext 위 basenameOf() 주석)와 같은 이유로 베이스네임 기준 --
+      // finding.file 자체가 이미 베이스네임이므로(D179) dp.file만 basenameOf로 정규화한다.
+      const matchedDp = (decisionPoints || []).find((dp) => basenameOf(dp.file) === finding.file) || null;
+      const codeContext = buildCombinedCodeContext(codeContexts, codeCap, matchedDp);
       hooks.onProgress(codeContext
-        ? `코드 컨텍스트 포함 (${codeContexts.length}개 파일, 총 ${codeContext.length}자)`
+        ? `코드 컨텍스트 포함 (${codeContexts.length}개 파일, 총 ${codeContext.length}자)${matchedDp ? ` — ${matchedDp.file}은 p02-6이 지목한 지점 기준으로 발췌` : ""}`
         : "코드 컨텍스트 없음 -- 질문이 파일 내용 없이 생성됨");
       // D205: neither `repoRef` nor a ZIP file map (D210) available used to silently skip
       // the whole fact-check mechanism with zero visible trace -- not even a console.log.
@@ -1074,3 +1141,11 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
     run, LEVELS,
   };
 })();
+
+// 브라우저에는 module이 없어 no-op. node --test(tests/p03-code-context.test.js)가 이 파일의
+// 실제 buildCombinedCodeContext를 그대로 불러 검증하기 위한 한 줄이다 -- D-ground2의 "순수
+// 가산" 주장(grounding 데이터가 없으면 오늘과 100% 동일)은 테스트에 로직을 복제하면 검증한
+// 게 아니게 된다. shared/code-locate.js 맨 끝과 같은 가드 형태.
+// 이 파일은 .github/workflows/pages.yml의 drift-check에서 제외돼 있어(code_Q&A 전용,
+// feat/poc_full엔 존재하지 않음) 이 추가는 벤더링 표면에 영향을 주지 않는다.
+if (typeof module !== "undefined" && module.exports) module.exports = P03Engine;

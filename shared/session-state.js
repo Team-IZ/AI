@@ -35,6 +35,14 @@ const SessionState = (() => {
   const SUBMISSION_KEY = "teamiz_p02_submission";
   const RESULT_KEY = "teamiz_p03_result";
   const FINDINGS_KEY = "teamiz_p02_findings";
+  // D-ground2 (2026-08-03): p02-6("코드 분석 문서")이 만들고 CodeLocate.locateSymbol로
+  // 실제 제출 파일과 대조해 **검증에 성공한 것만** 남긴 decision point 배열. FINDINGS_KEY와
+  // 같은 이유로 자체 키를 쓴다 -- 스캔 1회당 한 번 계산되고 모든 finding이 공유하며,
+  // 뒤로가기/새 탭에서 finding 목록과 독립적으로 살아 있어야 한다.
+  // 크기: 항목당 {title, file, symbol, why_it_matters, located} 정도의 짧은 문자열이라
+  // sessionStorage로 충분하다(D210의 zipFiles처럼 IndexedDB가 필요한 크기가 아니다) --
+  // 코드 조각 본문은 저장하지 않는다. P03이 located로 그때그때 잘라 쓴다.
+  const DECISION_POINTS_KEY = "teamiz_p02_decision_points";
   // D200: {owner, repo, branch} from a GitHub-URL P02 scan, or null for ZIP uploads / no
   // scan yet. Own key (not folded into SUBMISSION_KEY/FINDINGS_KEY) because it's set once
   // per SCAN, not per finding -- every finding from the same scan shares the same repo.
@@ -194,6 +202,21 @@ const SessionState = (() => {
     return Array.isArray(v) ? v : null;
   }
 
+  // D-ground2: saveFindingsList/loadFindingsList와 같은 모양 그대로 -- 실패는 삼키지 않고
+  // safeSet의 {ok, error, hint}를 그대로 돌려주되, 호출부(submission.html)는 이 저장이
+  // 실패해도 스캔 결과 표시를 막지 않는다. decision point가 없는 상태는 유효한 폴백이고
+  // (P03이 기존 앞부분 슬라이스로 되돌아간다), 없는 근거를 억지로 보여주는 것보다 낫다.
+  function saveDecisionPoints(points) {
+    return safeSet(DECISION_POINTS_KEY, points);
+  }
+
+  // 배열이 아니면(저장 안 됨/이전 버전 스캔/손상) null -- p03-engine.js가 decisionPoints
+  // 부재를 D-poc13 이전과 완전히 동일한 동작으로 취급하는 그 신호다.
+  function loadDecisionPoints() {
+    const v = safeGet(DECISION_POINTS_KEY);
+    return Array.isArray(v) ? v : null;
+  }
+
   // result: the object P03Engine.run() resolved with ({finding, verdict, turns,
   // transcript, grades, rubric_overridden}) -- saved as-is, already fully graded and
   // already saved to Supabase by the time session.html calls this (run() does both
@@ -286,6 +309,7 @@ const SessionState = (() => {
 
   return {
     saveSubmission, saveSubmissionWithModel, loadSubmission, saveFindingsList, loadFindingsList,
+    saveDecisionPoints, loadDecisionPoints,
     saveInterviewResult, loadInterviewResult, saveRepoContext, loadRepoContext,
     saveZipFileMap, loadZipFileMap, clearZipFileMap,
   };
