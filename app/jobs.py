@@ -23,17 +23,29 @@ from app.schemas.usage import AiUsage
 #     존재하지 않는다. 로컬 파일 append만 구현하면 실제 운영 트래픽(팀 테스트
 #     페이지가 치는 배포된 백엔드)에서는 그 경로 자체가 없어 조용히 아무 데이터도
 #     안 쌓인다 -- PR-3이 요구하는 "실제 운영 세션 실측"을 정작 놓치게 된다.
-#     stdout은 로컬/컨테이너 어디서나 항상 동작하고, Cloudflare Container도
-#     stdout을 로그로 잡아준다(`wrangler tail`로 확인 가능) -- 그래서 배포본에서는
-#     당분간 "wrangler tail로 긁어서 수동으로 jsonl에 합치기"가 실제 수집 경로다.
-#     로컬 파일 append는 로컬 개발 중 편의를 위한 부가 경로일 뿐, 유일한 경로가
-#     아니다.
+#     stdout은 로컬/컨테이너 어디서나 항상 동작한다.
 #   COST: 배포본 쪽 실측은 완전 자동이 아니다(수동 하베스트 필요) -- 이 서비스에
 #     DB를 새로 들이면 D1("FastAPI는 DB를 갖지 않는다, Spring이 영속화 담당")이
 #     깨지므로 그 COST를 감수한다.
 #   EXIT: 실제 메트릭 저장소(D1을 재검토해서든, 별도 사이드카든)가 생기면 stdout
 #     프린트를 그 저장소 호출로 교체 -- 이 함수의 반환 타입(dict)은 그대로 재사용
 #     가능하다.
+#
+# D-pr3c (2026-08-03, 위 EXIT 각주의 실측 정정): "Cloudflare Container도 stdout을
+# wrangler tail로 잡아준다"는 가정이 실제로는 틀렸다 -- 실측(파일럿 3건 실행 중
+# `wrangler tail --format json`을 같이 띄워서 확인)해보니 wrangler tail은 Worker
+# 자체의 fetch 이벤트 로그만 캡처하고("logs": [] 로 항상 비어 있음), 그 뒤에서 도는
+# Container 프로세스의 stdout(`print()`)은 별도 채널이라 안 잡힌다. wrangler에도
+# 컨테이너 전용 로그 서브커맨드가 없다(`wrangler containers --help`로 확인).
+#   WHY: 실제 유일하게 동작하는 배포본 수집 경로는 GET /analyses/{jobId}의 최종
+#   응답에 있는 aiUsage[]를 그대로 옮겨 적는 것뿐이다 -- PARALLEL_RUN_CHECKLIST.md
+#   §1이 이미 이 방법을 "수동 하베스트 절차"로 문서화해 뒀고, 실제로 이 방법으로
+#   docs/code-importance-map/measurements/2026-08-03.jsonl에 3건 기록했다.
+#   COST: 이번 EXIT 각주가 틀렸던 가정에 의존하고 있었다는 뜻 -- "wrangler tail로
+#   긁어서 합치기"라는 문구는 지운다. 정말 자동화하려면 위 EXIT의 "별도 메트릭
+#   저장소" 쪽으로 가야 한다(사이드카 로그 수집기든, Worker가 컨테이너 응답의
+#   aiUsage를 직접 D1/KV에 적재하든).
+#   EXIT: 컨테이너 stdout 캡처 방법을 나중에 찾으면 이 각주를 다시 갱신할 것.
 _MEASUREMENTS_DIR = Path(__file__).resolve().parent.parent / "docs" / "code-importance-map" / "measurements"
 
 
