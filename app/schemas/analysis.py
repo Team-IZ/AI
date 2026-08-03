@@ -46,8 +46,12 @@ class AnalysisRequest(BaseSchema):
         default_factory=list, description="[{id, label, unitId, sourcePages}] 교안 참조용"
     )
     curriculum_id: str | None = None
-    model_code: str | None = Field(
-        default=None, description="생략 시 서버 기본값. operator가 고른다"
+    provider_model_code: str | None = Field(
+        default=None,
+        description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` "
+                    "(예: nvidia/nemotron-3-ultra-550b-a55b). 화면 선택값인 `model_code`가 "
+                    "아니다 — 벤더 접두어가 붙은 원본 식별자여야 호출이 된다. "
+                    "생략 시 서버 기본값. operator가 고른다",
     )
     
     @model_validator(mode="after")
@@ -188,7 +192,17 @@ class Problem(BaseSchema):
         description="evidenceHash를 계산한 원문 그대로. Spring이 다시 자르면 해시가 어긋난다"
     )
     evidence_hash: str = Field(description="codeSnippet의 sha256 hex 64자")
-    extractor_version: str = Field(description="이 문제를 뽑은 룰 버전. 재현성 근거")
+    extractor_version: int = Field(
+        gt=0,
+        description="이 문제를 뽑은 룰 버전. 재현성 근거. "
+                    "**정수다** — assessment_problem.extractor_version이 INTEGER "
+                    "CHECK (> 0)이라 문자열을 보내면 Spring INSERT가 깨진다",
+    )
+    teach_id: str | None = Field(
+        default=None,
+        description="이 문제가 검증하는 교안 개념(요청 teaches[].id). isGeneral=true면 null. "
+                    "화면의 '클래스는 L3까지, 상속은 L2까지' 같은 개념별 도달 표시가 이 값으로 붙는다",
+    )
     references: list[ProblemReference] = Field(default_factory=list)
     stages: list[ProblemStage] = Field(min_length=4, max_length=4)
 

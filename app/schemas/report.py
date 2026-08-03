@@ -38,10 +38,11 @@ class ReportRequest(BaseSchema):
     problem_id: str = Field(description="이 보고서가 다루는 문제. 문제 단위의 키")
     session_id: str | None = None
     score_run_id: str | None = Field(default=None, description="Spring ScoreRun 키(에코용)")
-    model_code: str | None = Field(
+    provider_model_code: str | None = Field(
         default=None,
-        description="생략 시 서버 기본값. `/analyses`·`/curricula`와 같은 규칙이다 — "
-                    "모델 선택은 operator 권한이고, 없으면 보고서만 비용·지연을 못 고른다",
+        description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code`"
+                    "(벤더 접두어 포함). 생략 시 서버 기본값 — `/analyses`·`/curricula`와 "
+                    "같은 규칙이다. 모델 선택은 operator 권한이다",
     )
     transcript: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -132,6 +133,7 @@ class ProblemResult(BaseSchema):
 class ReportVersions(BaseSchema):
     """어떤 모델·프롬프트·루브릭으로 만들었는지. 재현성 근거."""
 
+    # aiUsage.modelCode와 같은 값이다 — 호출에 쓴 provider 문자열을 그대로 에코한다.
     model_code: str
     prompt_version: str
     rubric_version: str

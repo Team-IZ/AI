@@ -177,7 +177,7 @@ def test_ai_usage_is_reported_for_reports(monkeypatch):
                         lambda *a, **k: stages.StageResult(data={"summary": "요약"},
                                                            usages=[usage]))
     try:
-        r = client.post("/api/v0/reports", json={"problemId": "prob-1", "modelCode": "m"},
+        r = client.post("/api/v0/reports", json={"problemId": "prob-1", "providerModelCode": "vendor/m"},
                         headers={**HEADERS, "X-Trace-Id": "trace-9"})
         job = client.get(f"/api/v0/reports/{r.json()['jobId']}", headers=HEADERS).json()
     finally:
@@ -214,7 +214,7 @@ def test_camelcase_transcript_reaches_the_engine(monkeypatch):
     }
     try:
         r = client.post("/api/v0/reports", headers=HEADERS, json={
-            "problemId": "prob-1", "transcript": [wire_turn], "modelCode": "m",
+            "problemId": "prob-1", "transcript": [wire_turn], "providerModelCode": "vendor/m",
         })
         result = client.get(f"/api/v0/reports/{r.json()['jobId']}",
                             headers=HEADERS).json()["result"]

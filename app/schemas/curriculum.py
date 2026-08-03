@@ -23,8 +23,10 @@ class CurriculumRequest(BaseSchema):
                     "매니페스트 기본값('Java')이 들어가고, 다른 과정 교안이면 "
                     "모델이 흔들려 결과 언어·용어가 섞인다",
     )
-    model_code: str | None = Field(
-        default=None, description="생략 시 서버 기본값. operator가 고른다"
+    provider_model_code: str | None = Field(
+        default=None,
+        description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code`"
+                    "(벤더 접두어 포함). 생략 시 서버 기본값. operator가 고른다",
     )
     # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다.
 

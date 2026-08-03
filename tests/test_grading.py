@@ -5,8 +5,10 @@ from app.engines.analysis import grading, stages
 
 
 def _fake(monkeypatch, data):
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+              extra_user=""):
         _call.values = values
+        _call.extra_user = extra_user
         return stages.StageResult(data=data, usages=[{"status": "SUCCEEDED"}])
 
     monkeypatch.setattr(grading.stages, "call", _call)
@@ -121,3 +123,49 @@ def test_missing_reach_field_does_not_break_grading(monkeypatch):
     assert g.model_reached is None
     assert g.reach_conflict is False
     assert g.passed is True
+
+
+def test_analysis_context_reaches_the_grader(monkeypatch):
+    """코드 파편 밖의 구조가 프롬프트에 실려야 한다.
+
+    MVC면 model·view·controller가 다른 파일에 있다. 파편만 본 채점기는 학생이
+    "컨트롤러가 서비스에 위임한다"고 답해도 사실 여부를 모른다.
+    """
+    call = _fake(monkeypatch, _data())
+
+    grading.grade("L1", "q", "a", model_code="m", analysis_context={
+        "overview": "주문을 받아 결제로 넘기는 서비스다.",
+        "structure": [{"area": "컨트롤러", "files": ["app/api.py"], "role": "요청 수신"}],
+    })
+
+    assert "주문을 받아 결제로 넘기는 서비스다." in call.extra_user
+    assert "app/api.py" in call.extra_user
+    # 맥락이 루브릭을 밀어내면 안 된다 — 채점 기준은 값 단계 서술뿐이다.
+    assert "기준을 늘리지 마라" in call.extra_user
+
+
+def test_analysis_context_is_optional(monkeypatch):
+    """안 주면 지금과 똑같이 동작해야 한다(하위 호환)."""
+    call = _fake(monkeypatch, _data())
+
+    grading.grade("L1", "q", "a", model_code="m")
+
+    assert call.extra_user == ""
+
+
+def test_decision_points_are_not_sent(monkeypatch):
+    """분석 문서를 통째로 넣으면 채점 36회 × 5,000~7,000토큰이다.
+
+    `decisionPoints`는 문제 후보 전체 목록이고 문제는 이미 정해졌다 — 부피만 차지한다.
+    """
+    call = _fake(monkeypatch, _data())
+
+    grading.grade("L1", "q", "a", model_code="m", analysis_context={
+        "overview": "개요",
+        "structure": [],
+        "decision_points": [{"title": "여기 있으면 안 된다"}],
+        "risks": ["이것도"],
+    })
+
+    assert "여기 있으면 안 된다" not in call.extra_user
+    assert "이것도" not in call.extra_user

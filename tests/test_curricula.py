@@ -11,7 +11,7 @@ from app.main import app
 client = TestClient(app)
 HEADERS = {"X-Internal-Key": get_settings().internal_api_key}
 
-PAYLOAD = {"versionId": "ver-1", "modelCode": "stub-0"}
+PAYLOAD = {"versionId": "ver-1", "providerModelCode": "vendor/stub-0"}
 PDF = ("teach.pdf", b"%PDF-1.4 stub", "application/pdf")
 
 

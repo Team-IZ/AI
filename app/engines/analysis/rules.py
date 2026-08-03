@@ -62,11 +62,19 @@ def _load_vendor():
 
 
 @lru_cache(maxsize=1)
-def extractor_version() -> str:
+def extractor_version() -> int:
     """이 결과를 만든 룰의 버전. vendor의 .py·.json 전부를 해시한다.
 
     rank_weights.json 같은 데이터 파일이 결과를 바꾸므로 코드만 해싱하면
     "같은 버전인데 결과가 다르다"가 생긴다. Problem.extractorVersion에 실린다.
+
+    **정수로 돌려준다** — DB `assessment_problem.extractor_version`이
+    `INTEGER CHECK (> 0)`이다. 문자열(`"rules-a1b2…"`)을 보내면 Spring INSERT가
+    깨지므로, 해시를 PostgreSQL INTEGER 범위 안으로 접어 넣는다.
+
+    ponytail: 해시를 접으므로 값이 사람에게 안 읽히고 순서도 없다(버전이 오르지
+    않는다). "같은 룰이면 같은 값, 다른 룰이면 다른 값"만 보장하면 되는 자리라
+    충분하다. 사람이 읽는 버전이 필요해지면 별도 필드를 요청한다.
     """
     digest = hashlib.sha256()
     for path in sorted(_VENDOR.rglob("*")):
@@ -74,7 +82,8 @@ def extractor_version() -> str:
             continue
         digest.update(path.relative_to(_VENDOR).as_posix().encode())
         digest.update(path.read_bytes())
-    return f"rules-{digest.hexdigest()[:12]}"
+    # 2^31-1을 넘으면 INTEGER에 안 들어간다. 0도 CHECK에 걸리므로 1부터 시작한다.
+    return int(digest.hexdigest()[:12], 16) % 2_147_483_647 + 1
 
 
 def _safe_extract(zip_bytes: bytes, dest: Path) -> None:

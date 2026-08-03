@@ -117,7 +117,7 @@ def _real_result(body: CurriculumRequest, pdf_bytes: bytes, job: CurriculumJobSt
     settings = get_settings()
     built = engine.analyse(
         pdf_bytes,
-        model_code=body.model_code or settings.model_code_curriculum,
+        model_code=body.provider_model_code or settings.model_code_curriculum,
         course_label=body.course_label or "",
     )
     job.ai_usage = to_ai_usage(built.usages, "CURRICULUM", job.job_id,

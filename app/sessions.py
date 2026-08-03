@@ -143,8 +143,14 @@ def _advance_problem(walk: _Walk) -> None:
     walk.hints_used = 0
 
 
-def _advance(walk: _Walk, passed: bool) -> None:
-    """계단 규칙. **진행 규칙의 단일 출처다** — 백엔드에 같은 규칙을 두지 않는다."""
+def _advance(walk: _Walk, passed: bool) -> tuple[str, str] | None:
+    """계단 규칙. **진행 규칙의 단일 출처다** — 백엔드에 같은 규칙을 두지 않는다.
+
+    문제가 이 턴에서 끝났으면 `(terminationReason, endedLevel)`을 돌려준다.
+    **종료 판정을 하는 자리가 곧 그 사유를 아는 자리다** — 응답에 안 실으면 백엔드가
+    커서가 다음 문제로 넘어간 것을 보고 "왜 끝났는지"를 역추론해야 한다.
+    """
+    axis = _AXES[walk.axis_index]
     if passed:
         # 다음 단계로. L4까지 통과했으면 이 문제는 완주다.
         walk.axis_index += 1
@@ -152,12 +158,15 @@ def _advance(walk: _Walk, passed: bool) -> None:
         stages_ = walk.problems[walk.problem_index].get("stages") or []
         if walk.axis_index >= len(stages_):
             _advance_problem(walk)
-    elif walk.hints_used < scoring.MAX_HINTS_PER_LEVEL:
+            return "COMPLETED_L4", axis
+        return None
+    if walk.hints_used < scoring.MAX_HINTS_PER_LEVEL:
         # 힌트를 하나 더 열고 같은 단계를 다시 묻는다. 질문은 안 바뀐다.
         walk.hints_used += 1
-    else:
-        # 힌트 소진 후에도 미달 — 그 문제는 여기서 끝이다. 다음 단계를 던지지 않는다.
-        _advance_problem(walk)
+        return None
+    # 힌트 소진 후에도 미달 — 그 문제는 여기서 끝이다. 다음 단계를 던지지 않는다.
+    _advance_problem(walk)
+    return f"TERMINATED_AT_{axis}", axis
 
 
 def _seek(walk: _Walk, cursor: Cursor | None, transcript: list[TranscriptTurn]) -> None:
@@ -182,7 +191,8 @@ def _seek(walk: _Walk, cursor: Cursor | None, transcript: list[TranscriptTurn]) 
 
 
 def _to_result(session_id: str, walk: _Walk, turn: TranscriptTurn | None,
-               trace_id: str | None) -> AnswerResult:
+               trace_id: str | None,
+               ended: tuple[str, str] | None = None) -> AnswerResult:
     completed = _current_stage(walk) is None
     return AnswerResult(
         session_id=session_id,
@@ -193,6 +203,8 @@ def _to_result(session_id: str, walk: _Walk, turn: TranscriptTurn | None,
         progress=None if completed else Progress(
             problem_index=walk.problem_index + 1, problem_total=len(walk.problems),
         ),
+        termination_reason=ended[0] if ended else None,
+        ended_level=ended[1] if ended else None,
         ai_usage=to_ai_usage(walk.usages, "GRADING", session_id,
                              feature_code="GRADING", trace_id=trace_id),
     )
@@ -231,10 +243,12 @@ def submit_answer(session_id: str, req: AnswerSubmit,
 
     grade = grading.grade(
         axis_code, question_text, req.answer_text,
-        model_code=get_settings().model_code_session,
+        # 요청이 이기고 없으면 서버 기본값. 채점 모델은 operator가 고른다(GradingPolicy).
+        model_code=req.provider_model_code or get_settings().model_code_session,
         hints=shown_hints,
         code_snippet=problem.get("code_snippet") or "",
         code_ref=problem.get("source_path") or "",
+        analysis_context=req.analysis_context,
     )
     walk.usages.extend(grade.usages)
 
@@ -251,5 +265,5 @@ def submit_answer(session_id: str, req: AnswerSubmit,
         autonomy=grade.autonomy,
     )
 
-    _advance(walk, grade.passed)
-    return _remember(key, _to_result(session_id, walk, turn, trace_id))
+    ended = _advance(walk, grade.passed)
+    return _remember(key, _to_result(session_id, walk, turn, trace_id, ended))

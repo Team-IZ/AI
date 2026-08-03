@@ -45,7 +45,12 @@ class AiUsage(BaseSchema):
     """LLM 호출 한 번의 기록. DB ai_usage 한 행에 대응한다."""
 
     feature_code: FeatureCode
-    model_code: str = Field(description="Spring이 ai_model에서 model_id를 조회한다")
+    model_code: str = Field(
+        description="Spring이 ai_model에서 model_id를 조회한다. "
+                    "⚠️ **AI는 호출에 쓴 provider 문자열을 그대로 에코한다**(요청의 "
+                    "providerModelCode 또는 서버 기본값) — AI는 화면 선택값을 모른다. "
+                    "Spring은 `provider_model_code`로 ai_model을 조회해야 한다",
+    )
 
     # 어느 작업에 딸린 호출인가. 다형 참조라 FK가 없다.
     source_type: SourceType

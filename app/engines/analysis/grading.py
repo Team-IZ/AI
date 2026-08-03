@@ -40,13 +40,56 @@ def _hints_block(hints: list[str]) -> str:
     return "\n".join(f"힌트 {i}: {text}" for i, text in enumerate(hints, start=1))
 
 
+# 맥락 블록 상한. 넘으면 자른다 — 채점은 문제당 12콜이라 여기가 부풀면 전체 비용이 는다.
+# ponytail: 문자 수로 자른다. 토큰으로 재는 것은 모델별 토크나이저가 필요해질 때.
+_CONTEXT_LIMIT = 2000
+
+
+def _context_block(context: dict[str, Any] | None) -> str:
+    """분석 문서의 `overview` + `structure`만 프롬프트용 문장으로 만든다.
+
+    **코드 파편 하나로는 전체 흐름이 안 보인다** — MVC면 model·view·controller가
+    다른 파일에 있고 클래스 정의도 다른 파일일 수 있다. 학생이 "컨트롤러가 서비스에
+    위임한다"고 답해도 파편만 본 채점기는 그게 사실인지 모른다.
+
+    **문서를 통째로 넣지 않는 이유**: `decisionPoints`가 부피의 대부분인데 문제 후보
+    전체 목록이라 채점에는 쓸모가 없다(문제는 이미 정해졌다). 20KB를 채점 36회에
+    넣으면 콜당 5,000~7,000토큰이다. 두 필드만 뽑으면 500~800토큰이다.
+    """
+    if not context:
+        return ""
+
+    lines: list[str] = []
+    overview = str(context.get("overview") or "").strip()
+    if overview:
+        lines.append(overview)
+    for area in context.get("structure") or []:
+        if not isinstance(area, dict):
+            continue
+        files = ", ".join(str(f) for f in (area.get("files") or []))
+        lines.append(f"- {area.get('area', '')} ({files}): {area.get('role', '')}")
+
+    if not lines:
+        return ""
+    body = "\n".join(lines)[:_CONTEXT_LIMIT]
+    return (
+        "\n\n## 코드 전체 맥락 (참고용)\n"
+        f"{body}\n\n"
+        "- 위 맥락은 답변이 코드 사실과 맞는지 볼 때만 참고하라. "
+        "채점 기준은 위 채점 축의 값 단계 서술뿐이고, 맥락을 근거로 기준을 늘리지 마라."
+    )
+
+
 def grade(axis_code: str, question: str, answer: str, *, model_code: str,
           hints: list[str] | None = None, code_snippet: str = "",
-          code_ref: str = "") -> Grade:
+          code_ref: str = "", analysis_context: dict[str, Any] | None = None) -> Grade:
     """답변 하나를 채점한다.
 
     hints는 이 시도 전에 학생이 받은 힌트들이다. 길이가 곧 hintsUsed이고,
     그게 점수 상한(5/4/3)과 자력 판정을 정한다.
+
+    analysis_context는 분석 문서의 `{overview, structure}`다. 없으면 파편만으로
+    채점한다 — 있던 동작 그대로다.
     """
     hints = hints or []
     hints_used = len(hints)
@@ -60,7 +103,10 @@ def grade(axis_code: str, question: str, answer: str, *, model_code: str,
         "code_ref": code_ref or "-",
         "answer": answer,
     }, model_code=model_code, timeout_s=client.SESSION_TIMEOUT_S,
-       max_attempts=client.SESSION_MAX_ATTEMPTS)
+       max_attempts=client.SESSION_MAX_ATTEMPTS,
+       # 매니페스트(vendor)에 자리가 없어 프롬프트 끝에 덧붙인다. vendor를 고치면
+       # 팀원 갱신 때마다 재적용해야 하므로 우리 소유 경로로 해결한다.
+       extra_user=_context_block(analysis_context))
 
     raw = result.data.get("score")
     try:

@@ -8,7 +8,7 @@
 진행 규칙(통과선·힌트 상한·사다리)은 여전히 AI가 소유한다. 커서를 입력으로 받아
 다음 커서를 계산해 돌려주는 순수 함수다.
 """
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field
 
@@ -107,6 +107,19 @@ class AnswerSubmit(BaseSchema):
     cursor: Cursor | None = Field(
         default=None, description="이 답변이 대답하는 자리. 생략 시 transcript로 복원",
     )
+    provider_model_code: str | None = Field(
+        default=None,
+        description="채점에 쓸 모델. 값은 `ai_model.provider_model_code`(벤더 접두어 포함). "
+                    "생략 시 서버 기본값 — `/analyses`·`/curricula`·`/reports`와 같은 규칙이다. "
+                    "채점 모델은 operator가 고른다(GradingPolicy)",
+    )
+    analysis_context: dict[str, Any] | None = Field(
+        default=None,
+        description="채점기가 코드 파편 밖을 보게 하는 최소 맥락. **분석 문서 전체가 아니라 "
+                    "`{overview, structure}` 두 필드만 보낸다** — `decisionPoints`는 문제 "
+                    "후보 목록이라 채점에 쓸모가 없고 부피의 대부분이다(20KB → 1~2KB). "
+                    "생략하면 파편만으로 채점한다",
+    )
 
 
 class AnswerResult(BaseSchema):
@@ -134,4 +147,17 @@ class AnswerResult(BaseSchema):
         default=None, description="다음 질문과 힌트 텍스트. 끝났으면 null",
     )
     progress: Progress | None = None
+    termination_reason: str | None = Field(
+        default=None,
+        description="**이 턴에서 문제가 끝났을 때만 채워진다.** 진행 중이면 null. "
+                    "`COMPLETED_L4`(L1~L4 완주) · `TERMINATED_AT_L1`~`TERMINATED_AT_L4`"
+                    "(그 단계에서 힌트 소진 후 미달. L4는 L3까지 통과하고 마지막에서 막힌 경우다). "
+                    "DB assessment_problem.termination_reason에 그대로 들어간다 — "
+                    "종료 판정은 AI가 소유하므로 백엔드가 커서 변화로 역추론하지 않아도 된다",
+    )
+    ended_level: AxisCode | None = Field(
+        default=None,
+        description="문제가 끝난 단계. terminationReason과 짝이고 진행 중이면 null. "
+                    "DB assessment_problem.ended_level",
+    )
     ai_usage: list[AiUsage] = Field(default_factory=list)

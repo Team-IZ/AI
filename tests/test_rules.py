@@ -72,7 +72,10 @@ def test_finds_candidates_from_zip():
     out = rules.find_candidates(_zip(_DUP))
 
     assert out["file_count"] == 2
-    assert out["extractor_version"].startswith("rules-")
+    # DB assessment_problem.extractor_version이 INTEGER CHECK (> 0)다.
+    # 문자열로 보내던 시절이 있었고 그대로 나가면 Spring INSERT가 깨진다.
+    assert isinstance(out["extractor_version"], int)
+    assert 0 < out["extractor_version"] <= 2_147_483_647
     assert any(c["finding_id"].startswith("repeated-pattern:") for c in out["candidates"])
 
 

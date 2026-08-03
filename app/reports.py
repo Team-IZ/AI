@@ -163,7 +163,7 @@ def _real_result(body: ReportRequest, job: ReportJobStatus,
     # 보고서는 문제가 끝날 때마다 세션 흐름 안에서 돌고(학생이 다음 문제를 푸는 동안
     # 병렬), 분석 배치와 지연 요구가 다르다. 분석 기본값(nemotron-ultra)을 쓰면
     # 세션이 끝나도 보고서가 안 나온다.
-    model_code = body.model_code or get_settings().model_code_session
+    model_code = body.provider_model_code or get_settings().model_code_session
     built = report_engine.build(
         body.problem_id, 1,
         [_to_snake(t if isinstance(t, dict) else dict(t)) for t in body.transcript],

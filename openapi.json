@@ -264,7 +264,7 @@
                     ],
                     "title": "Curriculumid"
                   },
-                  "modelCode": {
+                  "providerModelCode": {
                     "anyOf": [
                       {
                         "type": "string"
@@ -273,8 +273,8 @@
                         "type": "null"
                       }
                     ],
-                    "description": "생략 시 서버 기본값. operator가 고른다",
-                    "title": "Modelcode"
+                    "description": "공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` (예: nvidia/nemotron-3-ultra-550b-a55b). 화면 선택값인 `model_code`가 아니다 — 벤더 접두어가 붙은 원본 식별자여야 호출이 된다. 생략 시 서버 기본값. operator가 고른다",
+                    "title": "Providermodelcode"
                   }
                 },
                 "required": [
@@ -449,7 +449,7 @@
                           ],
                           "title": "Curriculumid"
                         },
-                        "modelCode": {
+                        "providerModelCode": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -458,8 +458,8 @@
                               "type": "null"
                             }
                           ],
-                          "description": "생략 시 서버 기본값. operator가 고른다",
-                          "title": "Modelcode"
+                          "description": "공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` (예: nvidia/nemotron-3-ultra-550b-a55b). 화면 선택값인 `model_code`가 아니다 — 벤더 접두어가 붙은 원본 식별자여야 호출이 된다. 생략 시 서버 기본값. operator가 고른다",
+                          "title": "Providermodelcode"
                         }
                       },
                       "required": [
@@ -927,7 +927,7 @@
                           "description": "과정명(예: 'SQL', 'Java'). 프롬프트 프레이밍에 쓴다 — 생략하면 매니페스트 기본값('Java')이 들어가고, 다른 과정 교안이면 모델이 흔들려 결과 언어·용어가 섞인다",
                           "title": "Courselabel"
                         },
-                        "modelCode": {
+                        "providerModelCode": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -936,8 +936,8 @@
                               "type": "null"
                             }
                           ],
-                          "description": "생략 시 서버 기본값. operator가 고른다",
-                          "title": "Modelcode"
+                          "description": "공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code`(벤더 접두어 포함). 생략 시 서버 기본값. operator가 고른다",
+                          "title": "Providermodelcode"
                         }
                       },
                       "required": [
@@ -1076,7 +1076,7 @@
           "modelCode": {
             "type": "string",
             "title": "Modelcode",
-            "description": "Spring이 ai_model에서 model_id를 조회한다"
+            "description": "Spring이 ai_model에서 model_id를 조회한다. ⚠️ **AI는 호출에 쓴 provider 문자열을 그대로 에코한다**(요청의 providerModelCode 또는 서버 기본값) — AI는 화면 선택값을 모른다. Spring은 `provider_model_code`로 ai_model을 조회해야 한다"
           },
           "sourceType": {
             "type": "string",
@@ -1478,6 +1478,36 @@
               }
             ]
           },
+          "terminationReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminationreason",
+            "description": "**이 턴에서 문제가 끝났을 때만 채워진다.** 진행 중이면 null. `COMPLETED_L4`(L1~L4 완주) · `TERMINATED_AT_L1`~`TERMINATED_AT_L4`(그 단계에서 힌트 소진 후 미달. L4는 L3까지 통과하고 마지막에서 막힌 경우다). DB assessment_problem.termination_reason에 그대로 들어간다 — 종료 판정은 AI가 소유하므로 백엔드가 커서 변화로 역추론하지 않아도 된다"
+          },
+          "endedLevel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "L1",
+                  "L2",
+                  "L3",
+                  "L4"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endedlevel",
+            "description": "문제가 끝난 단계. terminationReason과 짝이고 진행 중이면 null. DB assessment_problem.ended_level"
+          },
           "aiUsage": {
             "items": {
               "$ref": "#/components/schemas/AiUsage"
@@ -1531,6 +1561,31 @@
               }
             ],
             "description": "이 답변이 대답하는 자리. 생략 시 transcript로 복원"
+          },
+          "providerModelCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providermodelcode",
+            "description": "채점에 쓸 모델. 값은 `ai_model.provider_model_code`(벤더 접두어 포함). 생략 시 서버 기본값 — `/analyses`·`/curricula`·`/reports`와 같은 규칙이다. 채점 모델은 operator가 고른다(GradingPolicy)"
+          },
+          "analysisContext": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysiscontext",
+            "description": "채점기가 코드 파편 밖을 보게 하는 최소 맥락. **분석 문서 전체가 아니라 `{overview, structure}` 두 필드만 보낸다** — `decisionPoints`는 문제 후보 목록이라 채점에 쓸모가 없고 부피의 대부분이다(20KB → 1~2KB). 생략하면 파편만으로 채점한다"
           }
         },
         "type": "object",
@@ -2080,9 +2135,22 @@
             "description": "codeSnippet의 sha256 hex 64자"
           },
           "extractorVersion": {
-            "type": "string",
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
             "title": "Extractorversion",
-            "description": "이 문제를 뽑은 룰 버전. 재현성 근거"
+            "description": "이 문제를 뽑은 룰 버전. 재현성 근거. **정수다** — assessment_problem.extractor_version이 INTEGER CHECK (> 0)이라 문자열을 보내면 Spring INSERT가 깨진다"
+          },
+          "teachId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teachid",
+            "description": "이 문제가 검증하는 교안 개념(요청 teaches[].id). isGeneral=true면 null. 화면의 '클래스는 L3까지, 상속은 L2까지' 같은 개념별 도달 표시가 이 값으로 붙는다"
           },
           "references": {
             "items": {
@@ -2482,7 +2550,7 @@
             "title": "Scorerunid",
             "description": "Spring ScoreRun 키(에코용)"
           },
-          "modelCode": {
+          "providerModelCode": {
             "anyOf": [
               {
                 "type": "string"
@@ -2491,8 +2559,8 @@
                 "type": "null"
               }
             ],
-            "title": "Modelcode",
-            "description": "생략 시 서버 기본값. `/analyses`·`/curricula`와 같은 규칙이다 — 모델 선택은 operator 권한이고, 없으면 보고서만 비용·지연을 못 고른다"
+            "title": "Providermodelcode",
+            "description": "공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code`(벤더 접두어 포함). 생략 시 서버 기본값 — `/analyses`·`/curricula`와 같은 규칙이다. 모델 선택은 operator 권한이다"
           },
           "transcript": {
             "items": {

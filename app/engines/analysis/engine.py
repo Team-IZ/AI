@@ -106,7 +106,9 @@ class RealAnalysisEngine:
     def analyze(self, request: dict[str, Any],
                 zip_bytes: bytes | None = None) -> dict[str, Any]:
         settings = get_settings()
-        model_code = request.get("model_code") or settings.model_code_analysis
+        # wire 필드는 providerModelCode다 — 공급자에게 그대로 넘길 문자열이라
+        # 화면 선택값(model_code)이 아니라 ai_model.provider_model_code 값이다.
+        model_code = request.get("provider_model_code") or settings.model_code_analysis
 
         teaches = request.get("teaches") or []
         reqs = request.get("requirements") or []
@@ -218,6 +220,9 @@ class RealAnalysisEngine:
                 "priority": _priority(topic, candidates),
                 "question_focus_item_id": focus_ids[no - 1] if no <= len(focus_ids) else None,
                 "is_general": bool(topic.get("is_general")),
+                # 어느 교안 개념을 검증하는 문제인가. 일반 문제면 None이다
+                # (topics._general_topics가 teach_id를 비운다).
+                "teach_id": topic.get("teach_id"),
                 "source_path": ref.get("file", ""),
                 "line_start": ref.get("line_start") or 1,
                 "line_end": ref.get("line_end") or ref.get("line_start") or 1,

@@ -113,13 +113,19 @@ def parse_json(text: str) -> dict[str, Any]:
 
 
 def call(stage_id: str, values: dict[str, Any], *, model_code: str,
-         max_attempts: int = 2, timeout_s: float | None = None) -> StageResult:
+         max_attempts: int = 2, timeout_s: float | None = None,
+         extra_user: str = "") -> StageResult:
     """스테이지 하나 실행. 파싱 실패하면 한 번 더 시도한다.
 
     재시도하는 이유: temperature 0이어도 JSON이 깨져 나오는 경우가 실재한다
     (팀원 실측: 251페이지 실행에서 26청크 중 2건이 배열 중간에서 잘렸다).
     전송 실패(429·타임아웃)는 vendor 클라이언트가 이미 키를 바꿔가며 재시도하므로
     여기서 다시 돌리지 않는다 — 같은 실패를 두 계층에서 세면 예산이 곱해진다.
+
+    `extra_user`는 매니페스트에 자리가 없는 블록을 사용자 메시지 뒤에 덧붙인다.
+    **vendor를 고치지 않기 위한 통로다** — 매니페스트에 자리표시자를 추가하면
+    팀원 갱신(덮어쓰기 복사)마다 재적용해야 하고, 그건 PATCHES.md가 감당하는
+    유지비다. 자리표시자가 상류에 생기면 이 인자 대신 values로 옮긴다.
     """
     stage = get_stage(stage_id)
 
@@ -137,7 +143,7 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
     filled = _truncate({**defaults, **values}, stage.get("truncation", {}))
     messages = [
         {"role": "system", "content": stage["system"]},
-        {"role": "user", "content": _fill(stage["user_template"], filled)},
+        {"role": "user", "content": _fill(stage["user_template"], filled) + extra_user},
     ]
 
     usages: list[dict[str, Any]] = []

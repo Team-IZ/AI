@@ -22,7 +22,8 @@ def _stub_stages() -> list[dict[str, Any]]:
     ]
 
 
-def _stub_problem(problem_no: int, focus_item_id: str | None = None) -> dict[str, Any]:
+def _stub_problem(problem_no: int, focus_item_id: str | None = None,
+                  teach_id: str | None = None) -> dict[str, Any]:
     """문제 하나. DB assessment_problem 컬럼명을 그대로 쓴다."""
     return {
         "problem_id": f"00000000-0000-0000-0000-{problem_no:012d}",
@@ -32,13 +33,18 @@ def _stub_problem(problem_no: int, focus_item_id: str | None = None) -> dict[str
         "priority": 1.0,
         # 요청 focusItems[].id를 그대로 돌려준다. 후보가 없으면 자율 선정(None).
         "question_focus_item_id": focus_item_id,
+        # 요청 teaches[].id를 순서대로 물린다. 후보가 없으면 일반 문제(None).
+        "teach_id": teach_id,
+        # teach 앵커가 없으면 일반 문제다. 둘은 항상 짝이다.
+        "is_general": teach_id is None,
         "source_path": "app/main.py",
         "line_start": 12,
         "line_end": 14,
         # evidence_hash는 이 문자열 기준 해시다. Spring이 다시 자르면 어긋난다.
         "code_snippet": f"# stub problem {problem_no}\napi_key = 'hardcoded'\n",
         "evidence_hash": str(problem_no) * 64,
-        "extractor_version": "stub-0",
+        # DB가 INTEGER CHECK (> 0)이라 정수다. 스텁은 1로 고정한다.
+        "extractor_version": 1,
         "references": [
             {
                 "path": "app/services/auth.py",
@@ -64,6 +70,8 @@ class StubAnalysisEngine:
 
         # 강사 지정 후보를 문제에 순서대로 물린다. 후보가 적으면 나머지는 자율 선정.
         focus_ids = [item["id"] for item in request.get("focus_items", [])]
+        # teach 앵커도 같은 규칙이다. 부족분은 teach 없는 일반 문제가 된다.
+        teach_ids = [t.get("id") for t in request.get("teaches", [])]
 
         return {
             "snapshot_id": "00000000-0000-0000-0000-000000000001",
@@ -116,7 +124,9 @@ class StubAnalysisEngine:
                 for req in request.get("requirements", [])
             ],
             "problems": [
-                _stub_problem(no, focus_ids[i] if i < len(focus_ids) else None)
+                _stub_problem(no,
+                              focus_ids[i] if i < len(focus_ids) else None,
+                              teach_ids[i] if i < len(teach_ids) else None)
                 for i, no in enumerate((1, 2, 3))
             ],
             "question_count_planned": request["question_budget"],  # 요청 예산 반영

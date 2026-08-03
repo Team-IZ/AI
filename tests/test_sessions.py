@@ -37,7 +37,7 @@ def _problem(no: int) -> dict:
         "problemId": f"prob-{no}", "problemNo": no, "problemType": "DESIGN_CHOICE",
         "priority": 1.0, "sourcePath": "app/pay.py", "lineStart": 4, "lineEnd": 7,
         "codeSnippet": "def pay(order, method):", "evidenceHash": "a" * 64,
-        "extractorVersion": "v0",
+        "extractorVersion": 1, "teachId": f"teach-{no}",
         "stages": [_stage(a) for a in ("L1", "L2", "L3", "L4")],
     }
 
@@ -48,12 +48,18 @@ PROBLEMS = [_problem(1), _problem(2)]
 @pytest.fixture
 def score(monkeypatch):
     """채점 점수를 시나리오로 준다. 다 쓰면 마지막 값을 반복한다."""
-    plan: list[int] = [4]
+    class _Plan(list):
+        """점수 시나리오 + 채점기에 실려 간 인자(`seen`)."""
+        seen: dict = {}
+
+    plan = _Plan([4])
 
     def _grade(axis_code, question, answer, *, model_code, hints=None, **kw):
         value = plan[0] if len(plan) == 1 else plan.pop(0)
         used = len(hints or [])
         confirmed = min(value, grading.scoring.cap_for(used))
+        # 채점기에 무엇이 실려 갔는지. 모델·맥락 배선을 재는 테스트가 읽는다.
+        plan.seen = {"model_code": model_code, **kw}
         return grading.Grade(
             axis_code=axis_code, best_score=value, confirmed_score=confirmed,
             hints_used=used, passed=confirmed >= grading.scoring.PASS_SCORE,
@@ -208,6 +214,63 @@ def test_session_completes_after_the_last_problem(score):
     assert body["current"] is None
     assert body["cursor"] is None
     assert len(session.transcript) == 8
+
+
+def test_termination_reason_is_reported_when_hints_run_out(score):
+    """왜 끝났는지를 AI가 말해야 한다.
+
+    종료 판정은 AI가 소유하는데 응답이 커서만 주면 백엔드는 "커서가 다음 문제로
+    넘어갔으니 끝났나 보다"로 역추론해야 한다. DB assessment_problem에
+    termination_reason·ended_level 자리가 이미 있다.
+    """
+    score[:] = [2]
+    session = Backend()
+    session.answer()                                     # 힌트 1
+    mid = session.answer()                               # 힌트 2
+
+    assert mid["terminationReason"] is None              # 아직 진행 중
+    assert mid["endedLevel"] is None
+
+    body = session.answer()                              # 소진 후에도 미달 → 종료
+
+    assert body["terminationReason"] == "TERMINATED_AT_L1"
+    assert body["endedLevel"] == "L1"
+
+
+def test_completing_all_axes_reports_completion(score):
+    """L4까지 통과하면 종료가 아니라 완주다 — 사유 코드가 다르다."""
+    session = Backend()
+    for _ in range(3):
+        body = session.answer()
+        assert body["terminationReason"] is None         # L1~L3 통과 중에는 안 붙는다
+
+    body = session.answer()                              # L4 통과 → 완주
+
+    assert body["terminationReason"] == "COMPLETED_L4"
+    assert body["endedLevel"] == "L4"
+
+
+def test_provider_model_code_reaches_the_grader(score):
+    """채점 모델은 operator가 고른다(GradingPolicy) — 요청 값이 서버 기본값을 이긴다."""
+    Backend().answer(providerModelCode="vendor/some-model-1")
+
+    assert score.seen["model_code"] == "vendor/some-model-1"
+
+
+def test_grading_model_falls_back_to_the_server_default(score):
+    """생략하면 서버 기본값. `/analyses`·`/curricula`·`/reports`와 같은 규칙이다."""
+    Backend().answer()
+
+    assert score.seen["model_code"] == get_settings().model_code_session
+
+
+def test_analysis_context_is_passed_to_the_grader(score):
+    """코드 파편만으로는 전체 흐름이 안 보인다. 두 필드만 넘어가야 한다."""
+    context = {"overview": "결제 서비스", "structure": []}
+
+    Backend().answer(analysisContext=context)
+
+    assert score.seen["analysis_context"] == context
 
 
 def test_same_client_request_id_is_idempotent(score):
