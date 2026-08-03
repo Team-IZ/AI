@@ -18,7 +18,7 @@
 | 제출 | **ZIP · GitHub 링크 둘 다 동작.** 링크는 서버에서 `git clone --depth 1` |
 | 배포 | 서울 EC2 t3.small + cloudflared. systemd 상시 가동, 수동 배포 |
 | 계약 | `openapi.json`. `tests/test_openapi.py`가 드리프트를 막는다 |
-| 다음 | **§T15 새 MEAS 정의서 대응.** 그 다음 §T13 백엔드 연동 |
+| 다음 | **§T16 백엔드 회신 대기**(`#42`). 그 다음 §T13 백엔드 연동 |
 | 기준 | **§기능 동결 스펙** · **§계약 기준값**. 앞선 절과 충돌하면 이 둘이 이긴다 |
 | 막힌 것 | **DDL 2건**(`code_text`·`analysis_document`). 이슈 `#42`로 요청함 |
 | 🔴 위험 | **무료 티어 529 실패율 64%.** 유료 전환이 근본 해결(`../output_docs/미결_논의사항.md` P-3) |
@@ -35,7 +35,7 @@
 
 🔴 **LLM 호출 39회 중 25회(64%)가 `HTTP 529 Overloaded`였다.** 0.3초에 즉답하는 실패라
 재시도로 넘기지만, 채점 목표(15초)를 못 지키는 원인이 이것이다. **모델 교체로 안 풀린다**
-— 12종 실측(§T15-1).
+— 12종 실측(§T14b-1).
 
 **소요 특성이 서로 다르다 — 한 덩어리로 말하면 안 된다.**
 
@@ -241,7 +241,7 @@ code_analysis.analysis_document (JSONB)                 분석 문서 — B-5로
 
 ```
 단계당 0~5점, 통과선 3점
-🔴 점수 상한 없다  {0회:5, 1회:4, 2회:3} 폐기 (2026-08-03, §T15-1)
+🔴 점수 상한 없다  {0회:5, 1회:4, 2회:3} 폐기 (2026-08-03, §T15-1 완료)
 🔴 총점 없다       문제당 만점 20도 폐기
 도달 단계   0~4. 앞에서부터 연속 통과한 개수 = reachedStage
 힌트         단계당 2개. 소진 후에도 미달이면 그 문제는 거기서 끝
@@ -547,37 +547,59 @@ NVIDIA 무료 티어   (키, 모델) 쌍당 분당 40회      ← 키당이 아�
 | 채점 입력을 파편으로 되자른다 | `codeSnippet`이 파일 전체가 되면서, 그대로 채점에 넣으면 매니페스트 `code_block` 상한 4,000자에 **앞에서부터 잘려** 문제 구간이 파일 뒤쪽일 때 근거가 사라진 채 채점된다. `sessions._grading_code()`가 `lineStart`/`lineEnd`로 ±8줄을 되잘라 쓴다 |
 | `_repo_root` 판정 기준 | "안에 마커 파일이 있나"로 하면 README 없는 레포에서 오작동한다. **폴더 이름이 소스 폴더 이름(`src`·`app`·`main`…)이면 안 벗긴다**로 갔다 — 모르는 이름은 예전처럼 벗기므로 실패해도 옛 동작이다 |
 
-### T15 — 새 MEAS 정의서 대응 ← **지금 여기**
+### T15 — 새 MEAS 정의서 대응 ✅ 완료 (2026-08-03, 227 tests + 실호출 검증)
 
 백엔드가 `problem_stage`를 새로 짜면서 **한 행에 질문 1 + 힌트 2 + 답변 3 + 점수 3 + 통과 3**을
 담는 구조가 됐다. `stage_answer_attempt` 테이블이 사라졌고 `attempt_count`·`termination_reason`
-컬럼도 없다. 우리 응답을 그 모양에 맞춘다. **이슈 `#42` §4에 통보한 내용이다.**
+컬럼도 없다. 우리 응답을 그 모양에 맞췄다. **이슈 `#42` §4에 통보한 내용이다.**
 
-| # | 할 일 | 내용 |
+| # | 한 것 | 내용 |
 |---|---|---|
-| 1 | 🔴 **점수 상한 제거** | `scoring.HINT_CAPS`·`cap_for()` 삭제. `bestScore`/`confirmedScore` 두 필드 → `score` 하나. **AI는 채점만 하고 가공하지 않는다** — 새 구조가 답변 3개 점수를 따로 저장하므로 상한은 백엔드·화면이 정한다 |
-| 2 | **`StageScore`를 `problem_stage`와 1:1** | `axisCode` · `questionScore`/`Passed` · `firstHintScore`/`Passed` · `secondHintScore`/`Passed` · `status`. 백엔드가 변환 없이 INSERT할 수 있게 |
-| 3 | `attemptCount`·`hintsUsed`·`autonomy` 제거 | 전부 위 6필드에서 파생된다. **그래서 컬럼 추가 요청도 하지 않았다**(옛 B-14 철회) |
-| 4 | 세션 상태 어휘 8종 | `assessment_session.status`로. AI의 `EXPIRED`는 없앤다 — `end_reason_code`로 표현된다 |
-| 5 | 잡 상태에 `PARTIAL` 추가 | 요구사항 판정만 실패하고 문제는 정상으로 나가는 경로가 실제로 있다(실측 확인). 지금은 `SUCCEEDED`라 부분 실패가 안 보인다 |
-| 6 | `ai_usage` → `context_type`/`context_id` | 새 MEAS 비고가 두 곳에서 그렇게 쓴다. **`#42` §3-1 회신(시트 갱신본) 후에 한다** |
+| 1 | ✅ **점수 상한 제거** | `scoring.HINT_CAPS`·`cap_for()` 삭제. `bestScore`/`confirmedScore` → `score` 하나. **AI는 채점만 하고 가공하지 않는다** — 새 구조가 답변 3개 점수를 따로 저장하므로 상한은 백엔드·화면이 정한다 |
+| 2 | ✅ **`StageScore`를 `problem_stage`와 1:1** | `axisCode` · `question`/`firstHint`/`secondHint` × (`Score`, `Passed`) · `status`. 백엔드가 변환 없이 INSERT할 수 있다 |
+| 3 | ✅ `attemptCount`·`hintsUsed`·`autonomy` 제거 | 전부 위 6필드에서 파생된다. **그래서 컬럼 추가 요청도 하지 않았다**(옛 B-14 철회) |
+| 4 | ✅ 세션 상태 어휘 8종 | `EXPIRED` 삭제(정의서에 없다 → INSERT가 깨진다), `INTERRUPTED`·`INVALID`·`SUPERSEDED` 추가 |
+| 5 | ✅ 잡 상태 `PARTIAL` | 요구사항 판정만 실패하면 `PARTIAL` + 사유. 예전엔 `SUCCEEDED`라 **화면에 "요구사항 전부 미충족"이 사실처럼 떴다** |
+| 6 | ⏸ `ai_usage` → `context_type`/`context_id` | **`#42` §3-1 회신(시트 갱신본) 대기.** 새 MEAS 비고가 두 곳에서 그렇게 쓰는데 시트를 못 봤다 |
 
-**1·2번이 계약 파괴 변경이다.** 백엔드가 AI 연동 도메인을 아직 하나도 안 만들어서 **지금이
-가장 싸다.** 회신을 기다리지 않고 진행한다 — 6번만 시트를 받고 한다.
+**갈린 판단 1개**
+
+| 판단 | 내용 |
+|---|---|
+| `summarize_stages`가 마지막 턴만 남기지 않는다 | 옛 구조는 축당 1행이라 "마지막 시도가 그 축의 결과"였다. 새 구조는 답변 3개가 **같은 행의 다른 슬롯**이라, 마지막만 남기면 **"힌트 없이 몇 점이었나"가 사라져 자력 판정이 불가능해진다.** 턴의 `hints_used`로 슬롯을 골라 흩뿌린다 |
+
+**`TranscriptTurn.hintsUsed`는 남겼다.** `StageScore`에서는 뺐지만 턴에는 필요하다 —
+**어느 슬롯에 저장할지를 정하는 값**이라서다(0=질문 · 1=firstHint · 2=secondHint).
 
 `terminationReason`은 **응답에 계속 실어 보내되 저장 요청은 하지 않는다.**
 `problem_stage.status` 조합으로 완전히 파생되기 때문이다(마지막 `NOT_PASSED` 축 = 종료 축).
 
-**미커밋 상태다** (T14b 전체 + 문서). 커밋 명령:
+**실호출 검증** (2026-08-03)
 
 ```
-git add app tests openapi.json
-git commit -m "fix: swap dead grading model and stabilize retries (#42)"
-git add PLAN_FASTAPI_MIGRATION.md README.md
-git commit -m "docs: sync plan and api reference with issue #42 (#42)"
+L1  questionScore 5 · passed true                              status PASSED
+L2  questionScore 1 · false  →  firstHintScore 4 · true        status PASSED
+L3  전부 null                                                   status NOT_REACHED
+L4  전부 null                                                   status NOT_REACHED
+reachedStage 2 · retest false
 ```
 
-`output_docs/`·`qna/`·루트 `CLAUDE.md`는 git 저장소 밖이라 커밋 대상이 아니다.
+DB CHECK 두 개를 자연히 만족한다 — `firstHint`에 값이 있으려면 `questionPassed=false`여야
+하고, 미도달 축은 점수가 전부 `null`이다. 힌트 1개를 쓰고 4점을 받은 턴이 **4점 그대로**
+나갔다(옛 규칙이면 상한 4에 걸려 우연히 같았겠지만, 이제 상한 자체가 없다).
+
+### T16 — 백엔드 회신 대기 ← **지금 여기**
+
+`#42`에 요청한 것들이 오면 반영한다. **우리가 막힌 것은 없다** — 응답은 이미 그 값을 들고
+있고, 저장 자리만 없다.
+
+| 대기 | 오면 할 일 |
+|---|---|
+| **B-12** `code_text` 컬럼 | 없음(이미 `codeSnippet`으로 보내고 있다). 백엔드 저장 코드만 열린다 |
+| **B-13** `analysis_document JSONB` | 없음(이미 보내고 있다) |
+| **C-1** 통과 기준 3점 | 설정값이면 요청에 `passScore`를 받아 `scoring.PASS_SCORE` 대신 쓴다 |
+| **C-2** 개념 없을 때 | ⓑ면 문제 수 미달 시 실패 사유를 담아 보내는 경로를 만든다 |
+| **C-6** `ai_usage` 시트 | §T15-6 — `source_type`/`source_id` → `context_type`/`context_id` |
 
 ### T13 — 백엔드 연동 + `references[]` 채우기
 

@@ -1,12 +1,7 @@
 # AI 서비스 (FastAPI)
 
 > 갱신: **2026-08-03** · **이 문서는 지금 코드가 실제로 하는 일을 적는다.**
->
-> ⚠️ **곧 바뀌는 것이 있다.** 백엔드가 `problem_stage`를 새로 짜면서(새 MEAS 정의서,
-> 기준일 2026-08-03) 채점 응답 모양이 달라진다 — **점수 상한 제거**, `bestScore`/
-> `confirmedScore` → `score` 하나, `StageScore`를 `problem_stage`와 1:1로. 이슈
-> `Team-IZ/Backend#42` §4에 통보했고 작업 계획은 `PLAN_FASTAPI_MIGRATION.md` §T15다.
-> **아래 설명은 그 작업 전 기준이다.**
+> 백엔드와의 계약 현황은 이슈 `Team-IZ/Backend#42`, 작업 계획은 `PLAN_FASTAPI_MIGRATION.md`.
 
 교육생이 제출한 코드를 분석해 **문답 문제를 뽑고**, 학생과 **문답을 진행하며 채점**하고, 끝나면 **보고서**를 내는 서비스. Spring Boot가 호출하는 내부 서비스다.
 
@@ -42,10 +37,14 @@ React(Frontend) ──▶ Spring Boot(Backend) ──▶ FastAPI(이 저장소) 
   3점 미만 → 동결된 힌트를 주고 같은 단계 재질의 (단계당 최대 2회)
             힌트 2회 소진 후에도 미달 → 그 문제 종료, 다음 문제의 L1로
 
-힌트를 쓰면 그 단계의 점수 상한이 내려간다
-  무힌트 5 / 힌트1 후 4 / 힌트2 후 3      ← 미확정값. 완주 30건 후 재보정
-  confirmedScore = min(bestScore, 상한)
+🔴 점수 상한은 없다 (2026-08-03 폐기)
+  AI는 채점만 하고 점수를 그대로 낸다. 가공하지 않는다
 ```
+
+**왜 상한을 뺐나**: DB `problem_stage`가 **질문·힌트1·힌트2 각각의 점수를 따로 저장**한다.
+어느 답변이 몇 점이었는지가 그대로 남으므로 AI가 미리 눌러 담을 이유가 없다. 자력은
+"어느 슬롯에서 통과했나"로 읽는다 — 질문 통과=`SELF` / 힌트1 통과=`SELF_MAINTAINED` /
+힌트2 통과=`PARTIAL`.
 
 | 단계 | 무엇을 묻나 | DB `axis_score.axis_code` 대응 |
 |---|---|---|
@@ -227,6 +226,8 @@ cloudflared tunnel --url http://localhost:8000
 
 **`GITHUB_URL`은 AI가 서버에서 `git clone --depth 1`로 받는다** (2026-08-03). GitHub API로 파일을 긁지 않는다 — 비인증 한도가 IP당 60회/시간이라 **같은 망의 다른 교육생까지 막히고**, 큰 repo는 tree API가 목록을 잘라 소스가 조용히 빠진다(팀 PoC 실사고). **공개 레포만** 되고, 얕은 클론이라 `.git`은 남지만 커밋이 tip 하나뿐이라 `OWN_COMMIT`은 못 한다. `commitSha`는 이 경로에서만 실제 값이 채워진다.
 
+🔴 **`PARTIAL`이 실제로 나온다.** 요구사항 판정만 실패하고 문제·질문·힌트는 정상으로 나가는 경우다(2026-08-03 신설). 그때 `requirementResults`는 개수를 맞춰 오되 `verdict: "F"` + `note: "판정 실패: …"`로 채워진다 — **`SUCCEEDED`로 저장하면 화면에 "요구사항 전부 미충족"이 사실처럼 뜬다.** 문답은 그대로 진행할 수 있다.
+
 **`focusItems`를 Spring이 보내주는 이유**: `question_focus_item`의 PK가 랜덤 UUID라 AI가 그 값을 알 방법이 없다. 후보를 받아 **AI가 그중 하나의 `id`를 그대로 돌려준다.** 강사 지정 범위를 벗어날 수 없고, 항목 이름이 바뀌어도 AI 재배포가 필요 없다.
 
 ```jsonc
@@ -234,7 +235,7 @@ cloudflared tunnel --url http://localhost:8000
 {
   "jobId": "1b40467e-…", "attemptId": "att-1", "submissionId": "sub-1",
   "status": "SUCCEEDED",                     // QUEUED|RUNNING|SUCCEEDED|PARTIAL|FAILED
-  "failureReason": null,
+  "failureReason": null,                     // PARTIAL·FAILED면 사유가 들어간다
   "startedAt": "2026-07-30T05:00:00Z", "completedAt": "2026-07-30T05:00:12Z",
   "result": {
     "snapshotId": "snap-1",
@@ -347,11 +348,11 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
 // → AnswerResult
 {
   "sessionId": "sess-abc",
-  "state": "IN_PROGRESS",                    // IN_PROGRESS|COMPLETED (DB status 어휘)
+  "state": "IN_PROGRESS",                    // DB assessment_session.status 8종. AI는 IN_PROGRESS|COMPLETED만 낸다
   "turn": {                                  // 이번에 채점된 턴. 이것만 이어 붙여 저장하면 된다
     "problemId": "prob-1", "axisCode": "L3", "questionText": "…", "answerText": "…",
-    "answeredAt": "…", "bestScore": 4, "confirmedScore": 4,
-    "attemptCount": 1, "hintText": null, "autonomy": "SELF"
+    "answeredAt": "…", "score": 4, "passed": true,
+    "hintsUsed": 0, "hintText": null       // hintsUsed가 어느 슬롯에 저장할지를 정한다
   },
   "cursor": { "problemId": "prob-1", "axisCode": "L4", "hintsUsed": 0 },  // 다음 요청에 그대로 실는다
   "current": {                               // 다음 질문. 끝났으면 null
@@ -396,12 +397,15 @@ TERMINATED_AT_L4    L3까지 통과하고 L4에서 막힘     endedLevel = "L4"
 **점수 필드가 wire에 나오는 이유**: Spring이 매 턴 저장하고, 세션이 유실되면 그 기록으로 복구한다. 점수·시도 횟수가 wire에 없으면 "이 학생이 힌트를 몇 번 썼는지"를 아무도 모르게 된다.
 
 ```
-bestScore        힌트 상한 적용 "전" LLM 원점수 0~5   (DB problem_stage.best_score)
-confirmedScore   상한 적용 "후" 기록 점수             (DB problem_stage.confirmed_score)
-attemptCount     0~3. 0은 앞 단계에서 끊겨 미도달
-hintsUsed        보내지 않는다 = attemptCount - 1 (미도달이면 0)
-autonomy         SELF(힌트 0) | SELF_MAINTAINED(1) | PARTIAL(2)
+score       0~5 정수. **상한 적용 없는 루브릭 원점수다** (2026-08-03 상한 폐기)
+passed      score >= 3.  DB CHECK가 `passed=TRUE AND score>=3` 을 강제한다
+hintsUsed   0~2.  **어느 슬롯에 저장할지를 이 값이 정한다**
+            0 → question_answer_text / 1 → first_hint_* / 2 → second_hint_*
 ```
+
+🔴 **`attemptCount`·`autonomy`는 없다.** DB `problem_stage`가 한 행에 답변 3개를 담게
+되면서(2026-08-03) 둘 다 파생값이 됐다 — 어느 슬롯이 찼는지, 어느 슬롯이 통과했는지로
+계산된다.
 
 ### aiUsage — 모든 응답에 붙는다
 
@@ -468,9 +472,16 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
   "problem": {
     "problemNo": 1, "problemId": "…",
     "reachedStage": 2,                       // 0~4. 앞에서부터 연속 통과한 단계 수
-    "stages": [ { "axisCode": "L1", "confirmedScore": 4, "bestScore": 4,
-                  "attemptCount": 1, "passed": true, "hintsUsed": 0,
-                  "autonomy": "SELF" } ]     // 항상 4개. 미도달은 attemptCount=0
+    "stages": [                              // 항상 4개. DB problem_stage 4행과 1:1
+      { "axisCode": "L1", "questionScore": 5, "questionPassed": true,
+        "firstHintScore": null, "firstHintPassed": null,
+        "secondHintScore": null, "secondHintPassed": null, "status": "PASSED" },
+      { "axisCode": "L2", "questionScore": 1, "questionPassed": false,
+        "firstHintScore": 4, "firstHintPassed": true,     // 힌트 1개로 통과
+        "secondHintScore": null, "secondHintPassed": null, "status": "PASSED" },
+      { "axisCode": "L3", "questionScore": null, "status": "NOT_REACHED" }
+      // L4도 NOT_REACHED. 미도달 축은 점수가 전부 null이다
+    ]
   },
   "curriculumRefs": [ { "teachId": "tch-1", "unitId": "u3", "sourcePages": [12, 13] } ],
   "retest": true,
@@ -594,7 +605,7 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 **엔진 이식이 끝났다.** 룰 스캔 → 분석 문서 → 요구사항 P/F → 문제 선정 → 4축 질문·힌트 동결 → 채점 → 보고서까지 실호출로 동작을 확인했다(`app/engines/analysis/`). 팀원 PoC 규칙부와 NVIDIA 클라이언트는 vendor해 두고 우리 래퍼가 감싼다 — 갱신 절차는 `vendor/SOURCE.md`, 우리 수정 이력은 `vendor/PATCHES.md`.
 
-> ✅ 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례·한계), `focusItems`, `codeSnippet`, `requirementResults`, `bestScore`/`confirmedScore`, `analysisDocument`(JSON)가 전부 스펙에 있다.
+> ✅ 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례·한계), `focusItems`, `codeSnippet`, `requirementResults`, `analysisDocument`(JSON)가 전부 스펙에 있다. ⚠️ `bestScore`/`confirmedScore`는 2026-08-03에 `score` 하나로 합쳐졌다.
 >
 > ⚠️ **질문·힌트는 전면 동결이다.** 혼합 모드(L1·L2만 동결)는 폐기됐다 — **4축 전부** 분석 배치에서 만든다.
 >
