@@ -1,6 +1,6 @@
 """D-tierb1 / D-tierb2 회귀 테스트.
 
-실행: python3 -m pytest tests/ -q   (저장소 루트에서)
+실행: python3 -m pytest tests/python/ -q   (저장소 루트에서)
 
 이 저장소에는 이 파일 이전까지 Python 테스트가 **하나도 없었다**(유일한 테스트는
 worker/nvidia-proxy.test.js). 그래서 Tier B 제거의 "무엇이 깨지고 무엇이 조용히
@@ -17,7 +17,7 @@ import textwrap
 
 import pytest
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 for _p in (os.path.join(REPO_ROOT, "cognition"), os.path.join(REPO_ROOT, "judgment")):
     if _p not in sys.path:
         sys.path.insert(0, _p)

@@ -117,6 +117,8 @@ shared/
   config.js/db.js/llm.js/pyodide-shared.js  -- 원본 Pipeline Lab에서 무수정 이식
   lab-core.js         -- app.js에서 순수 매니페스트/템플릿 계층만 축출(탭 전환 UI 등은 제외)
   traffic-rate.js     -- debug-traffic.js에서 순수 rate-check 로직만 축출(SVG 차트 UI는 제외)
+  code-locate.js      -- 근거 심볼 -> 파일/줄 위치 확정(D-ground1). MIN_SYMBOL_LEN = 9는 손으로
+                         고른 값이 아니라 실측값입니다(D-ground1m, 파일 상단 주석에 코퍼스와 분포)
   p02-engine.js       -- p02-runner.js를 복사 후 DOM 접점만 훅으로 치환
   p03-engine.js       -- p03-runner.js를 복사 후 DOM 접점만 훅으로 치환(가장 정교한 이식 대상)
   session-state.js    -- 페이지 간 sessionStorage 핸드오프(신규 코드, 원본엔 없음)
@@ -125,16 +127,36 @@ prompt_manifest.json / webtool_driver.py  -- 원본에서 무수정 이식
    원본 기준 서술입니다 -- 이 저장소에서는 D208 이후 shared/p02-engine.js·p03-engine.js의
    REPO_RAW_BASE = "../" 로 같은 저장소에서 상대경로로 읽습니다. 무수정 이식 원칙 + pages.yml의
    바이트 동일성 드리프트 검사 때문에 그 파일 자체는 고치지 않습니다.)
-reference/            -- 이식 작업 중 대조용으로 둔 원본 p02-runner.js/p03-runner.js/app.js 사본
 cognition/ judgment/ feedback/  -- D208: P02/P03가 Pyodide로 실행하는 실제 파이썬 원본
-  (구조/판단 스캔, 5축 채점용 규칙, 격리 판정기, 자기수정 신호 등) 사본. 원본에서
-  무수정 이식이며, shared/p02-engine.js·p03-engine.js가 raw.githubusercontent.com 대신
-  이 저장소 자신에서(상대경로로) 읽어들입니다 -- 다른 팀 저장소에 대한 런타임 의존성 제거.
+  cognition/two_tier_scan.py    -- 구조/판단 스캔
+  judgment/*.py                 -- 5축 채점(score_findings), 격리 판정기(isolation_*),
+                                   관용구 필터(idiom_filter), 중요도 랭킹(importance_rank), subrubric
+  feedback/*.py                 -- 자기수정(Reflection) 턴의 신호 추출(reflection_signal/reflection_hook)
+  각 .py 옆의 JSON이 실제 규칙 데이터입니다(코드가 아니라 여기를 고쳐야 판정이 바뀝니다):
+    judgment/idioms/{c,cpp,java,javascript,python,swift}/idiom_patterns.json
+    judgment/isolation_categories/*/patterns.json,  judgment/subrubric_weights/*/weights.json
+    judgment/rank_weights/rank_weights.json,        feedback/reflection_patterns/*/patterns.json
+  셋 다 원본에서 무수정 이식이며, shared/p02-engine.js·p03-engine.js가 raw.githubusercontent.com
+  대신 이 저장소 자신에서(상대경로로) 읽어들입니다 -- 다른 팀 저장소에 대한 런타임 의존성 제거.
+worker/               -- NVIDIA API용 Cloudflare Worker 프록시(API 키를 브라우저에 두지 않기 위함)
+  nvidia-proxy.js / nvidia-proxy.test.js / wrangler.toml / package.json
+  (wrangler.toml과 shared/config.js는 feat/poc_full과 **의도적으로** 갈라져 있습니다 --
+   Worker 이름/KV namespace/큐/LANGSMITH_PROJECT 같은 배포 정체성을 담고 있어서. D-poc-worker)
+tests/                -- 런타임 산출물이 아니므로 drift 검사 대상 밖에 둡니다
+  js/     code-locate.test.js, p03-code-context.test.js  -- node --test tests/js/*.test.js
+  python/ test_rank_after_tier_b_drop.py                 -- python3 -m pytest tests/python/ -q
+docs/
+  port-reference/     -- 이식 대조용 원본 p02-runner.js/p03-runner.js/app.js 스냅샷(2026-07-28, 동결).
+                         왜 지우면 안 되는지는 그 디렉터리의 README.md 참조
+.github/workflows/pages.yml
+  -- 4개 브랜치를 하나의 사이트로 조립하는 배포 워크플로. feat/poc_full과의 바이트 동일성
+     드리프트 검사도 여기 있습니다(cognition/ judgment/ shared/ worker/ +
+     prompt_manifest.json/webtool_driver.py -- 이 경로들은 두 브랜치를 함께 고쳐야 합니다).
 ```
 
 ## 이식 방법론
 
-원본 `p02-runner.js`/`p03-runner.js`는 로직과 DOM 렌더링이 한 파일에 섞여 있습니다. 이번 포팅은 "이해한 내용을 바탕으로 재작성"이 아니라 **원본을 통째로 복사한 뒤, DOM 접점만 훅 호출로 기계적으로 치환**하는 방식으로 진행했습니다(`p02-engine.js`/`p03-engine.js` 상단 주석에 각 파일의 정확한 변경 목록이 있습니다). `reference/`의 원본과 diff하면 훅 치환으로 명시한 줄 외에는 100% 동일합니다.
+원본 `p02-runner.js`/`p03-runner.js`는 로직과 DOM 렌더링이 한 파일에 섞여 있습니다. 이번 포팅은 "이해한 내용을 바탕으로 재작성"이 아니라 **원본을 통째로 복사한 뒤, DOM 접점만 훅 호출로 기계적으로 치환**하는 방식으로 진행했습니다(`p02-engine.js`/`p03-engine.js` 상단 주석에 각 파일의 정확한 변경 목록이 있습니다). `docs/port-reference/`의 원본과 diff하면 훅 치환으로 명시한 줄 외에는 100% 동일합니다.
 
 `run()`은 이제 훅 객체를 받는 고차 함수입니다:
 ```js
@@ -147,11 +169,11 @@ P03Engine.run({ finding, codeContexts, model }, {
 
 ## 검증
 
-- **소스 diff**: `p02-engine.js`/`p03-engine.js`를 `reference/`의 원본과 비교, 문서화된 변경 외 로직 차이 없음을 확인.
+- **소스 diff**: `p02-engine.js`/`p03-engine.js`를 `docs/port-reference/`의 원본과 비교, 문서화된 변경 외 로직 차이 없음을 확인.
 - **실제 E2E 실행**(Playwright + 실제 NVIDIA API 호출): ZIP 제출 → 실제 Pyodide 스캔 → finding 2건(direct-match 1건 + text-mention 1건, D179/D180 두 커넥터 경로 모두) → 검증 세션 자동 시작 → 4턴 전부 실제 질문 생성+답변 제출+실제 Pyodide 분류 → 5축 채점 → 결과 페이지 렌더링까지 전 과정 실제로 통과. GitHub URL 제출 경로도 별도로 확인(성공/실패 케이스 둘 다).
 - 이 과정에서 실제 버그 3건을 발견·수정: session.html에 Pyodide 스크립트 태그 누락(분류기가 Pyodide를 쓰는데 "재스캔 없음"이라는 이유로 빠뜨렸음), `.hidden` 유틸리티 클래스가 어느 CSS에도 정의되지 않아 시각적으로 안 숨겨짐, 진행 체크리스트 아이콘이 상태 전환 시 색상만 바뀌고 글리프(✓/◔/•)는 안 바뀜.
 - direct-navigation 폴백(세션 데이터 없이 session.html/result.html 직접 접근) 확인 완료.
-- **D207 최신화 검증**: 모든 `shared/*.js`/`reference/*.js` syntax check 통과. `trainee/session.html`+`trainee/result.html`을 대상으로 Playwright E2E 재실행(모킹된 NVIDIA 프록시+GitHub API, 실제 Pyodide 분류기) — 근거 코드 패널 좌우 스크롤(D198), Enter 제출 시 확인 팝업(D201), L2 질문 생성 시 실시간 `⚙ list_files 호출 중...` 버블 노출 및 근거 파일명 인용(D204/D205), 마지막 턴 이후 채점 스피너 오버레이(D203), 결과 리포트의 채팅 버블 문답 원문+턴수 배지(D202) 8개 항목 전부 확인.
+- **D207 최신화 검증**: 모든 `shared/*.js`/`docs/port-reference/*.js` syntax check 통과. `trainee/session.html`+`trainee/result.html`을 대상으로 Playwright E2E 재실행(모킹된 NVIDIA 프록시+GitHub API, 실제 Pyodide 분류기) — 근거 코드 패널 좌우 스크롤(D198), Enter 제출 시 확인 팝업(D201), L2 질문 생성 시 실시간 `⚙ list_files 호출 중...` 버블 노출 및 근거 파일명 인용(D204/D205), 마지막 턴 이후 채점 스피너 오버레이(D203), 결과 리포트의 채팅 버블 문답 원문+턴수 배지(D202) 8개 항목 전부 확인.
 
 ## 범위 밖 (Team-IZ 원본엔 있지만 이 포트엔 없는 것)
 

@@ -1,5 +1,5 @@
 // shared/code-locate.js (D-ground1)의 순수 로직 테스트.
-//   실행: node --test tests/code-locate.test.js   (저장소 루트에서)
+//   실행: node --test tests/js/code-locate.test.js   (저장소 루트에서)
 //
 // 이 테스트는 **실제 구현을 그대로 require해서** 검증한다 -- 목(mock) locate를 쓰면
 // "poc_full의 로직을 복제하지 않고 이 저장소 사정에 맞게 하드닝했다"는 D-ground1 §3의
@@ -12,7 +12,7 @@
 const test = require("node:test");
 const assert = require("node:assert");
 
-const CodeLocate = require("../shared/code-locate.js");
+const CodeLocate = require("../../shared/code-locate.js");
 
 // P02Engine.findFileByBasename의 브라우저 구현과 동등한 최소 스텁(D-fix8의 결정론적
 // 정렬 규칙: 짧은 경로 우선, 그다음 알파벳순)을 주입한다.

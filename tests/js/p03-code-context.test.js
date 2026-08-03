@@ -1,8 +1,8 @@
 // shared/p03-engine.js::buildCombinedCodeContext(contexts, cap, decisionPoint)의 테스트
 // (D-ground2 -- p02-6의 decision point로 "파일 앞부분" 대신 "근거 줄 주변"을 잘라 넣는 배선).
-//   실행: node --test tests/p03-code-context.test.js   (저장소 루트에서)
+//   실행: node --test tests/js/p03-code-context.test.js   (저장소 루트에서)
 //
-// tests/code-locate.test.js와 같은 원칙: **실제 구현을 그대로 require해서** 검증한다.
+// tests/js/code-locate.test.js와 같은 원칙: **실제 구현을 그대로 require해서** 검증한다.
 // p03-engine.js는 그러라고 파일 맨 끝에 module.exports 가드가 붙어 있고, 그 안에서
 // CodeLocate도 (브라우저 전역이 없으면) 실제 shared/code-locate.js를 require한다 --
 // 조각 추출 규칙을 이 테스트에 복제하지 않기 위해서다.
@@ -13,8 +13,8 @@
 const test = require("node:test");
 const assert = require("node:assert");
 
-const P03Engine = require("../shared/p03-engine.js");
-const CodeLocate = require("../shared/code-locate.js");
+const P03Engine = require("../../shared/p03-engine.js");
+const CodeLocate = require("../../shared/code-locate.js");
 
 const { buildCombinedCodeContext } = P03Engine;
 

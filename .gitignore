@@ -1,3 +1,8 @@
 
 # Python bytecode from local webtool_driver.py runs
 __pycache__/
+
+# pytest 캐시. pytest가 자기 안에 .pytest_cache/.gitignore를 생성해 스스로를 무시하지만,
+# 그 생성 파일이 사라지면 곧바로 커밋 가능해집니다 -- 배포 워크플로의 rsync는 .git/.github/
+# __pycache__만 제외하므로 그대로 공개 사이트로 실려 나갑니다. 여기서 한 번 더 막습니다.
+.pytest_cache/
