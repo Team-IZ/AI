@@ -47,6 +47,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install PyYAML>=6,<7
+      - run: pip install "PyYAML>=6,<7"
       - name: manifest drift check (D3-2 -- YAML은 소스, JSON은 생성물)
         run: ./tools/rebuild_codemap_manifest.sh --check
