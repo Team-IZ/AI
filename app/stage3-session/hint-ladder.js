@@ -1,11 +1,13 @@
 // 문제 1개(teach + 근거 코드)의 L1~L4 세부질문(p04-4)을 답변을 보기 전에 동결한다.
-// 힌트는 hintMode에 따라 둘 중 하나: frozen이면 이 파일에서 질문 직후 답변 없이 미리
-// 생성해 lvl.hints에 동결(freezeQuestionSet 안에서 처리), adaptive면 오답이 확정될
-// 때마다 poc-engine.js의 세션 루프가 generateHint()를 직접 호출한다.
+// 힌트는 frozen 모드로 이 파일에서 질문 직후 답변 없이 미리 생성해 lvl.hints에
+// 동결한다(freezeQuestionSet 안에서 처리).
 //
-// D4 개정 → D7 절충(2026-07-30): 근거/트레이드오프는 app/scoring-config.js의 hintMode/
-// hintLadder 선언부 주석 참고 -- 팀 기획서(동결 계약)와 사용자 지시(답변 기반) 충돌을
-// 설정 하나로 스위칭 가능하게 절충했다.
+// D4 개정 → D7 절충(2026-07-30) → D-hintmode1 (2026-08-03, legacy 확정): 원래는
+// 팀 기획서(동결 계약)와 사용자 지시(답변 기반 adaptive) 충돌을 설정 하나로
+// 스위칭 가능하게 절충했었다(전문: app/scoring-config.js의 hintMode 선언부 주석).
+// 이제 adaptive는 legacy로 비활성화됐고 frozen만 쓴다 -- "오답이 확정될 때마다
+// poc-engine.js의 세션 루프가 generateHint()를 직접 호출"하던 adaptive 분기는
+// 그 파일에 주석 처리로 남아있다.
 const HintLadder = (() => {
   function buildAxisIntentBlock() {
     return POCScoring.AXIS_IDS.map((id) => {

@@ -119,12 +119,17 @@
       </div>
 
       <!-- D7 (2026-07-30): 힌트 동결(팀 계약) vs 답변 기반 적응형(사용자 D4 개정 지시)
-           충돌을 하나로 확정하지 않고 버튼으로 전환 가능하게 둘 다 살려둠. -->
+           충돌을 하나로 확정하지 않고 버튼으로 전환 가능하게 둘 다 살려뒀었다.
+           D-hintmode1 (2026-08-03, app/scoring-config.js에 전문): adaptive는 legacy로
+           비활성화, frozen만 유지 -- 아래 적응형 버튼은 주석 처리. -->
       <div class="fld" style="margin-top:var(--sp-4)">
-        <div class="fl">힌트 방식 <span class="hint">· 언제든 전환 가능, 팀 계약 기본값은 동결</span></div>
+        <div class="fl">힌트 방식 <span class="hint">· 동결 고정(adaptive는 legacy, D-hintmode1 참고)</span></div>
         <div class="toggle" id="hint-mode-toggle">
           <button type="button" class="on" data-hint-mode="frozen">동결</button>
+          <!-- D-hintmode1: legacy, 주석 처리. 되살리려면 scoring-config.js의 options에도
+               "adaptive"를 같이 추가할 것.
           <button type="button" data-hint-mode="adaptive">적응형</button>
+          -->
         </div>
         <div class="fwarn" id="hint-mode-note"></div>
       </div>

@@ -400,22 +400,31 @@ const POCEngine = (() => {
           hintsUsed++;
           // D7: hintMode==="frozen"이면 힌트가 이미 2단계법 freezeQuestionSet()에서
           // 생성돼 lvl.hints에 있다 -- LLM 호출 없이 그대로 읽는다(팀 계약: 턴당 채점
-          // 호출 1개만). "adaptive"면 D4 개정대로 오답이 확정된 지금 방금 답변을 근거로
-          // 힌트를 즉석 생성한다. 근거/트레이드오프는 scoring-config.js의 hintMode 주석.
+          // 호출 1개만).
+          // D-hintmode1 (2026-08-03, app/scoring-config.js에 전문): adaptive("답변
+          // 확정 직후 즉석 생성" 분기, 원래 이 if의 else였다)는 legacy로 비활성화하고
+          // 주석 처리했다 -- hintMode의 유일한 선택지가 이제 frozen뿐이라
+          // freezeQuestionSet()이 lvl.hints를 항상 채우므로 이 if는 정상 경로에서
+          // 항상 참이다. 아래는 그래도 lvl.hints가 비어있는 예외적 상황(구조상 없어야
+          // 하지만)에 대비한 방어적 폴백 -- 조용히 힌트 없이 진행하는 것보다 낫다.
           if (Array.isArray(lvl.hints)) {
             const frozen = lvl.hints.find((h) => h.lv === hintsUsed);
             hintText = frozen ? frozen.text : HintLadder.fallbackHint(hintsUsed, qs.code_ref);
             hintMs = frozen ? frozen.ms : null;
           } else {
-            if (hooks.onHintPending) hooks.onHintPending({ topicIndex: ti, axis: lvl.axis, hintLevel: hintsUsed });
-            const hint = await HintLadder.generateHint({
-              axis: lvl.axis, hintLevel: hintsUsed, question: lvl.question, attempts,
-              teach, codeBlock: qs.code_block, codeRef: qs.code_ref, model, onProgress: hooks.onProgress,
-            });
-            hintText = hint.text;
-            hintMs = hint.ms;
-            adaptiveHintGenMs.push({ topicIndex: ti, axis: lvl.axis, lv: hintsUsed, ms: hint.ms });
-            if (hooks.onHintTiming) hooks.onHintTiming({ topicIndex: ti, axis: lvl.axis, hintLevel: hintsUsed, ms: hint.ms });
+            // D-hintmode1: legacy adaptive 실시간 생성 경로, 주석 처리. 되살리려면
+            // scoring-config.js의 options에도 "adaptive"를 같이 추가할 것.
+            // if (hooks.onHintPending) hooks.onHintPending({ topicIndex: ti, axis: lvl.axis, hintLevel: hintsUsed });
+            // const hint = await HintLadder.generateHint({
+            //   axis: lvl.axis, hintLevel: hintsUsed, question: lvl.question, attempts,
+            //   teach, codeBlock: qs.code_block, codeRef: qs.code_ref, model, onProgress: hooks.onProgress,
+            // });
+            // hintText = hint.text;
+            // hintMs = hint.ms;
+            // adaptiveHintGenMs.push({ topicIndex: ti, axis: lvl.axis, lv: hintsUsed, ms: hint.ms });
+            // if (hooks.onHintTiming) hooks.onHintTiming({ topicIndex: ti, axis: lvl.axis, hintLevel: hintsUsed, ms: hint.ms });
+            hintText = HintLadder.fallbackHint(hintsUsed, qs.code_ref);
+            hintMs = null;
           }
         }
 

@@ -123,12 +123,22 @@ const POCScoring = (() => {
   //   EXIT: 팀과 최종 합의되면 default를 그 값으로 고정하고, index.html의 토글 UI와
   //   미사용 분기(hint-ladder.js freezeQuestionSet의 frozen 사전생성 루프 또는
   //   poc-engine.js의 adaptive 분기)를 지운다.
+  // D-hintmode1 (2026-08-03): adaptive를 legacy로 비활성화, frozen만 유지.
+  //   WHY: D4→D7 절충(버튼 전환)은 두 계약(팀 기획서의 동결 vs 사용자의 답변기반)이
+  //     충돌해서 임시로 둘 다 살려둔 것이었다. 저장소 소유자가 이번에 frozen만
+  //     쓰기로 확정 -- 위 D7 EXIT 각주가 이미 예고했던 바로 그 정리다.
+  //   COST: 답변 기반 힌트 생성 코드(HintLadder.generateHint의 adaptive 호출 경로,
+  //     app/core/poc-engine.js)는 주석 처리 후 실행되지 않는다. 과거 DB에 남은
+  //     adaptive 세션 기록의 표시(report.html 등)는 그대로 유지했으니 안 깨진다.
+  //   EXIT: options에 "adaptive"를 다시 추가하고, index.html의 주석 처리된 버튼과
+  //     poc-engine.js의 주석 처리된 else 블록을 복원하면 D7 이전 상태로 되돌아간다.
   const hintMode = {
     default: "frozen", // 팀 기획서의 "지금 계약"과 일치 -- 백엔드 이식 대상 기본값
-    options: ["frozen", "adaptive"],
+    options: ["frozen"], // D-hintmode1: "adaptive" 제거(legacy). 아래 labels 주석 참고.
     labels: {
       frozen: "동결 (분석 단계에서 미리 생성 · 팀 현재 계약 · 턴당 LLM 호출 1개)",
-      adaptive: "적응형 (오답 확정 직후 답변 기반 생성 · 턴당 LLM 호출 최대 3개)",
+      // D-hintmode1: legacy. 되살리려면 options에 "adaptive"도 같이 추가할 것.
+      // adaptive: "적응형 (오답 확정 직후 답변 기반 생성 · 턴당 LLM 호출 최대 3개)",
     },
   };
 
