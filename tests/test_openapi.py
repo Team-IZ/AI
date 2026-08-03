@@ -64,7 +64,7 @@ def test_frozen_contract_is_visible_in_the_spec():
     assert props("ProblemResult")["reachedStage"]["maximum"] == 4
 
     # ④ teach 앵커 없는 문제는 표기된다
-    assert "isGeneral" in props("Problem")
+    assert "isGeneral" not in props("Problem")   # 2026-08-03 삭제
 
     # 전면 동결 — 세션은 저장분을 받아 쓰기만 한다
     assert "problems" in props("AnswerSubmit")

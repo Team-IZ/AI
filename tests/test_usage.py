@@ -7,8 +7,8 @@ from app.schemas.usage import AiUsage
 BASE = {
     "featureCode": "GRADING",
     "modelCode": "nvidia/llama-3.3-70b-instruct",
-    "sourceType": "GRADING",
-    "sourceId": "ans-1",
+    "contextType": "GRADING",
+    "contextId": "ans-1",
     "requestId": "req-1",
     "traceId": "trace-1",
     "idempotencyKey": "ans-1:GRADING:1",
@@ -42,13 +42,13 @@ def test_cached_cannot_exceed_input():
         AiUsage.model_validate({**BASE, "cachedTokenCount": 9999})
 
 
-def test_source_type_is_a_closed_set():
+def test_context_type_is_a_closed_set():
     """2026-08-03 확정(§T11 D-1). 자유 문자열이면 Spring이 원장을 못 묶는다."""
-    assert set(AiUsage.model_json_schema()["properties"]["sourceType"]["enum"]) == {
+    assert set(AiUsage.model_json_schema()["properties"]["contextType"]["enum"]) == {
         "ANALYSIS", "GRADING", "REPORT", "CURRICULUM"
     }
     with pytest.raises(ValidationError):
-        AiUsage.model_validate({**BASE, "sourceType": "SESSION_ANSWER"})
+        AiUsage.model_validate({**BASE, "contextType": "SESSION_ANSWER"})
 
 
 def test_no_cost_fields():

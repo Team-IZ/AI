@@ -21,15 +21,26 @@ FeatureCode = Literal[
     "SUMMARY_DRAFT",        # 보고서 서술
 ]
 
-# 어느 작업에 딸린 호출인가. 2026-08-03 확정(PLAN §T11 D-1) — 우리가 정하고 통보한다.
-# featureCode보다 굵은 단위다: 한 SourceType 안에서 featureCode가 여럿 나올 수 있다
-# (ANALYSIS 하나에 CODE_ANALYSIS + QUESTION_GENERATION).
-SourceType = Literal[
-    "ANALYSIS",     # POST /analyses      sourceId = 분석 jobId
-    "GRADING",      # POST /sessions/{id}/answers   sourceId = sessionId
-    "REPORT",       # POST /reports       sourceId = 보고서 jobId
-    "CURRICULUM",   # POST /curricula     sourceId = 교안 jobId
+# 어느 작업에 딸린 호출인가. featureCode보다 굵은 단위다 — 한 ContextType 안에서
+# featureCode가 여럿 나올 수 있다(ANALYSIS 하나에 CODE_ANALYSIS + QUESTION_GENERATION).
+#
+# 🔴 필드명이 `source_type`/`source_id` → `context_type`/`context_id`로 바뀌었다
+# (2026-08-03, 백엔드 확인). **값 집합은 아직 확정이 아니다** — 새 MEAS 비고가
+# `context_type=ANALYSIS_JOB`·`context_type=PROBLEM_STAGE`처럼 **테이블 이름**을 쓰는데,
+# 우리 값은 동사(ANALYSIS·GRADING·…)다. 아래를 확인받기 전까지 값은 그대로 둔다.
+#
+#   ⚠️ `PROBLEM_STAGE`로 가면 `context_id`가 `problem_stage_id`여야 하는데
+#      **AI는 그 값을 모른다.** 세션 요청에 오는 것은 sessionId·problemId·axisCode뿐이다.
+#      백엔드가 요청에 실어 보내거나, 채점 컨텍스트를 세션 단위로 두어야 한다.
+ContextType = Literal[
+    "ANALYSIS",     # POST /analyses                 contextId = 분석 jobId
+    "GRADING",      # POST /sessions/{id}/answers    contextId = sessionId
+    "REPORT",       # POST /reports                  contextId = 보고서 jobId
+    "CURRICULUM",   # POST /curricula                contextId = 교안 jobId
 ]
+
+# 옛 이름. 다른 모듈이 아직 import할 수 있어 남겨둔다.
+SourceType = ContextType
 
 # 기술적 실패 유형. status가 FAILED·PARTIAL일 때만 채운다.
 FailureCode = Literal[
@@ -53,12 +64,12 @@ class AiUsage(BaseSchema):
     )
 
     # 어느 작업에 딸린 호출인가. 다형 참조라 FK가 없다.
-    source_type: SourceType
-    source_id: str = Field(description="작업 PK. 분석이면 analysisId")
+    context_type: ContextType
+    context_id: str = Field(description="작업 PK. 분석이면 분석 jobId")
     request_id: str
     trace_id: str = Field(description="요청 헤더 X-Trace-Id를 그대로 잇는다")
     idempotency_key: str = Field(
-        description="{sourceId}:{sourceType}:{attemptNo} 형식"
+        description="{contextId}:{contextType}:{attemptNo} 형식"
     )
 
     input_token_count: int = Field(ge=0)

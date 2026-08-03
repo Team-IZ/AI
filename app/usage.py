@@ -13,11 +13,11 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from app.schemas.usage import AiUsage, SourceType
+from app.schemas.usage import AiUsage, ContextType
 
 
 def to_ai_usage(
-    raw_usages: list[dict[str, Any]], source_type: SourceType, source_id: str,
+    raw_usages: list[dict[str, Any]], context_type: ContextType, context_id: str,
     *, feature_code: str | None = None,
     idempotency_key: str | None = None, trace_id: str | None = None,
 ) -> list[AiUsage]:
@@ -33,14 +33,14 @@ def to_ai_usage(
         try:
             rows.append(AiUsage.model_validate({
                 "feature_code": feature_code,
-                "source_type": source_type,
-                "source_id": source_id,
-                "request_id": source_id,
-                "trace_id": trace_id or source_id,
+                "context_type": context_type,
+                "context_id": context_id,
+                "request_id": context_id,
+                "trace_id": trace_id or context_id,
                 # 한 작업이 LLM을 여러 번 부른다. 요청 멱등키를 그대로 쓰면 행마다
                 # 같은 키가 되고 Spring이 하나로 합쳐 나머지 토큰이 사라진다.
-                # 그래서 순번을 붙인다(스키마가 명시한 {sourceId}:{sourceType}:{attemptNo}).
-                "idempotency_key": f"{idempotency_key or source_id}:{source_type}:{i}",
+                # 그래서 순번을 붙인다(스키마가 명시한 {contextId}:{contextType}:{attemptNo}).
+                "idempotency_key": f"{idempotency_key or context_id}:{context_type}:{i}",
                 **usage,
             }))
         except ValidationError:

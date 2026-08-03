@@ -93,7 +93,7 @@ class LlmError(RuntimeError):
 @dataclass(frozen=True)
 class LlmResult:
     content: str
-    usage: dict[str, Any]   # AiUsage의 일부. featureCode·sourceId 등은 호출자가 채운다
+    usage: dict[str, Any]   # AiUsage의 일부. featureCode·contextId 등은 호출자가 채운다
     raw: dict[str, Any]
 
 

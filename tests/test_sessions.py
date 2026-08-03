@@ -331,8 +331,8 @@ def test_ai_usage_is_reported_for_grading(monkeypatch):
 
     assert len(usage) == 1
     assert usage[0]["featureCode"] == "GRADING"
-    assert usage[0]["sourceType"] == "GRADING"
-    assert usage[0]["sourceId"] == "usage-1"
+    assert usage[0]["contextType"] == "GRADING"
+    assert usage[0]["contextId"] == "usage-1"
     assert usage[0]["inputTokenCount"] == 100
     assert "estimatedCost" not in usage[0]      # 금액은 Spring이 계산한다
 

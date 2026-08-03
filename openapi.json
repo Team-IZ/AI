@@ -915,17 +915,11 @@
                           "title": "Curriculumid"
                         },
                         "courseLabel": {
-                          "anyOf": [
-                            {
-                              "maxLength": 80,
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ],
-                          "description": "과정명(예: 'SQL', 'Java'). 프롬프트 프레이밍에 쓴다 — 생략하면 매니페스트 기본값('Java')이 들어가고, 다른 과정 교안이면 모델이 흔들려 결과 언어·용어가 섞인다",
-                          "title": "Courselabel"
+                          "description": "🔴 **필수다.** 과정명(예: 'SQL', 'Java', 'AI Agent'). 프롬프트 프레이밍에 쓴다 — 없으면 매니페스트 기본값('Java')이 들어가고, 다른 과정 교안이면 모델이 흔들려 결과 언어·용어가 섞인다. **교안 업로드 화면이 과정을 이미 알고 있으므로 기본값을 두지 않는다** (2026-08-03 확정)",
+                          "maxLength": 80,
+                          "minLength": 1,
+                          "title": "Courselabel",
+                          "type": "string"
                         },
                         "providerModelCode": {
                           "anyOf": [
@@ -941,7 +935,8 @@
                         }
                       },
                       "required": [
-                        "versionId"
+                        "versionId",
+                        "courseLabel"
                       ],
                       "title": "CurriculumRequest",
                       "type": "object"
@@ -1078,7 +1073,7 @@
             "title": "Modelcode",
             "description": "Spring이 ai_model에서 model_id를 조회한다. ⚠️ **AI는 호출에 쓴 provider 문자열을 그대로 에코한다**(요청의 providerModelCode 또는 서버 기본값) — AI는 화면 선택값을 모른다. Spring은 `provider_model_code`로 ai_model을 조회해야 한다"
           },
-          "sourceType": {
+          "contextType": {
             "type": "string",
             "enum": [
               "ANALYSIS",
@@ -1086,12 +1081,12 @@
               "REPORT",
               "CURRICULUM"
             ],
-            "title": "Sourcetype"
+            "title": "Contexttype"
           },
-          "sourceId": {
+          "contextId": {
             "type": "string",
-            "title": "Sourceid",
-            "description": "작업 PK. 분석이면 analysisId"
+            "title": "Contextid",
+            "description": "작업 PK. 분석이면 분석 jobId"
           },
           "requestId": {
             "type": "string",
@@ -1105,7 +1100,7 @@
           "idempotencyKey": {
             "type": "string",
             "title": "Idempotencykey",
-            "description": "{sourceId}:{sourceType}:{attemptNo} 형식"
+            "description": "{contextId}:{contextType}:{attemptNo} 형식"
           },
           "inputTokenCount": {
             "type": "integer",
@@ -1165,8 +1160,8 @@
         "required": [
           "featureCode",
           "modelCode",
-          "sourceType",
-          "sourceId",
+          "contextType",
+          "contextId",
           "requestId",
           "traceId",
           "idempotencyKey",
@@ -1398,6 +1393,14 @@
             },
             "type": "array",
             "title": "Problems"
+          },
+          "unmatchedTeaches": {
+            "items": {
+              "$ref": "#/components/schemas/UnmatchedTeach"
+            },
+            "type": "array",
+            "title": "Unmatchedteaches",
+            "description": "🔴 **문항을 못 만든 개념.** 오퍼레이터가 고른 teach 중 제출 코드에서 근거를 못 찾은 것들이다(2026-08-03 PM 결정: 지어내지 않고 '없음'으로 둔다). `problems`에 없는 teachId를 역산하지 않도록 명시적으로 보낸다 — 화면의 개념별 도달 격자에서 `―`(문항 없음)로 그릴 값이다"
           },
           "questionCountPlanned": {
             "type": "integer",
@@ -2108,12 +2111,6 @@
             "title": "Questionfocusitemid",
             "description": "요청 focusItems[].id를 그대로 돌려준다. 강사 지정 없이 뽑았으면 null"
           },
-          "isGeneral": {
-            "type": "boolean",
-            "title": "Isgeneral",
-            "description": "teach에 연결되지 않은 일반 문제. 제출 코드가 teaches를 만족하지 않아 그 개념으로 문제를 못 만들었을 때 나온다. **화면에 '일반 문제'로 표기해야 한다** — 검증 개념 앵커가 없어 다른 문제와 성격이 다르고, 보고서의 교안 복습 위치 지목도 붙지 않는다 (2026-08-02 PM 확정)",
-            "default": false
-          },
           "sourcePath": {
             "type": "string",
             "title": "Sourcepath"
@@ -2153,7 +2150,7 @@
               }
             ],
             "title": "Teachid",
-            "description": "이 문제가 검증하는 교안 개념(요청 teaches[].id). isGeneral=true면 null. 화면의 '클래스는 L3까지, 상속은 L2까지' 같은 개념별 도달 표시가 이 값으로 붙는다"
+            "description": "이 문제가 검증하는 교안 개념(요청 teaches[].id). **항상 채워진다** — 문제는 오퍼레이터가 고른 개념에만 붙는다(2026-08-03 PM 결정). 화면의 '클래스는 L3까지, 상속은 L2까지' 같은 개념별 도달 표시가 이 값으로 붙는다"
           },
           "references": {
             "items": {
@@ -3101,6 +3098,27 @@
         ],
         "title": "TranscriptTurn",
         "description": "확정된 문답 한 턴. Spring이 즉시 영속화하는 복구 근거.\n\n한 턴 = 질문 1개 + 답변 1개 + 채점 1개. 힌트 후 재질의도 한 턴이다.\n\n**DB `problem_stage` 한 행의 슬롯 하나에 들어간다** — `hintsUsed`가 0이면 질문 슬롯,\n1이면 첫 번째 힌트 슬롯, 2면 두 번째 힌트 슬롯이다(2026-08-03, 새 MEAS 정의서).\n옛 `stage_answer_attempt` 테이블은 사라졌다."
+      },
+      "UnmatchedTeach": {
+        "properties": {
+          "teachId": {
+            "type": "string",
+            "title": "Teachid",
+            "description": "요청 teaches[].id 그대로"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "왜 못 만들었는지. 화면에 그대로 띄워도 되는 한 문장"
+          }
+        },
+        "type": "object",
+        "required": [
+          "teachId",
+          "reason"
+        ],
+        "title": "UnmatchedTeach",
+        "description": "문항을 못 만든 검증 개념. **`―`(문항 없음)의 근거다.**\n\n🔴 **0단(L1 미달)과 다르다.** 0단은 물어봤는데 못 푼 것이고 이건 안 물어본 것이다.\n도달 단계 컬럼에 0을 박으면 둘이 섞여 \"안 물어봤다\"가 \"틀렸다\"로 바뀐다 — NULL이어야 한다.\n\nAI는 이 개념을 **두 번** 찾는다(p04-3 + 실패분 재시도 1회). 그래도 못 찾으면 여기 담긴다."
       },
       "ValidationError": {
         "properties": {
