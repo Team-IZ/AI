@@ -210,3 +210,39 @@ def test_siblings_are_computed_from_the_same_unit():
     by_name = {t["canonical_name"]: t["sibling_names"] for t in sections[0]["teaches"]}
     assert by_name["try-except"] == ["finally"]
     assert by_name["finally"] == ["try except"]
+
+
+def test_same_unit_id_in_different_chunks_is_not_merged():
+    """🔴 모델은 unit_id를 청크마다 독립적으로 매긴다.
+
+    청크 1의 "01"과 청크 5의 "01"은 완전히 다른 주제인데, 예전에는 같은 단원으로
+    합쳐졌다 — 실측에서 p.5~31 짜리 "단원"이 나왔고 siblingNames가 평균 31개가 됐다.
+    """
+    sections = curriculum._merge([
+        _chunk(1, 10, [{"unit_id": "01", "unit_title": "에이전트란", "source_pages": [1, 6]}],
+               [{"name": "정의", "unit_id": "01", "summary": "s", "source_pages": [2]}]),
+        _chunk(21, 30, [{"unit_id": "01", "unit_title": "배포 전략", "source_pages": [22, 28]}],
+               [{"name": "무중단", "unit_id": "01", "summary": "s", "source_pages": [23]}]),
+    ])
+
+    assert len(sections) == 2
+    assert [s["title"] for s in sections] == ["에이전트란", "배포 전략"]
+    # 범위가 겹치지 않는다 — 예전에는 p.1~28 한 덩이였다
+    assert sections[0]["page_end"] < sections[1]["page_start"]
+    # 서로 다른 단원이므로 형제가 아니다
+    assert sections[0]["teaches"][0]["sibling_names"] == []
+
+
+def test_unit_spanning_a_chunk_boundary_is_joined():
+    """청크 경계에 걸친 단원은 이어야 한다 — 안 이으면 같은 단원이 둘로 쪼개진다."""
+    sections = curriculum._merge([
+        _chunk(1, 10, [{"unit_id": "01", "unit_title": "예외 처리", "source_pages": [8, 10]}],
+               [{"name": "try", "unit_id": "01", "summary": "s", "source_pages": [9]}]),
+        _chunk(11, 20, [{"unit_id": "03", "unit_title": "예외 처리", "source_pages": [11, 13]}],
+               [{"name": "finally", "unit_id": "03", "summary": "s", "source_pages": [12]}]),
+    ])
+
+    assert len(sections) == 1                      # unit_id가 달라도 이어진다
+    assert (sections[0]["page_start"], sections[0]["page_end"]) == (8, 13)
+    assert {t["canonical_name"] for t in sections[0]["teaches"]} == {"try", "finally"}
+    assert sections[0]["teaches"][0]["sibling_names"] == ["finally"]
