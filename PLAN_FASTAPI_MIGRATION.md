@@ -692,6 +692,70 @@ PoC 팀원이 LLM 없이 "중요한 코드가 뭔가"를 정하려고 `fan_in`·
 ⏳ **`kind` 분포는 아직 모른다.** 지금까지 버려서 데이터가 없다. 다음 교안 실행에서
 `CODE_EXAMPLE`이 70개 중 몇 개인지 보면 사전 품질을 가늠할 수 있다.
 
+### T19 — references 채우기 + 섹션 병합 수정 ✅ 완료 (2026-08-04, 240 tests)
+
+**🔴 `ReferenceType`이 새 MEAS와 안 맞았다 — 조용한 지뢰였다.**
+
+```
+우리      CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
+새 MEAS   PRIMARY_BLOCK · QUESTION_HIGHLIGHT · CALLER · RELATED_CONTEXT · CURRICULUM_EVIDENCE
+겹침      CALLER 하나뿐
+```
+
+`references[]`가 **항상 빈 배열이라 안 터졌을 뿐**이고, 채우는 순간 전부 CHECK 위반이었다.
+어휘부터 맞추고 채웠다.
+
+**채운 것** (LLM 0회 — 이미 산정된 사실만 조립)
+
+| 유형 | 개수 | 근거 |
+|---|---|---|
+| `PRIMARY_BLOCK` | 1 | 문제를 낸 그 지점 |
+| `QUESTION_HIGHLIGHT` | 4 | 축별 강조 구간. `axisCode` 필수 |
+| `CURRICULUM_EVIDENCE` | 0~1 | teach 연결. **코드 라인이 없다** |
+| `CALLER` | 0~3 | import 그래프. 상한 3 |
+
+⚠️ **`RELATED_CONTEXT`는 안 만든다.** 심볼 테이블이 없어 "같이 봐야 하는 자리"를 특정할
+근거가 없다 — 지어내면 학생이 무관한 코드를 읽는다.
+
+⚠️ **`QUESTION_HIGHLIGHT` 4개가 전부 같은 구간을 가리킨다.** 축마다 다른 곳을 짚으려면
+LLM이 필요하고 지금은 근거가 없다. 그래도 넣는 이유는 DB가 축별 행을 기대하고, 화면이
+"L3에서는 여기를 보세요"를 그리려면 자리가 있어야 해서다.
+
+**`imports.py` 이식** — 팀원 브랜치 `feature/code-importance-map`의 `graph.py`(`f2db763`)에서
+다국어 import 정규식(JS·PY·JAVA·C)과 Java 주석·문자열 제거를 가져왔다. **`fan_in` 점수는
+안 가져왔다** — 공용 모듈일수록 판단이 빠져 있어 중요도로 쓰면 안 되는 값이다(PM §7-1).
+역방향 색인("누가 나를 import 하나")만 남겼다.
+
+실측(spring-petclinic 49파일): importer가 있는 파일 11개. `Person.java ← Owner·Vet`처럼
+상속 관계가 잡힌다.
+
+**🔴 `_merge()` 재작성 — `unit_id`로 합치면 안 된다**
+
+모델은 `unit_id`를 **청크마다 독립적으로** `"01"`·`"02"`로 매긴다. 청크 1의 `"02"`와 청크 5의
+`"02"`가 같은 단원으로 합쳐졌다.
+
+```
+전   섹션 3개   p.4-6(7) · p.5-31(48) · p.8-34(15)   범위 2쌍 겹침
+                siblingNames 평균 31.2  ← "교안이 대안을 가르쳤다" 신호로 못 쓴다
+후   섹션 15개  p.4-4 … p.32-34 순서대로              범위 1쌍(쪽 경계라 정상)
+                siblingNames 평균 4.0 · 최대 7
+```
+
+**제목이 같고 페이지가 이어질 때만 합친다**(`_find_continuation`, 허용 간격 2쪽). 청크 경계에
+걸친 단원은 이어지고, 멀리 떨어진 동명 단원은 따로 남는다. 회귀 테스트가 양쪽을 고정한다.
+
+**교안 사전 실측** (34쪽 영어 교안)
+
+```
+kind          CONCEPT 43 · CODE_EXAMPLE 12 · CAUTION 3   (58개)
+evidence      전부 채워짐
+식별자 추출    teach 수 25% (변화 없음) · 고유 22 → 37 (68% 증가)
+              새로 얻은 것: GuardrailFunctionOutput · WebSearchTool() · tripwire_triggered …
+```
+
+`evidence`가 사전 크기를 키웠다. **커버리지(teach 수)는 안 늘었다** — `evidence`에 식별자가
+있는 teach는 이미 `canonicalDescription`에도 있었다.
+
 ### T16 — 백엔드 회신 대기 ← **지금 여기**
 
 **우리가 막힌 것은 없다** — 응답은 이미 그 값을 들고 있고 저장 자리만 없다.

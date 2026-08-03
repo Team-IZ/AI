@@ -291,9 +291,16 @@ cloudflared tunnel --url http://localhost:8000
   "codeSnippet": "…파일 전체…",         // 🔴 문제를 낸 파일 전체 (화면에 띄울 것)
   "evidenceHash": "…",
   "extractorVersion": 1739284412,      // 정수. INTEGER CHECK (> 0)
-  "references": [
-    { "path": "app/cli.py", "lineStart": 30, "lineEnd": 33,
-      "evidenceHash": "…", "referenceType": "CALLER" }
+  "references": [                      // DB assessment_problem_reference 와 1:1
+    { "referenceType": "PRIMARY_BLOCK", "displayOrder": 1,
+      "path": "app/main.py", "lineStart": 12, "lineEnd": 14, "evidenceHash": "…" },
+    { "referenceType": "QUESTION_HIGHLIGHT", "displayOrder": 2, "axisCode": "L1",
+      "path": "app/main.py", "lineStart": 12, "lineEnd": 14, "evidenceHash": "…" },
+    // L2·L3·L4 동일. 축별로 한 행씩 = 4개
+    { "referenceType": "CURRICULUM_EVIDENCE", "displayOrder": 6,
+      "teachId": "tch-1", "evidenceHash": "…" },     // 코드 라인이 없다
+    { "referenceType": "CALLER", "displayOrder": 7,
+      "path": "app/cli.py", "lineStart": 1, "lineEnd": 1, "evidenceHash": "…" }
   ],
   "stages": [
     { "axisCode": "L1", "questionText": "…", "flagged": false,
@@ -718,8 +725,7 @@ B-13  🔴 code_analysis 에 analysis_document JSONB
 
 ```
 백엔드 연동 — 주소를 설정값으로, 채점 타임아웃 30초 이상
-references[] 채우기 — 지금 항상 빈 배열. DEFINITION·CALLER 먼저
-                      팀원 브랜치 feature/code-importance-map 의 graph.py(import 그래프)를 이식
+RELATED_CONTEXT 근거 — 심볼 테이블이 없어 아직 못 만든다
 유료 전환 — 529 실패율 64%. 채점 목표 15초를 못 지키는 원인 (팀 논의)
 교안 소요 실측 — 34쪽 451초. 200쪽 상한을 아직 못 준다
 (먼 항목) 적응형 힌트 모듈 대응 — 턴당 2콜, 힌트용 featureCode, 체크포인트 단위 모드 고정
