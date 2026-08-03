@@ -4,7 +4,7 @@
   "pipelines": {
     "p04": {
       "label": "P04 통합 검증 PoC",
-      "source_files": ["app/poc-engine.js", "app/hint-ladder.js", "app/scoring-config.js"],
+      "source_files": ["app/core/poc-engine.js", "app/stage3-session/hint-ladder.js", "app/scoring-config.js"],
       "has_llm_calls": true,
       "stages": [
         {

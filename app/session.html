@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>문답 · P04 통합 검증</title>
 <link rel="stylesheet" href="../shared/iz-tokens.css">
-<link rel="stylesheet" href="poc.css">
+<link rel="stylesheet" href="ui/poc.css">
 <style>
   .wrap { max-width: 1080px; }
   .layout { display: grid; grid-template-columns: 320px 1fr; gap: var(--sp-4); align-items: start; }
@@ -92,13 +92,13 @@
 <script src="../shared/session-state.js"></script>
 <script src="../shared/p02-engine.js"></script>
 <script src="scoring-config.js"></script>
-<script src="poc-state.js"></script>
-<script src="code-fragment.js"></script>
-<script src="teaches-source.js"></script>
-<script src="question-guard.js"></script>
-<script src="llm-stage.js"></script>
-<script src="hint-ladder.js"></script>
-<script src="poc-engine.js"></script>
+<script src="core/poc-state.js"></script>
+<script src="stage2-analysis/code-fragment.js"></script>
+<script src="data/teaches-source.js"></script>
+<script src="stage3-session/question-guard.js"></script>
+<script src="core/llm-stage.js"></script>
+<script src="stage3-session/hint-ladder.js"></script>
+<script src="core/poc-engine.js"></script>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);

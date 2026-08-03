@@ -249,7 +249,7 @@ const POCEngine = (() => {
   //   COST: RLS의 "update own"(member_id = auth.uid())을 통과하려면 anon key가 아니라
   //   로그인한 사용자의 실제 세션 access_token이 필요하다 -- 미로그인이면 0행 매칭으로
   //   조용히 실패한다(기존 관용과 동일하게 non-fatal, best-effort).
-  //   EXIT: app/p04_timing_schema.sql을 되돌리면(컬럼 DROP) 이 함수는 계속 호출은 되지만
+  //   EXIT: db/migrations/p04_timing_schema.sql을 되돌리면(컬럼 DROP) 이 함수는 계속 호출은 되지만
   //   PATCH가 컬럼없음 에러로 실패할 뿐 메인 저장 흐름에는 영향 없다(catch로 감싸져 있음).
   async function patchTimingColumns(runId, patch) {
     if (!runId) return;
@@ -273,7 +273,7 @@ const POCEngine = (() => {
     }
   }
 
-  // best-effort DB 기록. app/p04_schema.sql이 아직 적용되지 않았으면 CHECK 제약(23514)에
+  // best-effort DB 기록. db/migrations/p04_schema.sql이 아직 적용되지 않았으면 CHECK 제약(23514)에
   // 걸려 실패하는데, 그건 이 함수가 아니라 그 마이그레이션의 책임이다 -- 여기서는 실패해도
   // 화면 흐름을 막지 않는다(이 저장소의 saveFailedRun/maybeSaveRun과 동일한 관용).
   async function saveAnalysisRun(setup, analysis, onProgress) {

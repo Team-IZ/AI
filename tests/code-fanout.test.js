@@ -1,7 +1,7 @@
 // D-poc13 4단계(병렬 fan-out) 실행부의 순수 로직 테스트.
-//   실행: node --test app/code-fanout.test.js   (저장소 루트에서)
+//   실행: node --test tests/code-fanout.test.js   (저장소 루트에서)
 //
-// 1~3단계 테스트는 app/code-candidates.test.js에 그대로 있다 -- 이 파일은 그 뒤에 붙은
+// 1~3단계 테스트는 tests/code-candidates.test.js에 그대로 있다 -- 이 파일은 그 뒤에 붙은
 // 실행부(runWithConcurrency / deepDiveCandidate / mergeDeepDives / runFanout)만 다룬다.
 //
 // **네트워크를 절대 건드리지 않는다.** code-candidates.test.js가 grounding을 검증할 때
@@ -17,8 +17,8 @@ globalThis.P02Engine = {
   },
 };
 
-const CodeFragment = require("./code-fragment.js");
-const CC = require("./code-candidates.js");
+const CodeFragment = require("../app/stage2-analysis/code-fragment.js");
+const CC = require("../app/stage2-analysis/code-candidates.js");
 
 const INJECT = { locate: CodeFragment.locateSymbol, extract: CodeFragment.extractFragment };
 

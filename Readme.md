@@ -32,22 +32,45 @@ app/
   analysis.html   2단계: 코드 분석 문서 · 요구사항 P/F 판정 · 문제 3개 선정 · L1~L4 질문 동결
   session.html    3단계: 문답 (문제당 최대 4레벨, 레벨당 힌트 최대 2회)
   report.html     4단계: 보고서 (문제×레벨 매트릭스 · 재시험 대상 · 교안 참조)
+                  ★ 이 네 페이지와 아래 두 파일은 app/ 바로 아래(깊이 1)에 고정이다 --
+                    vendored 파일의 "../" 상대경로와 pages.yml 스모크체크가 이 경로를 박아둠
 
   scoring-config.js    ★ 축(L1~L4)×값(0~5) 루브릭 + 임계값(pass=3) + 힌트 상한(5/4/3) + 힌트
-                         사다리 강도 정의(hintLadder) + 재시험 규칙
-  prompt_manifest.json ★ p04 7개 스테이지 프롬프트/파라미터 (단일 소스)
-  llm-stage.js         매니페스트 스테이지 1개 호출(fillTemplate -> chatJSON -> JSON 파싱) 공용 경로
-  teaches-source.js    P01이 DB에 남긴 unit_map을 teach 목록으로 읽어옴(교안 분석 자체는 재구현 안 함)
-  code-fragment.js     LLM이 지목한 {file,symbol}에서 실제 줄 번호를 우리가 찾아 산정(D-poc10)
-  question-guard.js    질문·힌트에 선택지가 섞이는 걸 정규식으로 탐지(실측 사고 재발 방지)
-  hint-ladder.js       문제 1개의 L1~L4 질문을 답변 전에 동결(freezeQuestionSet, D4) +
-                         힌트 1개 생성(generateHint) -- hintMode에 따라 질문 직후 답변 없이
-                         (frozen, D7) 또는 오답 확정 직후 답변 기반(adaptive, D4 개정)으로 호출
-  requirements.js      요구사항 P/F 판정
-  poc-engine.js         전체 오케스트레이션(2/3/4단계) -- 페이지는 DOM을 안 만지고 이 파일의 hooks만 받음
-  poc-state.js          페이지 간 sessionStorage 핸드오프(teamiz_p04_* 키, code-qna와 분리)
-  p04_schema.sql        ★ public.runs/presets의 pipeline CHECK 제약에 'p04' 추가(사람이 한 번 실행)
+                         사다리 강도 정의(hintLadder) + 재시험 규칙 (pages.yml 스모크체크 대상)
+  prompt_manifest.json ★ p04 7개 스테이지 프롬프트/파라미터 (단일 소스, 스모크체크 대상)
+
+  core/                단계에 걸쳐 공유되는 축 (D-poc14)
+    poc-engine.js        전체 오케스트레이션(2/3/4단계) -- 페이지는 DOM을 안 만지고 이 파일의 hooks만 받음
+    llm-stage.js         매니페스트 스테이지 1개 호출(fillTemplate -> chatJSON -> JSON 파싱) 공용 경로
+    poc-state.js         페이지 간 sessionStorage 핸드오프(teamiz_p04_* 키, code-qna와 분리)
+
+  stage2-analysis/     2단계(코드 분석) 전용 (D-poc14)
+    code-candidates.js   D-poc13 1~4단계: 후보 수집 -> grounding -> 랭킹 -> 병렬 fan-out
+                           (이 저장소에서 가장 큰 파일, runFanout이 p04-1b를 상위 K개에 호출)
+    code-fragment.js     LLM이 지목한 {file,symbol}에서 실제 줄 번호를 우리가 찾아 산정(D-poc10)
+    requirements.js      요구사항 P/F 판정
+
+  stage3-session/      3단계(문답 루프) 전용 (D-poc14)
+    hint-ladder.js       문제 1개의 L1~L4 질문을 답변 전에 동결(freezeQuestionSet, D4) +
+                           힌트 1개 생성(generateHint) -- hintMode에 따라 질문 직후 답변 없이
+                           (frozen, D7) 또는 오답 확정 직후 답변 기반(adaptive, D4 개정)으로 호출
+    question-guard.js    질문·힌트에 선택지가 섞이는 걸 정규식으로 탐지(실측 사고 재발 방지)
+
+  data/                외부 데이터 어댑터 (D-poc14)
+    teaches-source.js    P01이 DB에 남긴 unit_map을 teach 목록으로 읽어옴(교안 분석 자체는 재구현 안 함)
+
+  ui/                  화면 표현 (D-poc14)
+    poc.css              네 페이지 공용 스타일(진행 스피너 .spin 등, D-poc11)
+
+db/migrations/         사람이 한 번 실행하는 DB 마이그레이션 (D-poc14, 앱 코드가 아님)
+  p04_schema.sql        ★ public.runs/presets의 pipeline CHECK 제약에 'p04' 추가
   p04_timing_schema.sql ★ public.runs에 hint_mode/timing_ms 컬럼 + p04_timing_view 추가(D8)
+
+tests/                 node --test / pytest (저장소 루트에서 실행)
+  code-candidates.test.js  D-poc13 1~3단계 + 예산 계산 순수 로직(실제 locateSymbol 사용, 목 아님)
+  code-fanout.test.js      D-poc13 4단계 실행부(runFanout 등) -- 네트워크를 절대 타지 않음
+  code-locate.test.js      vendored shared/code-locate.js의 심볼 탐색(D-ground1m)
+  test_rank_after_tier_b_drop.py  랭킹 회귀(pytest)
 
 shared/ cognition/ judgment/ feedback/  feat/code_Q&A에서 무수정 이식(vendored, 드리프트 검사 대상)
   (참고: webtool_driver.py 헤더 주석의 "fetched at runtime from raw.githubusercontent.com"은
@@ -76,6 +99,21 @@ worker/                D-poc-worker(2026-07-30) 이전엔 code_Q&A와 같은 Wor
 **D-poc2**: `shared/`·`cognition/`·`judgment/`·`feedback/`은 feat/code_Q&A에서 무수정
 이식 — P02 스캐너를 다시 구현하지 않기 위해서다. 두 브랜치의 사본이 어긋나지 않도록
 `.github/workflows/pages.yml`에 드리프트 검사를 넣었다(byte-diff, 어긋나면 빌드 실패).
+벤더링된 경로가 정확히 무엇이고 왜 여기서 고치면 안 되는지는 루트의 `VENDORED.md` 참고.
+
+**D-poc14 (2026-08-03, `app/` 재구성)**: 위 "페이지 구조"의 디렉터리 분리.
+- **WHY**: `app/`이 5개 관심사(페이지 / 단계공용 core / 2단계 분석 / 3단계 문답 루프 /
+  데이터 어댑터)를 20개 파일 평면 디렉터리 하나에 섞어두고 있었다 — 매니페스트가 이미
+  `p04-1`...`p04-7`로 이름 붙인 파이프라인 단계가 파일 구조에는 아무 신호도 없었다.
+  SQL 마이그레이션과 테스트가 앱 코드와 같은 폴더에 있던 것도 같은 문제다.
+- **COST**: 옮긴 파일을 앞으로 고칠 때 새 경로를 써야 하고, 네 HTML 페이지의
+  `<script src>`를 **로드 순서를 유지한 채** 같이 고쳐야 했다(전역 스크립트라 순서가
+  깨지면 빌드 에러 없이 런타임에 죽는다). 저장소 밖은 아무것도 안 바뀐다 — 재구성은
+  핀으로 고정되지 않은 `app/` 내부에서만 일어났다. `app/index.html`·`analysis.html`·
+  `session.html`·`report.html`·`scoring-config.js`·`prompt_manifest.json`은
+  pages.yml 스모크체크와 vendored `../` 상대경로 때문에 **깊이 1에 그대로 둔다**.
+- **EXIT**: 되돌리려면 위 트리를 평면 `app/`으로 기계적으로 되돌리고 네 페이지의
+  `<script src>`에서 디렉터리 접두사만 지우면 된다 — 데이터도 계약도 잃는 게 없다.
 
 **D3**: 채점 임계값·루브릭을 `app/scoring-config.js` 한 파일로 외화(축×값 표). 사용자
 요구("채점 임계값 하이퍼파라미터·채점 로직은 모듈화로 빼놓고 설정 가능하게") 반영.
@@ -165,7 +203,7 @@ vendored `shared/lab-core.js:200`이 페이지 로드 즉시 `MODEL_CHOICES`를 
 **★ 이건 단일 예시에서 역산한 가설이다** — 실제 세션이 쌓이면 재검증 대상
 (`app/scoring-config.js`의 `retest` 주석 참고).
 
-**D-poc8** (`app/llm-stage.js`): `LabApp`은 매니페스트를 하나만 들고 있는데
+**D-poc8** (`app/core/llm-stage.js`): `LabApp`은 매니페스트를 하나만 들고 있는데
 `LabApp.loadManifest()`는 항상 저장소 루트의 `prompt_manifest.json`(p02용)을 불러온다.
 이 PoC의 p04 스테이지는 별도 파일(`app/prompt_manifest.json`)에 있어서, 페이지 로드 시
 `POCStage.ensureManifestLoaded()`가 두 파일을 fetch해 `manifest.pipelines.p04`를 합쳐
@@ -182,7 +220,7 @@ vendored `shared/lab-core.js:200`이 페이지 로드 즉시 `MODEL_CHOICES`를 
 소요시간 요약+상세), `session.html`(힌트 버블마다 "(N.N초)" 인라인 표시 -- frozen은 사전생성
 시점 값, adaptive는 방금 생성한 값), `report.html`(세션 종합, frozen이면 "사전생성 8건 중
 실제 세션에서 재사용된 건수"까지 attempts에서 역산)에 표시.
-  - **DB 컬럼**: `app/p04_timing_schema.sql`이 `public.runs`에 `hint_mode text`(CHECK로
+  - **DB 컬럼**: `db/migrations/p04_timing_schema.sql`이 `public.runs`에 `hint_mode text`(CHECK로
     `'frozen'`/`'adaptive'`만 허용) + `timing_ms jsonb` **실컬럼**을 추가한다(JSONB
     `input_meta` 필드가 아니라 "DB에 칼럼 구별 지어서"라는 요구를 문자 그대로 만족).
     vendored `shared/db.js`의 `startRun()`/`saveRun()`은 이 두 필드를 모르므로(고정된
@@ -198,7 +236,7 @@ vendored `shared/lab-core.js:200`이 페이지 로드 즉시 `MODEL_CHOICES`를 
 
 ## DB 마이그레이션 상태
 
-- **`app/p04_schema.sql`**: **적용 완료** (2026-07-29, Management API PAT으로 직접 실행).
+- **`db/migrations/p04_schema.sql`**: **적용 완료** (2026-07-29, Management API PAT으로 직접 실행).
   `public.runs`의 `pipeline` CHECK 제약이 `('p01','p02','p03')`로만 한정돼 있던 걸
   `'p04'`까지 허용하도록 변경. 적용 후 `insert ... pipeline='p04' ... rollback`으로
   실제 통과함을 확인(데이터는 남기지 않음).
@@ -206,7 +244,7 @@ vendored `shared/lab-core.js:200`이 페이지 로드 즉시 `MODEL_CHOICES`를 
   `oziaeqcvrkrqkhwrybfj`)에는 애초에 생성돼 있지 않음을 실측 확인 — 존재 여부를 먼저
   검사해 없으면 건너뛰도록 파일을 고친 뒤 재적용(1차 시도는 존재하지 않는 presets를
   참조하다 트랜잭션 전체가 롤백돼 runs 쪽도 같이 실패했었음, 파일 상단 주석에 기록).
-- **`app/p04_timing_schema.sql`**: **적용 완료** (2026-07-30, Management API PAT).
+- **`db/migrations/p04_timing_schema.sql`**: **적용 완료** (2026-07-30, Management API PAT).
   `public.runs`에 `hint_mode text`(CHECK 제약 포함) + `timing_ms jsonb` 컬럼과
   `public.p04_timing_view`를 추가. 적용 후 `information_schema.columns` 조회로 두
   컬럼이 실제로 생겼음을 확인.

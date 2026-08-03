@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>코드 분석 · P04 통합 검증</title>
 <link rel="stylesheet" href="../shared/iz-tokens.css">
-<link rel="stylesheet" href="poc.css">
+<link rel="stylesheet" href="ui/poc.css">
 <style>
   .wrap { max-width: 860px; }
   .card { background: var(--c-surface); border: 1px solid var(--c-border); border-radius: var(--r-lg); padding: var(--sp-5); margin-bottom: var(--sp-4); }
@@ -91,9 +91,9 @@
 <script src="../shared/session-state.js"></script>
 <script src="../shared/p02-engine.js"></script>
 <script src="scoring-config.js"></script>
-<script src="teaches-source.js"></script>
-<script src="poc-state.js"></script>
-<script src="code-fragment.js"></script>
+<script src="data/teaches-source.js"></script>
+<script src="core/poc-state.js"></script>
+<script src="stage2-analysis/code-fragment.js"></script>
 <!-- D-poc13 (2026-08-03): 4단계 fan-out이 호출 직전 현재 rpm을 보고 K를 깎는다
      (CodeCandidates.readRate -> DebugTraffic.getCurrentRate). 이 태그가 없으면
      typeof DebugTraffic === "undefined"라 항상 "트래픽을 확인할 수 없음" 경로로 떨어져
@@ -104,12 +104,12 @@
      groundCandidates / rankCandidates / runFanout). code-fragment.js 다음이어야 하는 건
      groundCandidates()/deepDiveCandidate()가 전역 CodeFragment를 기본 주입값으로 쓰기
      때문이고, llm-stage.js(POCStage)는 runFanout이 **호출 시점에** 참조하므로 순서 무관. -->
-<script src="code-candidates.js"></script>
-<script src="question-guard.js"></script>
-<script src="llm-stage.js"></script>
-<script src="requirements.js"></script>
-<script src="hint-ladder.js"></script>
-<script src="poc-engine.js"></script>
+<script src="stage2-analysis/code-candidates.js"></script>
+<script src="stage3-session/question-guard.js"></script>
+<script src="core/llm-stage.js"></script>
+<script src="stage2-analysis/requirements.js"></script>
+<script src="stage3-session/hint-ladder.js"></script>
+<script src="core/poc-engine.js"></script>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);

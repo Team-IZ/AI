@@ -1,5 +1,5 @@
 // D-poc13 프로토타입(1~3단계 + 예산 계산)의 순수 로직 테스트.
-//   실행: node --test app/code-candidates.test.js   (저장소 루트에서)
+//   실행: node --test tests/code-candidates.test.js   (저장소 루트에서)
 //
 // 이 테스트는 grounding을 위해 **실제 CodeFragment.locateSymbol을 그대로 불러 쓴다** --
 // 목(mock) locate를 쓰면 "복제하지 않고 재사용한다"는 D-poc13 2단계의 핵심 결정을 정작
@@ -14,8 +14,8 @@ globalThis.P02Engine = {
   },
 };
 
-const CodeFragment = require("./code-fragment.js");
-const CC = require("./code-candidates.js");
+const CodeFragment = require("../app/stage2-analysis/code-fragment.js");
+const CC = require("../app/stage2-analysis/code-candidates.js");
 
 const LOCATE = { locate: CodeFragment.locateSymbol };
 
