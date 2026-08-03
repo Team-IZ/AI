@@ -1,0 +1,364 @@
+# D-split2 (2026-07-28): GitHub Pages moved from a legacy single-source build
+# (branch=feat/pdf_analysis, path=/docs) to this workflow, which assembles ONE site
+# from TWO source branches so each tool is owned by exactly one branch.
+#
+#   feat/pdf_analysis  -> docs/            -> /lab/**            (P01, 교안 분석)
+#   feat/code_Q&A      -> repo root        -> /lab/code-qna/**   (P02/P03, 코드 Q&A)
+#
+#   WHY: both tools were being served out of feat/pdf_analysis, which meant
+#   feat/pdf_analysis carried a full duplicate copy of the code-qna tool under
+#   docs/lab/code-qna/. That copy drifted from feat/code_Q&A (shared/db.js and
+#   trainee/session.html already differed) and every code-qna fix had to be applied
+#   twice or it silently did not ship. GitHub Pages allows exactly ONE source per
+#   repository, so "point each branch at Pages" is not possible -- assembling both in
+#   one build is the closest structure that still gives each branch sole ownership of
+#   its own tool, and it keeps every existing URL byte-identical.
+#
+#   COST: a push to either branch rebuilds the WHOLE site, so a broken commit on one
+#   branch blocks the other branch's deploy until it is fixed. The smoke-check step
+#   below is what makes that failure loud instead of silent. Also, deploys are no
+#   longer "push and Pages picks it up" -- they depend on Actions minutes and on this
+#   workflow file existing on BOTH branches (push events run the workflow file from
+#   the pushed branch, so the two copies must stay in sync).
+#
+#   EXIT: to go back to single-branch Pages, set the repo's Pages source back to
+#   {branch: feat/pdf_analysis, path: /docs} (build_type "legacy"), restore
+#   docs/lab/code-qna/ on feat/pdf_analysis from feat/code_Q&A, and delete this file
+#   from both branches.
+#
+# D-poc1 (2026-07-28): a THIRD source branch, feat/poc_full, joins the assembly.
+#
+#   feat/poc_full -> repo root -> /lab/poc/**  (P04, 교안→제출→코드분석→문답→보고서 통합 PoC)
+#
+#   WHY: the P04 PoC spans what P01 and P02/P03 each own half of, but its turn loop is
+#   structurally different from P03's (per-level immediate 0-5 scoring + a fixed 2-step
+#   hint ladder + fail-fast per question, vs P03's escalate-until-defended + one grading
+#   pass at the end). Editing P03 into that shape would have broken the tool the team is
+#   actively using, so P04 is its own branch/tool under the same one-branch-one-tool rule
+#   this file already enforces.
+#   COST: the workflow file now has to stay in sync across THREE branches, and a broken
+#   commit on any one of them blocks the other two from deploying. feat/poc_full also
+#   carries a vendored copy of shared/, cognition/, judgment/, feedback/ (it was branched
+#   from feat/code_Q&A and reuses the P02 scanner unmodified) -- exactly the duplication
+#   that silently drifted before this workflow existed.
+#   EXIT/mitigation: the "Drift-check vendored files" step below fails the build the moment
+#   those copies stop being byte-identical, so the old failure mode (fix applied to one
+#   copy, other copy silently stale) is now loud. To intentionally fork one of those files
+#   onto feat/poc_full, remove it from VENDORED/EXCLUDES there and say why.
+#
+# D-codemap1 (2026-07-31): a FOURTH source branch, feature/code-importance-map, joins the
+#   assembly, and the site gets a root index.html for the first time.
+#
+#   feature/code-importance-map -> docs/lab/codemap/ -> /lab/codemap/**  (independent
+#     codemap backend's static team-test page -- calls the Cloudflare Worker+Container
+#     deployment directly from the browser, no server-rendered page)
+#
+#   WHY: this branch is explicitly NOT one of the three PoC-ported pipelines (see its own
+#   README §6) -- it's a parallel FastAPI implementation with its own deploy target
+#   (wrangler.toml/Dockerfile), so it only contributes one static demo page, not a whole
+#   app/ tree like feat/poc_full. Naming it "codemap" (not "p04") avoids implying it
+#   replaces feat/poc_full's P04 -- both exist side by side per that README section.
+#   Four tools with no landing page was already awkward before this; adding a fourth
+#   made "no way to discover the others" worth fixing, hence pages-hub/index.html (this
+#   branch, feat/poc_full) -- the "Generate hub index" step just copies it from the
+#   already-checked-out src-poc/. It isn't rsynced under /lab/ like the other four
+#   sources: it deliberately lives at the site root as index.html, so /  itself is the
+#   landing page instead of 404ing. It lives on feat/poc_full specifically because that
+#   checkout was already happening anyway (no new checkout step needed) -- not because
+#   the hub is conceptually feat/poc_full's tool; it links to all four equally.
+#   COST: a 4th branch means a 4th place a broken commit can block the other three's
+#   deploy. The hub's links are hand-written paths, not generated from the checkouts, so
+#   they can silently drift from reality if a tool's entry-point path changes -- the smoke
+#   -check below only proves the four target files exist, not that the hub's <a href>
+#   values still point at them.
+#   EXIT: if feature/code-importance-map's demo page is retired, drop its checkout step,
+#   its rsync line, its smoke-check entry, and its card in pages-hub/index.html.
+#
+name: Deploy Pages (P01 + code-qna + poc + codemap)
+
+on:
+  push:
+    branches:
+      - "feat/pdf_analysis"
+      - "feat/code_Q&A"
+      - "feat/poc_full"
+      - "feature/code-importance-map"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One site, two possible triggers -- never let two assemblies race each other.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout P01 source (feat/pdf_analysis)
+        uses: actions/checkout@v4
+        with:
+          ref: feat/pdf_analysis
+          path: src-p01
+          fetch-depth: 1
+
+      - name: Checkout code-qna source (feat/code_Q&A)
+        uses: actions/checkout@v4
+        with:
+          ref: "feat/code_Q&A"
+          path: src-codeqna
+          fetch-depth: 1
+
+      - name: Checkout poc source (feat/poc_full)
+        uses: actions/checkout@v4
+        with:
+          ref: "feat/poc_full"
+          path: src-poc
+          fetch-depth: 1
+
+      - name: Checkout codemap source (feature/code-importance-map)
+        uses: actions/checkout@v4
+        with:
+          ref: "feature/code-importance-map"
+          path: src-codemap
+          fetch-depth: 1
+
+      - name: Assemble site
+        run: |
+          set -euo pipefail
+          mkdir -p site
+
+          # P01 half: everything feat/pdf_analysis publishes under docs/, minus the
+          # stale code-qna duplicate -- that path is filled from its own branch below.
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            --exclude='lab/code-qna' \
+            src-p01/docs/ site/
+
+          # code-qna half: the whole feat/code_Q&A tree. cognition/, judgment/ and
+          # feedback/ are NOT dev-only -- p02-engine.js and p03-engine.js fetch those
+          # .py files at runtime through REPO_RAW_BASE="../", so they must ship.
+          mkdir -p site/lab/code-qna
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            src-codeqna/ site/lab/code-qna/
+
+          # poc half (D-poc1): same shape as code-qna -- the whole feat/poc_full tree,
+          # including its vendored cognition/judgment (runtime fetch targets, see above --
+          # feedback/ was dropped from this branch, D-feedback1 below, since P04 never
+          # loaded it). Its pages live one directory deep (app/) because the vendored files
+          # resolve "../" against the page: p02-engine.js's REPO_RAW_BASE and
+          # lab-core.js's loadManifest() both assume it. Root index.html is a redirect stub.
+          #
+          # D-poc15 (2026-08-03): four more excludes added on top of the original three.
+          #   WHY: a read-only audit found the unqualified rsync above was shipping dead
+          #   weight to the public site -- tests/ + *.test.js (never run by any CI step
+          #   here), db/migrations/ (already-applied, one-shot SQL, not runtime code), and
+          #   worker/ (channel-B Cloudflare Worker source, irrelevant to channel-A Pages).
+          #   Worse, it was also duplicating pages-hub/index.html to
+          #   site/lab/poc/pages-hub/index.html -- a second, BROKEN copy, since that page's
+          #   relative hrefs (the D-codemap2 guard below requires them relative) only
+          #   resolve correctly from the site root, where the "Generate hub index" step
+          #   below separately `cp`s the same file. From /lab/poc/pages-hub/ all four cards
+          #   404. Confirmed reproduced before this fix.
+          #   COST: none of the four excluded things are used by index.html/app/*.html at
+          #   runtime, verified against every <script src>/fetch() in this branch -- so
+          #   nothing observable changes except these bytes no longer being served. The
+          #   `cp src-poc/pages-hub/index.html site/index.html` step below reads from the
+          #   checkout, not from site/, so it is unaffected by excluding pages-hub here.
+          #   EXIT: drop any of the four --exclude flags to resume shipping that directory.
+          mkdir -p site/lab/poc
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            --exclude='.pytest_cache' \
+            --exclude='tests' --exclude='*.test.js' \
+            --exclude='db' --exclude='worker' --exclude='pages-hub' \
+            src-poc/ site/lab/poc/
+
+          # codemap half (D-codemap1): just the one static demo page, not a whole tree --
+          # this branch's actual product is a server (Cloudflare Worker+Container), not a
+          # Pages-hosted app. See its docs/lab/codemap/index.html for what it does.
+          mkdir -p site/lab/codemap
+          rsync -a \
+            --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            src-codemap/docs/lab/codemap/ site/lab/codemap/
+
+      - name: Generate hub index (D-codemap1)
+        run: cp src-poc/pages-hub/index.html site/index.html
+
+      - name: Show assembled tree
+        run: find site -maxdepth 3 | sort
+
+      # Fail the build loudly rather than publishing a half-assembled site -- a missing
+      # runtime .py or a mis-rooted copy would otherwise only surface as a broken page.
+      - name: Smoke-check assembled artifact
+        run: |
+          set -uo pipefail
+          fail=0
+          for f in \
+            "site/lab/curriculum-manager/index.html" \
+            "site/lab/p01-runner.js" \
+            "site/lab/prompt_manifest.json" \
+            "site/lab/code-qna/trainee/submission.html" \
+            "site/lab/code-qna/trainee/session.html" \
+            "site/lab/code-qna/shared/lab-core.js" \
+            "site/lab/code-qna/prompt_manifest.json" \
+            "site/lab/code-qna/cognition/two_tier_scan.py" \
+            "site/lab/code-qna/judgment/isolation_classifier.py" \
+            "site/lab/poc/index.html" \
+            "site/lab/poc/app/index.html" \
+            "site/lab/poc/app/scoring-config.js" \
+            "site/lab/poc/app/prompt_manifest.json" \
+            "site/lab/poc/shared/p02-engine.js" \
+            "site/lab/poc/cognition/two_tier_scan.py" \
+            "site/lab/poc/webtool_driver.py" \
+            "site/lab/codemap/index.html" \
+            "site/index.html" \
+          ; do
+            if [ -f "$f" ]; then echo "  OK   $f"; else echo "  MISS $f"; fail=1; fi
+          done
+
+          # Ownership assertion: the code-qna half must come from feat/code_Q&A, which
+          # no longer defines a p01 pipeline. If p01 shows up here, the rsync above
+          # picked up feat/pdf_analysis's old duplicate instead.
+          if grep -q '"p01"' site/lab/code-qna/prompt_manifest.json; then
+            echo "  FAIL site/lab/code-qna sourced from the wrong branch (p01 present)"
+            fail=1
+          fi
+
+          # D-poc1 ownership assertion, same shape: the poc half must carry the p04
+          # manifest, and must NOT have picked up feat/code_Q&A's trainee/ pages (those
+          # were deleted on feat/poc_full precisely so /lab/poc/ can't become a second,
+          # drifting copy of the code-qna tool).
+          if ! grep -q '"p04"' site/lab/poc/app/prompt_manifest.json; then
+            echo "  FAIL site/lab/poc/app/prompt_manifest.json has no p04 pipeline"
+            fail=1
+          fi
+          if [ -e "site/lab/poc/trainee" ] || [ -e "site/lab/poc/shared/p03-engine.js" ]; then
+            echo "  FAIL site/lab/poc carries a duplicate of the code-qna tool"
+            fail=1
+          fi
+
+          # D-codemap1 ownership assertion: catches an empty/wrong rsync source silently
+          # producing a blank or stale page instead of failing loud.
+          if ! grep -q 'x-internal-key' site/lab/codemap/index.html; then
+            echo "  FAIL site/lab/codemap/index.html doesn't look like the codemap test page"
+            fail=1
+          fi
+
+          # D-codemap2: this site has no custom domain, so it serves at /AI/, not root.
+          # An absolute href="/lab/..." on the hub resolves against the origin root and
+          # 404s in production even though it looks fine when the file is opened locally.
+          # Caught this the hard way (real user clicked every link, all four 404'd) --
+          # guard it here instead of trusting a local open() check again.
+          if grep -q 'href="/lab' site/index.html; then
+            echo "  FAIL site/index.html has an absolute /lab href -- breaks under the /AI/ subpath, use a relative href"
+            fail=1
+          fi
+          exit $fail
+
+      # D-poc1: feat/poc_full was branched from feat/code_Q&A and vendors its P02 scanner
+      # verbatim. That duplication is the exact thing that drifted silently before this
+      # workflow existed (docs/lab/code-qna/ vs feat/code_Q&A), so it is checked here
+      # rather than trusted. A fix to any vendored file belongs on feat/code_Q&A first and
+      # must then be copied to feat/poc_full in the same PR/session.
+      - name: Drift-check vendored files (feat/poc_full vs feat/code_Q&A)
+        run: |
+          set -uo pipefail
+          fail=0
+          # Deliberately absent from feat/poc_full (see its own D2 note): the code-qna
+          # tool's own pages/engine. worker/wrangler.toml and shared/config.js are
+          # DELIBERATELY forked between the two branches (D-poc-worker, 2026-07-30) --
+          # they carry per-deployment identity: Worker name, KV namespace id, queue name,
+          # LANGSMITH_PROJECT, and the client's default proxy URL pointing at that
+          # Worker. Everything else under worker/ and shared/, including
+          # nvidia-proxy.js itself, must still be byte-identical: the LangSmith
+          # instrumentation is entirely env-driven precisely so that stays true. The
+          # positive assertions below replace the byte-identity check for these two
+          # forked files, so excluding them here cannot silently re-hide the exact
+          # collision this step's exclusion is carved out for.
+          #
+          # D-feedback1 (2026-08-03): feedback/ dropped from this loop entirely -- it's
+          # deleted from feat/poc_full's tree (not just excluded here), unlike the
+          # wrangler.toml/config.js forks above which still exist on both sides.
+          #   WHY: confirmed feat/poc_full's own app/*.js and shared/p02-engine.js never
+          #   referenced feedback/ (not in PIPELINE_FILES, no import anywhere) -- it was
+          #   vendored at the original branch-off but P04 never actually loaded it (P03's
+          #   own p03-engine.js is the one that uses feedback/reflection_hook.py etc, and
+          #   P04 has no equivalent). feat/code_Q&A still genuinely uses it, so it's not
+          #   removed there.
+          #   COST: if P04 ever needs reflection-style feedback later, this file has to
+          #   be re-vendored from feat/code_Q&A at that point (not currently drift-checked
+          #   so it can silently go stale in the meantime -- acceptable since it doesn't
+          #   exist here to go stale FROM).
+          #   EXIT: copy feedback/ back from feat/code_Q&A and add it back to this loop.
+          for p in cognition judgment shared worker prompt_manifest.json webtool_driver.py; do
+            if diff -r -q \
+                 --exclude='__pycache__' --exclude='p03-engine.js' \
+                 --exclude='wrangler.toml' --exclude='config.js' \
+                 "src-codeqna/$p" "src-poc/$p"; then
+              echo "  SAME  $p"
+            else
+              echo "  DRIFT $p -- feat/poc_full's vendored copy no longer matches feat/code_Q&A"
+              fail=1
+            fi
+          done
+
+          # D-poc-worker: the two Workers must NOT collide on name / KV id / queue, and
+          # the two LangSmith projects must differ -- the exact bug this branch's own
+          # wrangler.toml fix was for, now permanently guarded instead of fixed once.
+          grep -q '^name = "team-iz-code-qna-proxy"' src-codeqna/worker/wrangler.toml \
+            || { echo "  FAIL code-qna's Worker name changed unexpectedly"; fail=1; }
+          grep -q '^name = "team-iz-poc-proxy"' src-poc/worker/wrangler.toml \
+            || { echo "  FAIL poc's Worker name changed unexpectedly"; fail=1; }
+          codeqna_kv=$(grep -o 'id = "[0-9a-f]*"' src-codeqna/worker/wrangler.toml | head -1)
+          poc_kv=$(grep -o 'id = "[0-9a-f]*"' src-poc/worker/wrangler.toml | head -1)
+          if [ -z "$codeqna_kv" ] || [ "$codeqna_kv" = "$poc_kv" ]; then
+            echo "  FAIL poc and code-qna share a KV namespace id (or one is missing)"
+            fail=1
+          fi
+          if grep -q 'team-iz-code-qna-jobs-queue' src-poc/worker/wrangler.toml; then
+            echo "  FAIL poc's wrangler.toml still references code-qna's queue"
+            fail=1
+          fi
+          codeqna_project=$(grep '^LANGSMITH_PROJECT' src-codeqna/worker/wrangler.toml || true)
+          poc_project=$(grep '^LANGSMITH_PROJECT' src-poc/worker/wrangler.toml || true)
+          if [ -z "$codeqna_project" ] || [ "$codeqna_project" = "$poc_project" ]; then
+            echo "  FAIL poc and code-qna share a LANGSMITH_PROJECT (or one is missing)"
+            fail=1
+          fi
+          if ! grep -q 'const DEFAULT_PROXY_URL = "https://team-iz-code-qna-proxy' src-codeqna/shared/config.js; then
+            echo "  FAIL code-qna's shared/config.js no longer defaults to its own Worker"
+            fail=1
+          fi
+          if ! grep -q 'const DEFAULT_PROXY_URL = "https://team-iz-poc-proxy' src-poc/shared/config.js; then
+            echo "  FAIL poc's shared/config.js no longer defaults to its own Worker"
+            fail=1
+          fi
+
+          if [ "$fail" -ne 0 ]; then
+            echo ""
+            echo "Fix: apply the change on feat/code_Q&A, then copy the same file(s) to"
+            echo "feat/poc_full. To fork a file on purpose, drop it from this step's list."
+          fi
+          exit $fail
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
