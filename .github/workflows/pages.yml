@@ -153,9 +153,30 @@ jobs:
           # loaded it). Its pages live one directory deep (app/) because the vendored files
           # resolve "../" against the page: p02-engine.js's REPO_RAW_BASE and
           # lab-core.js's loadManifest() both assume it. Root index.html is a redirect stub.
+          #
+          # D-poc15 (2026-08-03): four more excludes added on top of the original three.
+          #   WHY: a read-only audit found the unqualified rsync above was shipping dead
+          #   weight to the public site -- tests/ + *.test.js (never run by any CI step
+          #   here), db/migrations/ (already-applied, one-shot SQL, not runtime code), and
+          #   worker/ (channel-B Cloudflare Worker source, irrelevant to channel-A Pages).
+          #   Worse, it was also duplicating pages-hub/index.html to
+          #   site/lab/poc/pages-hub/index.html -- a second, BROKEN copy, since that page's
+          #   relative hrefs (the D-codemap2 guard below requires them relative) only
+          #   resolve correctly from the site root, where the "Generate hub index" step
+          #   below separately `cp`s the same file. From /lab/poc/pages-hub/ all four cards
+          #   404. Confirmed reproduced before this fix.
+          #   COST: none of the four excluded things are used by index.html/app/*.html at
+          #   runtime, verified against every <script src>/fetch() in this branch -- so
+          #   nothing observable changes except these bytes no longer being served. The
+          #   `cp src-poc/pages-hub/index.html site/index.html` step below reads from the
+          #   checkout, not from site/, so it is unaffected by excluding pages-hub here.
+          #   EXIT: drop any of the four --exclude flags to resume shipping that directory.
           mkdir -p site/lab/poc
           rsync -a \
             --exclude='.git' --exclude='.github' --exclude='__pycache__' \
+            --exclude='.pytest_cache' \
+            --exclude='tests' --exclude='*.test.js' \
+            --exclude='db' --exclude='worker' --exclude='pages-hub' \
             src-poc/ site/lab/poc/
 
           # codemap half (D-codemap1): just the one static demo page, not a whole tree --
