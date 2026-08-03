@@ -18,6 +18,15 @@
   .topic { border: 1px solid var(--c-border); border-radius: var(--r-md); padding: var(--sp-4); margin-bottom: var(--sp-3); }
   .topic .th { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
   .lvl { font-size: var(--fs-xs); color: var(--c-text-2); padding: 4px 0; }
+  /* D-poc13 4단계: 심층 분석(p04-1b). 새 디자인 언어를 만들지 않는다 -- .dp 안쪽에
+     들여쓴 한 덩어리로, 글자 크기·색은 바로 위 why_it_matters 줄(fs-xs / c-text-2)과 같게
+     두고 왼쪽 경계선만 추가해 "이 지점에 딸린 부가 분석"임을 위치로 표현한다. */
+  .dd { margin-top: var(--sp-3); padding-left: var(--sp-3); border-left: 2px solid var(--c-border); }
+  .dd .ddh { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); font-weight: 600; margin-bottom: var(--sp-2); }
+  .dd p { font-size: var(--fs-xs); color: var(--c-text-2); line-height: 1.7; margin-bottom: var(--sp-2); }
+  .dd .ddsec { font-size: 11px; font-weight: 600; color: var(--c-text-3); margin-top: var(--sp-2); }
+  .dd ul { margin: 4px 0 0 16px; }
+  .dd li { font-size: var(--fs-xs); color: var(--c-text-2); line-height: 1.6; }
 </style>
 </head>
 <body>
@@ -85,6 +94,17 @@
 <script src="teaches-source.js"></script>
 <script src="poc-state.js"></script>
 <script src="code-fragment.js"></script>
+<!-- D-poc13 (2026-08-03): 4단계 fan-out이 호출 직전 현재 rpm을 보고 K를 깎는다
+     (CodeCandidates.readRate -> DebugTraffic.getCurrentRate). 이 태그가 없으면
+     typeof DebugTraffic === "undefined"라 항상 "트래픽을 확인할 수 없음" 경로로 떨어져
+     동시성 1 / K<=2로만 돌았다 -- 안전하긴 하지만 설계한 조절이 아예 작동하지 않는 상태다.
+     LabConfig(config.js)와 LabLLM(llm.js)에 의존하므로 그 둘 뒤에 온다. -->
+<script src="../shared/traffic-rate.js"></script>
+<!-- D-poc13 (2026-08-03): 1~4단계(orderFilesByImportance / collectCandidates /
+     groundCandidates / rankCandidates / runFanout). code-fragment.js 다음이어야 하는 건
+     groundCandidates()/deepDiveCandidate()가 전역 CodeFragment를 기본 주입값으로 쓰기
+     때문이고, llm-stage.js(POCStage)는 runFanout이 **호출 시점에** 참조하므로 순서 무관. -->
+<script src="code-candidates.js"></script>
 <script src="question-guard.js"></script>
 <script src="llm-stage.js"></script>
 <script src="requirements.js"></script>
@@ -97,6 +117,10 @@
   const STEPS = [
     { key: "fetch", label: "코드 가져오기 · 구조 스캔" },
     { key: "doc", label: "분석 문서 작성" },
+    // D-poc13 4단계: 별도 항목으로 세운다. 최대 5회의 LLM 호출이 추가로 도는 구간이라
+    // "분석 문서 작성"의 하위 문구로 숨기면 화면이 실제 비용을 감춘다. 트래픽 여유가 없어
+    // 건너뛰면 이 항목은 그냥 다음 단계가 시작될 때 done으로 넘어간다(실패 표시 아님).
+    { key: "deep", label: "핵심 위치 심층 분석 (상위 K개 병렬, 여유 없으면 생략)" },
     { key: "req", label: "요구사항 P/F 판정" },
     { key: "topics", label: "문제 선정" },
     { key: "hints", label: "질문·힌트 생성 (레벨당 2회 힌트 고정)" },
@@ -127,6 +151,7 @@
     let key = null;
     if (msg.includes("[코드 스캔]") || msg.includes("가져오는 중")) key = "fetch";
     else if (msg.includes("분석 문서")) key = "doc";
+    else if (msg.includes("심층 분석")) key = "deep";
     else if (msg.includes("요구사항")) key = "req";
     else if (msg.includes("문제 선정") || msg.includes("문제 ") && msg.includes("확보")) key = "topics";
     else if (msg.includes("질문") || msg.includes("힌트")) key = "hints";
@@ -185,6 +210,36 @@
   }
 
   // ── 렌더 ────────────────────────────────────────────────────────────────────
+  // D-poc13 4단계: deep_dive(p04-1b)가 붙은 decision point만 이 블록이 추가로 그려진다.
+  // **없으면 빈 문자열을 돌려주고, 그 항목의 렌더는 오늘과 한 글자도 다르지 않다** --
+  // 심층 분석 실패/생략이 화면에서 "고장"으로 보이지 않아야 한다는 설계 계약
+  // (app/code-candidates.js 4단계 규칙 4)의 화면 쪽 절반이다. 그래서 실패를 알리는 문구도
+  // 여기 넣지 않는다: 실패는 진행 로그(routeProgress)에만 남는다.
+  //   비어 있는 필드는 통째로 생략한다(빈 제목만 떠 있는 상자를 만들지 않는다).
+  function deepDiveHtml(dd) {
+    if (!dd) return "";
+    const parts = [];
+    if (dd.what_it_does) parts.push(`<p>${esc(dd.what_it_does)}</p>`);
+    if (dd.why_this_way) parts.push(`<p>${esc(dd.why_this_way)}</p>`);
+    if (dd.alternatives && dd.alternatives.length) {
+      parts.push(`<div class="ddsec">다른 구현이었다면</div><ul>` + dd.alternatives
+        .map((a) => `<li><b>${esc(a.approach)}</b>${a.tradeoff ? ` — ${esc(a.tradeoff)}` : ""}</li>`)
+        .join("") + `</ul>`);
+    }
+    if (dd.failure_modes && dd.failure_modes.length) {
+      parts.push(`<div class="ddsec">깨지는 경우</div><ul>` + dd.failure_modes
+        .map((f) => `<li>${esc(f)}</li>`).join("") + `</ul>`);
+    }
+    if (!parts.length) return "";
+    // ref/rank는 "이 심층 분석이 정확히 어느 줄을 보고 나온 것인가"를 화면에서도 확인할 수
+    // 있게 하는 근거 표기다(D-poc6/D-poc10). 위 .ref 줄과 같은 mono/badge 어휘를 그대로 쓴다.
+    const meta = [dd.ref ? esc(dd.ref) : null, dd.rank ? `랭크 ${dd.rank}` : null]
+      .filter(Boolean).join(" · ");
+    return `<div class="dd"><div class="ddh">심층 분석
+      ${meta ? `<span class="badge mute mono" style="font-weight:400">${meta}</span>` : ""}</div>
+      ${parts.join("")}</div>`;
+  }
+
   function renderResults(analysis) {
     $("doc-overview").textContent = analysis.analysisDoc.overview || "";
     $("doc-decision-points").innerHTML = (analysis.decisionPoints || []).map((dp) => {
@@ -194,7 +249,7 @@
       return `<div class="dp"><div class="th"><b>${esc(dp.title || "")}</b> ${badge}</div>
         <div class="ref">${esc(ref)}</div>
         <div style="font-size:var(--fs-xs);color:var(--c-text-2);margin-top:4px">${esc(dp.why_it_matters || "")}</div>
-        ${body}</div>`;
+        ${body}${deepDiveHtml(dp.deep_dive)}</div>`;
     }).join("") || `<div class="fwarn">근거 있는 decision point가 없습니다.</div>`;
 
     const reqEl = $("req-results");

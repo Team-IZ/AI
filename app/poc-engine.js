@@ -42,6 +42,31 @@ const POCEngine = (() => {
     return fetched.files;
   }
 
+  /**
+   * 분석 문서를 다른 스테이지의 프롬프트에 넣을 때 쓰는 형태. deep_dive(p04-1b 산출물)를
+   * 떼어낸다.
+   *
+   * D-poc13 (2026-08-03): p04-3(문제 선정)과 p04-6(보고서)은 analysisDoc을 통째로
+   * JSON.stringify한 뒤 앞에서부터 8000/6000자로 자른다. 4단계 fan-out이 붙인 deep_dive는
+   * decision_point 하나당 수백~천 자라, 그대로 두면 뒤쪽 decision_points가 **잘려서 사라진다** --
+   * 심층 분석을 켠 대가로 문제 선정이 보는 후보가 줄어드는 조용한 회귀다.
+   *   WHY 그냥 truncation 예산을 늘리지 않는가: 그건 두 스테이지의 입력 크기와 비용을
+   *   같이 늘리는 결정이고, 여기서 필요한 건 "새 기능이 기존 입력을 밀어내지 않는 것"뿐이다.
+   *   이 함수를 거치면 두 스테이지가 보는 문자열은 fan-out 이전과 **바이트 단위로 동일**하다.
+   *   COST: p04-3/p04-6은 심층 분석 내용을 못 본다 -- 더 나은 문제를 고를 수도 있었을 정보를
+   *   안 주는 셈이다. 그 이득은 미측정이고, 잘림으로 인한 손실은 확실하다. 확실한 손실부터 막는다.
+   *   EXIT: 심층 분석을 문제 선정에 반영하고 싶어지면, deep_dive를 통째로 넘기는 대신
+   *   decision_point마다 한 줄로 요약해 넣고(예산 통제) 그때 truncation 값을 재산정한다.
+   *   deep_dive는 analysisDoc 자체에는 그대로 남아 화면·저장·보고서 렌더에 쓰인다.
+   */
+  function analysisDocForPrompt(analysisDoc) {
+    if (!analysisDoc || !Array.isArray(analysisDoc.decision_points)) return analysisDoc;
+    return {
+      ...analysisDoc,
+      decision_points: analysisDoc.decision_points.map(({ deep_dive, ...rest }) => rest),
+    };
+  }
+
   function findingsBlockFor(findings) {
     const text = JSON.stringify(findings, null, 0);
     return text.length > 6000 ? text.slice(0, 6000) + `\n...(총 ${findings.length}건 중 일부만 표시)` : text;
@@ -76,19 +101,52 @@ const POCEngine = (() => {
     const findingsBlock = findingsBlockFor(findings);
 
     // ── p04-1: 분석 문서 ────────────────────────────────────────────────────
-    // D-poc13 (2026-07-31, 설계): 아래 buildCodeBlock은 파일을 **알파벳순**으로 12,000자
-    // 예산에 채운다 -- 중요도 신호가 0이라 알파벳으로 늦은 핵심 파일이 잘린다. 대안 설계와
-    // 프로토타입은 app/code-candidates.js에 있다(후보 식별 -> grounding -> 랭킹 -> 상위 K개
-    // 병렬 심층분석). **아직 배선하지 않았다** -- 승인 시 이 줄에 order 하나를 넘기는 것부터가
-    // 가장 싼 첫 단계다:
-    //   order: CodeCandidates.orderFilesByImportance(files, (p02Result.scan.tier_a_structural || {}).fan_in)
-    // (analysis.html에 code-candidates.js <script> 추가 필요. 그 전까지 동작은 오늘 그대로.)
+    // D-poc13 (2026-08-03, 1단계 배선 완료): buildCodeBlock이 이제 fan_in 내림차순으로
+    // 12,000자 예산을 채운다 -- 알파벳으로 늦은 핵심 파일이 알파벳으로 이른 사소한 파일에
+    // 밀려 잘리던 문제(D-poc13 원 설계 문서 참고)를 새 LLM 호출 0개로 해결한다. fan_in이
+    // 없으면(Swift 등 구조 스캔 불가, orderFilesByImportance 자체 안전장치) 알파벳순으로
+    // 안전하게 떨어진다 -- 동작이 오늘과 완전히 같아지는 폴백이지 에러 경로가 아니다.
+    //   COST: fan_in은 basename 키라 동명 파일이 합산된다(cognition/two_tier_scan.py의 같은
+    //   경고) -- 정렬 순서만 바뀌고 포함 여부 판정 로직(buildCodeBlock 자체)은 그대로라
+    //   최악이라도 "오늘과 다른 순서로 같은 예산을 채움"이다.
+    //   EXIT: fan_in 순서가 알파벳순보다 나쁘다고 관측되면 order 인자 이 한 줄만 지운다.
     hooks.onProgress("코드 분석 문서 작성 중...");
     const docStage = POCStage.getStage("p04-1");
-    const docCodeBlock = CodeFragment.buildCodeBlock(files, { maxChars: docStage.truncation.code_block });
+    const fanIn = (p02Result.scan && p02Result.scan.tier_a_structural || {}).fan_in;
+    const docCodeBlock = CodeFragment.buildCodeBlock(files, {
+      maxChars: docStage.truncation.code_block,
+      order: CodeCandidates.orderFilesByImportance(files, fanIn),
+    });
     const analysisDoc = await POCStage.call("p04-1", {
       teaches_block: teachesBlock, findings_block: findingsBlock, code_block: docCodeBlock,
     }, { model, onProgress: hooks.onProgress });
+
+    // ── p04-1b: 상위 K개 위치 심층 분석 (1~4단계 fan-out) ────────────────────
+    // D-poc13 (2026-08-03, 4단계 배선 완료): p04-1은 코드베이스 전체를 예산 안에서 한 번
+    // 얕게 본다. 그 짝으로, 후보 식별 -> grounding -> 랭킹을 거쳐 고른 상위 K개(K<=5) 위치
+    // 각각을 p04-1b가 병렬로 한 곳씩 깊게 본다. 세 단계 전부 app/code-candidates.js에 있고
+    // 여기서는 runFanout() 한 번만 부른다(그 파일 §4 설계 규칙 그대로).
+    //   WHY try/catch로 통째로 감싸는가: 이 블록은 **부가 정보**다. 후보 수집·랭킹·트래픽
+    //   조회 중 어디가 예상 밖으로 터지더라도 2단계 전체(요구사항 P/F, 문제 선정, 질문 생성)를
+    //   같이 죽여서는 안 된다. 개별 p04-1b 실패는 이미 runFanout 안에서 정상 경로로 처리되고
+    //   (allSettled), 여기 catch는 그 바깥의 예상 밖 예외만 받는다.
+    //   COST: 성공 시 제출물당 LLM 호출이 최대 K개(=3, 상한 5) 늘어난다. 워커가 제출 1건당
+    //   최대 3회 재시도하므로 실제 NVIDIA 요청은 최대 3K회이고, 그래서 runFanout이 호출 직전
+    //   현재 rpm을 보고 K를 깎는다(재시도를 늘리는 게 아니라 K를 줄이는 방향 -- P03 D181과
+    //   반대인 이유는 code-candidates.js 4단계 설계 규칙 3에 있다).
+    //   신뢰성 계약: 실패하거나 K=0으로 깎이면 decision_points에 deep_dive 키가 아예 안 붙고,
+    //   화면은 오늘과 정확히 같다(근거 코드 파편 + why_it_matters 한 줄).
+    let fanout = null;
+    try {
+      fanout = await CodeCandidates.runFanout({
+        analysisDoc, files, findings, fanIn,
+        teachIds: setup.teaches.map((t) => t.id),
+        model, k: 3, onProgress: hooks.onProgress,
+      });
+      if (fanout) analysisDoc.decision_points = fanout.decision_points;
+    } catch (e) {
+      hooks.onProgress(`⚠ 핵심 위치 심층 분석 단계를 건너뜁니다(분석 문서는 그대로 유지): ${e.message}`);
+    }
 
     // decision_points는 모델이 스스로 지목한 {file,symbol}다(D-poc10 -- 줄 번호는 LLM이
     // 세지 않고 우리가 심볼 문자열로 찾아 산정한다) -- 실제 파일과 대조해 검증하고,
@@ -110,7 +168,7 @@ const POCEngine = (() => {
     const questionCount = POCScoring.thresholds.questionsPerSubmission;
     const topicsRaw = await POCStage.call("p04-3", {
       teaches_block: teachesBlock,
-      analysis_block: JSON.stringify(analysisDoc).slice(0, 8000),
+      analysis_block: JSON.stringify(analysisDocForPrompt(analysisDoc)).slice(0, 8000),
       findings_block: findingsBlock,
       question_count: questionCount,
     }, { model, onProgress: hooks.onProgress });
@@ -461,7 +519,7 @@ const POCEngine = (() => {
     const teachesBlock = TeachesSource.formatTeachesBlock(setup.teaches);
     const transcriptStage = POCStage.getStage("p04-6");
     const transcriptBlock = formatTranscriptBlock(session).slice(0, transcriptStage.truncation.transcript_block);
-    const analysisBlock = JSON.stringify(analysis.analysisDoc).slice(0, transcriptStage.truncation.analysis_block);
+    const analysisBlock = JSON.stringify(analysisDocForPrompt(analysis.analysisDoc)).slice(0, transcriptStage.truncation.analysis_block);
     const requirementsBlock = formatRequirementsBlock(analysis.requirementsResult);
 
     hooks.onProgress("보고서 작성 중...");

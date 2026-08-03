@@ -1,6 +1,6 @@
 {
-  "manifest_version": "p04-0.2.0",
-  "generated_from_commit_note": "P04 통합 PoC (교안 teaches -> 제출 -> 코드분석 -> 문답 -> 보고서). 채점 임계값/루브릭은 이 파일이 아니라 app/scoring-config.js가 단일 소스(D3) -- 채점 프롬프트의 {rubric_block}은 실행 시 POCScoring.buildRubricBlock()이 주입한다. 0.2.0(2026-07-30): D4 개정 -- 힌트를 p04-4에서 분리해 p04-7(답변 피드백 기반)로. 프롬프트만 고치면 힌트 문구/강도가 바뀌도록 이 파일이 유일한 소스.",
+  "manifest_version": "p04-0.3.0",
+  "generated_from_commit_note": "P04 통합 PoC (교안 teaches -> 제출 -> 코드분석 -> 문답 -> 보고서). 채점 임계값/루브릭은 이 파일이 아니라 app/scoring-config.js가 단일 소스(D3) -- 채점 프롬프트의 {rubric_block}은 실행 시 POCScoring.buildRubricBlock()이 주입한다. 0.2.0(2026-07-30): D4 개정 -- 힌트를 p04-4에서 분리해 p04-7(답변 피드백 기반)로. 0.3.0(2026-08-03): D-poc13 4단계 배선 -- p04-1b(핵심 위치 심층 분석) 추가. p04-1이 전체를 한 번 얕게 보고, 랭킹 상위 K개(<=5)에 대해 p04-1b가 한 곳씩 병렬로 깊게 본다. 실패하거나 트래픽 여유가 없어 K=0이 되면 p04-1까지의 결과가 그대로 남는다(설계 계약: 최악 = 오늘의 출력). 프롬프트만 고치면 힌트 문구/강도가 바뀌도록 이 파일이 유일한 소스.",
   "pipelines": {
     "p04": {
       "label": "P04 통합 검증 PoC",
@@ -19,6 +19,22 @@
           "params": [
             { "key": "max_tokens", "type": "int", "default": 2400 },
             { "key": "temperature", "type": "float", "default": 0.0, "locked": true, "note": "재현성 요구 -- 같은 제출물은 같은 분석 문서가 나와야 비교가 가능하다" }
+          ]
+        },
+        {
+          "id": "p04-1b",
+          "title": "핵심 위치 심층 분석",
+          "kind": "prompt",
+          "function": "CodeCandidates.deepDiveCandidate()",
+          "system": "You analyze ONE specific location in a student's submitted code for an oral code-ownership assessment. Output strict JSON only. You are given only that location's fragment -- ground every statement in it, and say plainly when the fragment alone does not settle a question instead of guessing about the rest of the codebase.",
+          "system_note": "D-poc13 4단계(2026-08-03 배선): p04-1이 코드베이스 전체를 한 번에 얕게 보는 것과 짝을 이루는 반대편이다 -- 여기서는 코드 **한 곳**만 본다. 1~3단계(collectCandidates/groundCandidates/rankCandidates)가 고른 상위 K개(K<=5, app/code-candidates.js의 FANOUT_MAX_K)에 대해 병렬로 이 스테이지를 호출한다. code_block은 LLM이 인용한 문자열이 아니라 locateSymbol이 산정한 줄 범위에서 우리가 직접 떼어낸 실제 파편이다(D-poc10) -- 그래서 이 프롬프트는 '코드를 찾아라'가 아니라 '이 코드를 읽어라'만 시킨다. 질문 문장은 여기서 만들지 않는다: 세부질문은 p04-4가 question-guard(선택지 금지 검사)와 함께 생성하는데, 여기서 질문을 만들면 그 검사를 우회한 질문이 화면에 새어 나간다.",
+          "user_template": "아래는 학생 코드에서 이해도 검증에 쓸 만하다고 지목된 지점 하나다. 이 지점 하나만 깊게 읽어라.\n\n## 지목된 지점\n{title}\n\n## 왜 이 지점이 지목되었는가 (앞 단계의 분석)\n{why_it_matters}\n\n## 근거 코드 ({code_ref})\n{code_block}\n\n다음 JSON만 반환하라:\n{{\n  \"what_it_does\": \"이 코드가 실제로 하는 일 2-3문장. 이름이 아니라 동작으로 서술하라\",\n  \"why_this_way\": \"이렇게 구현했을 때 따라오는 결과 2-3문장 (무엇을 얻고 무엇을 포기했는지)\",\n  \"alternatives\": [{{\"approach\": \"같은 목적을 달성하는 다른 구현\", \"tradeoff\": \"그 대신 무엇이 나빠지는지\"}}],\n  \"failure_modes\": [\"이 코드가 실제로 깨지는 입력·상태·순서를 구체적으로\"]\n}}\n\n규칙:\n- 위 근거 코드에 실제로 보이는 것만 근거로 삼아라. 이 파편 밖의 함수·파일·설정을 지어내지 마라.\n- 파편만으로 판단할 수 없는 것은 그렇게 적어라(예: \"이 파편에는 호출부가 없어 확인 불가\"). 추측으로 채우지 마라.\n- alternatives는 1-3개, failure_modes는 1-4개. 일반론(\"에러 처리를 하면 좋다\") 금지 -- 이 코드에서만 성립하는 이야기만.\n- 학생에게 물을 질문 문장은 만들지 마라. 여기서는 분석만 한다.",
+          "required_placeholders": ["code_ref", "code_block"],
+          "optional_placeholders": ["title", "why_it_matters"],
+          "truncation": { "code_block": 4000 },
+          "params": [
+            { "key": "max_tokens", "type": "int", "default": 1200, "note": "코드 한 곳 + 4개 필드짜리 구조화 출력이라 p04-5(답변 채점 1건, 1200)와 같은 규모다 -- 제출물당 최대 5회 도는 스테이지이므로 이 파일의 단일 목적 스테이지 대역(1200~1800) 중 아래끝을 쓴다" },
+            { "key": "temperature", "type": "float", "default": 0.0, "locked": true, "note": "p04-1과 같은 재현성 요구 -- 이 출력은 분석 문서의 일부로 저장되고 학생 간 비교의 근거가 된다. p04-7이 0.2인 것은 학생 답변에 반응하는 힌트라 완전 재현성 요구가 없기 때문이고, 이 스테이지는 답변을 보지 않으므로 그 예외에 해당하지 않는다" }
           ]
         },
         {

@@ -129,7 +129,7 @@
 //     "실제 제출물 20건에서 top-3 후보가 사람이 고른 top-3과 얼마나 겹치는가(Precision@3)"를
 //     한 번이라도 측정했을 때. 그 전까지 가중치를 감으로 바꾸지 말 것.
 //
-// ── 4단계: 병렬 fan-out -- **설계만. 이 커밋에서 구현/배선하지 않는다** ──────────────
+// ── 4단계: 병렬 fan-out -- **2026-08-03 구현/배선 완료** (아래 설계 그대로) ──────────
 //   구조: 상위 K개 각각에 대해 "이 위치 하나만" 파고드는 LLM 호출(가칭 p04-1b) ->
 //   Promise.allSettled로 회수 -> 성공분만 analysisDoc.decision_points[i].deep_dive에 병합.
 //   WHY 굳이 병렬인가: 순차면 K개 × (관측된 꼬리 지연)이 그대로 벽시계에 더해진다. 이 세션에서
@@ -221,12 +221,18 @@
 //   EXIT: fan_in 순서가 알파벳보다 낫다는 게 실측되면 poc-engine.js:81의 호출부에 order를
 //      넘기는 한 줄만 바꾸면 된다. 나빠지면 그 한 줄을 되돌린다.
 //
-// ── 이 파일의 현재 상태 ────────────────────────────────────────────────────────────
-//   구현됨(순수 로직, LLM 호출 0, 어디에도 배선 안 됨): collectCandidates / groundCandidates /
-//     rankCandidates / selectTopK / orderFilesByImportance / resolveFanoutPlan.
-//   설계만: 4단계의 실제 호출부(p04-1b 프롬프트, poc-engine.js 배선, analysis.html 렌더).
-//     resolveFanoutPlan()은 "몇 개를 몇 병렬로 쏠지"를 계산만 하고 아무것도 호출하지 않는다 --
-//     fan-out에서 가장 비싸고 되돌리기 어려운 건 호출 그 자체이므로, 승인 전까지는 예산 계산까지만 둔다.
+// ── 이 파일의 현재 상태 (2026-08-03: 1~4단계 전부 배선됨) ──────────────────────────
+//   순수 로직(LLM 호출 0): collectCandidates / groundCandidates / rankCandidates /
+//     selectTopK / orderFilesByImportance / resolveFanoutPlan / mergeDeepDives /
+//     runWithConcurrency(호출은 주입된 worker가 한다) / normalizeDeepDive.
+//   부수효과 있음(주입 가능한 opts.call을 통해서만 -- 기본값은 전역 POCStage.call):
+//     deepDiveCandidate / runFanout.
+//   배선된 곳: app/poc-engine.js runAnalysisStage()가 p04-1 직후 runFanout()을 한 번 부른다.
+//     프롬프트는 app/prompt_manifest.json의 p04-1b, 렌더는 app/analysis.html의
+//     deepDiveHtml()(#doc-decision-points).
+//   되돌리는 법(EXIT): poc-engine.js의 runFanout() 블록 하나를 지우면 p04-1b 호출이 사라지고
+//     화면은 오늘의 렌더로 돌아간다 -- deep_dive 필드가 없으면 렌더러가 아무것도 그리지 않으므로
+//     analysis.html/매니페스트는 손대지 않아도 된다.
 const CodeCandidates = (() => {
   // ── 3단계 가중치 ─────────────────────────────────────────────────────────────
   // 전부 1.0에서 시작하는 unmeasured/provisional 값이다. judgment/rank_weights/
@@ -319,16 +325,26 @@ const CodeCandidates = (() => {
     const out = [];
     const teachSet = teachIds instanceof Set ? teachIds : new Set(teachIds || []);
 
-    for (const dp of (analysisDoc && Array.isArray(analysisDoc.decision_points) ? analysisDoc.decision_points : [])) {
+    const dps = analysisDoc && Array.isArray(analysisDoc.decision_points) ? analysisDoc.decision_points : [];
+    dps.forEach((dp, dpIndex) => {
       out.push({
         source: "llm",
         file: dp.file,
         symbol: dp.symbol || null,
         title: dp.title || "",
         why: dp.why_it_matters || "",
-        meta: { related_teach: dp.related_teach || null, teach_linked: !!(dp.related_teach && teachSet.has(dp.related_teach)) },
+        // dp_index: 이 후보가 analysisDoc.decision_points의 몇 번째에서 왔는지. 4단계에서
+        // 심층 분석 결과를 **원래 그 항목에** 되돌려 붙이기 위한 유일한 연결고리다
+        // (mergeByLocation이 여러 소스를 하나로 합쳐도 meta 병합으로 살아남는다).
+        // 파일/줄로 역추적하지 않는 이유: 같은 파일 같은 줄을 두 decision_point가 지목하면
+        // 역추적은 어느 쪽인지 못 고르지만, 인덱스는 애초에 모호하지 않다.
+        meta: {
+          dp_index: dpIndex,
+          related_teach: dp.related_teach || null,
+          teach_linked: !!(dp.related_teach && teachSet.has(dp.related_teach)),
+        },
       });
-    }
+    });
 
     for (const f of (Array.isArray(findings) ? findings : [])) {
       if (!f.file) continue; // repeated-pattern처럼 단일 파일에 귀속되지 않는 finding (D76)
@@ -591,9 +607,246 @@ const CodeCandidates = (() => {
     };
   }
 
+  // ── 4단계 실행부 (2026-08-03 배선) ────────────────────────────────────────────
+  // 위 resolveFanoutPlan이 "몇 개를 몇 병렬로"만 계산하는 순수 함수인 것과 달리, 아래
+  // 네 함수는 실제로 LLM을 호출한다 -- 이 파일에서 처음으로 부수효과가 있는 코드다.
+  //   WHY 그래도 이 파일인가: 1~3단계(후보 -> grounding -> 랭킹)가 여기 있고, fan-out은
+  //   그 결과를 소비하는 마지막 마디다. poc-engine.js에 두면 파이프라인이 두 파일로 쪼개지고,
+  //   더 나쁘게는 poc-engine.js가 node --test로 불러올 수 없는 파일이라(브라우저 전역 12개에
+  //   의존) 이 세 조각의 순수 로직을 테스트할 수단이 사라진다.
+  //   WHY 주입(opts.call/opts.extract/opts.getRate)인가: groundCandidates가 이미 opts.locate로
+  //   쓰고 있는 그 관례 그대로다. 기본값은 브라우저 전역(POCStage/CodeFragment/DebugTraffic),
+  //   테스트에서는 목을 넣는다 -- 테스트가 네트워크를 건드리지 않는 유일한 이유다.
+
+  /**
+   * 동시 실행 수를 limit으로 묶어 worker를 돌린다. 라이브러리 없이 레인(lane) N개가 공용
+   * 커서를 당겨가는 방식 -- 배열 청크 분할과 달리 느린 항목이 자기 레인만 붙잡고, 다른
+   * 레인은 계속 다음 항목으로 넘어간다(관측 지연이 2s~92s로 흔들리는 환경에서 중요).
+   *
+   * 반환은 **입력과 인덱스가 정렬된** Promise.allSettled 형태다. Promise.all이 아닌 이유는
+   * 파일 헤더 4단계 설계 규칙 4 -- 하나가 reject되면 나머지 성공분까지 버려진다.
+   * 레인 자체도 allSettled로 회수한다(레인 함수가 통제 밖 이유로 깨져도 다른 레인의 성과가
+   * 사라지지 않게 하는 이중 안전장치).
+   */
+  async function runWithConcurrency(items, limit, worker) {
+    const list = Array.isArray(items) ? items : [];
+    const results = new Array(list.length);
+    if (!list.length) return results;
+    const width = Math.max(1, Math.min(Number(limit) || 1, list.length));
+    let cursor = 0;
+    async function lane() {
+      for (;;) {
+        const i = cursor++;
+        if (i >= list.length) return;
+        try {
+          results[i] = { status: "fulfilled", value: await worker(list[i], i) };
+        } catch (e) {
+          results[i] = { status: "rejected", reason: e };
+        }
+      }
+    }
+    await Promise.allSettled(Array.from({ length: width }, () => lane()));
+    for (let i = 0; i < list.length; i++) {
+      if (!results[i]) {
+        results[i] = { status: "rejected", reason: new Error("실행되지 않음(레인이 조기 종료됨)") };
+      }
+    }
+    return results;
+  }
+
+  // p04-1b 응답의 형태를 여기서 확정한다. LLM이 필드를 빼먹거나 문자열 대신 객체를 주는
+  // 경우가 실제로 있고, 렌더러(analysis.html)가 그걸 방어하게 두면 방어 코드가 화면 쪽에
+  // 흩어진다 -- 경계에서 한 번만 정규화한다.
+  //   내용이 통째로 비면 **throw한다**: 성공으로 취급해 빈 "심층 분석" 상자를 화면에 띄우는
+  //   것보다, 실패로 떨어뜨려 오늘과 똑같은 렌더(파편 + why_it_matters 한 줄)로 내려가는 게
+  //   이 설계의 신뢰성 계약에 맞다(파일 헤더 4단계 규칙 4).
+  function normalizeDeepDive(data, fragment, candidate) {
+    const d = data || {};
+    const str = (v) => String(v === undefined || v === null ? "" : v).trim();
+    const dive = {
+      what_it_does: str(d.what_it_does),
+      why_this_way: str(d.why_this_way),
+      alternatives: (Array.isArray(d.alternatives) ? d.alternatives : [])
+        .map((a) => ({ approach: str(a && a.approach), tradeoff: str(a && a.tradeoff) }))
+        .filter((a) => a.approach)
+        .slice(0, 3),
+      failure_modes: (Array.isArray(d.failure_modes) ? d.failure_modes : [])
+        .map(str).filter(Boolean).slice(0, 4),
+      // 근거 추적용 -- 이 심층 분석이 정확히 어느 줄을 보고 나온 것인지를 결과에 박아둔다
+      // (D-poc6/D-poc10: 화면에 보이는 근거와 LLM이 실제로 본 것이 어긋나면 안 된다).
+      ref: fragment && fragment.lines ? `${fragment.file}:${fragment.lines[0]}-${fragment.lines[1]}` : null,
+      rank: candidate && candidate.rank !== undefined ? candidate.rank : null,
+      rank_score: candidate && candidate.rank_score !== undefined ? candidate.rank_score : null,
+      ground_confidence: candidate ? (candidate.confidence || 0) : null,
+    };
+    if (!dive.what_it_does && !dive.why_this_way && !dive.alternatives.length && !dive.failure_modes.length) {
+      throw new Error("p04-1b 응답에 내용이 없음");
+    }
+    return dive;
+  }
+
+  /**
+   * 후보 하나에 대한 p04-1b 호출 1회. 실패하면 던진다 -- 삼키지 않는 이유는
+   * runWithConcurrency가 이미 rejected로 회수해 주고, 그 실패가 "이 항목은 오늘 수준으로
+   * 렌더"라는 정상 경로이기 때문이다.
+   * @param {object} candidate  rankCandidates/selectTopK를 통과한 grounded 후보
+   * @param {object} opts  {files, model, onProgress, call, extract}
+   */
+  async function deepDiveCandidate(candidate, opts = {}) {
+    const files = opts.files || {};
+    const extract = opts.extract
+      || (typeof CodeFragment !== "undefined" ? CodeFragment.extractFragment : null);
+    // .bind: 오늘의 POCStage.call은 클로저(getStage)만 쓰므로 떼어내도 동작하지만, 그게
+    // 우연히 성립하는 사실이라 기대지 않는다. 이 계열 실수는 조용히 나타난다 -- fan-out은
+    // 실패해도 "오늘의 출력"으로 degrade하도록 설계돼 있어서, 배선이 통째로 깨져도 화면은
+    // 멀쩡해 보이고 진행 로그의 ⚠ 한 줄만 남는다(E2E 시뮬레이션에서 실제로 이 모습을 봤다).
+    const call = opts.call
+      || (typeof POCStage !== "undefined" ? POCStage.call.bind(POCStage) : null);
+    if (!extract) throw new Error("deepDiveCandidate: CodeFragment를 찾을 수 없음 (code-fragment.js 로드 필요)");
+    if (!call) throw new Error("deepDiveCandidate: POCStage를 찾을 수 없음 (llm-stage.js 로드 필요)");
+
+    const file = candidate.fileResolved || candidate.file;
+    // 2단계에서 이미 산정된 줄 범위를 그대로 쓴다(extractFragment의 lines 경로 --
+    // code-fragment.js:104가 말하는 "이미 산정된(추측 아닌) lines를 직접 넘기는 내부 호출").
+    // symbol로 다시 찾게 두면 같은 문자열을 두 번 탐색하는 셈이고, 그 사이 두 번째 탐색이
+    // 첫 번째와 다른 줄을 고를 여지(ambiguous 후보)가 생긴다 -- 화면 근거와 LLM이 본 코드가
+    // 어긋나는 정확히 그 사고다.
+    const ref = candidate.located
+      ? { file, lines: candidate.located.lines }
+      : { file, symbol: candidate.symbol };
+    const fragment = extract(files, ref);
+    if (!fragment || !fragment.valid) {
+      throw new Error(`코드 파편을 만들 수 없음: ${(fragment && fragment.reason) || "이유 불명"}`);
+    }
+
+    const data = await call("p04-1b", {
+      code_ref: `${fragment.file}:${fragment.lines[0]}-${fragment.lines[1]}`,
+      code_block: fragment.text,
+      title: candidate.title || "(제목 없음)",
+      // p04-1이 why_it_matters를 비워 보내는 경우가 있다. 빈 문자열은 POCStage.call의
+      // 필수값 검사에 걸리므로(그래서 매니페스트에서 optional로 뒀다) 여기서 채운다 --
+      // 프롬프트에 빈 칸이 남는 것보다 "설명 없음"이라고 명시하는 편이 낫다.
+      why_it_matters: candidate.why || "(앞 단계 분석에 설명 없음 -- 코드만 보고 판단하라)",
+    }, { model: opts.model, onProgress: opts.onProgress });
+
+    return normalizeDeepDive(data, fragment, candidate);
+  }
+
+  /**
+   * 심층 분석 결과를 원래 decision_points에 되돌려 붙인다. **순수 함수** -- 입력 배열을
+   * 건드리지 않고 새 배열을 만든다(엔진이 실패 시 원본으로 되돌릴 수 있어야 한다).
+   *
+   * 실패/미실행 항목에는 deep_dive 키를 **아예 만들지 않는다**. undefined/null을 넣으면
+   * 렌더러가 "있는데 비었음"과 "없음"을 구분해야 하고, JSON 직렬화 결과도 오늘과 달라진다.
+   *
+   * @param {Array} decisionPoints  analysisDoc.decision_points
+   * @param {Array} picked          selectTopK 결과 (meta.dp_index를 들고 있어야 한다)
+   * @param {Array} settled         runWithConcurrency 결과 (picked과 인덱스 정렬)
+   * @returns {{decision_points:Array, attached:number, failed:Array, unattached:Array}}
+   */
+  function mergeDeepDives(decisionPoints, picked, settled) {
+    const out = (Array.isArray(decisionPoints) ? decisionPoints : []).map((dp) => ({ ...dp }));
+    const failed = [];
+    const unattached = [];
+    let attached = 0;
+
+    (Array.isArray(picked) ? picked : []).forEach((c, i) => {
+      const r = (settled || [])[i];
+      const label = c.title || `${c.fileResolved || c.file}`;
+      if (!r || r.status !== "fulfilled" || !r.value) {
+        const reason = r && r.reason ? (r.reason.message || String(r.reason)) : "결과 없음";
+        failed.push({ label, reason });
+        return;
+      }
+      const idx = c.meta && Number.isInteger(c.meta.dp_index) ? c.meta.dp_index : -1;
+      if (idx < 0 || idx >= out.length) {
+        // 여기 오는 건 decision_point가 아닌 소스(structural/finding)에서만 온 후보다.
+        // 지금은 fan-out 대상에서 미리 걸러지므로(runFanout의 dp 연결 필터) 실제로는
+        // 도달하지 않지만, 그 필터가 나중에 완화돼도 조용히 엉뚱한 항목에 붙는 일은 없게 둔다.
+        unattached.push({ label, reason: "연결할 decision_point 없음" });
+        return;
+      }
+      out[idx] = { ...out[idx], deep_dive: r.value };
+      attached++;
+    });
+
+    return { decision_points: out, attached, failed, unattached };
+  }
+
+  // 트래픽 조회는 실패해도 fan-out을 막지 않는다 -- 못 읽으면 null을 주고,
+  // resolveFanoutPlan이 이미 "낙관하지 않고 동시성 1"로 떨어뜨린다.
+  async function readRate(opts = {}) {
+    const getRate = opts.getRate
+      || (typeof DebugTraffic !== "undefined" ? DebugTraffic.getCurrentRate : null);
+    if (!getRate) return null;
+    try { return await getRate(); } catch (_) { return null; }
+  }
+
+  /**
+   * 1~4단계를 한 번에 돈다. 이 함수 하나가 poc-engine.js에서 부르는 유일한 진입점이다.
+   *
+   * 실패 정책: 개별 p04-1b 실패는 정상 경로(해당 항목만 오늘 수준으로 렌더). 계획 단계에서
+   * K=0으로 깎이면 호출 자체를 건너뛴다. 어느 경우에도 decision_points는 유효한 배열로
+   * 돌아오므로, 호출부는 반환값을 그대로 쓰면 된다.
+   *
+   * @param {object} input {analysisDoc, files, findings, fanIn, teachIds, model, k, onProgress}
+   * @param {object} opts  주입구 {call, locate, extract, getRate} -- 테스트/재사용용
+   */
+  async function runFanout(input = {}, opts = {}) {
+    const { analysisDoc, files = {}, findings, fanIn, teachIds, model, k = 3, onProgress } = input;
+    const log = typeof onProgress === "function" ? onProgress : () => {};
+    const dps = analysisDoc && Array.isArray(analysisDoc.decision_points) ? analysisDoc.decision_points : [];
+    const skip = (reason) => ({
+      decision_points: dps.map((dp) => ({ ...dp })),
+      attached: 0, failed: [], unattached: [], picked: [], ranked: [], plan: null, skipped: reason,
+    });
+    if (!dps.length) return skip("decision_points 없음");
+
+    const candidates = collectCandidates({ analysisDoc, findings, fanIn, files, teachIds });
+    const ranked = rankCandidates(groundCandidates(files, candidates, opts), { fanIn });
+
+    // fan-out 대상은 decision_point에 연결된 후보로 한정한다.
+    //   WHY: 심층 분석 결과가 갈 자리(decision_points[i].deep_dive)가 있는 후보만 태운다는
+    //   뜻이다. structural/finding 단독 후보는 붙일 자리가 없어 호출값을 버리게 된다 --
+    //   실패해도 되는 호출이 아니라 **애초에 하면 안 되는 호출**이다(예산이 유한하다).
+    //   그렇다고 하이브리드 랭킹이 장식이 되는 것은 아니다: 같은 위치를 구조/finding 신호가
+    //   함께 지목하면 mergeByLocation이 그 후보를 하나로 합쳐 dp_index를 유지한 채
+    //   agreement/fan_in 항으로 **순위를 올린다**. 즉 세 신호는 "어느 decision_point에
+    //   비싼 심층 분석을 쓸 것인가"를 고르는 데 그대로 쓰인다.
+    //   EXIT: LLM이 놓친 위치까지 심층 분석하고 싶어지면, 그 후보를 decision_points에
+    //   append하고(origin 표시) 그 인덱스를 dp_index로 넣어주면 이 필터가 자동으로 통과된다.
+    //   지금 안 하는 이유는 p04-3/p04-6이 analysisDoc을 통째로 stringify해 잘라 쓰기 때문에
+    //   decision_points 개수를 늘리는 것이 그쪽 입력을 조용히 밀어내기 때문이다.
+    const eligible = ranked.filter((c) => c.grounded && c.meta && Number.isInteger(c.meta.dp_index));
+    if (!eligible.length) return { ...skip("grounding된 decision_point 후보 없음"), ranked };
+
+    const plan = resolveFanoutPlan(await readRate(opts), { k });
+    if (plan.k <= 0) {
+      log(`심층 분석 생략 -- ${plan.reason}`);
+      return { ...skip(plan.reason), ranked, plan };
+    }
+
+    const picked = selectTopK(eligible, { k: plan.k });
+    if (!picked.length) return { ...skip("선정된 후보 없음"), ranked, plan };
+
+    log(`핵심 위치 심층 분석 ${picked.length}곳 (동시 ${plan.concurrency}개) -- ${plan.reason}`);
+    const settled = await runWithConcurrency(picked, plan.concurrency, (c) =>
+      deepDiveCandidate(c, { files, model, onProgress, call: opts.call, extract: opts.extract }));
+
+    const merged = mergeDeepDives(dps, picked, settled);
+    if (merged.failed.length) {
+      // 실패를 숨기지 않는다. 다만 이건 경고지 에러가 아니다 -- 해당 항목은 오늘과 똑같이 렌더된다.
+      log(`⚠ 심층 분석 ${merged.failed.length}곳 실패(해당 항목은 근거 코드 + 한 줄 설명만 표시): `
+        + merged.failed.map((f) => `"${f.label}"(${f.reason})`).join(", "));
+    }
+    log(`심층 분석 완료 -- ${merged.attached}/${picked.length}곳 성공`);
+    return { ...merged, picked, ranked, plan, skipped: null };
+  }
+
   return {
     collectCandidates, groundCandidates, rankCandidates, selectTopK,
     orderFilesByImportance, resolveFanoutPlan,
+    runWithConcurrency, deepDiveCandidate, mergeDeepDives, runFanout, normalizeDeepDive,
     countSymbolMatches, symbolFromFinding, symbolFromStructure,
     RANK_WEIGHTS, RANK_WEIGHTS_PROVENANCE, GROUND_CONFIDENCE,
     MIN_SYMBOL_CHARS, FANOUT_MAX_K, FANOUT_CONCURRENCY,
