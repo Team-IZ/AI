@@ -539,6 +539,20 @@ PDF가 항상 필요하므로 **multipart 하나만 받는다**(`payload` 문자
 다른 과정 교안에서 결과 언어·용어가 섞인다. 교안 업로드 화면이 과정을 이미 알고 있으므로
 기본값을 두지 않는다.
 
+**`teaches[]`가 문제 선정의 재료다.** `kind`·`evidence`·`siblingNames` 셋은 화면에 안 띄워도
+되지만 저장해뒀다가 `POST /analyses`에 실어 보내야 한다.
+
+```
+kind: CODE_EXAMPLE   코드 식별자 추출원 (st.title · function_tool 같은 이름이 여기서 나온다)
+kind: CAUTION        L4(언제 깨지는가) 재료 · 선별 순서 신호
+evidence             추가 식별자 추출원 — 정의 문장보다 코드 이름이 많다
+siblingNames         같은 unit의 다른 개념 = 교안이 대안을 가르쳤다는 신호
+```
+
+이 셋은 **p01-2가 이미 답에 담아 보내던 값**이라 LLM 호출이 늘지 않는다(`siblingNames`는
+unit 묶음에서 계산). 방향은 PM 설계 v2 §7 — 코드를 훑어 "중요해 보이는 곳"을 고르는 대신
+**교안에서 식별자 사전을 만들어 코드에서 찾는다.**
+
 **결과는 항상 한국어다.** 매니페스트(vendor)에 언어 지시가 없어 영어 교안을 넣으면 영어로
 나왔다 — 우리 소유 경로(`stages.call(extra_user=...)`)로 지시를 붙였다. `unitTitle`·
 `canonicalDescription`이 한국어가 되고, **기술 용어·API 이름·코드 식별자는 원문을 유지한다**
@@ -556,7 +570,10 @@ PDF가 항상 필요하므로 **multipart 하나만 받는다**(`payload` 문자
       "teaches": [
         { "canonicalName": "try-except", "normalizedName": "try except",
           "canonicalDescription": "예외를 잡아 처리하는 구문",
-          "descriptionPageStart": 3, "descriptionPageEnd": 5 },
+          "descriptionPageStart": 3, "descriptionPageEnd": 5,
+          "kind": "CONCEPT",                      // CONCEPT | CODE_EXAMPLE | CAUTION
+          "evidence": "try 블록에서 …",            // 페이지 근거 요약
+          "siblingNames": ["finally", "raise"] },  // 같은 unit의 다른 개념
         { "canonicalName": "finally", "normalizedName": "finally",
           "canonicalDescription": null,
           "descriptionPageStart": null, "descriptionPageEnd": null }
