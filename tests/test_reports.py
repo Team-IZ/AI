@@ -147,6 +147,49 @@ def test_report_stages_must_be_four_in_order():
         ProblemResult(problemNo=1, problemId="p-1", totalScore=2, maxScore=20, stages=only_l1)
 
 
+def test_same_idempotency_key_returns_same_job_id():
+    """{problemId}:{scoreRunId} 재전송 → 같은 jobId. LLM을 두 번 부르지 않는다.
+
+    보고서는 문제마다 1건이라 중복이 곧 비용이다(§T11 D-2).
+    """
+    headers = {**HEADERS, "Idempotency-Key": "prob-stub-1:run-1"}
+
+    first = client.post("/api/v0/reports", json=BODY, headers=headers)
+    second = client.post("/api/v0/reports", json=BODY, headers=headers)
+
+    assert first.json()["jobId"] == second.json()["jobId"]
+    assert client.post("/api/v0/reports", json=BODY,
+                       headers={**HEADERS, "Idempotency-Key": "prob-stub-1:run-2"}
+                       ).json()["jobId"] != first.json()["jobId"]
+
+
+def test_ai_usage_is_reported_for_reports(monkeypatch):
+    """🔴 보고서 토큰이 원장에 실려야 한다 (§T11 F1). 엔진이 주는데 버리고 있었다."""
+    from datetime import datetime, timezone
+
+    from app.engines.analysis import stages
+
+    usage = {"model_code": "m-1", "input_token_count": 900, "output_token_count": 120,
+             "cached_token_count": 0, "status": "SUCCEEDED", "failure_code": None,
+             "latency_ms": 3000, "occurred_at": datetime.now(timezone.utc)}
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
+    monkeypatch.setattr(stages, "call",
+                        lambda *a, **k: stages.StageResult(data={"summary": "요약"},
+                                                           usages=[usage]))
+    try:
+        r = client.post("/api/v0/reports", json={"problemId": "prob-1", "modelCode": "m"},
+                        headers={**HEADERS, "X-Trace-Id": "trace-9"})
+        job = client.get(f"/api/v0/reports/{r.json()['jobId']}", headers=HEADERS).json()
+    finally:
+        monkeypatch.setattr(get_settings(), "engine_mode", "stub")
+
+    assert len(job["aiUsage"]) == 1
+    assert job["aiUsage"][0]["featureCode"] == "SUMMARY_DRAFT"
+    assert job["aiUsage"][0]["sourceType"] == "REPORT"
+    assert job["aiUsage"][0]["traceId"] == "trace-9"        # 헤더가 원장으로 이어진다
+    assert job["aiUsage"][0]["outputTokenCount"] == 120
+
+
 def test_camelcase_transcript_reaches_the_engine(monkeypatch):
     """와이어는 camelCase인데 엔진은 snake_case를 읽는다 — 안 바꾸면 조용히 다 버린다.
 

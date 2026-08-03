@@ -26,9 +26,7 @@ class CurriculumRequest(BaseSchema):
     model_code: str | None = Field(
         default=None, description="생략 시 서버 기본값. operator가 고른다"
     )
-    callback_url: str | None = Field(
-        default=None, description="완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현"
-    )
+    # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다.
 
 
 class CurriculumAccepted(BaseSchema):

@@ -72,6 +72,30 @@ def test_same_idempotency_key_returns_same_job_id():
     assert first["jobId"] == second["jobId"]
 
 
+def test_ai_usage_is_reported_for_curricula(monkeypatch):
+    """🔴 교안 토큰이 원장에 실려야 한다 (§T11 F1). 엔진이 주는데 버리고 있었다."""
+    from datetime import datetime, timezone
+
+    from app.engines import curriculum as engine
+
+    usage = {"model_code": "m-1", "input_token_count": 5000, "output_token_count": 800,
+             "cached_token_count": 0, "status": "SUCCEEDED", "failure_code": None,
+             "latency_ms": 60000, "occurred_at": datetime.now(timezone.utc)}
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
+    monkeypatch.setattr(engine, "analyse",
+                        lambda *a, **k: engine.Curriculum(sections=[], usages=[usage]))
+    try:
+        job_id = _post({"X-Trace-Id": "trace-8"})["jobId"]
+        job = client.get(f"/api/v0/curricula/{job_id}", headers=HEADERS).json()
+    finally:
+        monkeypatch.setattr(get_settings(), "engine_mode", "stub")
+
+    assert len(job["aiUsage"]) == 1
+    assert job["aiUsage"][0]["featureCode"] == "CURRICULUM_ANALYSIS"
+    assert job["aiUsage"][0]["sourceType"] == "CURRICULUM"
+    assert job["aiUsage"][0]["traceId"] == "trace-8"        # 헤더가 원장으로 이어진다
+
+
 def test_result_has_three_levels():
     """analysis → section → teaches 3계층이 그대로 나와야 Spring이 INSERT할 수 있다."""
     body = _result()

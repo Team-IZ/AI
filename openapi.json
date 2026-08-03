@@ -145,18 +145,6 @@
                     ],
                     "title": "Submissionid"
                   },
-                  "callbackUrl": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현",
-                    "title": "Callbackurl"
-                  },
                   "method": {
                     "enum": [
                       "GITHUB_URL",
@@ -341,18 +329,6 @@
                             }
                           ],
                           "title": "Submissionid"
-                        },
-                        "callbackUrl": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ],
-                          "description": "완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현",
-                          "title": "Callbackurl"
                         },
                         "method": {
                           "enum": [
@@ -581,17 +557,26 @@
         }
       }
     },
-    "/api/v0/sessions": {
+    "/api/v0/sessions/{session_id}/answers": {
       "post": {
         "tags": [
           "sessions"
         ],
-        "summary": "검증 세션 시작 (P03)",
-        "description": "세션 만들고 첫 질문 돌려주기",
-        "operationId": "start_session_api_v0_sessions_post",
+        "summary": "답변 제출 -> 채점 + 다음 질문 (P03)",
+        "description": "답변을 채점하고 다음 질문(또는 종료)을 돌려준다.\n\n문제·기록·커서는 요청에 실려 온다. 같은 client_request_id 재전송 -> 처음 응답 그대로(멱등).\n\n🔴 **`async def`가 아니라 `def`여야 한다.** 이 경로는 세션에서 유일하게 LLM을\n호출하는데(`grading.grade`), vendor 클라이언트가 `urllib.request` 기반의 블로킹\n호출이다. `async def`로 두면 채점 4.5~7.7초 동안 **이벤트 루프가 통째로 멈춰**\n다른 학생의 채점은 물론 폴링·헬스체크까지 대기한다(동시 처리 1명).\n`def`면 FastAPI가 스레드풀에서 돌려 동시 40건까지 처리한다.\nLLM 호출을 비동기로 바꾸기 전까지 이 시그니처를 되돌리지 않는다.",
+        "operationId": "submit_answer_api_v0_sessions__session_id__answers_post",
         "parameters": [
           {
-            "name": "x-internal-key",
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "x-trace-id",
             "in": "header",
             "required": false,
             "schema": {
@@ -603,61 +588,10 @@
                   "type": "null"
                 }
               ],
-              "title": "X-Internal-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SessionStart"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionView"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v0/sessions/{session_id}/answers": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "답변 제출 -> 다음 질문/종료 (P03)",
-        "description": "답변 받고 다음 질문(또는 종료)를 돌려줌.\n\n같은 client_request_id 재전송 -> 처음 응답 그대로(멱등).\n세션 유실이면 404 -> Spring이 restore 호출\n\n🔴 **`async def`가 아니라 `def`여야 한다.** 이 경로는 세션에서 유일하게 LLM을\n호출하는데(`grading.grade`), vendor 클라이언트가 `urllib.request` 기반의 블로킹\n호출이다. `async def`로 두면 채점 4.5~7.7초 동안 **이벤트 루프가 통째로 멈춰**\n다른 학생의 채점은 물론 폴링·헬스체크까지 대기한다(동시 처리 1명).\n`def`면 FastAPI가 스레드풀에서 돌려 동시 40건까지 처리한다.\nLLM 호출을 비동기로 바꾸기 전까지 이 시그니처를 되돌리지 않는다.",
-        "operationId": "submit_answer_api_v0_sessions__session_id__answers_post",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
+              "description": "분산 추적 ID",
+              "title": "X-Trace-Id"
+            },
+            "description": "분산 추적 ID"
           },
           {
             "name": "x-internal-key",
@@ -692,17 +626,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionView"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "모르는 세션",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/AnswerResult"
                 }
               }
             }
@@ -730,153 +654,51 @@
         }
       }
     },
-    "/api/v0/sessions/{session_id}": {
-      "get": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "세션 상태 조회 (P03)",
-        "description": "세션 현재 상태, 질문 반환(Spring 풀링/복구용)",
-        "operationId": "get_session_api_v0_sessions__session_id__get",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          },
-          {
-            "name": "x-internal-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Internal-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionView"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "모르는 세션",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v0/sessions/{session_id}/restore": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "유실 세션 복원(P03)",
-        "description": "Spring이 저장해둔 transcript로 유실 세션 재구성하고 이어질 질문 반환",
-        "operationId": "restore_session_api_v0_sessions__session_id__restore_post",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          },
-          {
-            "name": "x-internal-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Internal-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SessionRestore"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionView"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v0/reports": {
       "post": {
         "tags": [
           "reports"
         ],
         "summary": "세션 결과로 보고서 생성 요청",
-        "description": "요청을 접수하고 즉시 202. 실제 생성은 백그라운드에서.",
+        "description": "요청을 접수하고 즉시 202. 실제 생성은 백그라운드에서.\n\n같은 멱등키가 다시 오면 처음 jobId를 그대로 돌려주고 **LLM을 다시 부르지 않는다.**\n보고서는 문제마다 1건이라 중복이 곧 비용이다(2026-08-03, PLAN §T11 D-2).",
         "operationId": "create_report_api_v0_reports_post",
         "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "{problemId}:{scoreRunId}. 중복 요청 판별",
+              "title": "Idempotency-Key"
+            },
+            "description": "{problemId}:{scoreRunId}. 중복 요청 판별"
+          },
+          {
+            "name": "x-trace-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "분산 추적 ID",
+              "title": "X-Trace-Id"
+            },
+            "description": "분산 추적 ID"
+          },
           {
             "name": "x-internal-key",
             "in": "header",
@@ -1116,18 +938,6 @@
                           ],
                           "description": "생략 시 서버 기본값. operator가 고른다",
                           "title": "Modelcode"
-                        },
-                        "callbackUrl": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ],
-                          "description": "완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현",
-                          "title": "Callbackurl"
                         }
                       },
                       "required": [
@@ -1270,8 +1080,13 @@
           },
           "sourceType": {
             "type": "string",
-            "title": "Sourcetype",
-            "description": "값 목록은 백엔드 확정 대기(C-4)"
+            "enum": [
+              "ANALYSIS",
+              "GRADING",
+              "REPORT",
+              "CURRICULUM"
+            ],
+            "title": "Sourcetype"
           },
           "sourceId": {
             "type": "string",
@@ -1602,16 +1417,120 @@
         "title": "AnalysisResult",
         "description": "분석이 성공했을 때의 결과 본문.\n\n문제·질문·힌트가 전부 여기 실린다. 질문과 힌트는 분석 때 만들어 동결하므로\n세션 시작에는 AI 호출이 없다 — Spring이 이 응답을 저장해두고 꺼내 쓴다."
       },
+      "AnswerResult": {
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "title": "Sessionid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "IN_PROGRESS",
+              "PAUSED",
+              "COMPLETED",
+              "FAILED",
+              "EXPIRED"
+            ],
+            "title": "State"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptTurn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "이번에 채점된 턴. 물을 것이 없었으면 null"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "다음에 물을 자리. 그대로 다음 요청에 실어 보낸다. 끝났으면 null"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Question"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "다음 질문과 힌트 텍스트. 끝났으면 null"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Progress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "aiUsage": {
+            "items": {
+              "$ref": "#/components/schemas/AiUsage"
+            },
+            "type": "array",
+            "title": "Aiusage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessionId",
+          "state"
+        ],
+        "title": "AnswerResult",
+        "description": "POST /sessions/{id}/answers 응답.\n\n**transcript를 통째로 돌려주지 않는다.** 요청이 이미 들고 온 것이라 되돌리면\n같은 32KB를 두 번 실어 나르게 된다. 이번 턴(`turn`)만 주므로 백엔드는 그것만\n붙여 저장하면 된다."
+      },
       "AnswerSubmit": {
         "properties": {
           "clientRequestId": {
             "type": "string",
             "title": "Clientrequestid",
-            "description": "세션 내 유일 멱등키"
+            "description": "세션 내 유일 멱등키. 재전송하면 같은 응답이 온다"
           },
           "answerText": {
             "type": "string",
             "title": "Answertext"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "type": "array",
+            "title": "Problems",
+            "description": "분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다. **AI는 세션 중에 질문을 만들지 않는다** — 안 주면 물을 것이 없다"
+          },
+          "transcript": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptTurn"
+            },
+            "type": "array",
+            "title": "Transcript",
+            "description": "지금까지 확정된 턴 전부. `cursor`를 생략하면 이걸 되짚어 위치를 복원한다"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "이 답변이 대답하는 자리. 생략 시 transcript로 복원"
           }
         },
         "type": "object",
@@ -1620,7 +1539,7 @@
           "answerText"
         ],
         "title": "AnswerSubmit",
-        "description": "POST /sessions/{id}/answers 요청."
+        "description": "POST /sessions/{id}/answers 요청. **세션 API는 이것 하나뿐이다.**\n\nAI가 상태를 안 들고 있으므로 채점에 필요한 것이 전부 여기 실려야 한다."
       },
       "Body_create_curriculum_api_v0_curricula_post": {
         "properties": {
@@ -1892,6 +1811,39 @@
         ],
         "title": "CurriculumSection",
         "description": "교안의 모듈 하나. DB curriculum_section 대응."
+      },
+      "Cursor": {
+        "properties": {
+          "problemId": {
+            "type": "string",
+            "title": "Problemid"
+          },
+          "axisCode": {
+            "type": "string",
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ],
+            "title": "Axiscode"
+          },
+          "hintsUsed": {
+            "type": "integer",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Hintsused",
+            "description": "이 단계에서 이미 연 힌트 수. 점수 상한(5/4/3)의 근거",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemId",
+          "axisCode"
+        ],
+        "title": "Cursor",
+        "description": "문답이 지금 서 있는 자리. **요청과 응답에 같은 모양으로 오간다.**\n\n백엔드는 응답의 `cursor`를 저장해 두었다가 다음 요청에 그대로 실어 보내면 된다.\n생략하면 AI가 `transcript`를 되짚어 복원한다(첫 답변이면 첫 문제의 L1)."
       },
       "DecisionPoint": {
         "properties": {
@@ -2683,198 +2635,6 @@
         ],
         "title": "RequirementResult",
         "description": "요구사항 하나의 P/F 판정. 요청 requirements와 1:1로 대응한다."
-      },
-      "SessionRestore": {
-        "properties": {
-          "attemptId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attemptid"
-          },
-          "analysisJobId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysisjobid"
-          },
-          "timeLimitSec": {
-            "type": "integer",
-            "title": "Timelimitsec",
-            "description": "문제 1개당 제한 시간(초)",
-            "default": 1200
-          },
-          "elapsedSec": {
-            "type": "integer",
-            "title": "Elapsedsec",
-            "description": "현재 문제에서 흘러간 시간. 문제가 바뀌면 0으로 돌아간다",
-            "default": 0
-          },
-          "transcript": {
-            "items": {
-              "$ref": "#/components/schemas/TranscriptTurn"
-            },
-            "type": "array",
-            "title": "Transcript"
-          },
-          "problems": {
-            "items": {
-              "$ref": "#/components/schemas/Problem"
-            },
-            "type": "array",
-            "title": "Problems"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
-          }
-        },
-        "type": "object",
-        "title": "SessionRestore",
-        "description": "POST /sessions/{id}/restore 요청 (명세 §4.4)."
-      },
-      "SessionStart": {
-        "properties": {
-          "attemptId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attemptid"
-          },
-          "analysisJobId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysisjobid"
-          },
-          "sessionId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sessionid",
-            "description": "Spring AssessmentSession 키(에코용)"
-          },
-          "problems": {
-            "items": {
-              "$ref": "#/components/schemas/Problem"
-            },
-            "type": "array",
-            "title": "Problems",
-            "description": "분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다"
-          },
-          "selectedProblemIds": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Selectedproblemids",
-            "description": "problems 중 이 세션에 쓸 것. 생략 시 전체"
-          },
-          "timeLimitSec": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Timelimitsec",
-            "description": "**문제 1개당** 제한 시간(초). 세션 전체가 아니다 — 문제가 바뀌면 리셋되고 남은 시간은 이월되지 않는다. AI 호출 대기 동안은 멈춘다",
-            "default": 1200
-          }
-        },
-        "type": "object",
-        "title": "SessionStart",
-        "description": "POST /sessions 요청.\n\n🔴 **`problems`가 필수다** (2026-08-02, 전면 동결). 문제·질문·힌트는 분석 때\n만들어져 DB에 있고 세션은 그것을 받아 진행한다. **AI는 세션 중에 아무것도\n생성하지 않는다** — 채점만 한다. 안 주면 물을 것이 없어 세션이 성립하지 않는다."
-      },
-      "SessionView": {
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "title": "Sessionid"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "READY",
-              "IN_PROGRESS",
-              "PAUSED",
-              "COMPLETED",
-              "FAILED",
-              "EXPIRED"
-            ],
-            "title": "State"
-          },
-          "current": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Question"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "progress": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Progress"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "transcript": {
-            "items": {
-              "$ref": "#/components/schemas/TranscriptTurn"
-            },
-            "type": "array",
-            "title": "Transcript"
-          },
-          "aiUsage": {
-            "items": {
-              "$ref": "#/components/schemas/AiUsage"
-            },
-            "type": "array",
-            "title": "Aiusage"
-          }
-        },
-        "type": "object",
-        "required": [
-          "sessionId",
-          "state"
-        ],
-        "title": "SessionView",
-        "description": "세션 응답.\n\n명세는 진행/종료 두 형태로 나뉘지만, 스텁에서는 한 모델에 선택 필드로 담아\n단순하게 간다(진행 중이면 current+progress, 끝났으면 transcript).\n실제 계약을 굳힐 때 분리 여부를 정한다."
       },
       "SnapshotMeta": {
         "properties": {

@@ -21,9 +21,14 @@ from app.schemas.report import (
     ReportRequest,
     ReportResult,
 )
+from app.usage import to_ai_usage
 
 # job_id -> 보고서 job 상태·결과
 _jobs: dict[str, ReportJobStatus] = {}
+
+# 멱등키({problemId}:{scoreRunId}) -> job_id. 재전송해도 LLM을 다시 부르지 않는다.
+# 보고서는 문제마다 1건이라 중복이 곧 비용이다.
+_job_id_by_idempotency_key: dict[str, str] = {}
 
 # 통과선. 미달이면 힌트 후 재질의. 총점은 만들지 않는다(ProblemResult 주석 참고).
 _PASS_SCORE = 3
@@ -33,7 +38,11 @@ def get_job(job_id: str) -> ReportJobStatus | None:
     return _jobs.get(job_id)
 
 
-def create_job(body: ReportRequest) -> ReportJobStatus:
+def job_id_for_key(idempotency_key: str) -> str | None:
+    return _job_id_by_idempotency_key.get(idempotency_key)
+
+
+def create_job(body: ReportRequest, idempotency_key: str | None = None) -> ReportJobStatus:
     """QUEUED 보고서 job 생성. 아직 만들지 않는다."""
     job = ReportJobStatus(
         job_id=str(uuid.uuid4()),
@@ -42,6 +51,8 @@ def create_job(body: ReportRequest) -> ReportJobStatus:
         status="QUEUED",
     )
     _jobs[job.job_id] = job
+    if idempotency_key:
+        _job_id_by_idempotency_key[idempotency_key] = job.job_id
     return job
 
 
@@ -135,11 +146,16 @@ def _to_snake(row: dict[str, Any]) -> dict[str, Any]:
     return {_CAMEL.sub("_", key).lower(): value for key, value in row.items()}
 
 
-def _real_result(body: ReportRequest) -> ReportResult:
+def _real_result(body: ReportRequest, job: ReportJobStatus,
+                 idempotency_key: str | None, trace_id: str | None) -> ReportResult:
     """p04-6으로 서술을 만들고, 판정은 transcript에서 결정론으로 계산한다.
 
     `problemNo`는 요청에 없다 — 문제 단위 호출이라 Spring이 문제를 알고 있고,
     보고서 안에서 순번이 필요한 자리가 없다. 1로 고정한다.
+
+    원장(`job.ai_usage`)을 여기서 채우는 이유는 **검증 실패로 결과를 버려도 태운
+    토큰은 남겨야 하기 때문**이다(jobs.py와 같은 순서). 아래 model_validate가 터지면
+    호출자는 FAILED로 적고, 그때도 원장은 이미 채워져 있다.
     """
     from app.engines.analysis import report as report_engine
 
@@ -155,6 +171,9 @@ def _real_result(body: ReportRequest) -> ReportResult:
         teaches=body.teaches,
         analysis_documents=body.analysis_documents,
     )
+    job.ai_usage = to_ai_usage(built.usages, "REPORT", job.job_id,
+                               feature_code="SUMMARY_DRAFT",
+                               idempotency_key=idempotency_key, trace_id=trace_id)
     return ReportResult.model_validate({
         "report_markdown": built.report_markdown,
         "problem": built.problem,
@@ -168,7 +187,8 @@ def _real_result(body: ReportRequest) -> ReportResult:
     })
 
 
-def run_report(job_id: str, body: ReportRequest | None = None) -> None:
+def run_report(job_id: str, body: ReportRequest | None = None, *,
+               idempotency_key: str | None = None, trace_id: str | None = None) -> None:
     """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED."""
     job = _jobs[job_id]
     job.status = "RUNNING"
@@ -176,7 +196,7 @@ def run_report(job_id: str, body: ReportRequest | None = None) -> None:
 
     try:
         if get_settings().engine_mode == "real" and body is not None:
-            job.result = _real_result(body)
+            job.result = _real_result(body, job, idempotency_key, trace_id)
         else:
             job.result = _stub_result(job.problem_id or "prob-stub-1")
         job.status = "SUCCEEDED"

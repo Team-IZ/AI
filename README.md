@@ -145,7 +145,7 @@ cloudflared tunnel --url http://localhost:8000
 | 헤더 | 값 | 용도 |
 |---|---|---|
 | `X-Internal-Key` | 공유 비밀 | 서비스 간 인증. `GET /api/health`만 면제 |
-| `Idempotency-Key` | `submissionId:attemptNo` | 중복 요청 판별. 같은 키면 처음 만든 `jobId`를 그대로 반환하고 재분석하지 않는다 |
+| `Idempotency-Key` | 경로마다 다르다(아래) | 중복 요청 판별. 같은 키면 처음 만든 `jobId`를 그대로 반환하고 LLM을 다시 부르지 않는다 |
 | `X-Trace-Id` | 추적 ID | Spring이 `analysis_job.trace_id`로 저장 |
 
 **에러 형식** — 평탄 구조. `timestamp`·`path`는 쓰지 않는다.
@@ -171,17 +171,20 @@ cloudflared tunnel --url http://localhost:8000
 | 공통 | `GET /api/health` | 서비스 상태 | 동기 |
 | 분석 | `POST /api/v0/analyses` | 코드 분석 요청 | 202 + 폴링 |
 | 분석 | `GET /api/v0/analyses/{jobId}` | 분석 상태·결과 | 동기 |
-| 세션 | `POST /api/v0/sessions/{id}/answers` | 답변 제출 → 채점 (다음 질문·힌트는 이미 동결돼 있다) | 동기 |
-| 세션 | `POST /api/v0/sessions` | 세션 시작 → 첫 질문 | 동기 · **축소 예정** |
-| 세션 | `GET /api/v0/sessions/{id}` | 세션 현재 상태 | 동기 · **축소 예정** |
-| 세션 | `POST /api/v0/sessions/{id}/restore` | 유실 세션 복원 | 동기 · **축소 예정** |
+| 세션 | `POST /api/v0/sessions/{id}/answers` | 답변 제출 → 채점 + 다음 질문 (**세션 API는 이것 하나뿐**) | 동기 |
 | 보고서 | `POST /api/v0/reports` | 보고서 생성 요청 | 202 + 폴링 |
 | 보고서 | `GET /api/v0/reports/{jobId}` | 보고서 결과 | 동기 |
 
 | 교안 | `POST /api/v0/curricula` | 교안 PDF(multipart) 분석 요청 | 202 + 폴링 |
 | 교안 | `GET /api/v0/curricula/{jobId}` | 교안 구조·개념 결과 | 동기 |
 
-**"축소 예정"이 무슨 뜻인가**: 백엔드가 문제 3행 + 단계 12행을 분석 직후에 저장하고 세션을 `READY`로 미리 만드는 구조를 골랐다. 그러면 세션 시작 시 AI 호출이 필요 없고 `/answers`만 남는다. 지금은 셋 다 동작하지만 제거될 수 있으니 새로 의존하지 말 것.
+**세션은 무상태다** (2026-08-03 확정). `POST /sessions` · `GET /sessions/{id}` · `POST /sessions/{id}/restore` **3개는 삭제됐다.** AI는 세션을 들고 있지 않으므로 문제·기록·커서가 매 요청에 실려 오고 — **매 요청이 곧 restore**다. 배포·재시작·인스턴스 중지가 진행 중인 세션을 깨지 않고, 백엔드는 갈래 하나만 구현하면 된다.
+
+**첫 질문은 백엔드가 낸다.** 질문 12개·힌트 24개는 분석 배치에서 동결돼 이미 DB에 있으므로 첫 질문을 받으려고 AI를 부를 필요가 없다. AI는 답변이 올 때부터 관여한다.
+
+`Idempotency-Key`는 `/analyses`(`{submissionId}:{attemptNo}`) · `/curricula`(`{versionId}:{analysisVersion}`) · `/reports`(`{problemId}:{scoreRunId}`)에서 받는다. 같은 키면 처음 `jobId`를 그대로 돌려주고 **LLM을 다시 부르지 않는다.** 세션 `/answers`는 헤더 대신 본문의 `clientRequestId`를 쓴다.
+
+**콜백은 없다.** 요청에 `callbackUrl`을 받지 않는다 — 전부 202 + 폴링이고 AI→백엔드 방향 통신은 0이다.
 
 ### 분석
 
@@ -199,8 +202,7 @@ cloudflared tunnel --url http://localhost:8000
     { "id": "b7c1-…", "name": "동시성" }
   ],
   "requirements": [ { "requirementId": "req-1", "text": "로그인 실패 3회 시 잠금" } ],
-  "teaches": [ { "id": "tch-1", "label": "의존성 주입", "unitId": "u3", "sourcePages": [12, 13] } ],
-  "callbackUrl": "https://.../internal/ai-callbacks"   // 선택. 현재 수용만 하고 전송 미구현
+  "teaches": [ { "id": "tch-1", "label": "의존성 주입", "unitId": "u3", "sourcePages": [12, 13] } ]
 }
 // → 202
 { "jobId": "1b40467e-…", "status": "QUEUED" }
@@ -299,32 +301,47 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
 ### 세션
 
 ```jsonc
-// POST /api/v0/sessions/{id}/answers
-{ "clientRequestId": "turn-7", "answerText": "재귀 대신 반복문으로 바꿨습니다" }
+// POST /api/v0/sessions/{id}/answers        헤더: X-Trace-Id(선택)
+{
+  "clientRequestId": "turn-7",
+  "answerText": "재귀 대신 반복문으로 바꿨습니다",
+  "problems": [ /* 분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다 */ ],
+  "transcript": [ /* 지금까지 확정된 턴 전부 */ ],
+  "cursor": { "problemId": "prob-1", "axisCode": "L3", "hintsUsed": 0 }
+}
 
-// → SessionView
+// → AnswerResult
 {
   "sessionId": "sess-abc",
-  "state": "IN_PROGRESS",                    // IN_PROGRESS|PAUSED|COMPLETED|FAILED|EXPIRED
-  "current": {
-    "problemId": "prob-1", "axisCode": "L3", "sequenceNo": 5, "attemptNo": 1,
+  "state": "IN_PROGRESS",                    // IN_PROGRESS|COMPLETED (DB status 어휘)
+  "turn": {                                  // 이번에 채점된 턴. 이것만 이어 붙여 저장하면 된다
+    "problemId": "prob-1", "axisCode": "L3", "questionText": "…", "answerText": "…",
+    "answeredAt": "…", "bestScore": 4, "confirmedScore": 4,
+    "attemptCount": 1, "hintText": null, "autonomy": "SELF"
+  },
+  "cursor": { "problemId": "prob-1", "axisCode": "L4", "hintsUsed": 0 },  // 다음 요청에 그대로 실는다
+  "current": {                               // 다음 질문. 끝났으면 null
+    "problemId": "prob-1", "axisCode": "L4", "sequenceNo": 1, "hintsUsed": 0,
     "questionText": "…",
     "hintText": null,                        // 3점 미만이었으면 동결분에서 꺼내 채운다
-    "codeContext": { "path": "src/Solver.java", "lineStart": 42, "lineEnd": 58, "snippet": "…" }
+    "codeContext": { "path": "src/Solver.java", "lineStart": 42, "snippet": "…" }
   },
   "progress": { "problemIndex": 1, "problemTotal": 3 },
-  "transcript": [
-    { "problemId": "prob-1", "axisCode": "L1", "questionText": "…", "answerText": "…",
-      "answeredAt": "…", "bestScore": 4, "confirmedScore": 4,
-      "attemptCount": 1, "passed": true, "hintText": null, "autonomy": "SELF" }
-  ],
   "aiUsage": [ /* §aiUsage */ ]
 }
 ```
 
-`clientRequestId`는 세션 내 유일한 멱등키다. 같은 키로 재요청하면 처음 돌려준 응답을 그대로 반환한다.
+**요청이 상태를 들고 온다.** AI는 아무것도 기억하지 않으므로 `problems`가 없으면 물을 것이 없다(빈 채로 두면 `COMPLETED`가 나간다). `cursor`를 생략하면 `transcript`를 되짚어 위치를 복원하고, 둘 다 없으면 첫 문제의 L1로 본다.
 
-`state`는 DB `assessment_session.status`의 허용값을 따른다. **`TIMEOUT`은 폐기값이다** — 시간 초과는 `EXPIRED`다. (코드 미반영: `schemas/session.py`가 아직 `TIMEOUT`을 쓴다.)
+**응답은 `transcript`를 돌려주지 않는다.** 요청이 이미 들고 온 것이라 되돌리면 같은 payload를 두 번 실어 나른다. 이번 턴(`turn`)만 이어 붙이면 된다.
+
+`clientRequestId`는 세션 내 유일한 멱등키다. 같은 키로 재요청하면 처음 돌려준 응답을 그대로 반환한다. 채점이 실패하면 **503 `GRADING_UNAVAILABLE`(retryable=true)**이고 그 턴은 기록되지 않으므로 같은 키로 재전송하면 된다.
+
+**진행 규칙은 AI가 소유한다** — 통과선 3점 · 힌트 단계당 2회 · 점수 상한 5/4/3 · 사다리(통과→다음 축 / 미달→힌트 / 소진→다음 문제). 백엔드는 커서를 왕복시키기만 하면 되고 같은 규칙을 다시 구현하지 않는다.
+
+**타이머는 AI 계약에 없다.** 문제당 20분·문제가 바뀌면 리셋·AI 호출 대기 중 정지는 프론트/백엔드가 소유한다 — AI는 그 값을 쓰지 않았다.
+
+`state`는 DB `assessment_session.status`의 허용값을 따른다. **`TIMEOUT`은 폐기값이다** — 시간 초과는 `EXPIRED`다.
 
 **점수 필드가 wire에 나오는 이유**: Spring이 매 턴 저장하고, 세션이 유실되면 그 기록으로 복구한다. 점수·시도 횟수가 wire에 없으면 "이 학생이 힌트를 몇 번 썼는지"를 아무도 모르게 된다.
 
@@ -343,8 +360,8 @@ DB `ai_usage`(기관별 AI 호출·토큰·비용 원장)에 대응한다. **LLM
 ```jsonc
 "aiUsage": [
   {
-    "idempotencyKey": "01H8XABC…:QUESTION_L1:1",   // {sourceId}:{sourceType}:{attemptNo}
-    "sourceType": "QUESTION_L1",                   // 값 목록 백엔드 확정 대기
+    "idempotencyKey": "sub-1:1:ANALYSIS:3",        // {요청 멱등키|sourceId}:{sourceType}:{호출순번}
+    "sourceType": "ANALYSIS",                      // ANALYSIS|GRADING|REPORT|CURRICULUM
     "sourceId": "01H8XABC…",                       // 작업 PK
     "featureCode": "QUESTION_GENERATION",
     "modelCode": "glm-5.2",           // Spring이 ai_model 조회해 model_id 확보
@@ -358,6 +375,8 @@ DB `ai_usage`(기관별 AI 호출·토큰·비용 원장)에 대응한다. **LLM
 ```
 
 `featureCode` — `CODE_ANALYSIS`(분석 문서·요구사항 판정) · `QUESTION_GENERATION`(문제 선정, 질문·힌트 동결) · `GRADING`(채점) · `SUMMARY_DRAFT`(보고서) · `CURRICULUM_ANALYSIS`(교안). 힌트는 질문과 함께 동결되므로 별도 값이 필요 없다.
+
+`sourceType` 4종 — `ANALYSIS`(분석 jobId) · `GRADING`(sessionId) · `REPORT`(보고서 jobId) · `CURRICULUM`(교안 jobId). `featureCode`보다 굵은 단위라 한 `sourceType` 안에 `featureCode`가 여럿 나온다(분석 하나에 `CODE_ANALYSIS` + `QUESTION_GENERATION`).
 
 `failureCode` 5종 — `TIMEOUT` · `RATE_LIMITED` · `PROVIDER_ERROR` · `INVALID_JSON` · `CONTEXT_OVERFLOW`.
 
@@ -446,8 +465,9 @@ app/
 ├─ main.py          앱 조립. 라우터 등록만. 로직 없음
 ├─ config.py        Settings — 환경변수 (engine_mode 포함)
 ├─ jobs.py          분석 job 인메모리 저장소 + 수명주기(상태 전이)
-├─ sessions.py      문답 세션 인메모리 저장소 + 진행(멱등)
+├─ sessions.py      문답 세션 진행 규칙 + 채점. **무상태** — 상태는 요청이 들고 온다
 ├─ reports.py       보고서 job 인메모리 저장소 (jobs.py와 형제)
+├─ usage.py         ai_usage 원장 행 만들기. 네 경로가 함께 쓴다
 ├─ api/             HTTP 계층 — 백엔드가 보는 면
 │  ├─ deps.py         인증
 │  ├─ errors.py       예외 핸들러
@@ -501,26 +521,23 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 | | |
 |---|---|
-| 엔드포인트 | **11/11 동작 (응답은 아직 스텁)** |
-| 테스트 | **112 passed** |
+| 엔드포인트 | **8/8 동작** (세션 무상태 전환으로 11 → 8) |
+| 테스트 | **198 passed** |
 | 붙일 수 있나 | **예.** 인증·에러 형식·camelCase·Swagger·`openapi.json`까지 완성 |
 
-**엔진 이식이 진행 중이다.** 룰 스캔 → 분석 문서 → 문제 선정 → L1·L2 질문·힌트 동결 → 채점까지 실호출로 동작을 확인했다(`app/engines/analysis/`). 팀원 PoC 규칙부와 NVIDIA 클라이언트는 **무수정 vendor**하고 우리 래퍼가 감싼다 — 갱신 절차는 각 `vendor/SOURCE.md`.
+**엔진 이식이 끝났다.** 룰 스캔 → 분석 문서 → 요구사항 P/F → 문제 선정 → 4축 질문·힌트 동결 → 채점 → 보고서까지 실호출로 동작을 확인했다(`app/engines/analysis/`). 팀원 PoC 규칙부와 NVIDIA 클라이언트는 vendor해 두고 우리 래퍼가 감싼다 — 갱신 절차는 `vendor/SOURCE.md`, 우리 수정 이력은 `vendor/PATCHES.md`.
 
-엔드포인트 응답은 아직 스텁이라 **백엔드는 11개 전부 지금 바로 붙여볼 수 있다.**
-
-> ✅ 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례 대응), `focusItems`, `codeSnippet`, `requirementResults`, `bestScore`/`confirmedScore`, `analysisDocument`(JSON)가 전부 스펙에 있다.
+> ✅ 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례·한계), `focusItems`, `codeSnippet`, `requirementResults`, `bestScore`/`confirmedScore`, `analysisDocument`(JSON)가 전부 스펙에 있다.
 >
-> ⚠️ **`ProblemStage.hints`의 `minItems: 2`는 사라졌다.** 혼합 모드(L1·L2 동결 / L3·L4 적응형)로 바뀌면서 축마다 채워지는 시점이 달라졌기 때문이다.
+> ⚠️ **질문·힌트는 전면 동결이다.** 혼합 모드(L1·L2만 동결)는 폐기됐다 — **4축 전부** 분석 배치에서 만든다.
 >
 > ```
-> L1·L2   questionText 필수 · hints 정확히 2개(hintLevel 1, 2 순서)
-> L3·L4   questionText null · hints 빈 배열      ← 세션 중 생성
+> L1~L4   questionText 필수 · hints 정확히 2개(hintLevel 1, 2 순서)
 > ```
 >
-> 이 규칙은 **축에 따라 달라지는 조건부 제약이라 OpenAPI 문법으로 표현이 안 된다.** 스키마 검증기가 막고 있고 여기 산문으로만 적혀 있다.
+> 이 규칙은 **OpenAPI 문법으로 표현이 안 된다.** 스키마 검증기가 막고 있고 여기 산문으로만 적혀 있다.
 >
-> ⏳ **아직인 것**: p04-2(요구사항 P/F), 엔진 조립(`engine_mode="real"`), 배치 병렬화, 세션 엔드포인트 축소. 순서는 `PLAN_FASTAPI_MIGRATION.md`.
+> ⏳ **아직인 것**: 백엔드 연동(T9d), 고정 HTTPS 주소, 배치 병렬화. 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
 ### 백엔드 대기 2건
 
@@ -528,7 +545,7 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 | # | 내용 | 우리 작업을 막나 |
 |---|---|---|
-| C-4 | `source_type` 값 목록 | 아니다. 형식만 지키고 값은 나중에 맞춘다 |
+| C-4 | ~~`source_type` 값 목록~~ | **닫힘.** 2026-08-03에 우리가 `ANALYSIS`·`GRADING`·`REPORT`·`CURRICULUM`로 정해 통보한다 |
 | C-5 | `curriculum_analysis.extraction_status`·`quality_status` 코드 카탈로그 | 아니다. CHECK가 없어 `str`로 두고 나중에 맞춘다 |
 
 C-1~C-3은 **회신 완료**다.
@@ -542,14 +559,14 @@ DDL 수정 요청 4건(`attempt_count` 0~3 · `attempt_no=3` 허용 · `stage_an
 ### 앞으로
 
 ```
-세션 시작 시 질문 생성 제거 — 질문은 분석 때 동결돼 DB에 있다 (세션 엔드포인트 축소와 함께)
-엔진 이식 (팀원 PoC feat/poc_full) — P02 규칙부, P04 LLM 스테이지
+백엔드 연동 (T9d) — 주소를 설정값으로, 채점 타임아웃 30초 이상, IP 화이트리스트
+고정 HTTPS 주소 — 무료 도메인 + Caddy (cloudflared 재시작마다 URL이 바뀐다)
 (먼 항목) 적응형 힌트 모듈 대응 — 턴당 2콜, 힌트용 featureCode, 체크포인트 단위 모드 고정
 ```
 
-완료: 세션 턴 점수 필드 · `aiUsage` 스키마 · `/curricula` 신설 · `openapi.json` 갱신.
+완료: 세션 턴 점수 필드 · `aiUsage` 스키마·배선 · `/curricula` 신설 · 엔진 이식 · **세션 무상태 전환**(2026-08-03).
 
-**미확정값** — 힌트 점수 상한 `{5, 4, 3}`, 재시험 커트라인, `ai_usage.source_type` 값 목록. 세부 순서·방법은 **`PLAN_FASTAPI_MIGRATION.md`**에 있다.
+**미확정값** — 힌트 점수 상한 `{5, 4, 3}`, 재시험 커트라인. 세부 순서·방법은 **`PLAN_FASTAPI_MIGRATION.md`**에 있다.
 
 ---
 

@@ -21,6 +21,16 @@ FeatureCode = Literal[
     "SUMMARY_DRAFT",        # 보고서 서술
 ]
 
+# 어느 작업에 딸린 호출인가. 2026-08-03 확정(PLAN §T11 D-1) — 우리가 정하고 통보한다.
+# featureCode보다 굵은 단위다: 한 SourceType 안에서 featureCode가 여럿 나올 수 있다
+# (ANALYSIS 하나에 CODE_ANALYSIS + QUESTION_GENERATION).
+SourceType = Literal[
+    "ANALYSIS",     # POST /analyses      sourceId = 분석 jobId
+    "GRADING",      # POST /sessions/{id}/answers   sourceId = sessionId
+    "REPORT",       # POST /reports       sourceId = 보고서 jobId
+    "CURRICULUM",   # POST /curricula     sourceId = 교안 jobId
+]
+
 # 기술적 실패 유형. status가 FAILED·PARTIAL일 때만 채운다.
 FailureCode = Literal[
     "TIMEOUT",
@@ -38,7 +48,7 @@ class AiUsage(BaseSchema):
     model_code: str = Field(description="Spring이 ai_model에서 model_id를 조회한다")
 
     # 어느 작업에 딸린 호출인가. 다형 참조라 FK가 없다.
-    source_type: str = Field(description="값 목록은 백엔드 확정 대기(C-4)")
+    source_type: SourceType
     source_id: str = Field(description="작업 PK. 분석이면 analysisId")
     request_id: str
     trace_id: str = Field(description="요청 헤더 X-Trace-Id를 그대로 잇는다")

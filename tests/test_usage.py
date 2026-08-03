@@ -7,11 +7,11 @@ from app.schemas.usage import AiUsage
 BASE = {
     "featureCode": "GRADING",
     "modelCode": "nvidia/llama-3.3-70b-instruct",
-    "sourceType": "SESSION_ANSWER",
+    "sourceType": "GRADING",
     "sourceId": "ans-1",
     "requestId": "req-1",
     "traceId": "trace-1",
-    "idempotencyKey": "ans-1:SESSION_ANSWER:1",
+    "idempotencyKey": "ans-1:GRADING:1",
     "inputTokenCount": 1200,
     "outputTokenCount": 300,
     "cachedTokenCount": 0,
@@ -40,6 +40,15 @@ def test_cached_cannot_exceed_input():
     """DB CHECK: cached_token_count <= input_token_count."""
     with pytest.raises(ValidationError):
         AiUsage.model_validate({**BASE, "cachedTokenCount": 9999})
+
+
+def test_source_type_is_a_closed_set():
+    """2026-08-03 확정(§T11 D-1). 자유 문자열이면 Spring이 원장을 못 묶는다."""
+    assert set(AiUsage.model_json_schema()["properties"]["sourceType"]["enum"]) == {
+        "ANALYSIS", "GRADING", "REPORT", "CURRICULUM"
+    }
+    with pytest.raises(ValidationError):
+        AiUsage.model_validate({**BASE, "sourceType": "SESSION_ANSWER"})
 
 
 def test_no_cost_fields():

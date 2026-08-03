@@ -57,9 +57,10 @@ OpenAPI 3.1 `contentSchema`로 실었다(`app/api/multipart_docs.py`).
 
 - `main.py`·`config.py`·`api/deps.py`·`api/errors.py` — 앱 조립, 설정, 인증(`X-Internal-Key`), 예외 핸들러
 - `schemas/` — `common.py`(camelCase 기반)·`analysis.py`·`session.py`·`report.py`
-- `api/` — `health.py`·`analyses.py`(2)·`sessions.py`(4)·`reports.py`(2)
+- `api/` — `health.py`·`analyses.py`(2)·`sessions.py`(1)·`reports.py`(2)·`curricula.py`(2)
 - `engines/` — Protocol + 스텁 + 팩토리. `engine_mode` 설정으로 교체
-- `jobs.py`·`sessions.py`·`reports.py` — 인메모리 저장소 + 수명주기·멱등
+- `jobs.py`·`reports.py`·`curricula.py` — 인메모리 저장소 + 수명주기·멱등. `sessions.py`는 무상태(§T11)
+- `usage.py` — `ai_usage` 원장 행 만들기. 네 경로가 함께 쓴다
 - 백엔드 계약 C1~C6 합의(2026-07-22), 로컬 통신 자체검증 통과, cloudflared 터널 준비
 - **T1 완료** — `/gradings` → `/reports` 전환. 파일 3쌍 개명(`schemas/grading.py`→`report.py`, `app/gradings.py`→`reports.py`, `api/gradings.py`→`reports.py`), 기존 결함 3개(`ALTERNATIVE_COMPARISION` 오타·`COMPELETED`·`AxisEvidence` 중복 정의) 정리. 41 tests
 - **T1b 완료 (커밋 `4bda015`)** — 이름 통일. `decision_point`/`dp_*` 어휘를 `problem`/`problem_*`로, `depth_level`을 `axis_code`로 교체
@@ -920,8 +921,8 @@ sudo journalctl -u cloudflared -n 60 --no-pager | grep trycloudflare.com
 
 | # | 사실 | 대응 |
 |---|---|---|
-| **1** | `jobs.py`·`sessions.py`·`reports.py`·`curricula.py`가 **인메모리 dict**다 | **인스턴스 1대라 자연히 충족.** Redis로 옮기기 전에는 절대 2대로 늘리지 않는다 |
-| **2** | 재시작 시 진행 중 job·세션 유실 | `systemctl restart` 시점을 백엔드와 맞춘다 |
+| **1** | `jobs.py`·`reports.py`·`curricula.py`가 **인메모리 dict**다 | **인스턴스 1대라 자연히 충족.** Redis로 옮기기 전에는 절대 2대로 늘리지 않는다. **세션은 2026-08-03 무상태 전환으로 빠졌다**(§T11 B) — 남은 것은 멱등 캐시뿐이고 유실돼도 중복 채점 한 번으로 끝난다 |
+| **2** | 재시작 시 진행 중 job 유실 (세션은 무관) | `systemctl restart` 시점을 백엔드와 맞춘다 |
 | **3** | **Cloudflare 터널은 100초를 넘는 응답을 끊는다(524)** | 동기 경로는 채점뿐이고 실측 4.5~7.7초. 분석·교안·보고서는 202+폴링이라 무관 |
 | **4** | 분석 626초, 교안 464초 | 백그라운드 작업이라 요청 수명과 무관 |
 | **5** | 터널 URL이 재시작마다 바뀐다 | 백엔드가 **AI 주소를 설정값으로** 갖고 있어야 한다. 이 요청이 전제다 |
@@ -1188,7 +1189,7 @@ L1  concept 정의     L2  gap.missing     L3  siblings     L4  warns     ← �
 | 타이머 1200초 | `schemas/session.py:58,115` |
 | 응답에 금액 필드 없음 | `schemas/usage.py` — 토큰·모델만 |
 
-**🔴 F1 — `aiUsage`가 분석 외 전 경로에서 빈 배열이다 (계약 위반, 미수정)**
+**🔴 F1 — `aiUsage`가 분석 외 전 경로에서 빈 배열이었다 (계약 위반, ✅ 2026-08-03 수정)**
 
 ```
 분석    jobs.py:_to_ai_usage 로 채워짐                          ✅
@@ -1204,15 +1205,25 @@ L1  concept 정의     L2  gap.missing     L3  siblings     L4  warns     ← �
 학생 수 × 문제 3 × 축 4라 **호출 건수가 가장 많은 경로**인데 통째로 원장에서 빠진다.
 엔진은 이미 `usages`를 돌려주므로 **API 계층 배선만 하면 된다.**
 
-**🟠 F2 — `POST /reports`가 `Idempotency-Key`·`X-Trace-Id`를 안 받는다 (미수정)**
+**수정 내용**: `jobs.py:_to_ai_usage`를 `app/usage.py:to_ai_usage`로 올려 네 경로가 함께 쓴다.
+경로마다 회귀 테스트 1개(`test_sessions`·`test_reports`·`test_curricula`).
+
+같이 고친 것 — **원장 행마다 멱등키가 같던 문제.** 요청 헤더의 키를 모든 행에 그대로 박고
+있어서, 한 작업이 LLM을 여러 번 부르면 Spring이 한 행으로 합쳐 나머지 토큰이 사라진다.
+이제 `{요청 멱등키|sourceId}:{sourceType}:{호출순번}`으로 순번을 붙인다(스키마가 명시한 형식).
+
+**🟠 F2 — `POST /reports`가 `Idempotency-Key`·`X-Trace-Id`를 안 받았다 (✅ 2026-08-03 수정)**
 
 `/analyses`·`/curricula`는 받는다(`api/analyses.py:95`). `/reports`(`api/reports.py:16`)만 body만 받아,
 백엔드가 재전송하면 같은 문제의 보고서 job이 두 개 생기고 추적이 끊긴다. 보고서는 문제마다
-1건이라 중복이 곧 비용이다.
+1건이라 중복이 곧 비용이다. → 헤더 2개를 받고, 같은 멱등키면 기존 `jobId`를 그대로 돌려준다.
+`/curricula`도 헤더 2개가 원장까지 이어지도록 배선했다(받기만 하고 버리고 있었다).
 
-**🟡 F3 — `sessions.py:172` 주석이 "라우터가 502"인데 실제는 503 `GRADING_UNAVAILABLE`** (미수정)
+**🟡 F3 — `sessions.py:172` 주석이 "라우터가 502"인데 실제는 503 `GRADING_UNAVAILABLE`** (✅ 수정.
+무상태 전환으로 그 주석은 `sessions.py:submit_answer`로 옮겨졌고 옮긴 자리에서 정정)
 
-**🟡 F4 — 워크스페이스 `CLAUDE.md`의 힌트 사다리 설명이 폐기된 버전이다** (미수정)
+**🟡 F4 — 워크스페이스 `CLAUDE.md`의 힌트 사다리 설명이 폐기된 버전이다** (미수정 — `AI/` 밖이라
+우리가 못 고친다. 사용자가 고쳐야 한다)
 
 "힌트1=관점 되짚기 / 힌트2=**범위 좁힘**"으로 적혀 있으나 2026-08-02에 **재진술 사다리**로
 교체됐다(`scoring.py` `HINT_LADDER`). PM 설계 v2 §4-2가 범위 축소를 금지한다 —
@@ -1226,7 +1237,7 @@ L1  concept 정의     L2  gap.missing     L3  siblings     L4  warns     ← �
 | **D-2** | `POST /reports` 멱등키 형식 | ✅ **`{problemId}:{scoreRunId}`**. 같은 키면 기존 `jobId`를 그대로 돌려주고 LLM을 다시 부르지 않는다(`/analyses`와 같은 규칙) |
 | **D-3** | 요청 스키마의 `callbackUrl` | ✅ **필드 삭제.** 202+폴링으로 확정한다. AI→백엔드 방향 통신은 0이 된다 — 백엔드가 HTTP만 열려 있어 콜백을 구현하면 그 구간이 평문이 되고 인증·방화벽을 새로 정해야 한다. `schemas/analysis.py`·`schemas/curriculum.py` 양쪽에서 뺀다 |
 
-#### 🔴 미결 — 세션을 무상태로 바꿀 것인가 (논의 중, 결정 안 됨)
+#### ✅ 세션 무상태 전환 — **B 확정 (2026-08-03, 사용자 결정. 구현 완료)**
 
 **문제 제기 두 가지**
 
@@ -1250,31 +1261,43 @@ L1  concept 정의     L2  gap.missing     L3  siblings     L4  warns     ← �
 ⓓ 대가인 payload 증가(후반 턴 약 32KB)는 서비스 간 내부 통신이라 무시할 수준 — §T8도 같은 판단
 ⓔ 세션에 한해 인메모리 제약(§T9 제약 1)이 사라진다.
 
-**B로 갈 때의 계약**
+**확정된 계약**
 
 ```
-POST /api/v0/sessions/{id}/answers      ← 이것 하나만 남는다
+POST /api/v0/sessions/{id}/answers      ← 이것 하나만 남았다
   요청: clientRequestId · answerText · problems · transcript
         · cursor(problemId · axisCode · hintsUsed)
-  응답: 채점 결과 · 다음 커서 · 다음 질문/힌트 텍스트 · state · aiUsage
+  응답: turn(채점 결과) · cursor(다음 자리) · current(다음 질문·힌트) · state
+        · progress · aiUsage
 
 삭제: POST /sessions · GET /sessions/{id} · POST /sessions/{id}/restore
 ```
 
-`restore`가 불필요해진다 — **모든 요청이 곧 restore**다.
+`restore`가 불필요해졌다 — **모든 요청이 곧 restore**다.
+
+**구현하며 갈린 판단 3가지**
+
+| 지점 | 결정 | 근거 |
+|---|---|---|
+| 응답에 `transcript`를 되돌릴까 | **아니다.** `turn` 하나만 | 요청이 이미 들고 온 것이라 되돌리면 같은 32KB를 두 번 실어 나른다. 백엔드는 새 턴만 붙이면 된다 |
+| `cursor`를 필수로 할까 | **선택.** 없으면 transcript 재생 | 재생 코드는 옛 `restore_session`에 이미 있었다. 그대로 살려 백엔드가 커서를 안 들고도 돌아가게 뒀다 |
+| `timeLimitSec` | **계약에서 뺐다** | AI가 받기만 하고 **한 번도 쓰지 않던 값**이다. 타이머는 프론트/백엔드 소유(문제당 1200초는 그대로) |
+
+**남은 상태는 멱등 캐시 하나**(`{sessionId}:{clientRequestId}` → 응답, 상한 2000행 LRU).
+날아가도 잃는 것은 "재전송 한 번이 중복 채점이 된다"뿐이다 — 진행은 요청이 들고 온다.
 
 **A를 골라야 하는 경우**: 백엔드가 매 요청에 transcript·problems를 싣는 것을 거부하거나,
 프론트가 AI를 직접 호출하는 구조로 바뀔 때. 현재는 둘 다 아니다.
 
-#### 작업 순서 (예정)
+#### 작업 순서 (2026-08-03 완료, 브랜치 `feature/stabilize`)
 
-1. **F1 배선** — `jobs.py:_to_ai_usage`를 공용으로 올려 세션·보고서·교안이 함께 쓴다. 경로마다 회귀 테스트 1개
-2. **F2 헤더** — `/reports`에 `Idempotency-Key`(D-2 형식)·`X-Trace-Id` 추가
-3. **D-3** — `callbackUrl` 삭제
-4. **F3·F4** — 주석 정정, `CLAUDE.md` 힌트 사다리 갱신
-5. **세션 미결 결정 후** 반영 (B면 엔드포인트 3개 삭제 + `/answers` 스키마 확장)
-6. `openapi.json` 재생성 (1·2·3·5가 전부 계약 변경이다)
-7. **백엔드 전달 문서 1장** — `output_docs/`에 주소·헤더·엔드포인트·타임아웃·폴링 간격·에러 코드·재시도 규칙
+1. ✅ **세션 무상태 전환(B)** — 엔드포인트 3개 삭제, `AnswerSubmit`에 problems·transcript·cursor, 응답을 `SessionView` → `AnswerResult`
+2. ✅ **F1 배선** — `app/usage.py:to_ai_usage` 신설. 채점·보고서·교안 회귀 테스트 3개
+3. ✅ **F2 헤더** — `/reports`에 `Idempotency-Key`(D-2)·`X-Trace-Id`. `/curricula`는 원장까지 배선
+4. ✅ **D-1** — `SourceType` Literal 4종. `D-3` — `callbackUrl` 삭제
+5. ✅ **F3** — 주석 정정 (F4는 `AI/` 밖이라 사용자 몫)
+6. ✅ `openapi.json` 재생성 — 경로 11 → **8개**, 스키마 36개. `pytest` **198 passed**
+7. ⏳ **백엔드 전달 문서 1장** — `output_docs/`에 주소·헤더·엔드포인트·타임아웃·폴링 간격·에러 코드·재시도 규칙
 
 **백엔드에 요청할 것 3가지**(§T9d와 동일, 아직 전달 안 됨): AI 주소를 설정값으로 뺄 것 ·
 채점 호출 타임아웃 30초 이상 · AI IP 화이트리스트 계획 유무.
@@ -1292,9 +1315,34 @@ POST /api/v0/sessions/{id}/answers      ← 이것 하나만 남는다
 필드 표기     camelCase (내부는 snake_case, 직렬화만 변환)
               단 problems[]·stages[] 내부는 DB 컬럼명을 그대로 쓴다
 에러          {error, message, retryable}  평탄 구조. timestamp·path 안 씀
-헤더 3종      X-Internal-Key(인증, health 면제) · Idempotency-Key(submissionId:attemptNo) · X-Trace-Id
+헤더 3종      X-Internal-Key(인증, health 면제) · Idempotency-Key · X-Trace-Id
 analysisId    Spring이 발급. AI는 만들지도 받지도 않는다
 modelCode     UUID(model_id) 대신 문자열로 주고받는다. 기본값은 서버 설정
+콜백          없다. 전부 202 + 폴링이고 요청에 callbackUrl을 받지 않는다 (2026-08-03, §T11 D-3)
+```
+
+**엔드포인트 8개** (2026-08-03 확정)
+
+```
+GET  /api/health
+POST /api/v0/analyses         GET /api/v0/analyses/{jobId}
+POST /api/v0/curricula        GET /api/v0/curricula/{jobId}
+POST /api/v0/reports          GET /api/v0/reports/{jobId}
+POST /api/v0/sessions/{id}/answers      ← 세션 API는 이것 하나뿐이다
+```
+
+**세션은 무상태다** (§T11 B). `POST /sessions` · `GET /sessions/{id}` · `POST /sessions/{id}/restore`
+**3개는 삭제됐다.** 문제·기록·커서가 매 요청에 실려 오고 매 요청이 곧 restore다. 진행 규칙
+(통과선·힌트 상한·사다리)은 AI가 소유하고 백엔드는 응답의 `cursor`를 왕복시키기만 한다.
+첫 질문은 백엔드가 DB 동결분에서 낸다 — AI를 부르지 않는다.
+
+**`Idempotency-Key` 형식** — 경로마다 다르다. 같은 키면 기존 `jobId`를 돌려주고 LLM을 다시 안 부른다.
+
+```
+/analyses    {submissionId}:{attemptNo}
+/curricula   {versionId}:{analysisVersion}
+/reports     {problemId}:{scoreRunId}        (2026-08-03, §T11 D-2)
+/sessions/*/answers   헤더 대신 본문 clientRequestId
 ```
 
 ### 이름 (2026-07-30 개명 완료 — 옛 이름을 쓰지 않는다)
@@ -1537,7 +1585,21 @@ AI가 채우는 값과 Spring이 채우는 값이 갈린다. **경계를 넘지 
 
 **`failure_code` 5종 (확정)**: `TIMEOUT` · `RATE_LIMITED` · `PROVIDER_ERROR` · `INVALID_JSON` · `CONTEXT_OVERFLOW`. `UPSTREAM_ERROR`는 폐기 — `PROVIDER_ERROR`로 쓴다.
 
-**`idempotency_key` = `{source_id}:{source_type}:{attempt_no}`.** UNIQUE 제약은 제거됐다. `source_type`이 호출 종류를 구분하므로 한 요청의 6콜이 서로 다른 키를 갖는다. `source_type` 값 목록은 백엔드 확정 대기(C-4).
+**`source_type` 4종 (2026-08-03 확정, §T11 D-1)** — 우리가 정해 통보한다. C-4는 닫혔다.
+
+```
+ANALYSIS     POST /analyses               sourceId = 분석 jobId
+GRADING      POST /sessions/{id}/answers  sourceId = sessionId
+REPORT       POST /reports                sourceId = 보고서 jobId
+CURRICULUM   POST /curricula              sourceId = 교안 jobId
+```
+
+`featureCode`보다 굵은 단위다 — 한 `sourceType` 안에 `featureCode`가 여럿 나온다
+(`ANALYSIS` 하나에 `CODE_ANALYSIS` + `QUESTION_GENERATION`).
+
+**`idempotency_key` = `{요청 멱등키 | source_id}:{source_type}:{호출순번}`.** UNIQUE 제약은 제거됐다.
+호출순번이 없으면 **한 작업의 여러 콜이 같은 키를 갖고 Spring이 한 행으로 합쳐 토큰이 사라진다**
+(2026-08-03에 발견해 고쳤다 — 그전엔 요청 헤더 키를 모든 행에 그대로 박고 있었다).
 
 **`ai_model.model_code` 초기 목록에 `glm-5.2`가 이미 있다.** 별도 등록 없이 `modelCode`로 `model_id` 조회가 된다.
 

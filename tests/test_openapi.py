@@ -31,10 +31,14 @@ def test_every_endpoint_is_published():
     published = set(_spec()["paths"])
 
     assert "/api/health" in published
-    for path in ("/api/v0/analyses", "/api/v0/sessions", "/api/v0/reports",
-                 "/api/v0/curricula"):
+    for path in ("/api/v0/analyses", "/api/v0/sessions/{session_id}/answers",
+                 "/api/v0/reports", "/api/v0/curricula"):
         assert path in published, path
-    assert len(published) == 11
+
+    # 세션은 무상태다(§T11 B) — 시작·조회·복원 3개가 사라져 8개다.
+    assert "/api/v0/sessions" not in published
+    assert "/api/v0/sessions/{session_id}/restore" not in published
+    assert len(published) == 8
 
 
 def test_frozen_contract_is_visible_in_the_spec():
@@ -63,8 +67,12 @@ def test_frozen_contract_is_visible_in_the_spec():
     assert "isGeneral" in props("Problem")
 
     # 전면 동결 — 세션은 저장분을 받아 쓰기만 한다
-    assert "problems" in props("SessionStart")
+    assert "problems" in props("AnswerSubmit")
     assert "hintText" in props("Question")
+
+    # 무상태(§T11 B) — 커서가 요청·응답 양쪽에 있어야 왕복이 성립한다
+    assert "cursor" in props("AnswerSubmit") and "transcript" in props("AnswerSubmit")
+    assert "cursor" in props("AnswerResult") and "turn" in props("AnswerResult")
 
 
 def test_grading_failure_is_documented():
@@ -98,3 +106,6 @@ def test_multipart_request_fields_are_readable():
 
     curricula = payload_fields("/api/v0/curricula")
     assert {"versionId", "courseLabel", "modelCode"} <= curricula
+
+    # 202 + 폴링으로 확정(§T11 D-3) — 콜백 자리를 두면 누군가 구현한다
+    assert "callbackUrl" not in analyses and "callbackUrl" not in curricula

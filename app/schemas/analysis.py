@@ -29,9 +29,8 @@ class AnalysisRequest(BaseSchema):
     
     attempt_id: str | None = Field(default=None, description="Spring 측 측정수행 키(에코용)")
     submission_id: str | None = None
-    callback_url: str | None = Field(
-        default=None, description="완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현"
-    )
+    # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다 —
+    # AI→백엔드 방향 통신이 0이라 그 구간의 인증·방화벽을 새로 정할 일이 없다.
     method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
     source: AnalysisSource = Field(default_factory=AnalysisSource)
     extraction_scope: Literal["TOTAL", "OWN_COMMIT"] = "TOTAL"

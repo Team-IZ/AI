@@ -1,19 +1,29 @@
-""" 문답 세션 API(P03)의 요청 응답 스키마 """
-from typing import Any, Literal
+""" 문답 세션 API(P03)의 요청 응답 스키마.
+
+🔴 **세션은 무상태다** (2026-08-03 확정, PLAN §T11). 엔드포인트는
+`POST /sessions/{id}/answers` 하나뿐이고 AI는 세션을 들고 있지 않는다.
+**매 요청이 곧 restore**다 — 문제·기록·커서가 전부 요청에 실려 온다.
+
+그래서 배포·재시작·인스턴스 중지가 진행 중인 세션을 깨지 않는다. 대신
+진행 규칙(통과선·힌트 상한·사다리)은 여전히 AI가 소유한다. 커서를 입력으로 받아
+다음 커서를 계산해 돌려주는 순수 함수다.
+"""
+from typing import Literal
 
 from pydantic import Field
 
+from app.schemas.analysis import Problem
 from app.schemas.common import BaseSchema
 from app.schemas.report import AutonomyCode, AxisCode  # 축 = 문답 레벨. 정의는 report.py 한 곳뿐
 from app.schemas.usage import AiUsage
-from app.schemas.analysis import Problem
+
 
 class CodeContext(BaseSchema):
     """ 질문이 가르키는 코드 발췌 """
     path: str
     snippet: str
     line_start: int
-    
+
 class Question(BaseSchema):
     """지금 물어보는 질문 하나.
 
@@ -38,34 +48,21 @@ class Progress(BaseSchema):
     problem_index: int            # 몇 번째 문제인지(1부터)
     problem_total: int
 
-class SessionStart(BaseSchema):
-    """POST /sessions 요청.
 
-    🔴 **`problems`가 필수다** (2026-08-02, 전면 동결). 문제·질문·힌트는 분석 때
-    만들어져 DB에 있고 세션은 그것을 받아 진행한다. **AI는 세션 중에 아무것도
-    생성하지 않는다** — 채점만 한다. 안 주면 물을 것이 없어 세션이 성립하지 않는다.
+class Cursor(BaseSchema):
+    """문답이 지금 서 있는 자리. **요청과 응답에 같은 모양으로 오간다.**
+
+    백엔드는 응답의 `cursor`를 저장해 두었다가 다음 요청에 그대로 실어 보내면 된다.
+    생략하면 AI가 `transcript`를 되짚어 복원한다(첫 답변이면 첫 문제의 L1).
     """
-    attempt_id: str | None = None
-    analysis_job_id: str | None = None
-    session_id: str | None = Field(default=None, description="Spring AssessmentSession 키(에코용)")
-    problems: list[Problem] = Field(
-        default_factory=list,
-        description="분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다",
-    )
-    selected_problem_ids: list[str] = Field(
-        default_factory=list, description="problems 중 이 세션에 쓸 것. 생략 시 전체",
-    )
-    time_limit_sec: int = Field(
-        default=1200, ge=1,
-        description="**문제 1개당** 제한 시간(초). 세션 전체가 아니다 — 문제가 바뀌면 "
-                    "리셋되고 남은 시간은 이월되지 않는다. AI 호출 대기 동안은 멈춘다",
+
+    problem_id: str
+    axis_code: AxisCode
+    hints_used: int = Field(
+        default=0, ge=0, le=2, description="이 단계에서 이미 연 힌트 수. 점수 상한(5/4/3)의 근거",
     )
 
-class AnswerSubmit(BaseSchema):
-    """POST /sessions/{id}/answers 요청."""
-    client_request_id: str = Field(description="세션 내 유일 멱등키")
-    answer_text: str
-    
+
 class TranscriptTurn(BaseSchema):
     """확정된 문답 한 턴. Spring이 즉시 영속화하는 복구 근거.
 
@@ -88,14 +85,38 @@ class TranscriptTurn(BaseSchema):
         default=None, description="이 턴 직전에 보여준 힌트. 첫 시도면 null"
     )
     autonomy: AutonomyCode | None = None
-    
-class SessionView(BaseSchema):
-    """세션 응답.
 
-    명세는 진행/종료 두 형태로 나뉘지만, 스텁에서는 한 모델에 선택 필드로 담아
-    단순하게 간다(진행 중이면 current+progress, 끝났으면 transcript).
-    실제 계약을 굳힐 때 분리 여부를 정한다.
+
+class AnswerSubmit(BaseSchema):
+    """POST /sessions/{id}/answers 요청. **세션 API는 이것 하나뿐이다.**
+
+    AI가 상태를 안 들고 있으므로 채점에 필요한 것이 전부 여기 실려야 한다.
     """
+
+    client_request_id: str = Field(description="세션 내 유일 멱등키. 재전송하면 같은 응답이 온다")
+    answer_text: str
+    problems: list[Problem] = Field(
+        default_factory=list,
+        description="분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다. "
+                    "**AI는 세션 중에 질문을 만들지 않는다** — 안 주면 물을 것이 없다",
+    )
+    transcript: list[TranscriptTurn] = Field(
+        default_factory=list,
+        description="지금까지 확정된 턴 전부. `cursor`를 생략하면 이걸 되짚어 위치를 복원한다",
+    )
+    cursor: Cursor | None = Field(
+        default=None, description="이 답변이 대답하는 자리. 생략 시 transcript로 복원",
+    )
+
+
+class AnswerResult(BaseSchema):
+    """POST /sessions/{id}/answers 응답.
+
+    **transcript를 통째로 돌려주지 않는다.** 요청이 이미 들고 온 것이라 되돌리면
+    같은 32KB를 두 번 실어 나르게 된다. 이번 턴(`turn`)만 주므로 백엔드는 그것만
+    붙여 저장하면 된다.
+    """
+
     session_id: str
     # DB assessment_session.status CHECK와 같은 집합.
     # READY = 분석 직후 미리 만들어 둔 상태(문제보다 세션이 먼저 있어야 한다).
@@ -103,17 +124,14 @@ class SessionView(BaseSchema):
     state: Literal[
         "READY", "IN_PROGRESS", "PAUSED", "COMPLETED", "FAILED", "EXPIRED"
     ]
-    current: Question | None = None
+    turn: TranscriptTurn | None = Field(
+        default=None, description="이번에 채점된 턴. 물을 것이 없었으면 null",
+    )
+    cursor: Cursor | None = Field(
+        default=None, description="다음에 물을 자리. 그대로 다음 요청에 실어 보낸다. 끝났으면 null",
+    )
+    current: Question | None = Field(
+        default=None, description="다음 질문과 힌트 텍스트. 끝났으면 null",
+    )
     progress: Progress | None = None
-    transcript: list[TranscriptTurn] = Field(default_factory=list)
     ai_usage: list[AiUsage] = Field(default_factory=list)
-    
-class SessionRestore(BaseSchema):
-    """POST /sessions/{id}/restore 요청 (명세 §4.4)."""
-    attempt_id: str | None = None
-    analysis_job_id: str | None = None
-    time_limit_sec: int = Field(default=1200, description="문제 1개당 제한 시간(초)")
-    elapsed_sec: int = Field(default=0, description="현재 문제에서 흘러간 시간. 문제가 바뀌면 0으로 돌아간다")
-    transcript: list[TranscriptTurn] = Field(default_factory=list)
-    problems: list[Problem] = Field(default_factory=list)
-    source: dict[str, Any] | None = None
