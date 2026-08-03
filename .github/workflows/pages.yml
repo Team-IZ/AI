@@ -148,8 +148,9 @@ jobs:
             src-codeqna/ site/lab/code-qna/
 
           # poc half (D-poc1): same shape as code-qna -- the whole feat/poc_full tree,
-          # including its vendored cognition/judgment/feedback (runtime fetch targets, see
-          # above). Its pages live one directory deep (app/) because the vendored files
+          # including its vendored cognition/judgment (runtime fetch targets, see above --
+          # feedback/ was dropped from this branch, D-feedback1 below, since P04 never
+          # loaded it). Its pages live one directory deep (app/) because the vendored files
           # resolve "../" against the page: p02-engine.js's REPO_RAW_BASE and
           # lab-core.js's loadManifest() both assume it. Root index.html is a redirect stub.
           mkdir -p site/lab/poc
@@ -259,7 +260,22 @@ jobs:
           # positive assertions below replace the byte-identity check for these two
           # forked files, so excluding them here cannot silently re-hide the exact
           # collision this step's exclusion is carved out for.
-          for p in cognition judgment feedback shared worker prompt_manifest.json webtool_driver.py; do
+          #
+          # D-feedback1 (2026-08-03): feedback/ dropped from this loop entirely -- it's
+          # deleted from feat/poc_full's tree (not just excluded here), unlike the
+          # wrangler.toml/config.js forks above which still exist on both sides.
+          #   WHY: confirmed feat/poc_full's own app/*.js and shared/p02-engine.js never
+          #   referenced feedback/ (not in PIPELINE_FILES, no import anywhere) -- it was
+          #   vendored at the original branch-off but P04 never actually loaded it (P03's
+          #   own p03-engine.js is the one that uses feedback/reflection_hook.py etc, and
+          #   P04 has no equivalent). feat/code_Q&A still genuinely uses it, so it's not
+          #   removed there.
+          #   COST: if P04 ever needs reflection-style feedback later, this file has to
+          #   be re-vendored from feat/code_Q&A at that point (not currently drift-checked
+          #   so it can silently go stale in the meantime -- acceptable since it doesn't
+          #   exist here to go stale FROM).
+          #   EXIT: copy feedback/ back from feat/code_Q&A and add it back to this loop.
+          for p in cognition judgment shared worker prompt_manifest.json webtool_driver.py; do
             if diff -r -q \
                  --exclude='__pycache__' --exclude='p03-engine.js' \
                  --exclude='wrangler.toml' --exclude='config.js' \
