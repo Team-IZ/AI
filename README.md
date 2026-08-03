@@ -92,24 +92,31 @@ Swagger UI: **http://127.0.0.1:8000/docs** — 여기서 엔드포인트를 직�
 
 > **워커는 1개로 유지한다.** job·세션 저장소가 인메모리라 `--workers 2` 이상이면 만든 프로세스와 조회 프로세스가 달라져 404가 난다. 시연 규모(동시 10~20명)에서는 제약이 아니다 — 병목은 FastAPI가 아니라 NVIDIA 무료 티어의 분당 40회다.
 
-### 배포 — AWS EC2 + cloudflared (2026-08-02~)
+### 배포 — 자동이다. 신경 쓰지 않는다 (2026-08-03~)
 
-운영 인스턴스는 **서울 리전 EC2 t3.small**이고 `main` 브랜치를 체크아웃해 둔다.
-`uvicorn`과 `cloudflared`가 각각 systemd 서비스라 재부팅에도 자동으로 올라온다.
-
-```bash
-# 배포 (EC2에서)
-cd ~/AI && git pull && .venv/bin/pip install -r requirements.txt && sudo systemctl restart iz-get-ai
-# 상태·현재 주소
-systemctl is-active iz-get-ai cloudflared
-sudo journalctl -u cloudflared -n 60 --no-pager | grep trycloudflare.com
+```
+https://cpiysizen3.ap-northeast-1.awsapprunner.com     고정 HTTPS. 주소가 안 바뀐다
 ```
 
-- **8080은 인바운드로 열지 않는다.** 터널이 아웃바운드로 나가므로 인터넷에 평문 포트가 없다.
-  `X-Internal-Key`가 공유 비밀이라 이 성질이 중요하다.
-- **quick tunnel URL은 cloudflared가 재시작될 때마다 바뀐다.** 백엔드는 AI 주소를 설정값으로 갖고 있어야 한다.
-- 안 쓸 때는 인스턴스를 **Stop**(EBS만 과금). **`Terminate`는 디스크째 삭제라 금지.**
-- App Runner는 2026-04-30부터 신규 고객을 받지 않아 쓸 수 없다. 경위와 대안은 `PLAN_FASTAPI_MIGRATION.md` §T9.
+**AWS App Runner가 `main` 브랜치를 물고 자동 배포한다.** 팀원이 그 계정과 설정을 소유하고
+있고, **우리는 `main`에 올리기만 하면 된다.** 배포 명령도, 서버 접속도, 주소 공유도 없다.
+설정 파일은 `main`의 `apprunner.yaml`(런타임 python3.11 · 포트 8080 · 헬스체크 `/api/health`).
+
+⚠️ **`main` 머지가 곧 재배포다.** 재배포는 프로세스를 갈아치우므로 **진행 중인 job과 세션
+멱등 캐시가 끊긴다.** 세션 자체는 무상태라 안 깨지지만(매 요청이 restore), 폴링 중인
+`/analyses`·`/reports` job은 사라진다. **머지 시점은 백엔드와 맞춘다.**
+
+⚠️ **인스턴스는 1개로 고정해야 한다.** job 저장소가 인메모리 dict라 2개로 늘면 만든
+프로세스와 조회 프로세스가 달라져 폴링이 404가 난다.
+
+<details>
+<summary>옛 방식 — EC2 + cloudflared (2026-08-02 ~ 08-03, 폐기)</summary>
+
+서울 EC2 t3.small에 `main`을 체크아웃해 두고 `git pull && systemctl restart iz-get-ai`로
+수동 배포했다. quick tunnel URL이 cloudflared 재시작마다 바뀌어서 백엔드가 주소를 설정값으로
+들고 있어야 했다. **App Runner 고정 주소로 대체됐다.**
+
+</details>
 
 ### 백엔드와 통신 테스트 (배포 없이)
 
