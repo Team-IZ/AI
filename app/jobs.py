@@ -40,14 +40,36 @@ _MEASUREMENTS_DIR = Path(__file__).resolve().parent.parent / "docs" / "code-impo
 def _log_measurement(job: AnalysisJobStatus) -> None:
     """ job이 터미널 상태(SUCCEEDED/FAILED/PARTIAL)가 될 때 run_analysis의 finally가 호출.
     측정 자체의 실패가 분석 job 결과에 영향을 주면 안 된다(D6과 같은 원칙) --
-    이 함수는 무엇을 하든 예외를 밖으로 던지지 않는다. """
+    이 함수는 무엇을 하든 예외를 밖으로 던지지 않는다.
+
+    D-pr3b (2026-08-03, 로깅 갭 수정): 원래는 job 전체의 latency_ms를 평평한
+    리스트로만 남겨서, "이 job에 3콜이 있었다"는 알아도 그중 CODE_MAP이 실패했는지
+    DIAGRAM이 실패했는지(D13 이후 CODE_MAP이 job 실패 없이도 개별 FAILED일 수 있음,
+    D6 강등 철학) 스테이지별로 분해할 수 없었다(D10 재논의 시 필요하다고 지적됨).
+      WHY: job.ai_usage의 각 AiUsage 항목이 이미 source_type/status/failure_code를
+      갖고 있다(app/schemas/usage.py) -- 새로 계산할 게 없고 그대로 옮겨 담기만 하면 된다.
+      COST: 기존에 이 파일 하나뿐인 잠재 소비자(PR-3 집계 스크립트, 아직 안 만들어짐)가
+      있었다면 latency_ms 평면 리스트를 기대했을 텐데, 그 스크립트가 없으므로 스키마를
+      깨는 실질적 비용은 0이다(measurements/ 안에 실제 .jsonl 데이터 자체가 아직 없음,
+      확인됨).
+      EXIT: 다시 평면 리스트가 필요해지면 [c["latency_ms"] for c in record["calls"]]로
+      바로 유도 가능 -- 정보가 상위집합이라 되돌리기 쉬운 방향으로 바꿨다.
+    """
     record = {
         "job_id": job.job_id,
         "status": job.status,
         "started_at": job.started_at.isoformat() if job.started_at else None,
         "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-        "latency_ms": [u.latency_ms for u in job.ai_usage],
         "failure_reason": job.failure_reason,
+        "calls": [
+            {
+                "source_type": u.source_type,
+                "status": u.status,
+                "failure_code": u.failure_code,
+                "latency_ms": u.latency_ms,
+            }
+            for u in job.ai_usage
+        ],
     }
     line = json.dumps(record, ensure_ascii=False)
 

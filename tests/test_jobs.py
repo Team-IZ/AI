@@ -118,6 +118,70 @@ def test_measurement_failure_never_breaks_job_result(monkeypatch):
     assert job.result is not None
 
 
+def test_measurement_calls_carry_per_stage_source_type_and_failure_code(capsys):
+    """ D-pr3b: _log_measurement의 record는 latency_ms 평면 리스트가 아니라
+    호출별 source_type/status/failure_code/latency_ms를 담은 calls 리스트를 남긴다 --
+    스테이지별(예: CODE_MAP만 FAILED) 귀속이 가능해야 한다는 D10 지적을 고친다. """
+    from datetime import datetime, timezone
+
+    from app.schemas.analysis import AnalysisJobStatus
+    from app.schemas.usage import AiUsage
+
+    job = AnalysisJobStatus(job_id="x", status="PARTIAL")
+    job.ai_usage = [
+        AiUsage.model_validate(
+            {
+                "featureCode": "CODE_ANALYSIS",
+                "modelCode": "mistralai/mistral-medium-3.5-128b",
+                "sourceType": "CODE_MAP",
+                "sourceId": "sub-1",
+                "requestId": "req-1",
+                "traceId": "trace-1",
+                "idempotencyKey": "sub-1:CODE_MAP:1",
+                "inputTokenCount": 100,
+                "outputTokenCount": 50,
+                "status": "SUCCEEDED",
+                "latencyMs": 2051,
+                "occurredAt": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+        AiUsage.model_validate(
+            {
+                "featureCode": "CODE_ANALYSIS",
+                "modelCode": "mistralai/mistral-medium-3.5-128b",
+                "sourceType": "DIAGRAM",
+                "sourceId": "sub-1",
+                "requestId": "req-2",
+                "traceId": "trace-1",
+                "idempotencyKey": "sub-1:DIAGRAM:1",
+                "inputTokenCount": 100,
+                "outputTokenCount": 0,
+                "status": "FAILED",
+                "failureCode": "TIMEOUT",
+                "latencyMs": 30000,
+                "occurredAt": datetime.now(timezone.utc).isoformat(),
+            }
+        ),
+    ]
+
+    jobs_mod._log_measurement(job)
+
+    out = capsys.readouterr().out
+    line = next(l for l in out.splitlines() if l.startswith("[pr3-measurement] "))
+    record = json.loads(line[len("[pr3-measurement] "):])
+
+    assert "latency_ms" not in record  # 평면 리스트는 더는 없다
+    assert len(record["calls"]) == 2
+    assert record["calls"][0] == {
+        "source_type": "CODE_MAP", "status": "SUCCEEDED",
+        "failure_code": None, "latency_ms": 2051,
+    }
+    assert record["calls"][1] == {
+        "source_type": "DIAGRAM", "status": "FAILED",
+        "failure_code": "TIMEOUT", "latency_ms": 30000,
+    }
+
+
 def test_log_measurement_swallows_write_errors(monkeypatch, capsys):
     """ 실제 안전장치 자체를 검증 -- 로컬 파일 쓰기가 뭘 던지든 _log_measurement는
     예외를 밖으로 절대 안 던진다(stdout 경로는 별개로 계속 동작). """

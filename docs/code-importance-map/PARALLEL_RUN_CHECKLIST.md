@@ -24,9 +24,15 @@ Worker를 은퇴시킨다.** 하나라도 Fail로 바뀌면 전부 다시 열린
 
 **측정 절차 (파일럿 기간에 실행):**
 1. `GET /analyses/{jobId}`의 최종(terminal) 폴링 응답마다 `status`,
-   `started_at`, `completed_at`, `ai_usage[].latency_ms`, `failure_reason`을
+   `started_at`, `completed_at`, `failure_reason`, 그리고 `ai_usage[]`의
+   각 항목에서 `source_type`/`status`/`failure_code`/`latency_ms`를
    `docs/code-importance-map/measurements/<날짜>.jsonl`에 한 줄씩 append.
+   (`app/jobs.py::_log_measurement()`가 로컬/컨테이너 stdout에 이미 이 모양으로
+   `calls: [{source_type, status, failure_code, latency_ms}, ...]`을 자동 기록한다 --
+   D-pr3b, 2026-08-03. 수동 하베스트는 이 자동 기록과 같은 필드셋을 맞추면 된다.)
 2. 20건이 쌓이면 p99 지연과 FAILED 비율을 계산해 이 문서의 X/Y를 날짜와 함께 갱신.
+   스테이지별(`source_type`) 실패가 특정 단계(예: DIAGRAM)에 쏠리면 Y를 전체
+   job 실패율 하나로 뭉개지 말고 스테이지별로도 병기할 것.
 
 **논쟁용 가안(채택 아님, 반증 대상):** X=300초(기존 Worker 자신의 문서화된
 600초/attempt 예산의 절반), Y=2%. **이 숫자로 기존 Worker를 은퇴시키지 말 것** —
