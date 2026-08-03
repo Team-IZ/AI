@@ -18,7 +18,7 @@
 | 제출 | **ZIP · GitHub 링크 둘 다 동작.** 링크는 서버에서 `git clone --depth 1` |
 | 배포 | **App Runner 자동 배포**(`main` 푸시 = 배포). 주소 고정. 팀원 소유 — 우리 작업 아님 |
 | 계약 | `openapi.json`. `tests/test_openapi.py`가 드리프트를 막는다 |
-| 다음 | **§T16 백엔드 회신 대기**(`#42`). 그 다음 §T13 백엔드 연동 |
+| 다음 | **§T16 백엔드 회신 대기**(`#42` 1차 반영 완료 → §T17). 그 다음 §T13 백엔드 연동 |
 | 기준 | **§기능 동결 스펙** · **§계약 기준값**. 앞선 절과 충돌하면 이 둘이 이긴다 |
 | 막힌 것 | **DDL 2건**(`code_text`·`analysis_document`). 이슈 `#42`로 요청함 |
 | 🔴 위험 | **무료 티어 529 실패율 64%.** 유료 전환이 근본 해결(`../output_docs/미결_논의사항.md` P-3) |
@@ -237,6 +237,29 @@ code_analysis.analysis_document (JSONB)                 분석 문서 — B-5로
 
 ⚠️ **L3=반례 / L4=대안으로 적힌 문서·댓글은 낡은 것이다.** PoC 축 순서는 정정 완료(`fc80044`·`15b02fb`).
 
+### 문제 선정 — 없으면 없다 (2026-08-03 PM 확정)
+
+```
+teaches 는 오퍼레이터가 고정한다 — 모든 학생이 같은 개념을 시험 본다
+개념이 코드에 없으면
+  ① 최대한 찾는다     p04-3 + 실패한 teach 만 모아 재시도 1회
+  ② 그래도 없으면      문항 없음. unmatchedTeaches 로 명시적으로 보고한다
+지어내지 않는다        대체 개념·일반 문제·합성 코드 전부 폐기
+```
+
+**비교 가능성의 근거가 여기다.** MG-06(교육생 상세)이 회차별로 같은 개념 3개를 가로로 놓고
+비교한다 — 학생마다 개념이 다르면 그 격자가 성립하지 않는다.
+
+🔴 **`―`(문항 없음)과 `0단`(L1 미달)은 다른 것이다.**
+
+```
+―     문항 없음   출제 안 됨      → 도달 단계 NULL
+0단   L1 미달     출제됐고 못 풀었다 → 도달 단계 0
+```
+
+⚠️ **`isGeneral`은 삭제됐다**(필드째). `_general_topics()` 폴백도 없앴다 —
+`tests/test_topics.py`가 `assert not hasattr(topics, "_general_topics")`로 되살아나는 것을 막는다.
+
 ### 채점
 
 ```
@@ -443,7 +466,7 @@ IP당 60회/시간이라 **같은 망의 다른 교육생까지 막혔고**(2026
 
 | AI가 준다 | Spring이 채운다 |
 |---|---|
-| `idempotencyKey` · `sourceType` · `sourceId` | `usage_id` · `org_id` · `actor_user_id` |
+| `idempotencyKey` · `contextType` · `contextId` | `usage_id` · `org_id` · `actor_user_id` |
 | `featureCode` · `modelCode` | `model_id` (조회) |
 | `inputTokenCount` · `outputTokenCount` · `cachedTokenCount` | `request_id` · `trace_id` |
 | `status` · `failureCode` | `input_unit_price` · `output_unit_price` · `currency_code` |
@@ -452,9 +475,10 @@ IP당 60회/시간이라 **같은 망의 다른 교육생까지 막혔고**(2026
 ✅ **단가는 Spring이 갖고 있다 (C-3 닫힘).** 백엔드에 `PUT /platform/operations/models/{modelId}/pricing`과 `GET /organizations/{orgId}/operations/usage`가 이미 있다. 우리 설계가 맞았다 — AI는 단가를 모르고, 단가표를 AI에 두면 바뀔 때마다 재배포다.
 
 ```
-sourceType     ANALYSIS · GRADING · REPORT · CURRICULUM        ← 4개 확정 (C-4 닫힘)
+contextType    ANALYSIS · GRADING · REPORT · CURRICULUM        ← 필드명 변경 완료(2026-08-03)
+               ⚠️ 값 집합은 미확정 — 새 MEAS 비고는 ANALYSIS_JOB·PROBLEM_STAGE 처럼 테이블명을 쓴다
 failureCode    TIMEOUT · RATE_LIMITED · PROVIDER_ERROR · INVALID_JSON · CONTEXT_OVERFLOW
-idempotencyKey {요청키|sourceId}:{sourceType}:{순번}
+idempotencyKey {요청키|contextId}:{contextType}:{순번}
 ```
 
 🔴 **`idempotencyKey` 형식이 2026-08-03에 바뀌었다.** 예전엔 한 작업의 모든 행에 요청 헤더 키를 그대로 박아 **행마다 키가 같았다.** 그대로 두면 Spring이 여러 콜을 한 행으로 합쳐 토큰이 사라진다.
@@ -588,18 +612,66 @@ DB CHECK 두 개를 자연히 만족한다 — `firstHint`에 값이 있으려�
 하고, 미도달 축은 점수가 전부 `null`이다. 힌트 1개를 쓰고 4점을 받은 턴이 **4점 그대로**
 나갔다(옛 규칙이면 상한 4에 걸려 우연히 같았겠지만, 이제 상한 자체가 없다).
 
+### T17 — 백엔드 1차 회신 반영 ✅ 완료 (2026-08-03, 232 tests)
+
+`#42` 회신이 왔고 확정분을 코드에 반영했다.
+
+| # | 한 것 | 근거 |
+|---|---|---|
+| 1 | ✅ `aiUsage` → `contextType`/`contextId` | 백엔드가 필드명 변경을 확인해줬다(01_SYS) |
+| 2 | ✅ 통과 기준 3점 **고정** | 공통 정책으로 확정. 요청에 `passScore`를 받지 않는다 |
+| 3 | ✅ **`isGeneral` 필드째 삭제** + `_general_topics()` 폴백 제거 | PM 결정 — 아래 참조 |
+| 4 | ✅ 못 찾은 teach **재시도 1회** | PM: "최대한 찾아보고 그래도 없으면 없다고 박아라" |
+| 5 | ✅ `unmatchedTeaches` 신설 | `―`(문항 없음)을 백엔드가 역산하지 않게 |
+| 6 | ✅ `courseLabel` 필수화 · 교안 결과 한글 고정 | 아래 참조 |
+
+**🔴 개념이 코드에 없을 때 — "없으면 없다" (2026-08-03 PM 확정)**
+
+```
+오퍼레이터가 고른 teaches 는 고정이다 — 모든 학생이 같은 개념을 시험 본다
+  ① 최대한 찾는다     p04-3 + 실패한 teach 만 모아 재시도 1회
+  ② 그래도 없으면      그 문항은 없다. unmatchedTeaches 로 보고한다
+```
+
+**폐기된 대안 3개와 이유**
+
+| 폐기 | 왜 |
+|---|---|
+| 다른 teach로 대체 선정 | 학생마다 다른 개념을 시험 보게 되어 **개념별 도달 비교가 깨진다.** MG-06이 회차별로 같은 개념 3개를 가로로 놓는 구조다 |
+| 앵커 없는 일반 문제(`isGeneral`) | 위와 같다. 오퍼레이터가 고른 개념을 조용히 갈아치우는 자리였다 |
+| 합성 코드 생성 + 3인칭 루브릭 | 루브릭 L2·L4가 **"네가 쓴 코드"** 전제다. 합성 코드에 "왜 이렇게 했나"를 물으면 학생이 할 답이 "제가 안 썼는데요"뿐이라 전원 저점으로 수렴한다 |
+
+🔴 **`―`(문항 없음)과 `0단`(L1 미달)은 다른 것이다.** 도달 단계에 0을 박으면 "안 물어봤다"가
+"틀렸다"로 바뀐다 — 문항 없음은 NULL이어야 한다. 백엔드에 이 구분을 요청했다.
+
+**교안 분석 2건**
+
+```
+courseLabel 필수화   생략 시 매니페스트 기본값 'Java' 로 프레이밍된다.
+                    영어 교안 실측에서 발견 — 업로드 화면이 과정을 이미 안다
+한글 출력 고정        매니페스트(vendor)에 언어 지시가 없다.
+                    stages.call(extra_user=...) 로 붙였다 — vendor 안 건드림
+                    번역 금지 항목 명시: JSON 키 · unit_id · kind · 기술 용어
+                    실측: guardrail(안전장치) · deterministic · Agents SDK 원문 유지
+```
+
+**곁가지로 잡은 버그 1개**: 검증 에러 메시지가 `": Field required"`로 나갔다 —
+`format_validation_message`가 `loc[1:]`로 무조건 잘라서, multipart payload를 손으로 파싱하는
+경로(`/analyses`·`/curricula`)는 `loc`에 `"body"`가 없어 **필드명이 통째로 날아갔다.**
+백엔드가 뭘 빠뜨렸는지 알 수 없는 메시지였다.
+
 ### T16 — 백엔드 회신 대기 ← **지금 여기**
 
-`#42`에 요청한 것들이 오면 반영한다. **우리가 막힌 것은 없다** — 응답은 이미 그 값을 들고
-있고, 저장 자리만 없다.
+**우리가 막힌 것은 없다** — 응답은 이미 그 값을 들고 있고 저장 자리만 없다.
 
 | 대기 | 오면 할 일 |
 |---|---|
-| **B-12** `code_text` 컬럼 | 없음(이미 `codeSnippet`으로 보내고 있다). 백엔드 저장 코드만 열린다 |
-| **B-13** `analysis_document JSONB` | 없음(이미 보내고 있다) |
-| **C-1** 통과 기준 3점 | 설정값이면 요청에 `passScore`를 받아 `scoring.PASS_SCORE` 대신 쓴다 |
-| **C-2** 개념 없을 때 | ⓑ면 문제 수 미달 시 실패 사유를 담아 보내는 경로를 만든다 |
-| **C-6** `ai_usage` 시트 | §T15-6 — `source_type`/`source_id` → `context_type`/`context_id` |
+| **B-12** `code_text` 컬럼 | 없음(이미 `codeSnippet`으로 보낸다). 백엔드 저장 코드만 열린다 |
+| **B-13** `analysis_document JSONB` | 없음(이미 보낸다) |
+| **되물음 1** 도달 단계 컬럼 위치 | 없음. `TEAM_COMMON`은 한 행에 학생 N명분을 못 담는다는 지적 |
+| **되물음 2** `ai_model` 등록 2건 | 없음. 등록 전까지 AI 기본값이 나간다 |
+| **되물음 3** 문항 없음 = NULL | 없음. 백엔드 저장 규칙이다 |
+| **고지** `contextType` 값 집합 | 값을 바꾸라고 하면 Literal 교체. `PROBLEM_STAGE`면 요청에 `problemStageId`가 필요하다 |
 
 ### T13 — 백엔드 연동 + `references[]` 채우기
 
@@ -772,6 +844,7 @@ main       배포 브랜치. EC2가 이 브랜치를 체크아웃해 둔다
 | 날짜 | 내용 |
 |---|---|
 | 2026-08-03 | **§T11 안정화** — 세션 무상태 전환(엔드포인트 3개 삭제) · `aiUsage` 전 경로 배선(분석 외 전부 빈 배열이던 계약 위반) · `sourceType` 4종 · `/reports` 헤더·멱등 · `callbackUrl` 삭제 · `idempotencyKey` 형식 정정. **198 tests** |
+| 2026-08-03 | **§T14b 실호출 안정화**(죽은 채점 모델 교체 · GITHUB_URL 이식 · codeSnippet 파일 전체 · 리포트 problemNo·narrativeFailed) · **§T15 새 MEAS 대응**(점수 상한 폐기 · StageScore 1:1 · 어휘 정렬 · 잡 PARTIAL) · **§T17 백엔드 1차 회신 반영**(contextType 개명 · isGeneral 삭제 · 재시도 1회 · unmatchedTeaches · courseLabel 필수 · 교안 한글 고정). **232 tests** |
 | 2026-08-02 | **T9 배포** — 서울 EC2 + cloudflared. **T10 전면 동결 전환** · **T10-B PM 설계 v2 대조 10건 판정** · **T10-C vendor 정책 변경 + P-1** · p04-1 `analysis_doc.py` · p04-2 `requirements.py` · 보고서 문제 단위 · 총점 폐기 + `reachedStage` · 힌트 사다리 재진술로 교체 · `Problem.is_general`. **192 tests** |
 | 2026-08-01 | **T7d 정체의 정체** — 스트리밍 TTFT 측정. 정체 draw는 30초를 기다려도 **첫 토큰이 0개**다(느린 게 아니라 영영 안 온다). 성공 draw TTFT 중앙값 0.62초. 세션 타임아웃 8초 × 10회. **112 tests** |
 | 2026-07-31 | **T6 룰 규칙부 이식**(vendor 방식, ZIP 안전 해제) · **T7a LLM 클라이언트**(실패해도 `usage`를 들고 던진다) · **T7b p04 전 구간 실동작** · **T7c 체감 지연 실측**(결론: 지연이 아니라 **실패율 32%**가 문제) · **T2c 분석 문서 JSON 전환**(B-5 발생) |

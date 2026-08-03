@@ -285,8 +285,7 @@ cloudflared tunnel --url http://localhost:8000
   "problemType": "DESIGN_CHOICE",      // 아래 5종
   "priority": 0.91,
   "questionFocusItemId": "a3f2-…",     // 요청 focusItems에서 고른 id
-  "teachId": "tch-1",                  // 요청 teaches에서 이 문제가 검증하는 개념. isGeneral이면 null
-  "isGeneral": false,                  // teach 앵커 없이 뽑은 "일반 문제"
+  "teachId": "tch-1",                  // 이 문제가 검증하는 개념. **항상 채워진다**
   "sourcePath": "app/main.py",
   "lineStart": 12, "lineEnd": 14,
   "codeSnippet": "…파일 전체…",         // 🔴 문제를 낸 파일 전체 (화면에 띄울 것)
@@ -317,7 +316,29 @@ cloudflared tunnel --url http://localhost:8000
 
 **`extractorVersion`은 정수다** — `assessment_problem.extractor_version`이 `INTEGER CHECK (> 0)`이다. 값은 룰 vendor의 `.py`+`.json` 전부를 해시해 산정한 값이라 **같은 룰이면 같은 값, 데이터 파일만 바뀌어도 다른 값**이다(재현성 근거). 사람이 읽는 버전 번호가 아니고 순서도 없다.
 
-**`teachId`는 문제↔개념 연결이다.** 강사가 teach 3개(클래스·상속·캡슐화)를 고르면 문제도 그 셋에 하나씩 붙고, 결과 화면의 "클래스는 L3까지 도달 / 상속은 L2까지 도달"이 이 값으로 그려진다. **`isGeneral: true`면 `teachId`는 null이다** — 제출 코드가 그 개념을 만족하지 않아 teach 앵커 없이 뽑은 문제이고, 화면에 "일반 문제"로 표기해야 한다.
+**`teachId`는 문제↔개념 연결이고 항상 채워진다.** 강사가 teach 3개(클래스·상속·캡슐화)를 고르면 문제도 그 셋에 하나씩 붙고, 결과 화면의 "클래스는 L3까지 도달 / 상속은 L2까지 도달"이 이 값으로 그려진다.
+
+🔴 **개념이 코드에 없으면 문항을 만들지 않는다** (2026-08-03 PM 결정). 다른 개념으로 갈아끼우거나 지어내지 않는다 — **모든 학생이 오퍼레이터가 고른 같은 개념을 시험 본다**는 것이 비교 가능성의 근거다.
+
+```
+① 최대한 찾는다        p04-3 으로 고르고, 실패한 teach 만 모아 재시도 1회
+                      ("파일에 실제 존재하는 선언·호출 문자열을 그대로 써라")
+② 그래도 없으면        그 개념은 문항 없음 → unmatchedTeaches 에 담아 보낸다
+```
+
+```jsonc
+"problems": [ /* 근거를 찾은 개념만. 2개일 수 있다 */ ],
+"unmatchedTeaches": [
+  { "teachId": "t-상속", "reason": "제출 코드에서 이 개념의 근거를 찾지 못했습니다" }
+],
+"questionCountPlanned": 3
+```
+
+**`unmatchedTeaches`를 명시적으로 보내는 이유**: `problems` 길이 차이로는 "몇 개가 없다"까지만 알 수 있고 **어느 개념이 빠졌는지**는 역산해야 한다. 화면의 개념별 도달 격자에서 `―`(문항 없음)로 그릴 값이다.
+
+🔴 **`―`(문항 없음)과 `0단`(L1 미달)은 다른 것이다.** 도달 단계에 0을 박으면 "안 물어봤다"가 "틀렸다"로 바뀐다 — 문항 없음은 NULL이다.
+
+⚠️ **`isGeneral` 필드는 2026-08-03에 삭제됐다.** teach 앵커 없는 "일반 문제"를 만들지 않기로 했다.
 
 **`problemType` 5종** — "왜 이 지점을 골랐나". `questionFocusItem`의 "무엇을 묻나"와 다른 축이다.
 
@@ -508,10 +529,21 @@ PDF가 항상 필요하므로 **multipart 하나만 받는다**(`payload` 문자
 
 ```jsonc
 // POST /api/v0/curricula        multipart/form-data → 202
-// payload = {"versionId": "ver-1", "providerModelCode": "minimaxai/minimax-m3"}
+// payload = {"versionId": "ver-1", "courseLabel": "Java",
+//             "providerModelCode": "minimaxai/minimax-m3"}
 // file    = 교안 PDF
 { "jobId": "…", "status": "QUEUED" }
 ```
+
+🔴 **`courseLabel`은 필수다** (2026-08-03). 생략하면 매니페스트 기본값 `'Java'`가 들어가
+다른 과정 교안에서 결과 언어·용어가 섞인다. 교안 업로드 화면이 과정을 이미 알고 있으므로
+기본값을 두지 않는다.
+
+**결과는 항상 한국어다.** 매니페스트(vendor)에 언어 지시가 없어 영어 교안을 넣으면 영어로
+나왔다 — 우리 소유 경로(`stages.call(extra_user=...)`)로 지시를 붙였다. `unitTitle`·
+`canonicalDescription`이 한국어가 되고, **기술 용어·API 이름·코드 식별자는 원문을 유지한다**
+(예: `guardrail(안전장치)`, `deterministic`). 억지로 옮기면 나중에 그 개념으로 문제를 낼 때
+교안 원문과 대조가 안 된다.
 
 ```jsonc
 // GET /api/v0/curricula/{jobId}  → 200 (result 부분)
@@ -622,7 +654,7 @@ engine_mode: Literal["stub", "real"] = "stub"
 >
 > 이 규칙은 **OpenAPI 문법으로 표현이 안 된다.** 스키마 검증기가 막고 있고 여기 산문으로만 적혀 있다.
 >
-> ⏳ **아직인 것**: 백엔드 연동, `references[]` 채우기, 고정 HTTPS 주소. 순서는 `PLAN_FASTAPI_MIGRATION.md`.
+> ⏳ **아직인 것**: 백엔드 연동, `references[]` 채우기. 배포·주소는 해결됐다(App Runner 자동 배포). 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
 ### 백엔드 대기 2건
 
@@ -639,33 +671,46 @@ C-1~C-3은 **회신 완료**다.
 - **C-2** `score_run`·`axis_score` 제거 예정. 점수의 단일 소유자는 `problem_stage`이고 축 어휘는 `'L1'`~`'L4'` 한 벌
 - **C-3** **비용은 Spring이 계산한다.** AI는 토큰·모델·지연·상태만 보낸다. 백엔드에 단가 관리 화면(`PUT /platform/operations/models/{modelId}/pricing`)과 비용 집계 화면이 이미 있는 것을 2026-08-03에 확인했다
 
-**DDL 요청은 6건이고 전달본은 `../qna/2026-08-03/issue-body.md`다.**
+**DDL 요청은 2건이고 전달본은 `../qna/2026-08-03/issue-body-v2.md`(= 이슈 `Team-IZ/Backend#42`)다.**
 
 ```
-B-9  🔴 problem_stage 에 question_text · hint_1_text · hint_2_text   동결 시험지를 저장할 자리가 없다
-B-10    assessment_problem 에 teach_id · is_general
-B-11    ai_model 에 nemotron-3-ultra-550b-a55b 등록
-B-1     attempt_count CHECK 0~2 → 0~3
-B-2     stage_answer_attempt attempt_no = 2 → IN (2,3)
-B-4     코드값 TERMINATED_AT_L1 · TERMINATED_AT_L4 추가
-B-5     analysis_document_markdown TEXT → analysis_document JSONB
-
-철회:  B-3 (NULL 허용 + all-or-nothing CHECK)  → B-9 로 대체
-       B-8 (도달 단계 저장 자리)                → highest_reached_level 이 이미 있다
+B-12  🔴 assessment_problem_reference 에 code_text TEXT
+      학생에게 보여줄 코드가 DB 어디에도 안 들어간다
+B-13  🔴 code_analysis 에 analysis_document JSONB
+      문제 출제 근거이자 채점 컨텍스트가 사라진다
 ```
+
+⚠️ **옛 요청 목록(B-1~B-11)은 폐기다.** `테이블정의서_v06` 기준이었고, 백엔드가 새 MEAS에서
+`problem_stage`를 다시 짜면서 대부분 해결됐다.
+
+```
+해결   B-9  질문·힌트 저장 자리    question_text · first_hint_text · second_hint_text 가 이미 있다
+       B-1  attempt_count 0~3     컬럼이 사라지고 답변 슬롯 3개로 대체
+       B-2  attempt_no IN (2,3)   stage_answer_attempt 테이블 자체가 사라짐
+       B-4  TERMINATED_AT_L1·L4   termination_reason 컬럼이 사라짐
+철회   B-10 teach_id · is_general  일반 문제를 안 만들기로 했다 (2026-08-03 PM)
+       B-5  TEXT → JSONB          컬럼이 통째로 사라져 B-13 신설로 바뀜
+       B-3 · B-8                  2026-08-03 이전에 이미 철회
+남음   B-11 ai_model 등록 2건 + 1건 INACTIVE
+```
+
+**확인 대기 3건**: 도달 단계 컬럼 위치(`TEAM_COMMON` 공유 문제) · 문항 없음을 NULL로 구분 ·
+`contextType` 값 집합.
 
 ### 앞으로
 
 ```
-백엔드 연동 — 주소를 설정값으로, 채점 타임아웃 30초 이상, IP 화이트리스트
-references[] 채우기 — 지금 항상 빈 배열. DEFINITION·TEST·CONFIG 먼저
-고정 HTTPS 주소 — 무료 도메인 + Caddy (cloudflared 재시작마다 URL이 바뀐다)
+백엔드 연동 — 주소를 설정값으로, 채점 타임아웃 30초 이상
+references[] 채우기 — 지금 항상 빈 배열. DEFINITION·CALLER 먼저
+                      팀원 브랜치 feature/code-importance-map 의 graph.py(import 그래프)를 이식
+유료 전환 — 529 실패율 64%. 채점 목표 15초를 못 지키는 원인 (팀 논의)
+교안 소요 실측 — 34쪽 451초. 200쪽 상한을 아직 못 준다
 (먼 항목) 적응형 힌트 모듈 대응 — 턴당 2콜, 힌트용 featureCode, 체크포인트 단위 모드 고정
 ```
 
 완료: 세션 턴 점수 필드 · `aiUsage` 스키마·배선 · `/curricula` 신설 · 엔진 이식 · **세션 무상태 전환**(2026-08-03).
 
-**미확정값** — 힌트 점수 상한 `{5, 4, 3}`, 재시험 커트라인. 세부 순서·방법은 **`PLAN_FASTAPI_MIGRATION.md`**에 있다.
+**미확정값** — 재시험 커트라인(L1·L2 기준은 가설이다). 힌트 점수 상한은 2026-08-03에 폐기됐다. 세부 순서·방법은 **`PLAN_FASTAPI_MIGRATION.md`**에 있다.
 
 ---
 
