@@ -206,11 +206,51 @@ def _teach_by_id(teaches: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {t["id"]: t for t in teaches if t.get("id")}
 
 
+class AnalysisFailed(Exception):
+    """엔진이 중간에 멈췄다. **여기까지 태운 원장을 들고 나온다.**
+
+    원장은 결과와 별개다 — job이 FAILED여도 콜은 실제로 나갔고 백엔드가 그걸로
+    비용을 집계한다. 그냥 raise하면 실패 지점 이전의 성공분까지 전부 사라진다
+    (2026-08-03 실호출: p04-3에서 터지며 p04-1·p04-2의 24콜이 aiUsage 0건으로
+    나갔다).
+    """
+
+    def __init__(self, message: str, ai_usage: list[dict[str, Any]]):
+        super().__init__(message)
+        self.ai_usage = ai_usage
+
+
+# 실패한 스테이지를 원장의 어느 종류로 적을지. 스테이지마다 다르다.
+_STAGE_KIND = {
+    "p04-1": "CODE_ANALYSIS", "p04-2": "CODE_ANALYSIS",
+    "p04-3": "QUESTION_GENERATION", "p04-4": "QUESTION_GENERATION",
+    "p04-7": "QUESTION_GENERATION",
+    "p04-5": "GRADING", "p04-6": "REPORT",
+}
+
+
+def _failed_kind(message: str) -> str:
+    """StageError 메시지 앞머리(`p04-3: ...`)에서 종류를 읽는다."""
+    return _STAGE_KIND.get(message.split(":", 1)[0].strip(), "CODE_ANALYSIS")
+
+
 class RealAnalysisEngine:
     """`engine_mode="real"`일 때 쓰이는 엔진."""
 
     def analyze(self, request: dict[str, Any],
                 zip_bytes: bytes | None = None) -> dict[str, Any]:
+        """실패해도 원장은 살려 내보낸다. 실제 작업은 `_run`이 한다."""
+        usages: list[dict[str, Any]] = []
+        try:
+            return self._run(request, zip_bytes, usages)
+        except stages.StageError as exc:
+            usages.extend(_stamp(exc.usages, _failed_kind(str(exc))))
+            raise AnalysisFailed(str(exc), usages) from exc
+        except Exception as exc:
+            raise AnalysisFailed(str(exc), usages) from exc
+
+    def _run(self, request: dict[str, Any], zip_bytes: bytes | None,
+             usages: list[dict[str, Any]]) -> dict[str, Any]:
         settings = get_settings()
         # wire 필드는 providerModelCode다 — 공급자에게 그대로 넘길 문자열이라
         # 화면 선택값(model_code)이 아니라 ai_model.provider_model_code 값이다.
@@ -219,8 +259,6 @@ class RealAnalysisEngine:
         teaches = request.get("teaches") or []
         reqs = request.get("requirements") or []
         budget = int(request.get("question_budget") or scoring.QUESTIONS_PER_SUBMISSION)
-
-        usages: list[dict[str, Any]] = []
 
         # ── 룰 스캔 ────────────────────────────────────────────────────────────
         # GITHUB_URL이면 클론, ZIP이면 압축 해제. 두 경로가 같은 스캔으로 합류한다

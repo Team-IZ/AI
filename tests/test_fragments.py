@@ -71,3 +71,28 @@ def test_fragment_carries_snippet_and_context():
     assert f["snippet"].startswith("def other():")
     assert "from fastapi" not in f["snippet"]      # 문맥은 snippet에 안 섞인다
     assert f["context_start"] < f["line_start"]     # 문맥은 따로 있다
+
+def test_symbol_with_a_broken_tail_still_locates():
+    """🔴 LLM은 코드를 끝까지 정확히 옮겨 적지 못한다. 실호출에서 나온 3건 그대로다.
+
+    앞부분이 맞으면 시작 줄은 확정된다 — 오타 한 글자에 개념 하나를 통째로
+    "코드에 없음"으로 박으면 오퍼레이터가 고른 개념이 조용히 빠진다.
+    """
+    files = {"pipeline/graph.py": "\n".join([
+        "def route(state):",
+        '    worker = state.get("next_worker", "FINISH")',
+        "    return worker",
+    ])}
+
+    for quoted in (r'worker = state.get("next_worker", "FINISH\))',
+                   'worker = state.get("next_worker", "FINISH"}'):
+        located = fragments.locate_symbol(files, "pipeline/graph.py", quoted)
+        assert located["valid"], quoted
+        assert located["line_start"] == 2
+
+
+def test_short_prefix_does_not_match_anything():
+    """`worker` 같은 짧은 조각은 엉뚱한 줄에 먼저 걸린다 — 하한이 그걸 막는다."""
+    files = {"a.py": "worker = 1\nother = 2\n"}
+
+    assert fragments.locate_symbol(files, "a.py", "worker(((")["valid"] is False

@@ -89,5 +89,11 @@ def run_analysis(
         # 엔진 터지거나 계약 어기면 job FAILED로. 예외 삼키지 말고 사유 기록
         job.status = "FAILED"
         job.failure_reason = str(exc)
+        # 🔴 **실패해도 원장은 남긴다.** 콜은 이미 나갔고 백엔드가 그걸로 비용을
+        # 집계한다. AnalysisFailed가 실패 지점까지의 usage를 들고 온다.
+        burned = getattr(exc, "ai_usage", None)
+        if burned and not job.ai_usage:
+            job.ai_usage = to_ai_usage(burned, "ANALYSIS", job_id,
+                                       idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)

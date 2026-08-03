@@ -154,3 +154,40 @@ def test_unmatched_teach_is_reported_explicitly(fake_stage):
 
     assert [u["teach_id"] for u in s.unmatched] == ["t2"]
     assert s.unmatched[0]["reason"]                 # 화면에 띄울 한 문장이 있다
+
+
+def test_sdk_only_teach_is_excluded_before_asking():
+    """🔴 코드에 없는 API는 물어볼 수 없다. **LLM에게 보여주지도 않는다.**
+
+    실측 2회 재현: LangGraph 레포에 `Runner.run()`을 물으려고 `builder.add_edge(...)`,
+    `builder.set_entry_point(...)`를 앵커로 끌어다 붙였다. 프롬프트를 두 번 강화해도
+    개수를 채웠다 — 부탁이 아니라 배제로 막는다.
+    """
+    files = {"pipeline/graph.py": "builder.add_edge('parser', 'supervisor')\n"}
+
+    absent = {"id": "runner", "label": "Agents SDK의 Runner.run() 루프"}
+    assert topics._missing_api_token(absent, files) == "Runner.run"
+
+    # 점 없는 개념 이름은 안 막는다 — `매니저 패턴`은 코드에서 `Supervisor`로 나타난다.
+    concept = {"id": "manager", "label": "매니저 패턴의 동작 방식"}
+    assert topics._missing_api_token(concept, files) is None
+
+    # 코드에 실제로 있는 API는 통과한다.
+    present = {"id": "edge", "label": "builder.add_edge 로 노드를 잇는다"}
+    assert topics._missing_api_token(present, files) is None
+
+
+def test_teach_id_echoed_with_the_label_is_recovered():
+    """🔴 모델은 준 id를 그대로 안 돌려준다. 목록 줄 전체를 적어 온다.
+
+    2026-08-03 실측: `- {id}: {label}` 목록을 보고 teach_id에
+    `"매니저 패턴의 동작 방식: 매니저 패턴의 동작 방식"`을 넣었다. 정확 일치만
+    인정하면 코드에 있는 개념이 전부 "없음"으로 나간다.
+    """
+    ids = {"t1", "t2"}
+
+    assert topics._resolve_teach_id("t1: 인증 토큰", ids) == "t1"
+    assert topics._resolve_teach_id("t1", ids) == "t1"
+
+    # 여러 id가 걸리면 어느 것인지 모른다 — 되살리지 않는다.
+    assert topics._resolve_teach_id("t1 과 t2 둘 다", ids) == "t1 과 t2 둘 다"

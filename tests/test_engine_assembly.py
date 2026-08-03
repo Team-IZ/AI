@@ -191,8 +191,23 @@ def test_focus_item_id_is_echoed(fake_llm):
 
 def test_github_url_without_repo_url_fails_loudly(fake_llm):
     """받아올 곳이 없으면 끊는다. 빈 결과를 내면 '문제 0개'가 정상처럼 보인다."""
-    with pytest.raises(ValueError, match="repoUrl"):
+    # AnalysisFailed로 감싸 나온다 — 원장을 들고 나오려고 엔진이 전부 감싼다.
+    with pytest.raises(engine_mod.AnalysisFailed, match="repoUrl"):
         engine_mod.RealAnalysisEngine().analyze({**REQUEST, "method": "GITHUB_URL"}, None)
+
+
+def test_failure_keeps_the_ledger(fake_llm, monkeypatch):
+    """실패해도 태운 콜은 남는다. **없으면 백엔드가 비용을 못 매긴다.**"""
+    def boom(*args, **kwargs):
+        raise engine_mod.stages.StageError("p04-3: JSON 파싱 실패", [{"status": "FAILED"}])
+
+    monkeypatch.setattr(engine_mod.topics, "select", boom)
+    with pytest.raises(engine_mod.AnalysisFailed) as exc:
+        engine_mod.RealAnalysisEngine().analyze(REQUEST, _zip())
+
+    # p04-1(분석 문서)이 태운 것 + 터진 p04-3의 것이 함께 있어야 한다.
+    assert len(exc.value.ai_usage) > 1
+    assert exc.value.ai_usage[-1]["feature_code"] == "QUESTION_GENERATION"
 
 
 def test_code_snippet_is_the_whole_file(fake_llm):

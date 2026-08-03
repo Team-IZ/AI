@@ -68,6 +68,12 @@ REASONING_EFFORT_BY_MODEL = {
 # 올려 재시도한다. 모델마다 실측하려면 nemotron은 콜 하나에 시간이 오래 걸린다.
 REASONING_TOKEN_MULTIPLIER = {
     "stepfun-ai/step-3.7-flash": 3.0,
+    # 분석 기본 모델도 추론형이다. 1.0으로 두면 p04-3(매니페스트 1600)이 사고에만
+    # 예산을 다 쓰고 JSON을 시작도 못 한다 — 2026-08-03 실호출에서 두 시도 다
+    # 사고 원문이 그대로 나와 "JSON을 찾을 수 없습니다"로 job이 통째로 FAILED 났다.
+    # 재시도 배수 상승(finish_reason=length)은 잘린 뒤에야 도는 사후 장치라,
+    # 매번 1콜을 버리고 시작하는 것과 같다.
+    "nvidia/nemotron-3-ultra-550b-a55b": 3.0,
 }
 
 

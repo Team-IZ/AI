@@ -9,10 +9,34 @@ LLM 호출만 태우고 세션에서 조용히 깨진다(PoC가 실제로 겪은
 """
 
 import json
+import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from app.engines.analysis import fragments, stages
+
+log = logging.getLogger(__name__)
+
+# 🔴 매니페스트가 자기모순이다. "topics는 정확히 N개"와 "코드에 없는 주제는 고르지
+# 마라"가 같이 있는데, 실측에서 **개수 강제가 이긴다** — 2026-08-03 실호출에서
+# LangGraph 레포에 `Runner.run() 루프`를 물으려고 `builder.add_edge(...)`를 앵커로
+# 끌어다 붙였다. 그러면 `unmatchedTeaches`가 빈 배열로 나가고 PM 확정
+# "개념이 코드에 없으면 없다"가 조용히 무너진다.
+#
+# vendor를 고치지 않고 우리 소유 경로(`extra_user`)로 뒤집는다 — 사용자 메시지
+# **끝에** 붙으므로 앞 규칙을 명시적으로 무효화한다고 적어야 효과가 있다.
+_NO_PADDING = (
+    "\n\n## 개수보다 우선하는 규칙\n"
+    "앞의 \"topics는 정확히 N개\"는 **상한이지 목표가 아니다.** 근거를 못 찾은 teach는 "
+    "빼고 그만큼 적게 반환하라 — 0개여도 된다.\n"
+    "다음은 전부 금지다:\n"
+    "- 개수를 맞추려고 관련 없는 코드를 앵커로 끌어다 붙이기\n"
+    "- teach가 특정 라이브러리·SDK 전용 이름인데 학생이 다른 라이브러리를 쓴 경우, "
+    "\"비슷한 역할\"을 하는 코드로 대체하기\n"
+    "코드에 그 개념이 실제로 구현돼 있을 때만 topic을 만들어라. **없는 것은 없다고 "
+    "두는 편이 낫다** — 억지로 만든 문제는 학생이 쓰지도 않은 개념을 묻게 된다."
+)
 
 
 @dataclass
@@ -35,6 +59,49 @@ class Selection:
         return self.budget - len(self.topics)
 
 
+# `Runner.run` 처럼 **점으로 이어진 식별자**만 잡는다. 이런 이름은 특정 SDK·라이브러리
+# 고유의 API라 다른 말로 바꿔 쓸 수 없다 — 코드에 그 문자열이 없으면 그 개념은 없다.
+_API_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _missing_api_token(teach: dict[str, Any], files: dict[str, str]) -> str | None:
+    """teach 이름의 API 식별자가 코드에 아예 없으면 그 이름을 돌려준다.
+
+    🔴 **LLM에게 "없으면 빼라"를 부탁하는 것으로는 안 막힌다** (2026-08-03 실측:
+    프롬프트를 두 번 강화했는데 두 번 다 개수를 채웠다). LangGraph 레포에
+    `Agents SDK의 Runner.run() 루프`를 물으려고 `builder.set_entry_point(...)`를
+    앵커로 끌어다 붙였다 — 학생이 쓰지도 않은 개념을 묻게 된다.
+
+    **점 있는 이름만 본다.** `매니저 패턴`은 코드에서 `Supervisor`로 나타날 수 있어
+    글자로 막으면 안 되지만, `Runner.run`은 그렇게 나타날 방법이 없다. 좁게 잡는 대신
+    걸리면 확실하다.
+    """
+    label = f"{teach.get('label', '')} {teach.get('id', '')}"
+    tokens = {m.group(0) for m in _API_TOKEN.finditer(label)}
+    haystack = "\n".join(files.values())
+    for token in sorted(tokens):
+        if token not in haystack:
+            return token
+    return None
+
+
+def _resolve_teach_id(raw: Any, teach_ids: set[str | None]) -> Any:
+    """LLM이 돌려준 teach_id를 실제 id로 되돌린다.
+
+    🔴 **모델은 준 id를 그대로 안 돌려준다.** 2026-08-03 실측: 목록이
+    `- {id}: {label}` 형식인데 id와 label이 비슷해서 **줄 전체**를 id로 적어 왔다
+    (`"매니저 패턴의 동작 방식: 매니저 패턴의 동작 방식"`). 정확 일치만 인정하면
+    개념이 코드에 있는데도 전부 "없음"으로 나간다.
+
+    되살리는 조건은 **정확히 하나로 좁혀질 때뿐이다** — 여러 id가 걸리면 어느 것을
+    물으려 했는지 알 수 없으므로 버린다.
+    """
+    if raw in teach_ids or not isinstance(raw, str):
+        return raw
+    hit = [tid for tid in teach_ids if tid and (raw.startswith(tid) or tid in raw)]
+    return hit[0] if len(hit) == 1 else raw
+
+
 def select(files: dict[str, str], teaches: list[dict[str, Any]],
            analysis_document: dict[str, Any], candidates: list[dict[str, Any]],
            *, model_code: str, question_budget: int = 3) -> Selection:
@@ -46,14 +113,28 @@ def select(files: dict[str, str], teaches: list[dict[str, Any]],
     룰 후보(candidates)는 선택지가 아니라 맥락이다 — 매니페스트가 code_ref.file을
     "분석 문서에 등장한 파일"로 제약하고, 환각 방지는 아래 symbol 검증이 담당한다.
     """
+    # 🔴 **물어볼 수 없는 teach는 LLM에게 보여주지도 않는다.** 목록에 남겨 두면
+    # 개수를 채우려고 엉뚱한 코드를 앵커로 끌어다 붙인다(실측 2회 재현).
+    askable, blocked = [], []
+    for teach in teaches:
+        token = _missing_api_token(teach, files)
+        if token:
+            blocked.append({"teach_id": teach.get("id") or "",
+                            "reason": f"제출 코드에 `{token}`이(가) 없습니다"})
+            log.info("p04-3 사전 제외: %s (%s 없음)", teach.get("id"), token)
+        else:
+            askable.append(teach)
+    teaches = askable
+
     stage = stages.get_stage("p04-3")
     values = {
         "teaches_block": "\n".join(f"- {t.get('id')}: {t.get('label', '')}" for t in teaches),
         "analysis_block": json.dumps(analysis_document, ensure_ascii=False),
         "findings_block": json.dumps(candidates, ensure_ascii=False),
-        "question_count": question_budget,
+        # 물어볼 수 있는 teach 수를 넘겨준다 — 사전 제외분까지 세면 또 채우려 든다.
+        "question_count": min(question_budget, len(teaches)),
     }
-    result = stages.call("p04-3", values, model_code=model_code)
+    result = stages.call("p04-3", values, model_code=model_code, extra_user=_NO_PADDING)
 
     raw = result.data.get("topics")
     topics = raw if isinstance(raw, list) else []
@@ -65,7 +146,8 @@ def select(files: dict[str, str], teaches: list[dict[str, Any]],
     seen: set[str] = set()
     kept = []
     for t in topics:
-        tid = t.get("teach_id")
+        tid = _resolve_teach_id(t.get("teach_id"), teach_ids)
+        t["teach_id"] = tid
         if tid not in teach_ids:
             dropped.append({"title": t.get("title", ""), "reason": f"없는 teach: {tid}"})
             continue
@@ -98,12 +180,22 @@ def select(files: dict[str, str], teaches: list[dict[str, Any]],
     # (2026-08-03 PM 결정). 사유는 화면에 그대로 띄울 수 있는 한 문장으로 만든다.
     matched = {t.get("teach_id") for t in picked}
     reason_by_teach = {d.get("teach_id"): d.get("reason") for d in dropped if d.get("teach_id")}
-    unmatched = [
+    # 사전 제외분(blocked)이 먼저다 — 사유가 "코드에 그 API가 없다"로 구체적이다.
+    unmatched = blocked + [
         {"teach_id": t["id"],
          "reason": reason_by_teach.get(t["id"])
                    or "제출 코드에서 이 개념의 근거를 찾지 못했습니다"}
         for t in teaches[:question_budget] if t.get("id") and t["id"] not in matched
     ]
+
+    # 🔴 **버린 이유는 로그에만 남는다.** 응답의 unmatched는 화면에 띄울 한 문장이라
+    # "없는 teach: X" 같은 내부 사유를 못 싣는다 — 그런데 문제가 0개로 나왔을 때
+    # 원인이 ①(teach_id 불일치)인지 ②(symbol 못 찾음)인지가 여기서만 갈린다.
+    if dropped:
+        log.warning("p04-3 버림 %d건: %s", len(dropped), dropped)
+    if not picked:
+        log.warning("p04-3 문제 0개. LLM이 낸 topic %d건, teach_id %s",
+                    len(topics), [t.get("teach_id") for t in topics])
 
     return Selection(topics=picked, usages=result.usages, dropped=dropped,
                      unmatched=unmatched, budget=question_budget)
@@ -175,8 +267,10 @@ def _relocate(files: dict[str, str], teaches: list[dict[str, Any]],
     )
     try:
         result = stages.call("p04-3", values, model_code=model_code, extra_user=hint)
-    except stages.StageError:
-        return None
+    except stages.StageError as exc:
+        # 재시도가 깨져도 콜은 나갔다. **원장을 버리면 "왜 이 토큰을 썼나"가 사라지고,
+        # 콜 수만 보고 "재시도가 안 돌았다"고 오독하게 된다.**
+        return Selection(topics=[], usages=exc.usages, budget=len(subset))
 
     raw = result.data.get("topics")
     topics = raw if isinstance(raw, list) else []

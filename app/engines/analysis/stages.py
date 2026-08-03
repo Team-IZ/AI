@@ -113,8 +113,16 @@ def parse_json(text: str) -> dict[str, Any]:
         return json.loads(m.group(0))
 
 
+# 배치 스테이지의 기본 시도 횟수. **아무도 안 기다리는 경로라 넉넉히 준다.**
+# 2로는 부족하다 — 무료 티어 529 실패율이 64%라 "파싱 한 번 깨지고 재시도가 529"면
+# 그것만으로 소진된다(2026-08-03 실호출: p04-3이 INVALID_JSON + PROVIDER_ERROR로
+# 2회를 다 쓰고 job이 FAILED). 세션 경로는 학생이 기다리므로 여기 값을 안 쓰고
+# client.SESSION_MAX_ATTEMPTS를 넘긴다.
+BATCH_MAX_ATTEMPTS = 4
+
+
 def call(stage_id: str, values: dict[str, Any], *, model_code: str,
-         max_attempts: int = 2, timeout_s: float | None = None,
+         max_attempts: int = BATCH_MAX_ATTEMPTS, timeout_s: float | None = None,
          extra_user: str = "") -> StageResult:
     """스테이지 하나 실행. 파싱 실패하면 한 번 더 시도한다.
 

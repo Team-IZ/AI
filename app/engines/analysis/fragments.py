@@ -71,6 +71,35 @@ def _symbol_candidates(symbol: str) -> list[str]:
     return candidates
 
 
+MIN_PREFIX_CHARS = 16  # 이보다 짧은 접두사는 아무 줄에나 걸린다
+
+
+def _prefix_match(lines: list[str], needle: str) -> int:
+    """뒤에서부터 잘라가며 **파일에 실제로 있는 최장 접두사**를 찾는다.
+
+    🔴 **LLM은 코드를 끝까지 정확히 옮겨 적지 못한다.** 2026-08-03 실호출에서 셋 다
+    앞부분은 맞고 꼬리만 틀렸다:
+
+        worker = state.get("next_worker", "FINISH\\))     따옴표·괄호가 깨짐
+        worker = state.get("next_worker", "FINISH"}       ) 대신 }
+
+    완전 일치만 인정하면 오타 한 글자에 개념 하나가 통째로 "코드에 없음"이 된다 —
+    오퍼레이터가 고른 개념이 조용히 빠지는 것이라 가장 비싼 실패다. 시작 줄만
+    맞으면 블록 추정이 나머지를 채우므로 접두사로 충분하다.
+
+    길이 하한을 두는 이유: `worker` 같은 짧은 조각은 엉뚱한 줄에 먼저 걸린다.
+    """
+    normalized = [_normalize(ln) for ln in lines]
+    for size in range(len(needle), MIN_PREFIX_CHARS - 1, -1):
+        prefix = needle[:size].rstrip()
+        if len(prefix) < MIN_PREFIX_CHARS:
+            break
+        idx = next((i for i, ln in enumerate(normalized) if prefix in ln), -1)
+        if idx != -1:
+            return idx
+    return -1
+
+
 def locate_symbol(files: dict[str, str], ref_file: str | None, symbol: str) -> dict[str, Any]:
     """symbol이 파일의 몇 번째 줄에 있는지 찾는다.
 
@@ -93,6 +122,9 @@ def locate_symbol(files: dict[str, str], ref_file: str | None, symbol: str) -> d
             # 들여쓰기·연속 공백이 뭉개진 인용을 살린다.
             norm = _normalize(needle)
             idx = next((i for i, ln in enumerate(lines) if norm in _normalize(ln)), -1)
+        if idx == -1:
+            # 마지막 수단: 꼬리가 틀린 인용을 접두사로 살린다.
+            idx = _prefix_match(lines, _normalize(needle))
         if idx != -1:
             break
 
