@@ -21,11 +21,12 @@ class Grade:
     """한 단계 한 시도의 채점 결과."""
 
     axis_code: str
-    best_score: int              # 루브릭 원점수 0~5. 힌트 상한 적용 전
-    confirmed_score: int         # 상한 적용 후. DB problem_stage에 남는 값
+    # 🔴 점수는 하나다 (2026-08-03). 옛 best/confirmed 두 필드는 힌트 상한을 적용하기
+    # 전후를 나눈 것인데, 상한 자체가 폐기됐다(scoring.py 주석). **AI는 채점만 한다.**
+    score: int                   # 루브릭 원점수 0~5
     hints_used: int
     passed: bool
-    autonomy: str                # SELF · SELF_MAINTAINED · PARTIAL
+    autonomy: str                # SELF · SELF_MAINTAINED · PARTIAL. 응답엔 안 나가고 보고서 서술에만 쓴다
     matched_level: str           # 이 점수를 준 근거가 된 루브릭 단계 서술
     evidence: str                # 답변에서 그 판단의 근거가 된 부분
     missing: str                 # 한 단계 위를 받으려면 뭐가 더 있어야 했는지
@@ -116,22 +117,20 @@ def grade(axis_code: str, question: str, answer: str, *, model_code: str,
         # 예외로 올려 재시도·PARTIAL 판정에 맡긴다.
         raise stages.StageError(f"p04-5: score가 정수가 아닙니다: {raw!r}", result.usages)
 
-    confirmed = min(best, scoring.cap_for(hints_used))
-    passed = confirmed >= scoring.PASS_SCORE
+    passed = best >= scoring.PASS_SCORE
 
     # 모델이 낸 도달 판정(vendor P-1). 점수(척도)와 도달(판정)을 따로 받아 교차 검증한다.
     #
-    # **어긋나면 점수를 따른다.** 힌트 상한이 점수에 걸리므로 통과 판정이 점수와 따로 놀면
-    # "5점인데 미달" 같은 상태가 생긴다 — 점수가 상한·자력 판정·정렬 tie-break의 근거라
-    # 그쪽을 단일 기준으로 둔다. 불일치는 버리지 않고 남긴다: 루브릭 문구와 도달 기준이
+    # **어긋나면 점수를 따른다.** 통과선(3점)이 계약이고 DB CHECK도 `passed=TRUE AND
+    # score>=3`으로 강제한다 — 모델 판정을 따르면 "5점인데 미달" 행이 만들어져 INSERT가
+    # 깨진다. 불일치는 버리지 않고 남긴다: 루브릭 문구와 도달 기준이
     # 서로 다른 말을 하고 있다는 신호이고, 쌓이면 루브릭을 고쳐야 한다는 뜻이다.
     raw_reached = result.data.get("reached")
     model_reached = bool(raw_reached) if isinstance(raw_reached, bool) else None
 
     return Grade(
         axis_code=axis_code,
-        best_score=best,
-        confirmed_score=confirmed,
+        score=best,
         hints_used=hints_used,
         passed=passed,
         autonomy=scoring.autonomy_for(hints_used),

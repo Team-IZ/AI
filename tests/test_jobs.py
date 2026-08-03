@@ -50,3 +50,30 @@ def test_run_analysis_failed_on_engine_error():
     assert job.status == "FAILED"
     assert job.failure_reason == "boom"
     assert job.result is None
+
+def test_requirement_failure_makes_the_job_partial():
+    """요구사항 판정만 실패하면 PARTIAL이다.
+
+    SUCCEEDED로 덮으면 화면에 "요구사항 전부 미충족"이 사실처럼 뜬다 — 문제·질문·힌트는
+    정상으로 나가는데도. 실호출에서 실제로 나오는 경로다.
+    """
+    body = AnalysisRequest.model_validate({
+        "method": "ZIP_WITH_GITLOG",
+        "requirements": [{"requirementId": "r1", "text": "로그인"}],
+    })
+    job = create_job(body, idempotency_key=None)
+
+    class _Engine:
+        def analyze(self, request, zip_bytes=None):
+            raw = StubAnalysisEngine().analyze(request, zip_bytes)
+            raw["requirement_results"] = [
+                {"requirement_id": "r1", "verdict": "F", "evidence": None,
+                 "note": "판정 실패: p04-2 터짐"}
+            ]
+            return raw
+
+    run_analysis(job.job_id, body, _Engine(), zip_bytes=None)
+
+    assert job.status == "PARTIAL"
+    assert "요구사항 판정 1건" in job.failure_reason
+    assert job.result.problems              # 문답은 살아 있다

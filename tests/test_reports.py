@@ -58,26 +58,26 @@ def test_result_carries_one_problem():
     assert [s["axisCode"] for s in result["problem"]["stages"]] == ["L1", "L2", "L3", "L4"]
 
 
-def test_hint_cap_lowers_recorded_score():
-    """힌트 2회를 쓰면 원점수 5여도 기록 점수는 상한 3으로 깎인다."""
+def test_each_attempt_has_its_own_slot():
+    """힌트를 쓴 축은 앞 슬롯이 미통과로 차 있어야 DB CHECK를 통과한다."""
     l4 = _result()["problem"]["stages"][3]
 
-    assert l4["bestScore"] == 5
-    assert l4["confirmedScore"] == 3
-    assert l4["hintsUsed"] == 2
-    assert l4["attemptCount"] == 3
-    assert l4["autonomy"] == "PARTIAL"
+    assert l4["questionPassed"] is False
+    assert l4["firstHintPassed"] is False
+    assert (l4["secondHintScore"], l4["secondHintPassed"]) == (5, True)
+    assert l4["status"] == "PASSED"
 
 
 def test_unreached_level_has_no_score():
-    """도달 못 한 단계는 attemptCount=0이고 점수가 비어 있다."""
+    """도달 못 한 단계는 NOT_REACHED이고 점수가 전부 null이다."""
     stages = _result("prob-stub-3")["problem"]["stages"]   # L1에서 끝난다
 
-    assert stages[0]["attemptCount"] > 0
+    assert stages[0]["status"] == "NOT_PASSED"
     for s in stages[1:]:
-        assert s["attemptCount"] == 0
-        assert s["confirmedScore"] is None
-        assert s["bestScore"] is None
+        assert s["status"] == "NOT_REACHED"
+        assert s["questionScore"] is None
+        assert s["firstHintScore"] is None
+        assert s["secondHintScore"] is None
 
 
 def test_retest_needs_both_l1_and_l2():
@@ -210,7 +210,7 @@ def test_camelcase_transcript_reaches_the_engine(monkeypatch):
     wire_turn = {
         "problemId": "prob-1", "axisCode": "L1", "questionText": "q",
         "answerText": "a", "answeredAt": "2026-08-02T00:00:00Z",
-        "bestScore": 4, "confirmedScore": 4, "attemptCount": 1, "autonomy": "SELF",
+        "score": 4, "passed": True, "hintsUsed": 0,
     }
     try:
         r = client.post("/api/v0/reports", headers=HEADERS, json={
@@ -222,5 +222,5 @@ def test_camelcase_transcript_reaches_the_engine(monkeypatch):
         monkeypatch.setattr(get_settings(), "engine_mode", "stub")
 
     assert result["problem"]["reachedStage"] == 1        # 0이면 턴을 못 읽은 것
-    assert result["problem"]["stages"][0]["attemptCount"] == 1
+    assert result["problem"]["stages"][0]["questionScore"] == 4
     assert result["retest"] is True                      # L2 미도달이라 재시험은 맞다

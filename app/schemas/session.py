@@ -66,8 +66,11 @@ class Cursor(BaseSchema):
 class TranscriptTurn(BaseSchema):
     """확정된 문답 한 턴. Spring이 즉시 영속화하는 복구 근거.
 
-    한 턴 = 질문 1개 + 답변 1개 + 채점 1개. 힌트 후 재질의는 별도 턴이 되고
-    attempt_no가 올라간다(DB stage_answer_attempt 한 행에 대응).
+    한 턴 = 질문 1개 + 답변 1개 + 채점 1개. 힌트 후 재질의도 한 턴이다.
+
+    **DB `problem_stage` 한 행의 슬롯 하나에 들어간다** — `hintsUsed`가 0이면 질문 슬롯,
+    1이면 첫 번째 힌트 슬롯, 2면 두 번째 힌트 슬롯이다(2026-08-03, 새 MEAS 정의서).
+    옛 `stage_answer_attempt` 테이블은 사라졌다.
     """
     problem_id: str
     axis_code: AxisCode
@@ -76,15 +79,21 @@ class TranscriptTurn(BaseSchema):
     answered_at: str
 
     # 채점 결과. 단계마다 즉시 매겨진다.
-    best_score: int = Field(ge=0, le=5, description="힌트 상한 적용 전 원점수")
-    confirmed_score: int = Field(ge=0, le=5, description="힌트 상한 적용 후 기록 점수")
-    attempt_count: int = Field(
-        ge=1, le=3, description="이 단계에서 몇 번째 시도인지. 첫 답변이 1"
+    score: int = Field(
+        ge=0, le=5,
+        description="🔴 **점수는 하나다** (2026-08-03). 옛 bestScore/confirmedScore는 "
+                    "힌트 상한 적용 전후를 나눈 것인데 상한 자체가 폐기됐다 — "
+                    "AI는 채점만 하고 가공하지 않는다",
+    )
+    passed: bool = Field(description="score >= 3. DB CHECK가 이 관계를 강제한다")
+    hints_used: int = Field(
+        ge=0, le=2,
+        description="이 답변 직전까지 받은 힌트 수. **어느 슬롯에 저장할지를 이 값이 정한다** — "
+                    "0=질문 · 1=firstHint · 2=secondHint",
     )
     hint_text: str | None = Field(
         default=None, description="이 턴 직전에 보여준 힌트. 첫 시도면 null"
     )
-    autonomy: AutonomyCode | None = None
 
 
 class AnswerSubmit(BaseSchema):
@@ -131,11 +140,16 @@ class AnswerResult(BaseSchema):
     """
 
     session_id: str
-    # DB assessment_session.status CHECK와 같은 집합.
+    # DB assessment_session.status CHECK와 같은 집합 (새 MEAS 정의서, 2026-08-03).
     # READY = 분석 직후 미리 만들어 둔 상태(문제보다 세션이 먼저 있어야 한다).
-    # TIMEOUT은 DB에 없다 — 시간 초과는 EXPIRED다.
+    #
+    # 🔴 **`EXPIRED`는 없앴다.** 정의서에 없는 값이라 그대로 두면 Spring INSERT가 깨진다.
+    # 시간 초과·창 만료는 상태가 아니라 `assessment_session.end_reason_code`로 구분한다
+    # (`ASSESSMENT_WINDOW_EXPIRED` 등). AI가 내는 값은 실질적으로 IN_PROGRESS·COMPLETED
+    # 둘뿐이고 나머지는 백엔드가 정하는 상태다 — 집합을 맞춰 두는 것이 목적이다.
     state: Literal[
-        "READY", "IN_PROGRESS", "PAUSED", "COMPLETED", "FAILED", "EXPIRED"
+        "READY", "IN_PROGRESS", "PAUSED", "COMPLETED",
+        "INTERRUPTED", "INVALID", "FAILED", "SUPERSEDED",
     ]
     turn: TranscriptTurn | None = Field(
         default=None, description="이번에 채점된 턴. 물을 것이 없었으면 null",

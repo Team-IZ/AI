@@ -213,7 +213,7 @@ def _seek(walk: _Walk, cursor: Cursor | None, transcript: list[TranscriptTurn]) 
     for turn in transcript:
         if _current_stage(walk) is None:
             break
-        _advance(walk, turn.confirmed_score >= scoring.PASS_SCORE)
+        _advance(walk, turn.passed)
 
 
 def _to_result(session_id: str, walk: _Walk, turn: TranscriptTurn | None,
@@ -284,11 +284,10 @@ def submit_answer(session_id: str, req: AnswerSubmit,
         question_text=question_text,
         answer_text=req.answer_text,
         answered_at=datetime.now(timezone.utc).isoformat(),
-        best_score=grade.best_score,
-        confirmed_score=grade.confirmed_score,
-        attempt_count=walk.hints_used + 1,
+        score=grade.score,
+        passed=grade.passed,
+        hints_used=walk.hints_used,
         hint_text=_hint_text(stage, walk.hints_used),
-        autonomy=grade.autonomy,
     )
 
     ended = _advance(walk, grade.passed)

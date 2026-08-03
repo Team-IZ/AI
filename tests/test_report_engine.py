@@ -12,13 +12,13 @@ TEACHES = [
 ]
 
 
-def _turn(axis: str, confirmed: int, best: int | None = None, hint: str | None = None):
+def _turn(axis: str, score: int, hints_used: int = 0, hint: str | None = None):
+    """턴 하나. `hints_used`가 problem_stage 의 어느 슬롯에 들어갈지를 정한다."""
     return {
         "problem_id": "p-1", "axis_code": axis, "question_text": f"{axis} 질문",
         "answer_text": "답변", "answered_at": "2026-08-02T00:00:00Z",
-        "best_score": best if best is not None else confirmed,
-        "confirmed_score": confirmed, "attempt_count": 1,
-        "hint_text": hint, "autonomy": "SELF",
+        "score": score, "passed": score >= 3, "hints_used": hints_used,
+        "hint_text": hint,
     }
 
 
@@ -43,18 +43,21 @@ NARRATIVE = {
 
 # ── ① 판정 (결정론) ───────────────────────────────────────────────────────────
 
-def test_last_turn_of_an_axis_is_the_recorded_result():
-    """힌트 후 재질의도 한 턴이다. 축의 결과는 **마지막 시도**의 점수다."""
+def test_each_attempt_lands_in_its_own_slot():
+    """한 축의 답변 3개가 problem_stage 한 행의 서로 다른 슬롯에 들어간다.
+
+    마지막 시도만 남기면 "힌트 없이 몇 점이었나"가 사라져 자력 판정을 못 한다.
+    """
     rows = report.summarize_stages([
-        _turn("L1", 2), _turn("L1", 2, hint="힌트1"), _turn("L1", 4, best=5, hint="힌트2"),
+        _turn("L1", 2), _turn("L1", 2, hints_used=1, hint="힌트1"),
+        _turn("L1", 4, hints_used=2, hint="힌트2"),
     ])
 
     l1 = rows[0]
-    assert l1["confirmed_score"] == 4
-    assert l1["best_score"] == 5
-    assert l1["attempt_count"] == 3
-    assert l1["hints_used"] == 2
-    assert l1["passed"] is True
+    assert (l1["question_score"], l1["question_passed"]) == (2, False)
+    assert (l1["first_hint_score"], l1["first_hint_passed"]) == (2, False)
+    assert (l1["second_hint_score"], l1["second_hint_passed"]) == (4, True)
+    assert l1["status"] == "PASSED"
 
 
 def test_unreached_axes_are_still_four_rows():
@@ -63,9 +66,9 @@ def test_unreached_axes_are_still_four_rows():
 
     assert [r["axis_code"] for r in rows] == ["L1", "L2", "L3", "L4"]
     for r in rows[1:]:
-        assert r["attempt_count"] == 0
-        assert r["passed"] is False
-        assert "confirmed_score" not in r      # 점수를 지어내지 않는다
+        assert r["status"] == "NOT_REACHED"
+        assert report.stage_passed(r) is False
+        assert "question_score" not in r        # 점수를 지어내지 않는다
 
 
 def test_reached_stage_counts_consecutive_passes():
@@ -179,7 +182,7 @@ def test_transcript_block_shows_hint_usage(monkeypatch):
     """힌트를 몇 개 받고 답했는지가 보여야 모델이 자력을 서술한다."""
     call = _fake(monkeypatch, NARRATIVE)
 
-    report.build("p-1", 1, [_turn("L1", 2), _turn("L1", 4, hint="L1 힌트 1")],
+    report.build("p-1", 1, [_turn("L1", 2), _turn("L1", 4, hints_used=1, hint="L1 힌트 1")],
                  model_code="m")
 
     block = call.values["transcript_block"]

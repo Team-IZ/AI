@@ -47,48 +47,54 @@ class Report:
 
 
 def summarize_stages(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """문답 기록을 축별 최종 상태로 접는다.
+    """문답 기록을 축별 한 행으로 접는다. **DB `problem_stage` 한 행과 1:1이다.**
 
-    **같은 축의 마지막 턴이 그 축의 결과다.** 힌트 후 재질의도 한 턴이라 축 하나에
-    턴이 최대 3개 나오는데, 기록에 남는 것은 마지막 시도의 점수다(힌트 상한이 이미
-    거기에 걸려 있다).
+    새 MEAS 정의서(2026-08-03)에서 한 축의 답변 3개(질문·힌트1·힌트2)가 **같은 행의
+    다른 슬롯**에 들어간다. 그래서 마지막 턴만 남기지 않고 **턴의 `hints_used`로 슬롯을
+    골라 흩뿌린다** — 0이면 질문, 1이면 첫 힌트, 2면 둘째 힌트다.
 
-    도달 못 한 축도 4개를 다 채워 보낸다 — DB `problem_stage`가 문제당 4행으로
-    미리 만들어져 있어서, 빼고 보내면 Spring이 어느 행을 채울지 순서로 짐작하게 된다.
+    도달 못 한 축도 4개를 다 채워 보낸다 — `problem_stage`가 문제당 4행으로 미리
+    만들어져 있어서, 빼고 보내면 Spring이 어느 행을 채울지 순서로 짐작하게 된다.
     """
-    last: dict[str, dict[str, Any]] = {}
-    counts: dict[str, int] = {}
+    slots = ("question", "first_hint", "second_hint")
+    by_axis: dict[str, dict[str, Any]] = {
+        axis: {"axis_code": axis, "status": "NOT_REACHED"} for axis in scoring.AXIS_CODES
+    }
+
     for turn in transcript:
         axis = turn.get("axis_code")
-        if axis not in scoring.AXES:
+        row = by_axis.get(axis)
+        if row is None:
             continue
-        last[axis] = turn
-        counts[axis] = counts.get(axis, 0) + 1
+        hints_used = int(turn.get("hints_used") or 0)
+        if not 0 <= hints_used < len(slots):
+            continue
+        score = turn.get("score")
+        prefix = slots[hints_used]
+        row[f"{prefix}_score"] = score
+        row[f"{prefix}_passed"] = bool(turn.get("passed"))
 
-    rows = []
-    for axis in scoring.AXIS_CODES:
-        turn = last.get(axis)
-        if turn is None:
-            rows.append({"axis_code": axis, "attempt_count": 0, "passed": False})
-            continue
-        confirmed = turn.get("confirmed_score")
-        rows.append({
-            "axis_code": axis,
-            "attempt_count": counts[axis],
-            "passed": (confirmed or 0) >= scoring.PASS_SCORE,
-            "best_score": turn.get("best_score"),
-            "confirmed_score": confirmed,
-            "hints_used": max(counts[axis] - 1, 0),
-            "autonomy": turn.get("autonomy"),
-        })
-    return rows
+    for row in by_axis.values():
+        passed = any(row.get(f"{p}_passed") for p in slots)
+        answered = any(row.get(f"{p}_score") is not None for p in slots)
+        # 답이 하나도 없으면 "안 물어본 것"이다. NOT_ANSWERED(물었는데 답이 없다)는
+        # 세션 쪽이 판단할 일이라 여기서는 만들지 않는다 — 기록만 보면 구분이 안 된다.
+        row["status"] = "PASSED" if passed else ("NOT_PASSED" if answered else "NOT_REACHED")
+
+    return [by_axis[axis] for axis in scoring.AXIS_CODES]
+
+
+def stage_passed(row: dict[str, Any]) -> bool:
+    """세 슬롯 중 하나라도 통과면 그 축은 통과다."""
+    return bool(row.get("question_passed") or row.get("first_hint_passed")
+                or row.get("second_hint_passed"))
 
 
 def reached_stage(stage_rows: list[dict[str, Any]]) -> int:
     """앞에서부터 연속으로 통과한 개수. 계단이라 건너뛴 통과는 없다."""
     reached = 0
     for row in stage_rows:
-        if not row["passed"]:
+        if not stage_passed(row):
             break
         reached += 1
     return reached
@@ -112,8 +118,8 @@ def _transcript_block(transcript: list[dict[str, Any]]) -> str:
     for i, turn in enumerate(transcript, start=1):
         hint = turn.get("hint_text")
         blocks.append(
-            f"[{i}] {turn.get('axis_code')} · 점수 {turn.get('confirmed_score')}"
-            f" (원점수 {turn.get('best_score')})\n"
+            f"[{i}] {turn.get('axis_code')} · 점수 {turn.get('score')}"
+            f" (힌트 {turn.get('hints_used') or 0}개 받고 답함)\n"
             f"질문: {turn.get('question_text', '')}\n"
             f"{'직전 힌트: ' + hint if hint else '힌트 없이 답함'}\n"
             f"답변: {turn.get('answer_text', '')}"
@@ -170,7 +176,7 @@ def _render_markdown(data: dict[str, Any], stage_rows: list[dict[str, Any]],
         # 힌트를 받고 통과한 것은 "통과"가 아니라 "보조를 받아 도달"이다.
         parts += ["### 스스로 한 것과 도움을 받은 것", str(data["autonomy_note"]).strip(), ""]
 
-    unreached = [r["axis_code"] for r in stage_rows if r["attempt_count"] == 0]
+    unreached = [r["axis_code"] for r in stage_rows if r["status"] == "NOT_REACHED"]
     if unreached:
         parts.append(f"> {', '.join(unreached)}는 앞 단계에서 끝나 묻지 않았습니다 — "
                      f"못한 것이 아니라 물어보지 않은 것입니다.")
@@ -203,7 +209,7 @@ def _narrative(data: dict[str, Any], teaches: list[dict[str, Any]],
         "strengths": take("strengths"),
         "gaps": take("gaps"),
         "autonomy_note": data.get("autonomy_note"),
-        "unreached_axes": [r["axis_code"] for r in stage_rows if r["attempt_count"] == 0],
+        "unreached_axes": [r["axis_code"] for r in stage_rows if r["status"] == "NOT_REACHED"],
     }
 
 
@@ -243,7 +249,7 @@ def build(problem_id: str, problem_no: int, transcript: list[dict[str, Any]], *,
     teaches = teaches or []
     stage_rows = summarize_stages(transcript)
     reached = reached_stage(stage_rows)
-    passed_by_axis = {r["axis_code"]: r["passed"] for r in stage_rows}
+    passed_by_axis = {r["axis_code"]: stage_passed(r) for r in stage_rows}
 
     usages: list[dict[str, Any]] = []
     data: dict[str, Any] = {}
@@ -278,7 +284,7 @@ def build(problem_id: str, problem_no: int, transcript: list[dict[str, Any]], *,
         # 내보내면 백엔드가 "요약이 있다"로 읽는다 — narrativeFailed와 같이 비운다.
         narrative=({"summary": None, "strengths": [], "gaps": [], "autonomy_note": None,
                     "unreached_axes": [r["axis_code"] for r in stage_rows
-                                       if r["attempt_count"] == 0]}
+                                       if r["status"] == "NOT_REACHED"]}
                    if narrative_failed else _narrative(data, teaches, stage_rows)),
         curriculum_refs=_curriculum_refs(data, teaches),
         # 재시험은 모델에게 묻지 않는다 — L1·L2 통과 여부로 결정된다(scoring).

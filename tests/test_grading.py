@@ -20,25 +20,26 @@ def _data(score=4):
             "evidence": "학생이 인용한 부분", "missing": "데이터 흐름 연결"}
 
 
-def test_hint_cap_lowers_confirmed_score(monkeypatch):
-    """원점수는 그대로 두고 상한만 씌운다 — '몇 번째 힌트에서 통과했나'가 자력의 측정값이다."""
+def test_hints_do_not_lower_the_score(monkeypatch):
+    """🔴 상한 폐기(2026-08-03). 힌트를 써도 점수를 깎지 않는다 — AI는 채점만 한다.
+
+    problem_stage 가 질문·힌트1·힌트2 점수를 따로 저장하므로 눌러 담을 이유가 없다.
+    자력은 '어느 슬롯에서 통과했나'로 읽는다.
+    """
     _fake(monkeypatch, _data(score=5))
 
     g = grading.grade("L1", "q", "a", model_code="m", hints=["h1", "h2"])
 
-    assert g.best_score == 5           # 루브릭 원점수는 보존
-    assert g.confirmed_score == 3      # 힌트 2회 상한
+    assert g.score == 5                # 힌트를 2개 썼어도 그대로
+    assert g.hints_used == 2           # 어느 슬롯인지는 이 값이 정한다
     assert g.autonomy == "PARTIAL"
 
 
-def test_pass_uses_confirmed_not_best(monkeypatch):
-    """best로 판정하면 힌트 상한이 무력해진다."""
-    _fake(monkeypatch, _data(score=5))
+def test_pass_line_is_the_raw_score(monkeypatch):
+    """통과 판정은 원점수 기준이다. DB CHECK도 `passed=TRUE AND score>=3`이다."""
+    _fake(monkeypatch, _data(score=3))
 
-    g = grading.grade("L1", "q", "a", model_code="m", hints=["h1", "h2"])
-
-    assert g.passed is True            # 상한 3점 = 통과선 3점
-    assert grading.grade("L1", "q", "a", model_code="m", hints=["h1", "h2"]).confirmed_score == 3
+    assert grading.grade("L1", "q", "a", model_code="m", hints=["h1", "h2"]).passed is True
 
 
 def test_no_hint_keeps_full_score(monkeypatch):
@@ -46,7 +47,7 @@ def test_no_hint_keeps_full_score(monkeypatch):
 
     g = grading.grade("L1", "q", "a", model_code="m")
 
-    assert (g.best_score, g.confirmed_score, g.autonomy) == (5, 5, "SELF")
+    assert (g.score, g.passed, g.autonomy) == (5, True, "SELF")
 
 
 def test_below_pass_line_fails(monkeypatch):

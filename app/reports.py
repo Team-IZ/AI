@@ -58,9 +58,9 @@ def create_job(body: ReportRequest, idempotency_key: str | None = None) -> Repor
 
 # problemId → 시나리오. 백엔드가 세 모양(완주 / L2 종료 / L1 종료)을 각각 불러
 # 파싱 코드를 짤 수 있게 한다. 모르는 id는 완주로 준다.
-# (원점수, 힌트사용) — 도달한 단계만. 나머지는 attemptCount=0으로 채운다.
+# (점수, 힌트사용) — 도달한 단계만. 나머지는 status=NOT_REACHED로 채운다.
 _STUB_SCRIPTS: dict[str, list[tuple[int, int]]] = {
-    "prob-stub-1": [(4, 0), (4, 1), (3, 0), (5, 2)],  # 완주. L4는 상한 3에 걸린다
+    "prob-stub-1": [(4, 0), (4, 1), (3, 0), (5, 2)],  # 완주. L4는 힌트 2개 쓰고 통과
     "prob-stub-2": [(3, 0), (2, 2)],                  # L2에서 힌트 소진 후 미달 → 재시험
     "prob-stub-3": [(2, 2)],                          # L1에서 종료 → 재시험
 }
@@ -69,36 +69,35 @@ _STUB_SCRIPTS: dict[str, list[tuple[int, int]]] = {
 def _stub_problem(problem_id: str) -> ProblemResult:
     """고정 매트릭스 하나. 백엔드가 파싱 코드를 짤 수 있도록 실제 모양을 준다.
 
-    힌트 상한(0회 5점 / 1회 4점 / 2회 3점)이 적용된 결과를 보여주는 것이 목적이라
-    완주 시나리오의 L4에 상한 3에 걸리는 케이스를 넣었다.
+    **DB `problem_stage` 한 행과 같은 모양이다** — 질문·힌트1·힌트2 슬롯에 점수가
+    흩어져 들어간다. 힌트를 쓴 시나리오는 앞 슬롯이 미통과로 채워져 있어야 DB CHECK를
+    통과한다("질문 미통과일 때만 첫 힌트 답변이 있다").
     """
     axes = list(get_args(AxisCode))
     reached = _STUB_SCRIPTS.get(problem_id, _STUB_SCRIPTS["prob-stub-1"])
-    caps = {0: 5, 1: 4, 2: 3}
-    autonomy = {0: "SELF", 1: "SELF_MAINTAINED", 2: "PARTIAL"}
+    slots = ("question", "first_hint", "second_hint")
 
     stages = []
     for i, axis in enumerate(axes):
         if i >= len(reached):
-            stages.append({"axis_code": axis, "attempt_count": 0, "passed": False})
+            stages.append({"axis_code": axis, "status": "NOT_REACHED"})
             continue
-        best, hints = reached[i]
-        confirmed = min(best, caps[hints])
-        stages.append(
-            {
-                "axis_code": axis,
-                "attempt_count": hints + 1,
-                "passed": confirmed >= _PASS_SCORE,
-                "best_score": best,
-                "confirmed_score": confirmed,
-                "hints_used": hints,
-                "autonomy": autonomy[hints],
-            }
-        )
+        score, hints = reached[i]
+        row: dict[str, Any] = {"axis_code": axis}
+        # 힌트를 쓴 만큼 앞 슬롯은 미통과로 채운다 — DB CHECK가 "질문 미통과일 때만
+        # 첫 힌트 답변이 있다"를 강제하므로 건너뛴 슬롯이 있으면 INSERT가 깨진다.
+        for used in range(hints):
+            row[f"{slots[used]}_score"] = _PASS_SCORE - 1
+            row[f"{slots[used]}_passed"] = False
+        row[f"{slots[hints]}_score"] = score
+        row[f"{slots[hints]}_passed"] = score >= _PASS_SCORE
+        row["status"] = "PASSED" if score >= _PASS_SCORE else "NOT_PASSED"
+        stages.append(row)
 
     reached = 0
-    for s in stages:
-        if not s["passed"]:
+    for row in stages:
+        if not (row.get("question_passed") or row.get("first_hint_passed")
+                or row.get("second_hint_passed")):
             break
         reached += 1
 
@@ -122,7 +121,7 @@ def _stub_result(problem_id: str) -> ReportResult:
             "strengths": [],
             "gaps": [],
             "autonomy_note": None,
-            "unreached_axes": [s.axis_code for s in problem.stages if s.attempt_count == 0],
+            "unreached_axes": [s.axis_code for s in problem.stages if s.status == "NOT_REACHED"],
         },
         problem=problem,
         curriculum_refs=[

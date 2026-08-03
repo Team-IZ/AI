@@ -57,12 +57,11 @@ def score(monkeypatch):
     def _grade(axis_code, question, answer, *, model_code, hints=None, **kw):
         value = plan[0] if len(plan) == 1 else plan.pop(0)
         used = len(hints or [])
-        confirmed = min(value, grading.scoring.cap_for(used))
         # 채점기에 무엇이 실려 갔는지. 모델·맥락 배선을 재는 테스트가 읽는다.
         plan.seen = {"model_code": model_code, **kw}
         return grading.Grade(
-            axis_code=axis_code, best_score=value, confirmed_score=confirmed,
-            hints_used=used, passed=confirmed >= grading.scoring.PASS_SCORE,
+            axis_code=axis_code, score=value, hints_used=used,
+            passed=value >= grading.scoring.PASS_SCORE,
             autonomy=grading.scoring.autonomy_for(used),
             matched_level="", evidence="", missing="", usages=[],
         )
@@ -180,19 +179,18 @@ def test_exhausted_hints_end_the_problem(score):
     assert len(session.transcript) == 3                  # 세 시도가 다 기록된다
 
 
-def test_hint_cap_is_recorded_in_the_turn(score):
-    """힌트를 쓰고 통과하면 원점수는 보존되고 기록 점수만 상한에 걸린다."""
+def test_hint_usage_is_recorded_in_the_turn(score):
+    """점수는 그대로 나가고(상한 폐기), 어느 슬롯인지는 hintsUsed 가 정한다."""
     score[:] = [2, 5]
     session = Backend()
     session.answer()                                     # 미달 → 힌트 1
 
     turn = session.answer()["turn"]
 
-    assert turn["bestScore"] == 5
-    assert turn["confirmedScore"] == 4                   # 힌트 1회 상한
-    assert turn["autonomy"] == "SELF_MAINTAINED"
+    assert turn["score"] == 5                            # 눌러 담지 않는다
+    assert turn["passed"] is True
+    assert turn["hintsUsed"] == 1                        # = problem_stage 의 첫 힌트 슬롯
     assert turn["hintText"] == "L1 힌트 1"               # 어떤 힌트를 보고 답했는지
-    assert turn["attemptCount"] == 2
 
 
 def test_completing_all_axes_moves_to_the_next_problem(score):
@@ -292,14 +290,14 @@ def test_transcript_replays_when_the_cursor_is_missing(score):
     score[:] = [2]
     turn = {"problemId": "prob-1", "axisCode": "L1", "questionText": "L1 질문",
             "answerText": "a", "answeredAt": "2026-08-02T00:00:00Z",
-            "bestScore": 2, "confirmedScore": 2, "attemptCount": 1, "autonomy": "SELF"}
+            "score": 2, "passed": False, "hintsUsed": 0}
     session = Backend()
-    session.transcript = [turn, {**turn, "attemptCount": 2}]
+    session.transcript = [turn, {**turn, "hintsUsed": 1}]
 
     body = session.answer(cursor=None)
 
     assert body["turn"]["hintText"] == "L1 힌트 2"       # 힌트 2개가 열린 자리였다
-    assert body["turn"]["attemptCount"] == 3
+    assert body["turn"]["hintsUsed"] == 2
 
 
 def test_cursor_wins_over_the_transcript(score):
@@ -319,7 +317,7 @@ def test_ai_usage_is_reported_for_grading(monkeypatch):
     """
     def _grade(axis_code, question, answer, *, model_code, hints=None, **kw):
         return grading.Grade(
-            axis_code=axis_code, best_score=4, confirmed_score=4, hints_used=0,
+            axis_code=axis_code, score=4, hints_used=0,
             passed=True, autonomy="SELF", matched_level="", evidence="", missing="",
             usages=[{"model_code": "m-1", "input_token_count": 100,
                      "output_token_count": 20, "cached_token_count": 0,

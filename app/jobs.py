@@ -70,7 +70,21 @@ def run_analysis(
             )
 
         job.result = result
-        job.status = "SUCCEEDED"
+        # 🔴 **부분 성공을 SUCCEEDED로 덮지 않는다** (2026-08-03, `analysis_job.status`에
+        # `PARTIAL`이 있다). 요구사항 판정은 문답과 독립이라 실패해도 문제·질문·힌트는
+        # 정상으로 나가는데(엔진이 verdict='F' + "판정 실패" note로 채운다), 그걸
+        # SUCCEEDED로 보내면 **화면에 "요구사항 전부 미충족"이 사실처럼 뜬다.**
+        # 실호출에서 실제로 나오는 경로다.
+        failed_judgements = sum(
+            1 for r in result.requirement_results
+            if (r.note or "").startswith("판정 실패")
+        )
+        job.status = "PARTIAL" if failed_judgements else "SUCCEEDED"
+        if failed_judgements:
+            job.failure_reason = (
+                f"요구사항 판정 {failed_judgements}건이 실패했습니다. "
+                f"문제·질문·힌트는 정상입니다"
+            )
     except Exception as exc:
         # 엔진 터지거나 계약 어기면 job FAILED로. 예외 삼키지 말고 사유 기록
         job.status = "FAILED"

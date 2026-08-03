@@ -62,23 +62,57 @@ class ReportRequest(BaseSchema):
     )
 
 
+# DB problem_stage.status. 이 값을 그대로 쓴다 — 별도 어휘를 만들면 Spring이 매핑을 든다.
+StageStatus = Literal[
+    "PREPARED",      # 질문·힌트만 채워진 초기 상태
+    "IN_PROGRESS",   # 답변이 시작됐다
+    "PASSED",        # 질문·힌트1·힌트2 중 하나가 통과
+    "NOT_PASSED",    # 셋 다 미통과 (= 이 축에서 문제가 끝났다)
+    "NOT_REACHED",   # 앞 단계에서 끝나 묻지 않았다
+    "NOT_ANSWERED",  # 물었는데 답이 없다 (시간 초과 등)
+]
+
+
 class StageScore(BaseSchema):
-    """문제 하나의 단계 하나. DB problem_stage 대응."""
+    """문제 하나의 단계 하나. **DB `problem_stage` 한 행과 1:1이다** (2026-08-03).
+
+    새 MEAS 정의서에서 `problem_stage`가 **한 행에 질문 1 + 힌트 2 + 답변 3 + 점수 3 +
+    통과 3**을 담게 됐다(`stage_answer_attempt` 테이블은 사라졌다). 그래서 응답도 같은
+    모양으로 낸다 — **Spring이 변환 없이 그대로 INSERT할 수 있게** 하는 것이 목적이다.
+
+    🔴 **`attemptCount`·`hintsUsed`·`autonomy`는 없다.** 셋 다 아래 6개 필드에서
+    파생된다(#42 §4-2). 자력 판정은 이렇게 계산한다.
+
+        questionPassed = true    → 스스로 답함      (SELF)
+        firstHintPassed = true   → 힌트 1개로 답함  (SELF_MAINTAINED)
+        secondHintPassed = true  → 힌트 2개로 답함  (PARTIAL)
+    """
 
     axis_code: AxisCode
-    attempt_count: int = Field(
-        ge=0, le=3, description="문답 시도 횟수. 0이면 앞 단계에서 끝나 도달하지 못했다"
+
+    question_score: int | None = Field(
+        default=None, ge=0, le=5, description="질문 답변 점수. 미응답·미도달이면 null"
     )
-    passed: bool = Field(description="confirmedScore가 통과선(3점) 이상인지")
-    best_score: int | None = Field(
-        default=None, ge=0, le=5, description="힌트 상한 적용 전 원점수. 미도달이면 null"
+    question_passed: bool | None = Field(
+        default=None, description="score >= 3. 점수와 함께 존재하거나 함께 null"
     )
-    confirmed_score: int | None = Field(
-        default=None, ge=0, le=5, description="힌트 상한 적용 후 기록 점수. 미도달이면 null"
+    first_hint_score: int | None = Field(
+        default=None, ge=0, le=5,
+        description="첫 힌트 후 답변 점수. **질문이 미통과일 때만 값이 있다**(DB CHECK)",
     )
-    # attemptCount - 1 과 같지만 직접 보낸다. 미도달(0)일 때 -1이 되는 것을 막는다.
-    hints_used: int = Field(default=0, ge=0, le=2)
-    autonomy: AutonomyCode | None = None
+    first_hint_passed: bool | None = None
+    second_hint_score: int | None = Field(
+        default=None, ge=0, le=5,
+        description="둘째 힌트 후 답변 점수. **첫 힌트가 미통과일 때만 값이 있다**(DB CHECK)",
+    )
+    second_hint_passed: bool | None = None
+
+    status: StageStatus = Field(description="DB problem_stage.status 값을 그대로 쓴다")
+
+    @property
+    def passed(self) -> bool:
+        """이 단계를 통과했는가. 세 슬롯 중 하나라도 통과면 통과다."""
+        return bool(self.question_passed or self.first_hint_passed or self.second_hint_passed)
 
 
 class ProblemResult(BaseSchema):
