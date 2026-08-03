@@ -42,6 +42,7 @@ from app.engines.analysis import (
     analysis_doc,
     fragments,
     hints,
+    imports,
     materialize,
     questions,
     requirements,
@@ -136,6 +137,61 @@ def _priority(topic: dict[str, Any], candidates: list[dict[str, Any]]) -> float:
     return 0.0
 
 
+def _references(ref: dict[str, Any], snippet: str, teach: dict[str, Any] | None,
+                importers: list[str]) -> list[dict[str, Any]]:
+    """문제의 근거 목록. **LLM을 부르지 않는다** — 이미 산정된 사실만 모은다.
+
+    지금까지 항상 빈 배열이었다. 채우는 데 필요한 것이 다 있었는데 조립을 안 했다.
+
+        PRIMARY_BLOCK        문제를 낸 그 지점. 화면에 띄울 본문의 위치
+        QUESTION_HIGHLIGHT   축별 강조 구간. 4축 전부 같은 지점을 가리킨다 —
+                             축마다 다른 구간을 짚으려면 LLM이 필요하고, 지금은 근거가 없다
+        CURRICULUM_EVIDENCE  이 문제가 검증하는 교안 개념. 코드 라인이 없다
+        CALLER               이 파일을 import 하는 파일들 (import 그래프)
+
+    ⚠️ `RELATED_CONTEXT`는 안 만든다. 심볼 테이블이 없어 "같이 봐야 하는 자리"를
+    특정할 근거가 없다 — 지어내면 학생이 무관한 코드를 읽는다.
+    """
+    path = ref.get("file", "")
+    lo = ref.get("line_start") or 1
+    hi = ref.get("line_end") or lo
+    fragment_hash = _sha256(snippet)
+
+    refs: list[dict[str, Any]] = [{
+        "reference_type": "PRIMARY_BLOCK", "display_order": 1,
+        "path": path, "line_start": lo, "line_end": hi,
+        "evidence_hash": fragment_hash,
+    }]
+
+    order = 2
+    for axis in scoring.AXIS_CODES:
+        refs.append({
+            "reference_type": "QUESTION_HIGHLIGHT", "display_order": order,
+            "path": path, "line_start": lo, "line_end": hi,
+            "axis_code": axis, "evidence_hash": fragment_hash,
+        })
+        order += 1
+
+    if teach and teach.get("id"):
+        refs.append({
+            "reference_type": "CURRICULUM_EVIDENCE", "display_order": order,
+            "teach_id": teach["id"],
+            # 교안 근거는 코드가 없다. 개념 이름을 해시해 중복만 막는다.
+            "evidence_hash": _sha256(f"teach:{teach['id']}"),
+        })
+        order += 1
+
+    for importer in importers:
+        refs.append({
+            "reference_type": "CALLER", "display_order": order,
+            "path": importer, "line_start": 1, "line_end": 1,
+            "evidence_hash": _sha256(f"caller:{importer}->{path}"),
+        })
+        order += 1
+
+    return refs
+
+
 def _stage(axis_code: str, question: str | None, hint_list: list[hints.Hint],
            flagged: bool) -> dict[str, Any]:
     return {
@@ -209,6 +265,8 @@ class RealAnalysisEngine:
 
         # ── p04-4 질문 + p04-7 힌트 ───────────────────────────────────────────
         teach_map = _teach_by_id(teaches)
+        # "이 파일을 누가 import 하나". references[].CALLER 를 채운다. LLM 0회.
+        importers = imports.build(files)
         # 강사 지정 초점 후보를 문제에 순서대로 물린다(C-1 확정 — 받은 id를 그대로 에코).
         focus_ids = [item["id"] for item in (request.get("focus_items") or [])]
         problems: list[dict[str, Any]] = []
@@ -286,7 +344,8 @@ class RealAnalysisEngine:
                 # 수정에도 "근거가 바뀌었다"가 되어 판정이 쓸모없어진다.
                 "evidence_hash": _sha256(snippet),
                 "extractor_version": scan["extractor_version"],
-                "references": [],
+                "references": _references(ref, snippet, teach_map.get(topic.get("teach_id")),
+                                         importers.get(ref.get("file", ""), [])),
                 "stages": stage_rows,
             })
 

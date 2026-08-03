@@ -2188,46 +2188,102 @@
       },
       "ProblemReference": {
         "properties": {
-          "path": {
+          "referenceType": {
             "type": "string",
+            "enum": [
+              "PRIMARY_BLOCK",
+              "QUESTION_HIGHLIGHT",
+              "CALLER",
+              "RELATED_CONTEXT",
+              "CURRICULUM_EVIDENCE"
+            ],
+            "title": "Referencetype"
+          },
+          "displayOrder": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Displayorder",
+            "description": "화면에 놓는 순서. DB CHECK (> 0)",
+            "default": 1
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Path"
           },
           "lineStart": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Linestart"
           },
           "lineEnd": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Lineend"
+          },
+          "axisCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "L1",
+                  "L2",
+                  "L3",
+                  "L4"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Axiscode",
+            "description": "QUESTION_HIGHLIGHT일 때 필수. 어느 축의 강조 구간인가"
+          },
+          "teachId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teachid",
+            "description": "CURRICULUM_EVIDENCE일 때 필수. 요청 teaches[].id"
           },
           "evidenceHash": {
             "type": "string",
             "title": "Evidencehash",
             "description": "sha256 hex 64자"
-          },
-          "referenceType": {
-            "type": "string",
-            "enum": [
-              "CALLER",
-              "CALLEE",
-              "DEFINITION",
-              "TEST",
-              "CONFIG",
-              "SIMILAR"
-            ],
-            "title": "Referencetype"
           }
         },
         "type": "object",
         "required": [
-          "path",
-          "lineStart",
-          "lineEnd",
-          "evidenceHash",
-          "referenceType"
+          "referenceType",
+          "evidenceHash"
         ],
         "title": "ProblemReference",
-        "description": "문제가 가리키는 코드 위치. DB problem_reference 대응."
+        "description": "문제가 가리키는 근거. DB `assessment_problem_reference` 대응.\n\n**코드 근거와 교안 근거가 한 테이블에 섞여 있다.** 유형마다 필수 필드가 다르다.\n\n    PRIMARY_BLOCK · QUESTION_HIGHLIGHT · CALLER · RELATED_CONTEXT\n        path · lineStart · lineEnd 필수 (코드 근거)\n    CURRICULUM_EVIDENCE\n        코드 라인이 없다. teachId 로 교안을 가리킨다\n    QUESTION_HIGHLIGHT\n        axisCode 필수 — 어느 축에서 강조할 구간인지"
       },
       "ProblemResult": {
         "properties": {

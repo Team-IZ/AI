@@ -222,3 +222,34 @@ def test_unmatched_teach_reaches_the_response(monkeypatch, fake_llm):
 
     assert [u.teach_id for u in result.unmatched_teaches] == ["t-nope"]
     assert result.unmatched_teaches[0].reason
+
+
+def test_references_are_filled(fake_llm):
+    """지금까지 항상 빈 배열이었다. 채우는 데 필요한 것이 다 있었는데 조립을 안 했다."""
+    raw = engine_mod.RealAnalysisEngine().analyze(REQUEST, _zip())
+    raw.pop("ai_usage")
+
+    refs = AnalysisResult.model_validate(raw).problems[0].references
+    kinds = [r.reference_type for r in refs]
+
+    assert kinds.count("PRIMARY_BLOCK") == 1
+    assert kinds.count("QUESTION_HIGHLIGHT") == 4          # 4축
+    assert kinds.count("CURRICULUM_EVIDENCE") == 1         # teach 가 붙은 문제다
+    assert [r.display_order for r in refs] == list(range(1, len(refs) + 1))
+
+    highlight = next(r for r in refs if r.reference_type == "QUESTION_HIGHLIGHT")
+    assert highlight.axis_code == "L1"                     # 축이 없으면 DB CHECK 위반
+    curriculum = next(r for r in refs if r.reference_type == "CURRICULUM_EVIDENCE")
+    assert curriculum.teach_id == "t1"
+    assert curriculum.path is None                         # 교안 근거는 코드 라인이 없다
+
+
+def test_old_reference_types_are_gone():
+    """옛 값을 보내면 새 정의서 CHECK 에 걸려 INSERT 가 깨진다."""
+    from app.schemas.analysis import ReferenceType
+    from typing import get_args
+
+    assert set(get_args(ReferenceType)) == {
+        "PRIMARY_BLOCK", "QUESTION_HIGHLIGHT", "CALLER",
+        "RELATED_CONTEXT", "CURRICULUM_EVIDENCE",
+    }

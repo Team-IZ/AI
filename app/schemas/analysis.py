@@ -80,25 +80,65 @@ class SnapshotMeta(BaseSchema):
     file_count: int
     byte_count: int
 
-# 문제 지점 주변에서 같이 봐야 하는 코드의 성격.
-# 주 지점 자체는 Problem이 갖는다(PRIMARY 폐기 — 같은 위치가 두 군데 적히는 것을 막는다).
+# 문제가 가리키는 근거의 성격. **DB assessment_problem_reference.reference_type CHECK와
+# 같은 집합이다** (새 MEAS, 2026-08-04에 정렬).
+#
+# 🔴 옛 값(`CALLEE`·`DEFINITION`·`TEST`·`CONFIG`·`SIMILAR`)은 폐기했다 — 새 정의서 CHECK에
+# 없어서 그대로 보내면 **Spring INSERT가 깨진다.** 지금까지 `references[]`가 항상 빈 배열이라
+# 안 터졌을 뿐이고, 채우는 순간 터졌을 자리다.
 ReferenceType = Literal[
-    "CALLER",      # 이 코드를 부르는 쪽
-    "CALLEE",      # 이 코드가 부르는 쪽
-    "DEFINITION",  # 여기서 쓰는 타입·상수의 정의
-    "TEST",        # 이 코드를 검증하는 테스트
-    "CONFIG",      # 동작을 좌우하는 설정
-    "SIMILAR",     # 비슷한 처리를 하는 다른 자리 (L3 대안 질문의 재료)
+    "PRIMARY_BLOCK",       # 문제를 낸 그 지점. 화면에 띄울 본문이 여기 붙는다
+    "QUESTION_HIGHLIGHT",  # 축별로 강조할 구간. axisCode가 필수다
+    "CALLER",              # 이 코드를 부르는 쪽
+    "RELATED_CONTEXT",     # 같이 봐야 이해되는 다른 자리 (옛 CALLEE·DEFINITION·SIMILAR가 여기로)
+    "CURRICULUM_EVIDENCE", # 교안 근거. **코드 라인이 없다** — 개념이 교안 어디서 왔는지
 ]
 
 class ProblemReference(BaseSchema):
-    """문제가 가리키는 코드 위치. DB problem_reference 대응."""
+    """문제가 가리키는 근거. DB `assessment_problem_reference` 대응.
 
-    path: str
-    line_start: int
-    line_end: int
-    evidence_hash: str = Field(description="sha256 hex 64자")
+    **코드 근거와 교안 근거가 한 테이블에 섞여 있다.** 유형마다 필수 필드가 다르다.
+
+        PRIMARY_BLOCK · QUESTION_HIGHLIGHT · CALLER · RELATED_CONTEXT
+            path · lineStart · lineEnd 필수 (코드 근거)
+        CURRICULUM_EVIDENCE
+            코드 라인이 없다. teachId 로 교안을 가리킨다
+        QUESTION_HIGHLIGHT
+            axisCode 필수 — 어느 축에서 강조할 구간인지
+    """
+
     reference_type: ReferenceType
+    display_order: int = Field(
+        default=1, ge=1,
+        description="화면에 놓는 순서. DB CHECK (> 0)",
+    )
+    path: str | None = None
+    line_start: int | None = Field(default=None, ge=1)
+    line_end: int | None = Field(default=None, ge=1)
+    axis_code: AxisCode | None = Field(
+        default=None, description="QUESTION_HIGHLIGHT일 때 필수. 어느 축의 강조 구간인가",
+    )
+    teach_id: str | None = Field(
+        default=None, description="CURRICULUM_EVIDENCE일 때 필수. 요청 teaches[].id",
+    )
+    evidence_hash: str = Field(description="sha256 hex 64자")
+
+    @model_validator(mode="after")
+    def _check_type_rules(self) -> "ProblemReference":
+        """유형별 필수 필드. DB CHECK와 같은 규칙이라 여기서 막지 않으면 INSERT가 깨진다."""
+        if self.reference_type == "CURRICULUM_EVIDENCE":
+            if not self.teach_id:
+                raise ValueError("CURRICULUM_EVIDENCE에는 teachId가 필요합니다")
+        elif not (self.path and self.line_start and self.line_end):
+            raise ValueError(
+                f"{self.reference_type}에는 path·lineStart·lineEnd가 필요합니다"
+            )
+        if self.reference_type == "QUESTION_HIGHLIGHT" and not self.axis_code:
+            raise ValueError("QUESTION_HIGHLIGHT에는 axisCode가 필요합니다")
+        if (self.line_start is not None and self.line_end is not None
+                and self.line_end < self.line_start):
+            raise ValueError(f"lineEnd가 lineStart보다 작습니다: {self.line_start}~{self.line_end}")
+        return self
     
 class Hint(BaseSchema):
     """단계 하나에 딸린 힌트(= 재질의 문장). L1·L2만 분석 때 미리 만든다."""
