@@ -162,7 +162,17 @@ cloudflared tunnel --url http://localhost:8000
 
 **`analysisId`는 Spring이 발급한다.** AI는 만들지도 받지도 않고, Spring이 `jobId`로 연결한다.
 
-**모델은 코드 문자열로 주고받는다.** 요청 `modelCode`(생략 시 서버 기본값), 응답 `aiUsage[].modelCode`. UUID(`model_id`)는 쓰지 않는다 — Spring이 `ai_model`에서 조회한다.
+**모델은 코드 문자열로 주고받되 방향마다 컬럼이 다르다.** UUID(`model_id`)는 쓰지 않는다.
+
+```
+요청 → AI      providerModelCode    ai_model.provider_model_code 값 (예: "nvidia/nemotron-3-ultra-550b-a55b")
+                                    공급자에게 그대로 넘길 문자열이라 벤더 접두어가 붙어 있어야 한다
+응답 → Spring  aiUsage[].modelCode  AI가 호출에 쓴 provider 문자열을 그대로 에코한다
+                                    **AI는 화면 선택값(model_code)을 모른다** — Spring이
+                                    provider_model_code로 ai_model을 조회해 model_id를 잡는다
+```
+
+요청 필드는 네 곳 모두 같은 이름·같은 규칙이다(`/analyses` · `/curricula` · `/reports` · `/sessions/{id}/answers`). 생략하면 서버 기본값이고, 채점 모델은 operator가 고른다(GradingPolicy).
 
 ### 엔드포인트
 
@@ -196,7 +206,7 @@ cloudflared tunnel --url http://localhost:8000
   "source": { "repoUrl": "https://github.com/...", "branch": "main" },
   "extractionScope": "TOTAL",                // 또는 OWN_COMMIT (이때 commitEmail 필수)
   "questionBudget": 3,
-  "modelCode": "glm-5.2",                    // 생략 시 서버 기본값
+  "providerModelCode": "nvidia/nemotron-3-ultra-550b-a55b",   // 생략 시 서버 기본값
   "focusItems": [                            // 강사가 체크포인트에 지정한 질문 초점 후보
     { "id": "a3f2-…", "name": "예외 처리" },
     { "id": "b7c1-…", "name": "동시성" }
@@ -258,11 +268,13 @@ cloudflared tunnel --url http://localhost:8000
   "problemType": "DESIGN_CHOICE",      // 아래 5종
   "priority": 0.91,
   "questionFocusItemId": "a3f2-…",     // 요청 focusItems에서 고른 id
+  "teachId": "tch-1",                  // 요청 teaches에서 이 문제가 검증하는 개념. isGeneral이면 null
+  "isGeneral": false,                  // teach 앵커 없이 뽑은 "일반 문제"
   "sourcePath": "app/main.py",
   "lineStart": 12, "lineEnd": 14,
   "codeSnippet": "def main():\n    …",  // evidenceHash의 대상
   "evidenceHash": "…",
-  "extractorVersion": "v0",            // 문자열. 룰 버전을 붙일 수 있게
+  "extractorVersion": 1739284412,      // 정수. INTEGER CHECK (> 0)
   "references": [
     { "path": "app/cli.py", "lineStart": 30, "lineEnd": 33,
       "evidenceHash": "…", "referenceType": "CALLER" }
@@ -281,6 +293,10 @@ cloudflared tunnel --url http://localhost:8000
 **Spring이 받아서 할 일**: 문제 3행 + `problem_stage` 12행 + `stage_answer_attempt` 36행(질문 12개·힌트 24개를 넣고 답변란은 NULL)을 미리 만들어 두면, 세션 진행 중 AI에 질문을 물을 필요가 없다.
 
 **`codeSnippet`을 AI가 보내는 이유**: `evidenceHash`가 `codeSnippet` 기준 해시이고 해시를 AI가 만든다. Spring이 ZIP을 따로 잘라내면 줄바꿈·BOM이 1바이트만 달라도 해시가 안 맞는다.
+
+**`extractorVersion`은 정수다** — `assessment_problem.extractor_version`이 `INTEGER CHECK (> 0)`이다. 값은 룰 vendor의 `.py`+`.json` 전부를 해시해 산정한 값이라 **같은 룰이면 같은 값, 데이터 파일만 바뀌어도 다른 값**이다(재현성 근거). 사람이 읽는 버전 번호가 아니고 순서도 없다.
+
+**`teachId`는 문제↔개념 연결이다.** 강사가 teach 3개(클래스·상속·캡슐화)를 고르면 문제도 그 셋에 하나씩 붙고, 결과 화면의 "클래스는 L3까지 도달 / 상속은 L2까지 도달"이 이 값으로 그려진다. **`isGeneral: true`면 `teachId`는 null이다** — 제출 코드가 그 개념을 만족하지 않아 teach 앵커 없이 뽑은 문제이고, 화면에 "일반 문제"로 표기해야 한다.
 
 **`problemType` 5종** — "왜 이 지점을 골랐나". `questionFocusItem`의 "무엇을 묻나"와 다른 축이다.
 
@@ -307,7 +323,12 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
   "answerText": "재귀 대신 반복문으로 바꿨습니다",
   "problems": [ /* 분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다 */ ],
   "transcript": [ /* 지금까지 확정된 턴 전부 */ ],
-  "cursor": { "problemId": "prob-1", "axisCode": "L3", "hintsUsed": 0 }
+  "cursor": { "problemId": "prob-1", "axisCode": "L3", "hintsUsed": 0 },
+  "providerModelCode": "mistralai/mistral-medium-3.5-128b",   // 생략 시 서버 기본값
+  "analysisContext": {                       // 선택. 분석 문서에서 두 필드만
+    "overview": "주문을 받아 결제로 넘기는 …",
+    "structure": [ { "area": "컨트롤러", "files": ["app/api.py"], "role": "요청 수신" } ]
+  }
 }
 
 // → AnswerResult
@@ -327,6 +348,8 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
     "codeContext": { "path": "src/Solver.java", "lineStart": 42, "snippet": "…" }
   },
   "progress": { "problemIndex": 1, "problemTotal": 3 },
+  "terminationReason": null,                 // 이 턴에 문제가 끝났을 때만 채워진다
+  "endedLevel": null,
   "aiUsage": [ /* §aiUsage */ ]
 }
 ```
@@ -338,6 +361,20 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
 `clientRequestId`는 세션 내 유일한 멱등키다. 같은 키로 재요청하면 처음 돌려준 응답을 그대로 반환한다. 채점이 실패하면 **503 `GRADING_UNAVAILABLE`(retryable=true)**이고 그 턴은 기록되지 않으므로 같은 키로 재전송하면 된다.
 
 **진행 규칙은 AI가 소유한다** — 통과선 3점 · 힌트 단계당 2회 · 점수 상한 5/4/3 · 사다리(통과→다음 축 / 미달→힌트 / 소진→다음 문제). 백엔드는 커서를 왕복시키기만 하면 되고 같은 규칙을 다시 구현하지 않는다.
+
+**종료 사유도 AI가 말한다.** 문제가 끝나는 판정이 AI 쪽에 있으므로 사유도 여기서 나간다 — 백엔드가 "커서가 다음 문제로 넘어갔으니 끝났나 보다"로 역추론하지 않는다. `assessment_problem.termination_reason`·`ended_level`에 그대로 들어간다.
+
+```
+COMPLETED_L4        L1~L4 전부 통과 (완주)        endedLevel = "L4"
+TERMINATED_AT_L3    L3에서 힌트 소진 후 미달       endedLevel = "L3"
+TERMINATED_AT_L2    L2에서                        endedLevel = "L2"
+TERMINATED_AT_L1    L1에서                        endedLevel = "L1"
+TERMINATED_AT_L4    L3까지 통과하고 L4에서 막힘     endedLevel = "L4"
+```
+
+문제가 안 끝난 턴이면 둘 다 null이다. ⚠️ 코드값 `MEAS.PROBLEM_TERMINATION_REASON`에 `TERMINATED_AT_L1`·`TERMINATED_AT_L4`가 아직 없다(백엔드 B-4). CHECK 제약이 없어 값 자체는 통과한다.
+
+**`analysisContext`는 분석 문서 전체가 아니라 `{overview, structure}` 두 필드다.** 코드 파편 하나로는 전체 흐름이 안 보여서(MVC면 model·view·controller가 다른 파일에 있다) 채점기가 학생 답변의 사실 여부를 못 가린다. 그렇다고 문서를 통째로 넣으면 채점 36회 × 5,000~7,000토큰이다 — `decisionPoints`는 문제 후보 목록이라 문제가 이미 정해진 채점에는 쓸모가 없고 부피의 대부분이다. 두 필드만 뽑으면 500~800토큰이다. **생략하면 파편만으로 채점한다**(기존 동작).
 
 **타이머는 AI 계약에 없다.** 문제당 20분·문제가 바뀌면 리셋·AI 호출 대기 중 정지는 프론트/백엔드가 소유한다 — AI는 그 값을 쓰지 않았다.
 
@@ -390,9 +427,13 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 
 ### 보고서
 
+**보고서는 문제 단위다.** 문제 하나가 끝날 때마다 한 번씩 부르므로 세션 1회에 보고서 3개다.
+
 ```jsonc
 // POST /api/v0/reports          → 202
-{ "sessionId": "sess-abc", "transcript": [ … ],
+{ "problemId": "prob-1", "sessionId": "sess-abc",
+  "providerModelCode": "mistralai/mistral-medium-3.5-128b",   // 생략 시 서버 기본값
+  "transcript": [ /* 이 문제의 턴만 */ ],
   "analysisDocuments": [ { "kind": "CODE_ANALYSIS", "content": { /* AnalysisDocument */ } } ],
   "teaches": [ … ] }
 { "jobId": "…", "status": "QUEUED" }
@@ -401,21 +442,25 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 ```jsonc
 // GET /api/v0/reports/{jobId}   → 200 (result 부분)
 {
-  "problems": [
-    { "problemNo": 1, "problemId": "…", "totalScore": 16, "maxScore": 20,
-      "stages": [ { "axisCode": "L1", "confirmedScore": 4, "bestScore": 4,
-                    "attemptCount": 1, "passed": true } ] }
-  ],
   "reportMarkdown": "…",
+  "problem": {
+    "problemNo": 1, "problemId": "…",
+    "reachedStage": 2,                       // 0~4. 앞에서부터 연속 통과한 단계 수
+    "stages": [ { "axisCode": "L1", "confirmedScore": 4, "bestScore": 4,
+                  "attemptCount": 1, "passed": true, "hintsUsed": 0,
+                  "autonomy": "SELF" } ]     // 항상 4개. 미도달은 attemptCount=0
+  },
   "curriculumRefs": [ { "teachId": "tch-1", "unitId": "u3", "sourcePages": [12, 13] } ],
-  "retestTargets": [ "prob-2" ],
-  "versions": { "modelCode": "glm-5.2", "promptVersion": "p04-6", "rubricVersion": "1" }
+  "retest": true,
+  "versions": { "modelCode": "…", "promptVersion": "p04-6", "rubricVersion": "…" }
 }
 ```
 
-**세션 총점·축 평균은 보내지 않는다.** 점수는 이미 `problem_stage`에 매 턴 저장되어 있고, 요약이 필요하면 Spring이 집계한다. LLM이 아니면 못 만드는 것(서술형 진단·교안 매핑)이 `/reports`의 본체다.
+**총점이 없다.** 이 구인은 보상을 허용하지 않고(자기 코드를 설명 못 하는데 대안을 잘 알아 총점이 높은 상태는 성립하면 안 된다), 총합은 결측을 0으로 만든다(안 물어본 단계와 못한 단계가 섞인다). 판정값은 `reachedStage`다.
 
-문제당 만점은 20(4단계 × 5). **재시험 판정은 문제 단위**이고, 커트라인은 조직 정책이라 Spring이 정한다 — AI는 `retestTargets`만 낸다.
+**세션 총점·축 평균도 보내지 않는다.** 점수는 이미 `problem_stage`에 매 턴 저장되어 있고, 요약이 필요하면 Spring이 집계한다. LLM이 아니면 못 만드는 것(서술형 진단·교안 매핑)이 `/reports`의 본체다.
+
+**재시험 판정은 문제 단위**다 — `retest`는 이 문제 하나에 대한 값이고(L1·L2 둘 다 통과해야 false), 세션 전체의 재시험 여부는 Spring이 문제 3개의 값을 모아 판단한다.
 
 ### 교안 분석
 
@@ -423,7 +468,7 @@ PDF가 항상 필요하므로 **multipart 하나만 받는다**(`payload` 문자
 
 ```jsonc
 // POST /api/v0/curricula        multipart/form-data → 202
-// payload = {"versionId": "ver-1", "modelCode": "glm-5.2"}
+// payload = {"versionId": "ver-1", "providerModelCode": "minimaxai/minimax-m3"}
 // file    = 교안 PDF
 { "jobId": "…", "status": "QUEUED" }
 ```
@@ -537,7 +582,7 @@ engine_mode: Literal["stub", "real"] = "stub"
 >
 > 이 규칙은 **OpenAPI 문법으로 표현이 안 된다.** 스키마 검증기가 막고 있고 여기 산문으로만 적혀 있다.
 >
-> ⏳ **아직인 것**: 백엔드 연동(T9d), 고정 HTTPS 주소, 배치 병렬화. 순서는 `PLAN_FASTAPI_MIGRATION.md`.
+> ⏳ **아직인 것**: 백엔드 연동, `references[]` 채우기, 고정 HTTPS 주소. 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
 ### 백엔드 대기 2건
 
@@ -552,14 +597,28 @@ C-1~C-3은 **회신 완료**다.
 
 - **C-1** 분석 요청에 `focusItems: [{id, name}]`를 싣고 AI가 `questionFocusItemId`로 하나를 돌려준다
 - **C-2** `score_run`·`axis_score` 제거 예정. 점수의 단일 소유자는 `problem_stage`이고 축 어휘는 `'L1'`~`'L4'` 한 벌
-- **C-3** **비용은 Spring이 계산한다.** AI는 토큰·모델·지연·상태만 보낸다. 모델을 고르는 주체가 백엔드·프론트라 단가도 그쪽이 먼저 안다
+- **C-3** **비용은 Spring이 계산한다.** AI는 토큰·모델·지연·상태만 보낸다. 백엔드에 단가 관리 화면(`PUT /platform/operations/models/{modelId}/pricing`)과 비용 집계 화면이 이미 있는 것을 2026-08-03에 확인했다
 
-DDL 수정 요청 4건(`attempt_count` 0~3 · `attempt_no=3` 허용 · `stage_answer_attempt` NULL 허용 + all-or-nothing CHECK · `TERMINATED_AT_L1` 코드값)도 같은 이슈에 있다.
+**DDL 요청은 6건이고 전달본은 `../qna/2026-08-03/issue-body.md`다.**
+
+```
+B-9  🔴 problem_stage 에 question_text · hint_1_text · hint_2_text   동결 시험지를 저장할 자리가 없다
+B-10    assessment_problem 에 teach_id · is_general
+B-11    ai_model 에 nemotron-3-ultra-550b-a55b 등록
+B-1     attempt_count CHECK 0~2 → 0~3
+B-2     stage_answer_attempt attempt_no = 2 → IN (2,3)
+B-4     코드값 TERMINATED_AT_L1 · TERMINATED_AT_L4 추가
+B-5     analysis_document_markdown TEXT → analysis_document JSONB
+
+철회:  B-3 (NULL 허용 + all-or-nothing CHECK)  → B-9 로 대체
+       B-8 (도달 단계 저장 자리)                → highest_reached_level 이 이미 있다
+```
 
 ### 앞으로
 
 ```
-백엔드 연동 (T9d) — 주소를 설정값으로, 채점 타임아웃 30초 이상, IP 화이트리스트
+백엔드 연동 — 주소를 설정값으로, 채점 타임아웃 30초 이상, IP 화이트리스트
+references[] 채우기 — 지금 항상 빈 배열. DEFINITION·TEST·CONFIG 먼저
 고정 HTTPS 주소 — 무료 도메인 + Caddy (cloudflared 재시작마다 URL이 바뀐다)
 (먼 항목) 적응형 힌트 모듈 대응 — 턴당 2콜, 힌트용 featureCode, 체크포인트 단위 모드 고정
 ```
