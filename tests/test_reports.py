@@ -58,26 +58,26 @@ def test_result_carries_one_problem():
     assert [s["axisCode"] for s in result["problem"]["stages"]] == ["L1", "L2", "L3", "L4"]
 
 
-def test_hint_cap_lowers_recorded_score():
-    """힌트 2회를 쓰면 원점수 5여도 기록 점수는 상한 3으로 깎인다."""
+def test_each_attempt_has_its_own_slot():
+    """힌트를 쓴 축은 앞 슬롯이 미통과로 차 있어야 DB CHECK를 통과한다."""
     l4 = _result()["problem"]["stages"][3]
 
-    assert l4["bestScore"] == 5
-    assert l4["confirmedScore"] == 3
-    assert l4["hintsUsed"] == 2
-    assert l4["attemptCount"] == 3
-    assert l4["autonomy"] == "PARTIAL"
+    assert l4["questionPassed"] is False
+    assert l4["firstHintPassed"] is False
+    assert (l4["secondHintScore"], l4["secondHintPassed"]) == (5, True)
+    assert l4["status"] == "PASSED"
 
 
 def test_unreached_level_has_no_score():
-    """도달 못 한 단계는 attemptCount=0이고 점수가 비어 있다."""
+    """도달 못 한 단계는 NOT_REACHED이고 점수가 전부 null이다."""
     stages = _result("prob-stub-3")["problem"]["stages"]   # L1에서 끝난다
 
-    assert stages[0]["attemptCount"] > 0
+    assert stages[0]["status"] == "NOT_PASSED"
     for s in stages[1:]:
-        assert s["attemptCount"] == 0
-        assert s["confirmedScore"] is None
-        assert s["bestScore"] is None
+        assert s["status"] == "NOT_REACHED"
+        assert s["questionScore"] is None
+        assert s["firstHintScore"] is None
+        assert s["secondHintScore"] is None
 
 
 def test_retest_needs_both_l1_and_l2():
@@ -147,6 +147,49 @@ def test_report_stages_must_be_four_in_order():
         ProblemResult(problemNo=1, problemId="p-1", totalScore=2, maxScore=20, stages=only_l1)
 
 
+def test_same_idempotency_key_returns_same_job_id():
+    """{problemId}:{scoreRunId} 재전송 → 같은 jobId. LLM을 두 번 부르지 않는다.
+
+    보고서는 문제마다 1건이라 중복이 곧 비용이다(§T11 D-2).
+    """
+    headers = {**HEADERS, "Idempotency-Key": "prob-stub-1:run-1"}
+
+    first = client.post("/api/v0/reports", json=BODY, headers=headers)
+    second = client.post("/api/v0/reports", json=BODY, headers=headers)
+
+    assert first.json()["jobId"] == second.json()["jobId"]
+    assert client.post("/api/v0/reports", json=BODY,
+                       headers={**HEADERS, "Idempotency-Key": "prob-stub-1:run-2"}
+                       ).json()["jobId"] != first.json()["jobId"]
+
+
+def test_ai_usage_is_reported_for_reports(monkeypatch):
+    """🔴 보고서 토큰이 원장에 실려야 한다 (§T11 F1). 엔진이 주는데 버리고 있었다."""
+    from datetime import datetime, timezone
+
+    from app.engines.analysis import stages
+
+    usage = {"model_code": "m-1", "input_token_count": 900, "output_token_count": 120,
+             "cached_token_count": 0, "status": "SUCCEEDED", "failure_code": None,
+             "latency_ms": 3000, "occurred_at": datetime.now(timezone.utc)}
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
+    monkeypatch.setattr(stages, "call",
+                        lambda *a, **k: stages.StageResult(data={"summary": "요약"},
+                                                           usages=[usage]))
+    try:
+        r = client.post("/api/v0/reports", json={"problemId": "prob-1", "providerModelCode": "vendor/m"},
+                        headers={**HEADERS, "X-Trace-Id": "trace-9"})
+        job = client.get(f"/api/v0/reports/{r.json()['jobId']}", headers=HEADERS).json()
+    finally:
+        monkeypatch.setattr(get_settings(), "engine_mode", "stub")
+
+    assert len(job["aiUsage"]) == 1
+    assert job["aiUsage"][0]["featureCode"] == "SUMMARY_DRAFT"
+    assert job["aiUsage"][0]["contextType"] == "REPORT"
+    assert job["aiUsage"][0]["traceId"] == "trace-9"        # 헤더가 원장으로 이어진다
+    assert job["aiUsage"][0]["outputTokenCount"] == 120
+
+
 def test_camelcase_transcript_reaches_the_engine(monkeypatch):
     """와이어는 camelCase인데 엔진은 snake_case를 읽는다 — 안 바꾸면 조용히 다 버린다.
 
@@ -167,11 +210,11 @@ def test_camelcase_transcript_reaches_the_engine(monkeypatch):
     wire_turn = {
         "problemId": "prob-1", "axisCode": "L1", "questionText": "q",
         "answerText": "a", "answeredAt": "2026-08-02T00:00:00Z",
-        "bestScore": 4, "confirmedScore": 4, "attemptCount": 1, "autonomy": "SELF",
+        "score": 4, "passed": True, "hintsUsed": 0,
     }
     try:
         r = client.post("/api/v0/reports", headers=HEADERS, json={
-            "problemId": "prob-1", "transcript": [wire_turn], "modelCode": "m",
+            "problemId": "prob-1", "transcript": [wire_turn], "providerModelCode": "vendor/m",
         })
         result = client.get(f"/api/v0/reports/{r.json()['jobId']}",
                             headers=HEADERS).json()["result"]
@@ -179,5 +222,5 @@ def test_camelcase_transcript_reaches_the_engine(monkeypatch):
         monkeypatch.setattr(get_settings(), "engine_mode", "stub")
 
     assert result["problem"]["reachedStage"] == 1        # 0이면 턴을 못 읽은 것
-    assert result["problem"]["stages"][0]["attemptCount"] == 1
+    assert result["problem"]["stages"][0]["questionScore"] == 4
     assert result["retest"] is True                      # L2 미도달이라 재시험은 맞다

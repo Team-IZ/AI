@@ -81,7 +81,9 @@ async def create_curriculum(
 
     pdf_bytes = await file.read()
     job = curricula.create_job(body, idempotency_key)
-    background_tasks.add_task(curricula.run_curriculum, job.job_id, body, pdf_bytes)
+    # 헤더 2개는 ai_usage 원장에 그대로 실린다 — Spring이 과금·추적을 이 값으로 잇는다.
+    background_tasks.add_task(curricula.run_curriculum, job.job_id, body, pdf_bytes,
+                              idempotency_key=idempotency_key, trace_id=x_trace_id)
 
     return CurriculumAccepted(job_id=job.job_id, status="QUEUED")
 

@@ -17,10 +17,19 @@ def _topic(teach_id, title, symbol, file="app/auth.py"):
 @pytest.fixture
 def fake_stage(monkeypatch):
     """stages.call을 가짜로. 매니페스트·LLM 없이 검증 로직만 본다."""
-    def _install(topic_list):
-        def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
-            return stages.StageResult(data={"topics": topic_list}, usages=[{"status": "SUCCEEDED"}])
+    def _install(topic_list, retry_list=None):
+        """`retry_list`를 주면 두 번째 호출(재시도)이 그것을 돌려준다."""
+        calls = []
+
+        def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+                  extra_user=""):
+            calls.append(extra_user)
+            payload = retry_list if (len(calls) > 1 and retry_list is not None) else topic_list
+            return stages.StageResult(data={"topics": payload},
+                                      usages=[{"status": "SUCCEEDED"}])
+
         monkeypatch.setattr(topics.stages, "call", _call)
+        return calls
     return _install
 
 
@@ -81,11 +90,42 @@ def test_shortfall_reports_missing_count(fake_stage):
 
     assert s.shortfall == 2
     
-def test_shortfall_is_filled_with_general_topics(fake_stage):
-    """부족분은 teach 없는 일반 문제로 채운다 — teach 세트를 바꾸지 않는다.
+def test_unlocatable_symbol_is_retried_once(fake_stage):
+    """개념이 코드에 **있는데 LLM이 엉뚱한 symbol을 지목**한 경우를 구제한다.
 
-    프론트가 강사가 고른 teach 목록을 그대로 보여주므로, 같은 teach를 두 번 쓰면
-    화면과 실제가 어긋난다.
+    한 번에 버리면 있는 개념을 "없음"으로 박게 되고, 그건 오퍼레이터가 고른 개념을
+    조용히 빼는 것이다(2026-08-03 PM: "최대한 찾아보고 그래도 없으면 없다고 박아라").
+    """
+    calls = fake_stage(
+        [_topic("t1", "발급", "def ghost():")],          # 1차: 못 찾는 symbol
+        retry_list=[_topic("t1", "발급", "def issue_token(user):")],   # 재시도: 진짜 symbol
+    )
+
+    s = topics.select(FILES, TEACHES, {"overview": "x"}, [],
+                      model_code="m", question_budget=1)
+
+    assert len(calls) == 2                      # 재시도가 실제로 돌았다
+    assert "재시도" in calls[1]
+    assert [t["teach_id"] for t in s.topics] == ["t1"]
+    assert s.topics[0]["code_ref"]["line_start"] == 1
+
+
+def test_retry_happens_only_once(fake_stage):
+    """두 번째도 못 찾으면 실제로 코드에 없을 가능성이 훨씬 높다. 더 태우지 않는다."""
+    calls = fake_stage([_topic("t1", "발급", "def ghost():")])
+
+    s = topics.select(FILES, TEACHES, {"overview": "x"}, [],
+                      model_code="m", question_budget=1)
+
+    assert len(calls) == 2                      # 1차 + 재시도 1회로 끝
+    assert s.topics == []                       # 지어내지 않는다
+
+
+def test_missing_concept_is_left_out_not_replaced(fake_stage):
+    """🔴 teach 앵커 없는 "일반 문제"를 만들지 않는다 (2026-08-03 PM 결정).
+
+    예전에는 부족분을 분석 문서의 다른 판단 지점으로 채웠다 — 그러면 오퍼레이터가
+    고른 개념이 조용히 다른 것으로 갈리고, 학생마다 다른 개념을 시험 보게 된다.
     """
     fake_stage([_topic("t1", "발급", "def issue_token(user):")])
     doc = {"decision_points": [
@@ -95,25 +135,96 @@ def test_shortfall_is_filled_with_general_topics(fake_stage):
 
     s = topics.select(FILES, TEACHES, doc, [], model_code="m", question_budget=2)
 
-    assert len(s.topics) == 2
-    assert [t["teach_id"] for t in s.topics] == ["t1", None]
-    assert s.topics[1]["code_ref"]["line_start"] == 4
-
-    # 화면에 "일반 문제"로 표기해야 한다(2026-08-02 PM 확정). teach 앵커가 없어
-    # 다른 문제와 성격이 다르고 교안 복습 위치 지목도 안 붙는다.
-    assert s.topics[1]["is_general"] is True
-    assert s.topics[0].get("is_general") is not True
+    assert len(s.topics) == 1                   # 2개를 요청했지만 1개만 나온다
+    assert [t["teach_id"] for t in s.topics] == ["t1"]
+    assert s.shortfall == 1                     # 부족분은 숨기지 않고 보고한다
+    assert not hasattr(topics, "_general_topics")
 
 
-def test_general_topic_does_not_reuse_a_used_location(fake_stage):
-    """1차와 같은 지점을 다시 쓰면 같은 문제가 두 번 나간다."""
+def test_unmatched_teach_is_reported_explicitly(fake_stage):
+    """`―`(문항 없음)을 백엔드가 역산하지 않도록 명시적으로 보낸다.
+
+    problems 길이 차이로는 "몇 개가 없다"까지만 알 수 있고 **어느 개념이 빠졌는지**는
+    모른다. 개념별 도달 격자를 그리려면 그 값이 필요하다.
+    """
     fake_stage([_topic("t1", "발급", "def issue_token(user):")])
-    doc = {"decision_points": [
-        {"title": "같은 지점", "file": "app/auth.py",
-         "symbol": "def issue_token(user):", "why_it_matters": "중복"},
-    ]}
 
-    s = topics.select(FILES, TEACHES, doc, [], model_code="m", question_budget=2)
+    s = topics.select(FILES, TEACHES, {"overview": "x"}, [],
+                      model_code="m", question_budget=2)
 
-    assert len(s.topics) == 1
-    assert s.shortfall == 1
+    assert [u["teach_id"] for u in s.unmatched] == ["t2"]
+    assert s.unmatched[0]["reason"]                 # 화면에 띄울 한 문장이 있다
+
+
+def test_sdk_only_teach_is_excluded_before_asking():
+    """🔴 코드에 없는 API는 물어볼 수 없다. **LLM에게 보여주지도 않는다.**
+
+    실측 2회 재현: LangGraph 레포에 `Runner.run()`을 물으려고 `builder.add_edge(...)`,
+    `builder.set_entry_point(...)`를 앵커로 끌어다 붙였다. 프롬프트를 두 번 강화해도
+    개수를 채웠다 — 부탁이 아니라 배제로 막는다.
+    """
+    files = {"pipeline/graph.py": "builder.add_edge('parser', 'supervisor')\n"}
+
+    absent = {"id": "runner", "label": "Agents SDK의 Runner.run() 루프"}
+    assert topics._missing_api_token(absent, files) == "Runner.run"
+
+    # 점 없는 개념 이름은 안 막는다 — `매니저 패턴`은 코드에서 `Supervisor`로 나타난다.
+    concept = {"id": "manager", "label": "매니저 패턴의 동작 방식"}
+    assert topics._missing_api_token(concept, files) is None
+
+    # 코드에 실제로 있는 API는 통과한다.
+    present = {"id": "edge", "label": "builder.add_edge 로 노드를 잇는다"}
+    assert topics._missing_api_token(present, files) is None
+
+
+def test_teach_id_echoed_with_the_label_is_recovered():
+    """🔴 모델은 준 id를 그대로 안 돌려준다. 목록 줄 전체를 적어 온다.
+
+    2026-08-03 실측: `- {id}: {label}` 목록을 보고 teach_id에
+    `"매니저 패턴의 동작 방식: 매니저 패턴의 동작 방식"`을 넣었다. 정확 일치만
+    인정하면 코드에 있는 개념이 전부 "없음"으로 나간다.
+    """
+    ids = {"t1", "t2"}
+
+    assert topics._resolve_teach_id("t1: 인증 토큰", ids) == "t1"
+    assert topics._resolve_teach_id("t1", ids) == "t1"
+
+    # 여러 id가 걸리면 어느 것인지 모른다 — 되살리지 않는다.
+    assert topics._resolve_teach_id("t1 과 t2 둘 다", ids) == "t1 과 t2 둘 다"
+
+
+def test_prose_anchor_is_rejected():
+    """🔴 문자열 리터럴에는 설계 판단이 없다 — L2·L4가 물을 대상을 잃는다.
+
+    2026-08-03 반복 실행에서 모델이 프롬프트 한복판을 앵커로 잡았다.
+    """
+    assert topics._is_prose(
+        "역할: 당신은 제공받은 PPT 슬라이드 지식 데이터베이스(Context)에만 "
+        "철저히 기반하여 답변하는 교육 비서입니다.") is True
+    assert topics._is_prose("") is True
+
+    # 코드는 식별자·연산자라 거의 ASCII다. 한글 주석이 꼬리에 붙어도 통과한다.
+    assert topics._is_prose("is_relevant = min_score < 0.95") is False
+    assert topics._is_prose("worker = state.get('next_worker', 'FINISH')  # 다음 워커") is False
+
+
+def test_unmatched_reason_is_safe_to_show_a_trainee(monkeypatch):
+    """🔴 이 문장은 **교육생 화면에 그대로 뜬다**(백엔드가 assessment_problem에 저장).
+
+    내부 진단(`dropped`)을 흘리면 모델이 잘못 인용한 코드 원문이나
+    "문자열·주석을 가리킵니다" 같은 모델 얘기가 학생에게 보인다.
+    """
+    def _call(stage_id, values, *, model_code, max_attempts=None, timeout_s=None,
+              extra_user=""):
+        return stages.StageResult(
+            data={"topics": [_topic("t1", "제목", "없는_심볼(")]},
+            usages=[{"status": "SUCCEEDED"}])
+
+    monkeypatch.setattr(topics.stages, "call", _call)
+    sel = topics.select(FILES, TEACHES, {}, [], model_code="m", question_budget=2)
+
+    assert sel.topics == []
+    for u in sel.unmatched:
+        assert u["reason"] == topics.NOT_FOUND_REASON
+    # 진단은 사라지지 않는다 — dropped 에는 남는다.
+    assert any("없는_심볼" in d["reason"] for d in sel.dropped)

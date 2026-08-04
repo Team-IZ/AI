@@ -1,7 +1,9 @@
 """ 문답 세션 진행 + 채점 (jobs.py와 형제).
 
-인메모리 dict — 재시작 시 유실. Spring이 transcript를 영속화하고
-restore로 재구성한다(명세 §4.4). 스케일/영속 필요 시 Redis·DB로 이전.
+🔴 **무상태다** (2026-08-03, PLAN §T11). AI는 세션을 들고 있지 않는다 — 문제·기록·커서가
+매 요청에 실려 오고, 여기서는 그것을 읽어 채점하고 **다음 커서를 계산해 돌려준다.**
+남는 상태는 멱등 재전송 방어용 캐시 하나뿐이고, 그건 날아가도 중복 채점 한 번으로 끝난다.
+그래서 배포·재시작·EC2 Stop이 진행 중인 세션을 깨지 않는다.
 
 🔴 **AI는 세션 중에 아무것도 만들지 않는다** (2026-08-02 전면 동결, PLAN §T10).
 문제·질문·힌트는 분석 배치에서 동결돼 요청에 실려 온다. 여기서 도는 LLM 호출은
@@ -18,68 +20,91 @@ restore로 재구성한다(명세 §4.4). 스케일/영속 필요 시 Redis·DB�
 그래서 `Question.questionText`는 그대로고 `hintText`만 붙는다.
 """
 
-import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, get_args
 
 from app.config import get_settings
 from app.engines.analysis import grading, scoring
-from app.engines.analysis.stages import StageError
+from app.schemas.report import AxisCode
 from app.schemas.session import (
+    AnswerResult,
     AnswerSubmit,
+    Cursor,
     Progress,
     Question,
-    SessionRestore,
-    SessionStart,
-    SessionView,
     TranscriptTurn,
 )
+from app.usage import to_ai_usage
+
+_AXES = list(get_args(AxisCode))
+
+# 멱등: "{session_id}:{client_request_id}" -> 그때 돌려준 응답.
+# ponytail: 상한 있는 dict. 재시작하면 비지만 그때 잃는 것은 "재전송 한 번이
+# 중복 채점이 된다"뿐이다(세션 진행은 요청이 들고 온다). Redis는 그게 실제로
+# 문제가 될 때.
+_ANSWERED_MAX = 2000
+_answered: "OrderedDict[str, AnswerResult]" = OrderedDict()
+
+
+def _remember(key: str, view: AnswerResult) -> AnswerResult:
+    _answered[key] = view
+    while len(_answered) > _ANSWERED_MAX:
+        _answered.popitem(last=False)
+    return view
 
 
 @dataclass
-class _Session:
-    """서버가 들고 있는 세션 상태(휘발성)."""
+class _Walk:
+    """요청 payload로 재구성한 진행 상태. 요청 하나 동안만 산다."""
 
-    session_id: str
-    state: str                              # assessment_session.status 6종
-    problems: list[dict[str, Any]]          # 동결된 문제. 질문·힌트가 들어 있다
+    problems: list[dict[str, Any]]
     problem_index: int = 0                  # 지금 몇 번째 문제인가
     axis_index: int = 0                     # 그 문제의 몇 번째 단계인가
     hints_used: int = 0                     # 이 단계에서 쓴 힌트 수 (0~2)
-    time_limit_sec: int = 1200
-    transcript: list[TranscriptTurn] = field(default_factory=list)
-    # 멱등키 -> 그때 돌려준 SessionView. 같은 답변 재전송 시 그대로 반환.
-    answered: dict[str, SessionView] = field(default_factory=dict)
     usages: list[dict[str, Any]] = field(default_factory=list)
 
-
-# session_id -> 세션 상태
-_sessions: dict[str, _Session] = {}
-
-
-def _pick_problems(req_problems: list[Any], selected: list[str]) -> list[dict[str, Any]]:
-    """요청이 준 문제 중 이 세션에서 쓸 것만, 준 순서대로.
-
-    **여기서 문제를 만들지 않는다.** 비어 있으면 빈 채로 둔다 — 지어내면 학생이
-    분석과 무관한 질문을 받고, 그건 "코드 파편이 곧 근거"라는 전제를 깬다.
-    """
-    problems = [p if isinstance(p, dict) else p.model_dump() for p in req_problems]
-    if selected:
-        wanted = set(selected)
-        problems = [p for p in problems if p.get("problem_id") in wanted]
-    return problems
+    @property
+    def done(self) -> bool:
+        return self.problem_index >= len(self.problems)
 
 
-def _current_stage(sess: _Session) -> tuple[dict[str, Any], dict[str, Any]] | None:
-    """(문제, 단계). 세션이 끝났으면 None."""
-    if sess.problem_index >= len(sess.problems):
+def _current_stage(walk: _Walk) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """(문제, 단계). 다 끝났으면 None."""
+    if walk.done:
         return None
-    problem = sess.problems[sess.problem_index]
+    problem = walk.problems[walk.problem_index]
     stages_ = problem.get("stages") or []
-    if sess.axis_index >= len(stages_):
+    if walk.axis_index >= len(stages_):
         return None
-    return problem, stages_[sess.axis_index]
+    return problem, stages_[walk.axis_index]
+
+
+# 채점에 넣을 근거 코드의 앞뒤 여유 줄. 파편만 주면 모델이 "이 메서드가 어디 소속인지"를
+# 못 보고, 넉넉히 주면 매니페스트의 code_block 상한(4,000자)에 걸려 뒤가 잘린다.
+_GRADING_CONTEXT_LINES = 8
+
+
+def _grading_code(problem: dict[str, Any]) -> str:
+    """채점 프롬프트에 넣을 근거 코드.
+
+    🔴 **`codeSnippet`을 그대로 넣으면 안 된다.** 2026-08-03부터 그 값은 **파일 전체**다
+    (학생 화면용). 채점 프롬프트의 `code_block` 상한이 4,000자라 큰 파일은 앞에서부터
+    잘리고, 문제 구간이 파일 뒤쪽이면 **근거가 통째로 사라진 채 채점된다** — 에러 없이
+    점수만 틀린다. 그래서 여기서 `lineStart`/`lineEnd`로 되잘라 낸다.
+    """
+    text = problem.get("code_snippet") or ""
+    start = problem.get("line_start") or 1
+    end = problem.get("line_end") or start
+    lines = text.splitlines()
+    # 파편이 그대로 온 경우(파일을 못 찾았거나 너무 커서 되돌린 경우)엔 줄 번호가
+    # 이 문자열의 색인이 아니다. 줄 수로 판별해 그때는 원문을 그대로 쓴다.
+    if len(lines) < end:
+        return text
+    lo = max(0, start - 1 - _GRADING_CONTEXT_LINES)
+    hi = min(len(lines), end + _GRADING_CONTEXT_LINES)
+    return "\n".join(lines[lo:hi])
 
 
 def _hint_text(stage: dict[str, Any], hints_used: int) -> str | None:
@@ -97,8 +122,8 @@ def _hint_text(stage: dict[str, Any], hints_used: int) -> str | None:
     return hint.get("hint_text") if isinstance(hint, dict) else getattr(hint, "hint_text", None)
 
 
-def _to_question(sess: _Session) -> Question | None:
-    current = _current_stage(sess)
+def _to_question(walk: _Walk) -> Question | None:
+    current = _current_stage(walk)
     if current is None:
         return None
     problem, stage = current
@@ -116,155 +141,154 @@ def _to_question(sess: _Session) -> Question | None:
         "axis_code": stage.get("axis_code"),
         # 화면의 "문제 2 / 3"이 이 값으로 그려진다. 단계는 세지 않는다 —
         # 학생마다 어디까지 가는지 달라 "3/4단계"는 거짓 진행률이 된다.
-        "sequence_no": sess.problem_index + 1,
+        "sequence_no": walk.problem_index + 1,
         "question_text": stage.get("question_text") or "",
         "code_context": code_context,
-        "hint_text": _hint_text(stage, sess.hints_used),
-        "hints_used": sess.hints_used,
+        "hint_text": _hint_text(stage, walk.hints_used),
+        "hints_used": walk.hints_used,
     })
 
 
-def _to_view(sess: _Session) -> SessionView:
-    current = _to_question(sess) if sess.state == "IN_PROGRESS" else None
-    progress = None
-    if sess.state == "IN_PROGRESS":
-        progress = Progress(problem_index=sess.problem_index + 1,
-                            problem_total=len(sess.problems))
-
-    return SessionView(
-        session_id=sess.session_id, state=sess.state,
-        current=current, progress=progress, transcript=sess.transcript,
+def _to_cursor(walk: _Walk) -> Cursor | None:
+    """다음에 물을 자리. 백엔드가 저장했다가 다음 요청에 그대로 실어 보낸다."""
+    current = _current_stage(walk)
+    if current is None:
+        return None
+    problem, stage = current
+    return Cursor(
+        problem_id=problem.get("problem_id", ""),
+        axis_code=stage.get("axis_code"),
+        hints_used=walk.hints_used,
     )
 
 
-def _advance_problem(sess: _Session) -> None:
-    """이 문제를 닫고 다음 문제의 L1로. 남은 문제가 없으면 세션 종료."""
-    sess.problem_index += 1
-    sess.axis_index = 0
-    sess.hints_used = 0
-    if sess.problem_index >= len(sess.problems):
-        sess.state = "COMPLETED"
+def _advance_problem(walk: _Walk) -> None:
+    """이 문제를 닫고 다음 문제의 L1로."""
+    walk.problem_index += 1
+    walk.axis_index = 0
+    walk.hints_used = 0
 
 
-def start_session(req: SessionStart) -> SessionView:
-    """세션 만들고 첫 질문 돌려줌."""
-    sid = req.session_id or str(uuid.uuid4())
-    problems = _pick_problems(req.problems, req.selected_problem_ids)
-    sess = _Session(
-        session_id=sid,
-        state="IN_PROGRESS" if problems else "COMPLETED",
-        problems=problems,
-        time_limit_sec=req.time_limit_sec,
+def _advance(walk: _Walk, passed: bool) -> tuple[str, str] | None:
+    """계단 규칙. **진행 규칙의 단일 출처다** — 백엔드에 같은 규칙을 두지 않는다.
+
+    문제가 이 턴에서 끝났으면 `(terminationReason, endedLevel)`을 돌려준다.
+    **종료 판정을 하는 자리가 곧 그 사유를 아는 자리다** — 응답에 안 실으면 백엔드가
+    커서가 다음 문제로 넘어간 것을 보고 "왜 끝났는지"를 역추론해야 한다.
+    """
+    axis = _AXES[walk.axis_index]
+    if passed:
+        # 다음 단계로. L4까지 통과했으면 이 문제는 완주다.
+        walk.axis_index += 1
+        walk.hints_used = 0
+        stages_ = walk.problems[walk.problem_index].get("stages") or []
+        if walk.axis_index >= len(stages_):
+            _advance_problem(walk)
+            return "COMPLETED_L4", axis
+        return None
+    if walk.hints_used < scoring.MAX_HINTS_PER_LEVEL:
+        # 힌트를 하나 더 열고 같은 단계를 다시 묻는다. 질문은 안 바뀐다.
+        walk.hints_used += 1
+        return None
+    # 힌트 소진 후에도 미달 — 그 문제는 여기서 끝이다. 다음 단계를 던지지 않는다.
+    _advance_problem(walk)
+    return f"TERMINATED_AT_{axis}", axis
+
+
+def _seek(walk: _Walk, cursor: Cursor | None, transcript: list[TranscriptTurn]) -> None:
+    """요청이 준 위치로 커서를 옮긴다. **매 요청이 곧 restore다.**
+
+    커서가 오면 그대로 믿는다(백엔드 장부가 원본이다). 없으면 transcript를 되짚는다 —
+    턴 수만 세면 안 된다. 힌트 후 재질의도 한 턴이라 같은 단계에서 세 턴이 나올 수 있고,
+    그러면 커서가 세 칸 밀린다.
+    """
+    if cursor is not None:
+        ids = [p.get("problem_id") for p in walk.problems]
+        if cursor.problem_id in ids:
+            walk.problem_index = ids.index(cursor.problem_id)
+        walk.axis_index = _AXES.index(cursor.axis_code)
+        walk.hints_used = cursor.hints_used
+        return
+
+    for turn in transcript:
+        if _current_stage(walk) is None:
+            break
+        _advance(walk, turn.passed)
+
+
+def _to_result(session_id: str, walk: _Walk, turn: TranscriptTurn | None,
+               trace_id: str | None,
+               ended: tuple[str, str] | None = None) -> AnswerResult:
+    completed = _current_stage(walk) is None
+    return AnswerResult(
+        session_id=session_id,
+        state="COMPLETED" if completed else "IN_PROGRESS",
+        turn=turn,
+        cursor=_to_cursor(walk),
+        current=_to_question(walk),
+        progress=None if completed else Progress(
+            problem_index=walk.problem_index + 1, problem_total=len(walk.problems),
+        ),
+        termination_reason=ended[0] if ended else None,
+        ended_level=ended[1] if ended else None,
+        ai_usage=to_ai_usage(walk.usages, "GRADING", session_id,
+                             feature_code="GRADING", trace_id=trace_id),
     )
-    _sessions[sid] = sess
-    return _to_view(sess)
 
 
-def get_session(session_id: str) -> SessionView | None:
-    sess = _sessions.get(session_id)
-    return _to_view(sess) if sess else None
-
-
-def submit_answer(session_id: str, req: AnswerSubmit) -> SessionView | None:
+def submit_answer(session_id: str, req: AnswerSubmit,
+                  *, trace_id: str | None = None) -> AnswerResult:
     """답변을 채점하고 다음에 무엇을 물을지 정한다.
 
     **세션에서 유일한 LLM 호출이 여기다.** 실패하면 그 턴을 버리지 않고 예외를
-    올린다 — 라우터가 502로 돌려주면 프론트가 재전송할 수 있고, 멱등키가 같으므로
-    중복 턴이 되지 않는다. 0점으로 기록하면 학생이 억울하게 깎인다.
+    올린다 — 라우터가 503 GRADING_UNAVAILABLE로 돌려주면 프론트가 재전송할 수 있고,
+    멱등키가 같으므로 중복 턴이 되지 않는다. 0점으로 기록하면 학생이 억울하게 깎인다.
     """
-    sess = _sessions.get(session_id)
-    if sess is None:
-        return None     # 라우터가 404로 변환
+    key = f"{session_id}:{req.client_request_id}"
+    if key in _answered:
+        return _answered[key]           # 같은 답변 재전송 → 처음 응답 그대로
 
-    # 멱등: 같은 client_request_id면 처음 돌려준 응답을 그대로 반환(중복 턴 방지)
-    if req.client_request_id in sess.answered:
-        return sess.answered[req.client_request_id]
+    # **여기서 문제를 만들지 않는다.** 안 주면 물을 것이 없다 — 지어내면 학생이
+    # 분석과 무관한 질문을 받고, 그건 "코드 파편이 곧 근거"라는 전제를 깬다.
+    walk = _Walk(problems=[p.model_dump() for p in req.problems])
+    _seek(walk, req.cursor, req.transcript)
 
-    current = _current_stage(sess)
+    current = _current_stage(walk)
     if current is None:
-        return _to_view(sess)          # 이미 끝난 세션. 조용히 현재 상태를 돌려준다
+        # 이미 끝난 세션. 조용히 끝난 상태를 돌려준다(채점할 것이 없다).
+        return _to_result(session_id, walk, None, trace_id)
     problem, stage = current
 
-    settings = get_settings()
     axis_code = stage.get("axis_code")
     question_text = stage.get("question_text") or ""
 
     # 지금까지 이 단계에서 보여준 힌트 전부. 길이가 곧 hintsUsed이고,
     # 그게 점수 상한(5/4/3)과 자력 판정을 정한다.
-    shown_hints = [h for h in (_hint_text(stage, i) for i in range(1, sess.hints_used + 1))
+    shown_hints = [h for h in (_hint_text(stage, i) for i in range(1, walk.hints_used + 1))
                    if h]
 
     grade = grading.grade(
         axis_code, question_text, req.answer_text,
-        model_code=settings.model_code_session,
+        # 요청이 이기고 없으면 서버 기본값. 채점 모델은 operator가 고른다(GradingPolicy).
+        model_code=req.provider_model_code or get_settings().model_code_session,
         hints=shown_hints,
-        code_snippet=problem.get("code_snippet") or "",
+        code_snippet=_grading_code(problem),
         code_ref=problem.get("source_path") or "",
+        analysis_context=req.analysis_context,
     )
-    sess.usages.extend({**u, "feature_code": "GRADING"} for u in grade.usages)
+    walk.usages.extend(grade.usages)
 
-    sess.transcript.append(
-        TranscriptTurn(
-            problem_id=problem.get("problem_id", ""),
-            axis_code=axis_code,
-            question_text=question_text,
-            answer_text=req.answer_text,
-            answered_at=datetime.now(timezone.utc).isoformat(),
-            best_score=grade.best_score,
-            confirmed_score=grade.confirmed_score,
-            attempt_count=sess.hints_used + 1,
-            hint_text=_hint_text(stage, sess.hints_used),
-            autonomy=grade.autonomy,
-        )
+    turn = TranscriptTurn(
+        problem_id=problem.get("problem_id", ""),
+        axis_code=axis_code,
+        question_text=question_text,
+        answer_text=req.answer_text,
+        answered_at=datetime.now(timezone.utc).isoformat(),
+        score=grade.score,
+        passed=grade.passed,
+        hints_used=walk.hints_used,
+        hint_text=_hint_text(stage, walk.hints_used),
     )
 
-    if grade.passed:
-        # 다음 단계로. L4까지 통과했으면 이 문제는 완주다.
-        sess.axis_index += 1
-        sess.hints_used = 0
-        if sess.axis_index >= len(problem.get("stages") or []):
-            _advance_problem(sess)
-    elif sess.hints_used < scoring.MAX_HINTS_PER_LEVEL:
-        # 힌트를 하나 더 열고 같은 단계를 다시 묻는다. 질문은 안 바뀐다.
-        sess.hints_used += 1
-    else:
-        # 힌트 소진 후에도 미달 — 그 문제는 여기서 끝이다. 다음 단계를 던지지 않는다.
-        _advance_problem(sess)
-
-    view = _to_view(sess)
-    sess.answered[req.client_request_id] = view     # 멱등 재전송 대비 저장
-    return view
-
-
-def restore_session(session_id: str, req: SessionRestore) -> SessionView:
-    """Spring이 저장해둔 transcript로 유실 세션 재구성, 이어질 질문 반환.
-
-    **transcript를 되짚어 위치를 복원한다.** 턴 수만 세면 안 된다 — 힌트 후 재질의도
-    한 턴이라, 같은 단계에서 세 턴이 나올 수 있고 그러면 커서가 세 칸 밀린다.
-    """
-    problems = _pick_problems(req.problems, [])
-    sess = _Session(
-        session_id=session_id, state="IN_PROGRESS", problems=problems,
-        time_limit_sec=req.time_limit_sec,
-    )
-    sess.transcript.extend(req.transcript)
-
-    # 확정된 턴을 그대로 재생해 커서를 옮긴다. 판정 규칙이 submit_answer와 한 벌이라
-    # 여기서 다시 쓰지 않고 같은 값(scoring)을 본다.
-    for turn in req.transcript:
-        current = _current_stage(sess)
-        if current is None:
-            break
-        _, stage = current
-        if turn.confirmed_score >= scoring.PASS_SCORE:
-            sess.axis_index += 1
-            sess.hints_used = 0
-            if sess.axis_index >= len(sess.problems[sess.problem_index].get("stages") or []):
-                _advance_problem(sess)
-        elif sess.hints_used < scoring.MAX_HINTS_PER_LEVEL:
-            sess.hints_used += 1
-        else:
-            _advance_problem(sess)
-
-    _sessions[session_id] = sess
-    return _to_view(sess)
+    ended = _advance(walk, grade.passed)
+    return _remember(key, _to_result(session_id, walk, turn, trace_id, ended))

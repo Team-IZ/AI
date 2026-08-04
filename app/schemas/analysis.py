@@ -29,9 +29,8 @@ class AnalysisRequest(BaseSchema):
     
     attempt_id: str | None = Field(default=None, description="Spring 측 측정수행 키(에코용)")
     submission_id: str | None = None
-    callback_url: str | None = Field(
-        default=None, description="완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현"
-    )
+    # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다 —
+    # AI→백엔드 방향 통신이 0이라 그 구간의 인증·방화벽을 새로 정할 일이 없다.
     method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
     source: AnalysisSource = Field(default_factory=AnalysisSource)
     extraction_scope: Literal["TOTAL", "OWN_COMMIT"] = "TOTAL"
@@ -47,8 +46,12 @@ class AnalysisRequest(BaseSchema):
         default_factory=list, description="[{id, label, unitId, sourcePages}] 교안 참조용"
     )
     curriculum_id: str | None = None
-    model_code: str | None = Field(
-        default=None, description="생략 시 서버 기본값. operator가 고른다"
+    provider_model_code: str | None = Field(
+        default=None,
+        description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` "
+                    "(예: nvidia/nemotron-3-ultra-550b-a55b). 화면 선택값인 `model_code`가 "
+                    "아니다 — 벤더 접두어가 붙은 원본 식별자여야 호출이 된다. "
+                    "생략 시 서버 기본값. operator가 고른다",
     )
     
     @model_validator(mode="after")
@@ -77,25 +80,65 @@ class SnapshotMeta(BaseSchema):
     file_count: int
     byte_count: int
 
-# 문제 지점 주변에서 같이 봐야 하는 코드의 성격.
-# 주 지점 자체는 Problem이 갖는다(PRIMARY 폐기 — 같은 위치가 두 군데 적히는 것을 막는다).
+# 문제가 가리키는 근거의 성격. **DB assessment_problem_reference.reference_type CHECK와
+# 같은 집합이다** (새 MEAS, 2026-08-04에 정렬).
+#
+# 🔴 옛 값(`CALLEE`·`DEFINITION`·`TEST`·`CONFIG`·`SIMILAR`)은 폐기했다 — 새 정의서 CHECK에
+# 없어서 그대로 보내면 **Spring INSERT가 깨진다.** 지금까지 `references[]`가 항상 빈 배열이라
+# 안 터졌을 뿐이고, 채우는 순간 터졌을 자리다.
 ReferenceType = Literal[
-    "CALLER",      # 이 코드를 부르는 쪽
-    "CALLEE",      # 이 코드가 부르는 쪽
-    "DEFINITION",  # 여기서 쓰는 타입·상수의 정의
-    "TEST",        # 이 코드를 검증하는 테스트
-    "CONFIG",      # 동작을 좌우하는 설정
-    "SIMILAR",     # 비슷한 처리를 하는 다른 자리 (L3 대안 질문의 재료)
+    "PRIMARY_BLOCK",       # 문제를 낸 그 지점. 화면에 띄울 본문이 여기 붙는다
+    "QUESTION_HIGHLIGHT",  # 축별로 강조할 구간. axisCode가 필수다
+    "CALLER",              # 이 코드를 부르는 쪽
+    "RELATED_CONTEXT",     # 같이 봐야 이해되는 다른 자리 (옛 CALLEE·DEFINITION·SIMILAR가 여기로)
+    "CURRICULUM_EVIDENCE", # 교안 근거. **코드 라인이 없다** — 개념이 교안 어디서 왔는지
 ]
 
 class ProblemReference(BaseSchema):
-    """문제가 가리키는 코드 위치. DB problem_reference 대응."""
+    """문제가 가리키는 근거. DB `assessment_problem_reference` 대응.
 
-    path: str
-    line_start: int
-    line_end: int
-    evidence_hash: str = Field(description="sha256 hex 64자")
+    **코드 근거와 교안 근거가 한 테이블에 섞여 있다.** 유형마다 필수 필드가 다르다.
+
+        PRIMARY_BLOCK · QUESTION_HIGHLIGHT · CALLER · RELATED_CONTEXT
+            path · lineStart · lineEnd 필수 (코드 근거)
+        CURRICULUM_EVIDENCE
+            코드 라인이 없다. teachId 로 교안을 가리킨다
+        QUESTION_HIGHLIGHT
+            axisCode 필수 — 어느 축에서 강조할 구간인지
+    """
+
     reference_type: ReferenceType
+    display_order: int = Field(
+        default=1, ge=1,
+        description="화면에 놓는 순서. DB CHECK (> 0)",
+    )
+    path: str | None = None
+    line_start: int | None = Field(default=None, ge=1)
+    line_end: int | None = Field(default=None, ge=1)
+    axis_code: AxisCode | None = Field(
+        default=None, description="QUESTION_HIGHLIGHT일 때 필수. 어느 축의 강조 구간인가",
+    )
+    teach_id: str | None = Field(
+        default=None, description="CURRICULUM_EVIDENCE일 때 필수. 요청 teaches[].id",
+    )
+    evidence_hash: str = Field(description="sha256 hex 64자")
+
+    @model_validator(mode="after")
+    def _check_type_rules(self) -> "ProblemReference":
+        """유형별 필수 필드. DB CHECK와 같은 규칙이라 여기서 막지 않으면 INSERT가 깨진다."""
+        if self.reference_type == "CURRICULUM_EVIDENCE":
+            if not self.teach_id:
+                raise ValueError("CURRICULUM_EVIDENCE에는 teachId가 필요합니다")
+        elif not (self.path and self.line_start and self.line_end):
+            raise ValueError(
+                f"{self.reference_type}에는 path·lineStart·lineEnd가 필요합니다"
+            )
+        if self.reference_type == "QUESTION_HIGHLIGHT" and not self.axis_code:
+            raise ValueError("QUESTION_HIGHLIGHT에는 axisCode가 필요합니다")
+        if (self.line_start is not None and self.line_end is not None
+                and self.line_end < self.line_start):
+            raise ValueError(f"lineEnd가 lineStart보다 작습니다: {self.line_start}~{self.line_end}")
+        return self
     
 class Hint(BaseSchema):
     """단계 하나에 딸린 힌트(= 재질의 문장). L1·L2만 분석 때 미리 만든다."""
@@ -175,21 +218,41 @@ class Problem(BaseSchema):
         default=None,
         description="요청 focusItems[].id를 그대로 돌려준다. 강사 지정 없이 뽑았으면 null",
     )
-    is_general: bool = Field(
-        default=False,
-        description="teach에 연결되지 않은 일반 문제. 제출 코드가 teaches를 만족하지 "
-                    "않아 그 개념으로 문제를 못 만들었을 때 나온다. **화면에 '일반 문제'로 "
-                    "표기해야 한다** — 검증 개념 앵커가 없어 다른 문제와 성격이 다르고, "
-                    "보고서의 교안 복습 위치 지목도 붙지 않는다 (2026-08-02 PM 확정)",
-    )
+    # 🔴 `isGeneral`은 삭제됐다 (2026-08-03 PM 결정). teach 앵커 없는 "일반 문제"를
+    # 만들지 않는다 — 오퍼레이터가 고른 개념이 코드에 없으면 **그 개념은 문항 없음**이고,
+    # 다른 개념으로 갈아끼우거나 지어내지 않는다. 모든 학생이 같은 개념 3개를 본다.
     source_path: str
-    line_start: int
+    line_start: int = Field(
+        description="**파일 기준 절대 줄 번호.** codeSnippet 안에서 하이라이트할 구간의 "
+                    "시작이다. 화면은 파일을 그리고 이 구간을 강조한다",
+    )
     line_end: int
     code_snippet: str = Field(
-        description="evidenceHash를 계산한 원문 그대로. Spring이 다시 자르면 해시가 어긋난다"
+        description="🔴 **문제를 낸 파일 전체다**(2026-08-03 확정). 파편만 주면 학생이 "
+                    "판단할 재료가 없다 — 질문이 주변 코드를 언급하는데 화면엔 선언 한 "
+                    "줄만 뜨는 일이 실제로 났다. 보여줄 구간은 lineStart~lineEnd다. "
+                    "예외: 파일이 100,000자를 넘으면 파편만 온다(그때도 줄 번호는 파일 기준). "
+                    "**Spring이 다시 자르지 마세요** — 자를 위치는 화면이 정한다",
     )
-    evidence_hash: str = Field(description="codeSnippet의 sha256 hex 64자")
-    extractor_version: str = Field(description="이 문제를 뽑은 룰 버전. 재현성 근거")
+    evidence_hash: str = Field(
+        description="🔴 **파편(lineStart~lineEnd 구간)의 sha256 hex 64자다.** codeSnippet "
+                    "전체의 해시가 아니다 — 파일 전체 기준이면 무관한 한 줄 수정에도 "
+                    "'근거가 바뀌었다'가 되어 판정이 쓸모없어진다. "
+                    "⚠️ 테이블정의서 evidence_hash 비고('code_snippet 기준 해시')와 "
+                    "어긋나므로 그 문구를 고쳐야 한다",
+    )
+    extractor_version: int = Field(
+        gt=0,
+        description="이 문제를 뽑은 룰 버전. 재현성 근거. "
+                    "**정수다** — assessment_problem.extractor_version이 INTEGER "
+                    "CHECK (> 0)이라 문자열을 보내면 Spring INSERT가 깨진다",
+    )
+    teach_id: str | None = Field(
+        default=None,
+        description="이 문제가 검증하는 교안 개념(요청 teaches[].id). **항상 채워진다** — "
+                    "문제는 오퍼레이터가 고른 개념에만 붙는다(2026-08-03 PM 결정). "
+                    "화면의 '클래스는 L3까지, 상속은 L2까지' 같은 개념별 도달 표시가 이 값으로 붙는다",
+    )
     references: list[ProblemReference] = Field(default_factory=list)
     stages: list[ProblemStage] = Field(min_length=4, max_length=4)
 
@@ -267,6 +330,19 @@ class AnalysisDocument(BaseSchema):
     decision_points: list[DecisionPoint] = Field(default_factory=list)
     risks: list[str] = Field(default_factory=list)
     
+class UnmatchedTeach(BaseSchema):
+    """문항을 못 만든 검증 개념. **`―`(문항 없음)의 근거다.**
+
+    🔴 **0단(L1 미달)과 다르다.** 0단은 물어봤는데 못 푼 것이고 이건 안 물어본 것이다.
+    도달 단계 컬럼에 0을 박으면 둘이 섞여 "안 물어봤다"가 "틀렸다"로 바뀐다 — NULL이어야 한다.
+
+    AI는 이 개념을 **두 번** 찾는다(p04-3 + 실패분 재시도 1회). 그래도 못 찾으면 여기 담긴다.
+    """
+
+    teach_id: str = Field(description="요청 teaches[].id 그대로")
+    reason: str = Field(description="왜 못 만들었는지. 화면에 그대로 띄워도 되는 한 문장")
+
+
 class AnalysisResult(BaseSchema):
     """분석이 성공했을 때의 결과 본문.
 
@@ -285,6 +361,13 @@ class AnalysisResult(BaseSchema):
     )
     requirement_results: list[RequirementResult] = Field(default_factory=list)
     problems: list[Problem] = Field(default_factory=list)
+    unmatched_teaches: list["UnmatchedTeach"] = Field(
+        default_factory=list,
+        description="🔴 **문항을 못 만든 개념.** 오퍼레이터가 고른 teach 중 제출 코드에서 "
+                    "근거를 못 찾은 것들이다(2026-08-03 PM 결정: 지어내지 않고 '없음'으로 둔다). "
+                    "`problems`에 없는 teachId를 역산하지 않도록 명시적으로 보낸다 — "
+                    "화면의 개념별 도달 격자에서 `―`(문항 없음)로 그릴 값이다",
+    )
     question_count_planned: int = Field(description="계획된 질문 수. 유효 문제가 적으면 축소된다")
     
 class AnalysisJobStatus(BaseSchema):

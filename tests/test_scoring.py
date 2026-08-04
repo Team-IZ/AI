@@ -15,11 +15,10 @@ def test_poc_ids_round_trip():
         assert scoring.POC_ID_TO_CODE[axis["poc_id"]] == code
 
 
-def test_hint_caps_lower_the_ceiling():
-    """도움을 받을수록 도달 가능한 최대치가 낮아져야 자력이 측정된다."""
-    assert scoring.cap_for(0) == 5
-    assert scoring.cap_for(1) == 4
-    assert scoring.cap_for(2) == 3
+def test_score_cap_is_gone():
+    """2026-08-03 폐기. problem_stage 가 슬롯별 점수를 따로 저장하므로 눌러 담지 않는다."""
+    assert not hasattr(scoring, "cap_for")
+    assert not hasattr(scoring, "HINT_CAPS")
 
 
 def test_retest_requires_l1_and_l2():

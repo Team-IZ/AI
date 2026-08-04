@@ -103,7 +103,8 @@ def test_merged_sections_pass_the_contract():
 
 def test_failed_chunk_does_not_lose_the_others(monkeypatch):
     """251쪽 실측에서 26청크 중 2건이 깨졌다. 전체를 버리면 24청크 토큰이 헛돈다."""
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+              extra_user=""):
         if values["chunk_range"] == "1-10":
             raise stages.StageError("p01-2: 터짐", [{"status": "FAILED"}])
         return stages.StageResult(
@@ -154,3 +155,94 @@ def test_single_oversized_page_goes_alone():
     chunks = curriculum.build_chunks(["가" * 9000, "나" * 100])
 
     assert [(s, e) for s, e, _ in chunks] == [(1, 1), (2, 2)]
+
+
+def test_chunk_analysis_asks_for_korean_output(monkeypatch):
+    """영어 교안을 넣어도 사람이 읽는 값은 한국어여야 한다 — 화면이 한국어다.
+
+    매니페스트(vendor)에는 언어 지시가 없어서 우리 쪽에서 붙인다.
+    """
+    seen = {}
+
+    def _call(stage_id, values, *, model_code, extra_user="", **kw):
+        seen["extra_user"] = extra_user
+        return {"units": [], "concepts": []}
+
+    monkeypatch.setattr(curriculum.stages, "call", _call)
+    curriculum.analyse_chunk(1, 3, "text", model_code="m", course_label="AI Agent")
+
+    assert "한국어" in seen["extra_user"]
+    assert "unit_id" in seen["extra_user"]      # 번역하면 안 되는 것도 명시한다
+
+
+def test_kind_and_evidence_are_not_dropped():
+    """p01-2가 이미 답에 담아 보내는 값이다 — 버리면 문제 선정 재료가 사라진다.
+
+    LLM 호출이 늘지 않는다. 예전엔 받고도 떨어뜨렸다(PM 설계 v2 §7의 재료).
+    """
+    sections = curriculum._merge([
+        _chunk(1, 10,
+               [{"unit_id": "01", "unit_title": "에이전트", "source_pages": [1, 3]}],
+               [{"name": "Runner.run 호출", "kind": "code_example", "unit_id": "01",
+                 "summary": "s", "source_pages": [2], "evidence": "Runner.run()으로 실행"},
+                {"name": "무한 재시도 주의", "kind": "caution", "unit_id": "01",
+                 "summary": "s", "source_pages": [3], "evidence": "비용 증가"},
+                {"name": "에이전트 정의", "unit_id": "01",
+                 "summary": "s", "source_pages": [1]}]),
+    ])
+
+    kinds = {t["canonical_name"]: t["kind"] for t in sections[0]["teaches"]}
+    assert kinds["Runner.run 호출"] == "CODE_EXAMPLE"
+    assert kinds["무한 재시도 주의"] == "CAUTION"
+    assert kinds["에이전트 정의"] == "CONCEPT"      # kind가 없으면 CONCEPT로 떨어진다
+    assert any(t["evidence"] == "Runner.run()으로 실행" for t in sections[0]["teaches"])
+
+
+def test_siblings_are_computed_from_the_same_unit():
+    """교안이 대안을 가르쳤다는 신호. 새로 받을 것 없이 unit 묶음에서 계산된다."""
+    sections = curriculum._merge([
+        _chunk(1, 10,
+               [{"unit_id": "01", "unit_title": "예외", "source_pages": [1, 3]}],
+               [{"name": "try-except", "unit_id": "01", "summary": "s", "source_pages": [1]},
+                {"name": "finally", "unit_id": "01", "summary": "s", "source_pages": [2]}]),
+    ])
+
+    by_name = {t["canonical_name"]: t["sibling_names"] for t in sections[0]["teaches"]}
+    assert by_name["try-except"] == ["finally"]
+    assert by_name["finally"] == ["try except"]
+
+
+def test_same_unit_id_in_different_chunks_is_not_merged():
+    """🔴 모델은 unit_id를 청크마다 독립적으로 매긴다.
+
+    청크 1의 "01"과 청크 5의 "01"은 완전히 다른 주제인데, 예전에는 같은 단원으로
+    합쳐졌다 — 실측에서 p.5~31 짜리 "단원"이 나왔고 siblingNames가 평균 31개가 됐다.
+    """
+    sections = curriculum._merge([
+        _chunk(1, 10, [{"unit_id": "01", "unit_title": "에이전트란", "source_pages": [1, 6]}],
+               [{"name": "정의", "unit_id": "01", "summary": "s", "source_pages": [2]}]),
+        _chunk(21, 30, [{"unit_id": "01", "unit_title": "배포 전략", "source_pages": [22, 28]}],
+               [{"name": "무중단", "unit_id": "01", "summary": "s", "source_pages": [23]}]),
+    ])
+
+    assert len(sections) == 2
+    assert [s["title"] for s in sections] == ["에이전트란", "배포 전략"]
+    # 범위가 겹치지 않는다 — 예전에는 p.1~28 한 덩이였다
+    assert sections[0]["page_end"] < sections[1]["page_start"]
+    # 서로 다른 단원이므로 형제가 아니다
+    assert sections[0]["teaches"][0]["sibling_names"] == []
+
+
+def test_unit_spanning_a_chunk_boundary_is_joined():
+    """청크 경계에 걸친 단원은 이어야 한다 — 안 이으면 같은 단원이 둘로 쪼개진다."""
+    sections = curriculum._merge([
+        _chunk(1, 10, [{"unit_id": "01", "unit_title": "예외 처리", "source_pages": [8, 10]}],
+               [{"name": "try", "unit_id": "01", "summary": "s", "source_pages": [9]}]),
+        _chunk(11, 20, [{"unit_id": "03", "unit_title": "예외 처리", "source_pages": [11, 13]}],
+               [{"name": "finally", "unit_id": "03", "summary": "s", "source_pages": [12]}]),
+    ])
+
+    assert len(sections) == 1                      # unit_id가 달라도 이어진다
+    assert (sections[0]["page_start"], sections[0]["page_end"]) == (8, 13)
+    assert {t["canonical_name"] for t in sections[0]["teaches"]} == {"try", "finally"}
+    assert sections[0]["teaches"][0]["sibling_names"] == ["finally"]

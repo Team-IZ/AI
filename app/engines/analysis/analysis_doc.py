@@ -86,7 +86,9 @@ def _clean_points(raw: Any, teach_ids: set[str], dropped: list[str]) -> list[dic
             continue
 
         # 모델이 지어낸 teach id는 버린다. 남겨두면 보고서가 없는 교안을 가리킨다.
-        teach = item.get("related_teach")
+        # 다만 **id를 그대로 안 돌려주는 것과 지어낸 것은 다르다** — 실측에서 4건 전부
+        # `null`로 나갔는데 원인은 목록 줄 전체를 적어 온 것이었다(p04-3과 같은 실패).
+        teach = stages.resolve_choice(item.get("related_teach"), teach_ids)
         related = teach if isinstance(teach, str) and teach in teach_ids else None
 
         points.append({

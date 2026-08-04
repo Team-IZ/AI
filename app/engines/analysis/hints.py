@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.engines.analysis import guard, scoring, stages
+from app.engines.analysis import fragments, guard, scoring, stages
 from app.llm import client
 
 
@@ -109,7 +109,9 @@ def generate(hint_level: int, question: str, *, model_code: str,
             continue
 
         usages.extend(result.usages)
-        text = str(result.data.get("hint") or "").strip()
+        # 질문과 같은 이유로 인용을 복구한다 — 힌트도 학생이 그대로 읽는다.
+        text = fragments.repair_code_quotes(
+            str(result.data.get("hint") or "").strip(), code_snippet or "")
         # 힌트에도 선택지 금지가 걸린다. 힌트에 보기가 섞이면 사다리 최강 단계를
         # 공짜로 주는 셈이라 자력/보조 구분이 무너진다.
         if text and not guard.check(text):

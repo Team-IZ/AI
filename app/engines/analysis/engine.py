@@ -42,6 +42,8 @@ from app.engines.analysis import (
     analysis_doc,
     fragments,
     hints,
+    imports,
+    materialize,
     questions,
     requirements,
     rules,
@@ -55,11 +57,60 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# 화면에 통째로 띄울 파일의 상한. 실측(spring-petclinic 49개 파일)에서 중앙 1,987자·
+# p90 6,264자·최대 10,464자라 평범한 소스는 전부 들어온다. 이 상한에 걸리는 파일은
+# 생성물이거나 한 파일에 다 밀어 넣은 경우인데, 그때는 통째로 띄우는 것 자체가
+# 학생에게 도움이 안 되므로 파편으로 되돌린다(잘라서 줄 번호를 어긋나게 하지 않는다).
+_MAX_DISPLAY_CHARS = 100_000
+
+
+def _display_source(files: dict[str, str], ref: dict[str, Any], fragment: str) -> str:
+    """학생 화면에 띄울 코드. **문제를 낸 파일 전체다.**
+
+    파일을 못 찾거나 너무 크면 파편으로 되돌린다 — 그 경우 `lineStart`가 파일 기준
+    절대 줄 번호라는 점은 그대로라, 화면이 줄 번호를 함께 그리면 어긋나지 않는다.
+    """
+    text = files.get(ref.get("file", "")) or ""
+    if not text or len(text) > _MAX_DISPLAY_CHARS:
+        return fragment
+    return text
+
+
+def _snapshot_meta(zip_bytes: bytes | None, files: dict[str, str]) -> dict[str, Any]:
+    """제출물 지문. **같은 코드를 다시 내면 같은 값이 나와야 한다** — Spring이
+    "같은 제출물인가"를 이 값으로 판정한다.
+
+    ZIP은 업로드된 바이트 그대로가 기준이다. GITHUB_URL은 기준이 될 바이트가 없어서
+    (클론 결과는 파일 시각·순서 때문에 매번 다르게 압축된다) **스캔한 소스 본문**으로
+    낸다. 경로로 정렬해 넣으므로 파일 시스템 순서에 안 흔들린다.
+    """
+    if zip_bytes is not None:
+        return {
+            "content_hash": hashlib.sha256(zip_bytes).hexdigest(),
+            "file_count": len(files),
+            "byte_count": len(zip_bytes),
+        }
+
+    digest = hashlib.sha256()
+    byte_count = 0
+    for path in sorted(files):
+        body = files[path].encode("utf-8")
+        digest.update(path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(body)
+        byte_count += len(body)
+    return {
+        "content_hash": digest.hexdigest(),
+        "file_count": len(files),
+        "byte_count": byte_count,
+    }
+
+
 def _stamp(usages: list[dict[str, Any]], feature_code: str) -> list[dict[str, Any]]:
     """호출 기록에 "어느 기능이 불렀나"를 찍는다.
 
     `llm/client.py`는 자기가 어느 기능에 쓰이는지 모른다(알아야 할 이유도 없다).
-    나머지 요청 범위 값(`sourceId`·`traceId` 등)은 job 계층이 채운다 — 엔진은
+    나머지 요청 범위 값(`contextId`·`traceId` 등)은 job 계층이 채운다 — 엔진은
     job_id도 헤더도 모르기 때문이다.
     """
     return [{**u, "feature_code": feature_code} for u in usages]
@@ -86,6 +137,61 @@ def _priority(topic: dict[str, Any], candidates: list[dict[str, Any]]) -> float:
     return 0.0
 
 
+def _references(ref: dict[str, Any], snippet: str, teach: dict[str, Any] | None,
+                importers: list[str]) -> list[dict[str, Any]]:
+    """문제의 근거 목록. **LLM을 부르지 않는다** — 이미 산정된 사실만 모은다.
+
+    지금까지 항상 빈 배열이었다. 채우는 데 필요한 것이 다 있었는데 조립을 안 했다.
+
+        PRIMARY_BLOCK        문제를 낸 그 지점. 화면에 띄울 본문의 위치
+        QUESTION_HIGHLIGHT   축별 강조 구간. 4축 전부 같은 지점을 가리킨다 —
+                             축마다 다른 구간을 짚으려면 LLM이 필요하고, 지금은 근거가 없다
+        CURRICULUM_EVIDENCE  이 문제가 검증하는 교안 개념. 코드 라인이 없다
+        CALLER               이 파일을 import 하는 파일들 (import 그래프)
+
+    ⚠️ `RELATED_CONTEXT`는 안 만든다. 심볼 테이블이 없어 "같이 봐야 하는 자리"를
+    특정할 근거가 없다 — 지어내면 학생이 무관한 코드를 읽는다.
+    """
+    path = ref.get("file", "")
+    lo = ref.get("line_start") or 1
+    hi = ref.get("line_end") or lo
+    fragment_hash = _sha256(snippet)
+
+    refs: list[dict[str, Any]] = [{
+        "reference_type": "PRIMARY_BLOCK", "display_order": 1,
+        "path": path, "line_start": lo, "line_end": hi,
+        "evidence_hash": fragment_hash,
+    }]
+
+    order = 2
+    for axis in scoring.AXIS_CODES:
+        refs.append({
+            "reference_type": "QUESTION_HIGHLIGHT", "display_order": order,
+            "path": path, "line_start": lo, "line_end": hi,
+            "axis_code": axis, "evidence_hash": fragment_hash,
+        })
+        order += 1
+
+    if teach and teach.get("id"):
+        refs.append({
+            "reference_type": "CURRICULUM_EVIDENCE", "display_order": order,
+            "teach_id": teach["id"],
+            # 교안 근거는 코드가 없다. 개념 이름을 해시해 중복만 막는다.
+            "evidence_hash": _sha256(f"teach:{teach['id']}"),
+        })
+        order += 1
+
+    for importer in importers:
+        refs.append({
+            "reference_type": "CALLER", "display_order": order,
+            "path": importer, "line_start": 1, "line_end": 1,
+            "evidence_hash": _sha256(f"caller:{importer}->{path}"),
+        })
+        order += 1
+
+    return refs
+
+
 def _stage(axis_code: str, question: str | None, hint_list: list[hints.Hint],
            flagged: bool) -> dict[str, Any]:
     return {
@@ -100,29 +206,70 @@ def _teach_by_id(teaches: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {t["id"]: t for t in teaches if t.get("id")}
 
 
+class AnalysisFailed(Exception):
+    """엔진이 중간에 멈췄다. **여기까지 태운 원장을 들고 나온다.**
+
+    원장은 결과와 별개다 — job이 FAILED여도 콜은 실제로 나갔고 백엔드가 그걸로
+    비용을 집계한다. 그냥 raise하면 실패 지점 이전의 성공분까지 전부 사라진다
+    (2026-08-03 실호출: p04-3에서 터지며 p04-1·p04-2의 24콜이 aiUsage 0건으로
+    나갔다).
+    """
+
+    def __init__(self, message: str, ai_usage: list[dict[str, Any]]):
+        super().__init__(message)
+        self.ai_usage = ai_usage
+
+
+# 실패한 스테이지를 원장의 어느 종류로 적을지. 스테이지마다 다르다.
+_STAGE_KIND = {
+    "p04-1": "CODE_ANALYSIS", "p04-2": "CODE_ANALYSIS",
+    "p04-3": "QUESTION_GENERATION", "p04-4": "QUESTION_GENERATION",
+    "p04-7": "QUESTION_GENERATION",
+    "p04-5": "GRADING", "p04-6": "REPORT",
+}
+
+
+def _failed_kind(message: str) -> str:
+    """StageError 메시지 앞머리(`p04-3: ...`)에서 종류를 읽는다."""
+    return _STAGE_KIND.get(message.split(":", 1)[0].strip(), "CODE_ANALYSIS")
+
+
 class RealAnalysisEngine:
     """`engine_mode="real"`일 때 쓰이는 엔진."""
 
     def analyze(self, request: dict[str, Any],
                 zip_bytes: bytes | None = None) -> dict[str, Any]:
+        """실패해도 원장은 살려 내보낸다. 실제 작업은 `_run`이 한다."""
+        usages: list[dict[str, Any]] = []
+        try:
+            return self._run(request, zip_bytes, usages)
+        except stages.StageError as exc:
+            usages.extend(_stamp(exc.usages, _failed_kind(str(exc))))
+            raise AnalysisFailed(str(exc), usages) from exc
+        except Exception as exc:
+            raise AnalysisFailed(str(exc), usages) from exc
+
+    def _run(self, request: dict[str, Any], zip_bytes: bytes | None,
+             usages: list[dict[str, Any]]) -> dict[str, Any]:
         settings = get_settings()
-        model_code = request.get("model_code") or settings.model_code_analysis
+        # wire 필드는 providerModelCode다 — 공급자에게 그대로 넘길 문자열이라
+        # 화면 선택값(model_code)이 아니라 ai_model.provider_model_code 값이다.
+        model_code = request.get("provider_model_code") or settings.model_code_analysis
 
         teaches = request.get("teaches") or []
         reqs = request.get("requirements") or []
         budget = int(request.get("question_budget") or scoring.QUESTIONS_PER_SUBMISSION)
 
-        usages: list[dict[str, Any]] = []
-
         # ── 룰 스캔 ────────────────────────────────────────────────────────────
-        # ZIP이 없으면(GITHUB_URL 방식) 아직 받아올 경로가 없다. 조용히 빈 결과를
-        # 내면 "문제 0개"가 정상처럼 보이므로 여기서 끊는다.
-        if zip_bytes is None:
-            raise NotImplementedError(
-                "GITHUB_URL 방식은 아직 지원하지 않습니다. ZIP 업로드로 보내주세요."
-            )
-
-        scan = rules.find_candidates(zip_bytes)
+        # GITHUB_URL이면 클론, ZIP이면 압축 해제. 두 경로가 같은 스캔으로 합류한다
+        # (materialize.py — 팀원 브랜치 feature/code-importance-map에서 이식).
+        # 디렉터리는 with를 빠져나가며 지워지므로 파일 내용은 여기서 다 읽어 나온다.
+        commit_sha = request.get("commit_sha")
+        with materialize.materialize(request, zip_bytes) as repo_dir:
+            scan = rules.scan_directory(repo_dir)
+            if request.get("method") == "GITHUB_URL":
+                # 클론 경로에서만 실제 커밋을 안다. ZIP은 요청 값을 그대로 쓴다.
+                commit_sha = materialize.head_sha(repo_dir) or commit_sha
         files, candidates = scan["files"], scan["candidates"]
 
         # ── p04-1 분석 문서 ────────────────────────────────────────────────────
@@ -156,6 +303,8 @@ class RealAnalysisEngine:
 
         # ── p04-4 질문 + p04-7 힌트 ───────────────────────────────────────────
         teach_map = _teach_by_id(teaches)
+        # "이 파일을 누가 import 하나". references[].CALLER 를 채운다. LLM 0회.
+        importers = imports.build(files)
         # 강사 지정 초점 후보를 문제에 순서대로 물린다(C-1 확정 — 받은 id를 그대로 에코).
         focus_ids = [item["id"] for item in (request.get("focus_items") or [])]
         problems: list[dict[str, Any]] = []
@@ -217,35 +366,40 @@ class RealAnalysisEngine:
                 "problem_type": _problem_type(topic, candidates),
                 "priority": _priority(topic, candidates),
                 "question_focus_item_id": focus_ids[no - 1] if no <= len(focus_ids) else None,
-                "is_general": bool(topic.get("is_general")),
+                # 어느 교안 개념을 검증하는 문제인가. 일반 문제면 None이다
+                # (topics._general_topics가 teach_id를 비운다).
+                "teach_id": topic.get("teach_id"),
                 "source_path": ref.get("file", ""),
+                # 파일 전체 안에서 **하이라이트할 구간**이다. codeSnippet의 부분범위가
+                # 아니라 파일 기준 절대 줄 번호다 — 화면이 파일을 그리고 이 구간을 강조한다.
                 "line_start": ref.get("line_start") or 1,
                 "line_end": ref.get("line_end") or ref.get("line_start") or 1,
-                "code_snippet": snippet,
+                # 🔴 **파일 전체다**(2026-08-03 확정). 파편만 주면 학생이 판단할 재료가
+                # 없다 — L2 질문이 checkOut을 언급하는데 화면엔 선언 한 줄만 뜨는 일이
+                # 실제로 났다(실측: 스니펫 29~51자, 1줄).
+                "code_snippet": _display_source(files, ref, snippet),
+                # 🔴 해시는 **파편** 기준을 유지한다. 파일 전체로 바꾸면 무관한 한 줄
+                # 수정에도 "근거가 바뀌었다"가 되어 판정이 쓸모없어진다.
                 "evidence_hash": _sha256(snippet),
                 "extractor_version": scan["extractor_version"],
-                "references": [],
+                "references": _references(ref, snippet, teach_map.get(topic.get("teach_id")),
+                                         importers.get(ref.get("file", ""), [])),
                 "stages": stage_rows,
             })
 
         return {
             "snapshot_id": str(uuid.uuid4()),
-            "snapshot_meta": {
-                # ZIP 원본 기준이다 — 같은 코드를 다시 올리면 같은 값이 나와야
-                # "같은 제출물"임을 Spring이 판정할 수 있다.
-                "content_hash": hashlib.sha256(zip_bytes).hexdigest(),
-                "file_count": len(files),
-                "byte_count": len(zip_bytes),
-            },
+            "snapshot_meta": _snapshot_meta(zip_bytes, files),
             "applied_scope": request["extraction_scope"],
             # OWN_COMMIT은 아직 구현이 없다. 요청이 오면 TOTAL로 물러나되 그 사실을 알린다.
             "scope_fallback": request["extraction_scope"] == "OWN_COMMIT",
             "fallback_reason": ("OWN_COMMIT 범위는 아직 지원하지 않아 전체를 분석했습니다"
                                 if request["extraction_scope"] == "OWN_COMMIT" else None),
-            "commit_sha": request.get("commit_sha"),
+            "commit_sha": commit_sha,
             "analysis_document": analysis_doc.to_schema(doc.document, files),
             "requirement_results": requirement_results,
             "problems": problems,
+            "unmatched_teaches": selection.unmatched,
             "question_count_planned": budget,
             "ai_usage": usages,
         }

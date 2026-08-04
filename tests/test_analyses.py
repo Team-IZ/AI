@@ -228,7 +228,7 @@ def test_problem_rejects_wrong_stage_order():
         "priority": 0.9, "sourcePath": "app/main.py",
         "lineStart": 10, "lineEnd": 20,
         "codeSnippet": "x = 1", "evidenceHash": "a" * 64,
-        "extractorVersion": "v0",
+        "extractorVersion": 1,
     }
 
     with pytest.raises(ValidationError):   # L3·L4 뒤집힘
@@ -239,6 +239,53 @@ def test_problem_rejects_wrong_stage_order():
 
     ok = Problem.model_validate({**base, "stages": [stage(a) for a in ("L1", "L2", "L3", "L4")]})
     assert ok.status == "READY"
+
+
+def test_extractor_version_must_be_a_positive_integer():
+    """DB assessment_problem.extractor_version은 INTEGER CHECK (> 0)다.
+
+    문자열("v0")로 보내던 시절이 있었고, 그대로 나가면 Spring INSERT가 깨진다.
+    응답 검증에서 안 막으면 분석은 SUCCEEDED로 끝나고 저장에서 터진다.
+    """
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.analysis import Problem
+
+    def stage(axis: str) -> dict:
+        return {
+            "axisCode": axis, "questionText": f"{axis} 질문",
+            "hints": [{"hintLevel": 1, "hintText": "h1"}, {"hintLevel": 2, "hintText": "h2"}],
+        }
+
+    base = {
+        "problemId": "p-1", "problemNo": 1, "problemType": "RISK_POINT",
+        "priority": 0.9, "sourcePath": "app/main.py", "lineStart": 10, "lineEnd": 20,
+        "codeSnippet": "x = 1", "evidenceHash": "a" * 64,
+        "stages": [stage(a) for a in ("L1", "L2", "L3", "L4")],
+    }
+
+    with pytest.raises(ValidationError):       # 룰 버전 문자열
+        Problem.model_validate({**base, "extractorVersion": "rules-a1b2c3"})
+
+    with pytest.raises(ValidationError):       # CHECK (> 0)
+        Problem.model_validate({**base, "extractorVersion": 0})
+
+    assert Problem.model_validate({**base, "extractorVersion": 7}).extractor_version == 7
+
+
+def test_teach_id_is_echoed_on_problems():
+    """문제↔개념 연결이 응답에 있어야 '클래스는 L3까지' 화면을 만들 수 있다."""
+    payload = {**VALID_BODY,
+               "teaches": [{"id": "tch-1", "label": "클래스"},
+                           {"id": "tch-2", "label": "상속"}]}
+    post = client.post("/api/v0/analyses", json=payload, headers=HEADERS)
+
+    problems = client.get(f"/api/v0/analyses/{post.json()['jobId']}",
+                          headers=HEADERS).json()["result"]["problems"]
+
+    assert [p["teachId"] for p in problems] == ["tch-1", "tch-2", None]
+    # teach 앵커가 없는 문제는 화면에 "일반 문제"로 표기된다. 둘은 짝이다.
 
 def test_requirement_result_count_mismatch_fails_job():
     """판정이 빠진 채 SUCCEEDED가 되면 미판정 요구사항이 통과로 기록된다."""

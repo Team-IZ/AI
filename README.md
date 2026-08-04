@@ -1,6 +1,7 @@
 # AI 서비스 (FastAPI)
 
-> 갱신: 2026-07-30
+> 갱신: **2026-08-04** · **이 문서는 지금 코드가 실제로 하는 일을 적는다.**
+> 백엔드와의 계약 현황은 이슈 `Team-IZ/Backend#42`, 작업 계획은 `PLAN_FASTAPI_MIGRATION.md`.
 
 교육생이 제출한 코드를 분석해 **문답 문제를 뽑고**, 학생과 **문답을 진행하며 채점**하고, 끝나면 **보고서**를 내는 서비스. Spring Boot가 호출하는 내부 서비스다.
 
@@ -36,17 +37,21 @@ React(Frontend) ──▶ Spring Boot(Backend) ──▶ FastAPI(이 저장소) 
   3점 미만 → 동결된 힌트를 주고 같은 단계 재질의 (단계당 최대 2회)
             힌트 2회 소진 후에도 미달 → 그 문제 종료, 다음 문제의 L1로
 
-힌트를 쓰면 그 단계의 점수 상한이 내려간다
-  무힌트 5 / 힌트1 후 4 / 힌트2 후 3      ← 미확정값. 완주 30건 후 재보정
-  confirmedScore = min(bestScore, 상한)
+🔴 점수 상한은 없다 (2026-08-03 폐기)
+  AI는 채점만 하고 점수를 그대로 낸다. 가공하지 않는다
 ```
 
-| 단계 | 무엇을 묻나 | DB `axis_score.axis_code` 대응 |
-|---|---|---|
-| L1 | 무엇을 하는 코드인가 | `CODE_UNDERSTANDING` |
-| L2 | 왜 그렇게 했는가 | `DESIGN_LOGIC` |
-| L3 | 다른 방법과 비교 (대안) | `ALTERNATIVE_COMPARISON` |
-| L4 | 언제 깨지는가 (반례·한계) | `COUNTEREXAMPLE_RESPONSE` |
+**왜 상한을 뺐나**: DB `problem_stage`가 **질문·힌트1·힌트2 각각의 점수를 따로 저장**한다.
+어느 답변이 몇 점이었는지가 그대로 남으므로 AI가 미리 눌러 담을 이유가 없다. 자력은
+"어느 슬롯에서 통과했나"로 읽는다 — 질문 통과=`SELF` / 힌트1 통과=`SELF_MAINTAINED` /
+힌트2 통과=`PARTIAL`.
+
+| 단계 | 무엇을 묻나 |
+|---|---|
+| L1 | 무엇을 하는 코드인가 |
+| L2 | 왜 그렇게 했는가 |
+| L3 | 다른 방법과 비교 (대안) |
+| L4 | 언제 깨지는가 (반례·한계) |
 
 wire와 DB `problem_stage.axis_code`에는 **짧은 값 `"L1"`~`"L4"`**를 쓴다.
 
@@ -87,40 +92,31 @@ Swagger UI: **http://127.0.0.1:8000/docs** — 여기서 엔드포인트를 직�
 
 > **워커는 1개로 유지한다.** job·세션 저장소가 인메모리라 `--workers 2` 이상이면 만든 프로세스와 조회 프로세스가 달라져 404가 난다. 시연 규모(동시 10~20명)에서는 제약이 아니다 — 병목은 FastAPI가 아니라 NVIDIA 무료 티어의 분당 40회다.
 
-### 배포 — AWS EC2 + cloudflared (2026-08-02~)
+### 배포 — 자동이다. 신경 쓰지 않는다 (2026-08-03~)
 
-운영 인스턴스는 **서울 리전 EC2 t3.small**이고 `main` 브랜치를 체크아웃해 둔다.
-`uvicorn`과 `cloudflared`가 각각 systemd 서비스라 재부팅에도 자동으로 올라온다.
-
-```bash
-# 배포 (EC2에서)
-cd ~/AI && git pull && .venv/bin/pip install -r requirements.txt && sudo systemctl restart iz-get-ai
-# 상태·현재 주소
-systemctl is-active iz-get-ai cloudflared
-sudo journalctl -u cloudflared -n 60 --no-pager | grep trycloudflare.com
+```
+https://cpiysizen3.ap-northeast-1.awsapprunner.com     고정 HTTPS. 주소가 안 바뀐다
 ```
 
-- **8080은 인바운드로 열지 않는다.** 터널이 아웃바운드로 나가므로 인터넷에 평문 포트가 없다.
-  `X-Internal-Key`가 공유 비밀이라 이 성질이 중요하다.
-- **quick tunnel URL은 cloudflared가 재시작될 때마다 바뀐다.** 백엔드는 AI 주소를 설정값으로 갖고 있어야 한다.
-- 안 쓸 때는 인스턴스를 **Stop**(EBS만 과금). **`Terminate`는 디스크째 삭제라 금지.**
-- App Runner는 2026-04-30부터 신규 고객을 받지 않아 쓸 수 없다. 경위와 대안은 `PLAN_FASTAPI_MIGRATION.md` §T9.
+**AWS App Runner가 `main` 브랜치를 물고 자동 배포한다.** 팀원이 그 계정과 설정을 소유하고
+있고, **우리는 `main`에 올리기만 하면 된다.** 배포 명령도, 서버 접속도, 주소 공유도 없다.
+설정 파일은 `main`의 `apprunner.yaml`(런타임 python3.11 · 포트 8080 · 헬스체크 `/api/health`).
 
-### 백엔드와 통신 테스트 (배포 없이)
+⚠️ **`main` 머지가 곧 재배포다.** 재배포는 프로세스를 갈아치우므로 **진행 중인 job과 세션
+멱등 캐시가 끊긴다.** 세션 자체는 무상태라 안 깨지지만(매 요청이 restore), 폴링 중인
+`/analyses`·`/reports` job은 사라진다. **머지 시점은 백엔드와 맞춘다.**
 
-로컬 FastAPI를 터널로 노출해 확인한다. 백엔드는 서울 EC2(`http://13.209.190.34`)에 떠 있다.
+⚠️ **인스턴스는 1개로 고정해야 한다.** job 저장소가 인메모리 dict라 2개로 늘면 만든
+프로세스와 조회 프로세스가 달라져 폴링이 404가 난다.
 
-```bash
-./.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+### 로컬에서 백엔드와 붙여볼 때
 
-# 다른 터미널 (cloudflared — 가입·토큰 불필요)
-cloudflared tunnel --url http://localhost:8000
-#   → https://xxxx.trycloudflare.com 발급 → 백엔드에 전달 (prefix /api/v0)
-```
+`.env`의 `INTERNAL_API_KEY`에 값이 있으면 헤더 `X-Internal-Key`가 필요하다(health만 면제).
+비우면 인증이 꺼진다. 로컬을 외부에 노출해야 하면 `cloudflared tunnel --url http://localhost:8000`
+(가입 불필요, 실행마다 URL이 바뀐다).
 
-- `.env`의 `INTERNAL_API_KEY`에 값이 있으면 헤더 `X-Internal-Key`가 필요하다(health만 면제). 비우면 인증이 꺼진다.
-- quick tunnel은 실행마다 URL이 바뀌고, 창을 닫거나 PC가 절전에 들어가면 끊긴다.
-- 상세 절차: `../output_docs/AI-Backend_통신테스트_계획_2026-07-24.md`
+**주고받을 데이터의 실제 모양은 `../test_folder/`에 있다** — 교안·분석·문답·보고서 4단계의
+요청·응답이 형식 그대로 저장돼 있고, 각 `input_data/*/README.md`가 필드의 백엔드 출처를 적어 뒀다.
 
 ### 계약이 바뀌면 openapi.json 갱신
 
@@ -145,7 +141,7 @@ cloudflared tunnel --url http://localhost:8000
 | 헤더 | 값 | 용도 |
 |---|---|---|
 | `X-Internal-Key` | 공유 비밀 | 서비스 간 인증. `GET /api/health`만 면제 |
-| `Idempotency-Key` | `submissionId:attemptNo` | 중복 요청 판별. 같은 키면 처음 만든 `jobId`를 그대로 반환하고 재분석하지 않는다 |
+| `Idempotency-Key` | 경로마다 다르다(아래) | 중복 요청 판별. 같은 키면 처음 만든 `jobId`를 그대로 반환하고 LLM을 다시 부르지 않는다 |
 | `X-Trace-Id` | 추적 ID | Spring이 `analysis_job.trace_id`로 저장 |
 
 **에러 형식** — 평탄 구조. `timestamp`·`path`는 쓰지 않는다.
@@ -162,7 +158,17 @@ cloudflared tunnel --url http://localhost:8000
 
 **`analysisId`는 Spring이 발급한다.** AI는 만들지도 받지도 않고, Spring이 `jobId`로 연결한다.
 
-**모델은 코드 문자열로 주고받는다.** 요청 `modelCode`(생략 시 서버 기본값), 응답 `aiUsage[].modelCode`. UUID(`model_id`)는 쓰지 않는다 — Spring이 `ai_model`에서 조회한다.
+**모델은 코드 문자열로 주고받되 방향마다 컬럼이 다르다.** UUID(`model_id`)는 쓰지 않는다.
+
+```
+요청 → AI      providerModelCode    ai_model.provider_model_code 값 (예: "nvidia/nemotron-3-ultra-550b-a55b")
+                                    공급자에게 그대로 넘길 문자열이라 벤더 접두어가 붙어 있어야 한다
+응답 → Spring  aiUsage[].modelCode  AI가 호출에 쓴 provider 문자열을 그대로 에코한다
+                                    **AI는 화면 선택값(model_code)을 모른다** — Spring이
+                                    provider_model_code로 ai_model을 조회해 model_id를 잡는다
+```
+
+요청 필드는 네 곳 모두 같은 이름·같은 규칙이다(`/analyses` · `/curricula` · `/reports` · `/sessions/{id}/answers`). 생략하면 서버 기본값이고, 채점 모델은 operator가 고른다(GradingPolicy).
 
 ### 엔드포인트
 
@@ -171,17 +177,20 @@ cloudflared tunnel --url http://localhost:8000
 | 공통 | `GET /api/health` | 서비스 상태 | 동기 |
 | 분석 | `POST /api/v0/analyses` | 코드 분석 요청 | 202 + 폴링 |
 | 분석 | `GET /api/v0/analyses/{jobId}` | 분석 상태·결과 | 동기 |
-| 세션 | `POST /api/v0/sessions/{id}/answers` | 답변 제출 → 채점 (다음 질문·힌트는 이미 동결돼 있다) | 동기 |
-| 세션 | `POST /api/v0/sessions` | 세션 시작 → 첫 질문 | 동기 · **축소 예정** |
-| 세션 | `GET /api/v0/sessions/{id}` | 세션 현재 상태 | 동기 · **축소 예정** |
-| 세션 | `POST /api/v0/sessions/{id}/restore` | 유실 세션 복원 | 동기 · **축소 예정** |
+| 세션 | `POST /api/v0/sessions/{id}/answers` | 답변 제출 → 채점 + 다음 질문 (**세션 API는 이것 하나뿐**) | 동기 |
 | 보고서 | `POST /api/v0/reports` | 보고서 생성 요청 | 202 + 폴링 |
 | 보고서 | `GET /api/v0/reports/{jobId}` | 보고서 결과 | 동기 |
 
 | 교안 | `POST /api/v0/curricula` | 교안 PDF(multipart) 분석 요청 | 202 + 폴링 |
 | 교안 | `GET /api/v0/curricula/{jobId}` | 교안 구조·개념 결과 | 동기 |
 
-**"축소 예정"이 무슨 뜻인가**: 백엔드가 문제 3행 + 단계 12행을 분석 직후에 저장하고 세션을 `READY`로 미리 만드는 구조를 골랐다. 그러면 세션 시작 시 AI 호출이 필요 없고 `/answers`만 남는다. 지금은 셋 다 동작하지만 제거될 수 있으니 새로 의존하지 말 것.
+**세션은 무상태다** (2026-08-03 확정). `POST /sessions` · `GET /sessions/{id}` · `POST /sessions/{id}/restore` **3개는 삭제됐다.** AI는 세션을 들고 있지 않으므로 문제·기록·커서가 매 요청에 실려 오고 — **매 요청이 곧 restore**다. 배포·재시작·인스턴스 중지가 진행 중인 세션을 깨지 않고, 백엔드는 갈래 하나만 구현하면 된다.
+
+**첫 질문은 백엔드가 낸다.** 질문 12개·힌트 24개는 분석 배치에서 동결돼 이미 DB에 있으므로 첫 질문을 받으려고 AI를 부를 필요가 없다. AI는 답변이 올 때부터 관여한다.
+
+`Idempotency-Key`는 `/analyses`(`{submissionId}:{attemptNo}`) · `/curricula`(`{versionId}:{analysisVersion}`) · `/reports`(`{problemId}:{scoreRunId}`)에서 받는다. 같은 키면 처음 `jobId`를 그대로 돌려주고 **LLM을 다시 부르지 않는다.** 세션 `/answers`는 헤더 대신 본문의 `clientRequestId`를 쓴다.
+
+**콜백은 없다.** 요청에 `callbackUrl`을 받지 않는다 — 전부 202 + 폴링이고 AI→백엔드 방향 통신은 0이다.
 
 ### 분석
 
@@ -190,21 +199,25 @@ cloudflared tunnel --url http://localhost:8000
 {
   "attemptId": "att-1", "submissionId": "sub-1",
   "method": "GITHUB_URL",                    // 또는 ZIP_WITH_GITLOG (multipart로 ZIP 첨부)
+  "source": { "repoUrl": "https://github.com/owner/repo", "branch": "main" },
   "source": { "repoUrl": "https://github.com/...", "branch": "main" },
   "extractionScope": "TOTAL",                // 또는 OWN_COMMIT (이때 commitEmail 필수)
   "questionBudget": 3,
-  "modelCode": "glm-5.2",                    // 생략 시 서버 기본값
+  "providerModelCode": "nvidia/nemotron-3-ultra-550b-a55b",   // 생략 시 서버 기본값
   "focusItems": [                            // 강사가 체크포인트에 지정한 질문 초점 후보
     { "id": "a3f2-…", "name": "예외 처리" },
     { "id": "b7c1-…", "name": "동시성" }
   ],
   "requirements": [ { "requirementId": "req-1", "text": "로그인 실패 3회 시 잠금" } ],
-  "teaches": [ { "id": "tch-1", "label": "의존성 주입", "unitId": "u3", "sourcePages": [12, 13] } ],
-  "callbackUrl": "https://.../internal/ai-callbacks"   // 선택. 현재 수용만 하고 전송 미구현
+  "teaches": [ { "id": "tch-1", "label": "의존성 주입", "unitId": "u3", "sourcePages": [12, 13] } ]
 }
 // → 202
 { "jobId": "1b40467e-…", "status": "QUEUED" }
 ```
+
+**`GITHUB_URL`은 AI가 서버에서 `git clone --depth 1`로 받는다** (2026-08-03). GitHub API로 파일을 긁지 않는다 — 비인증 한도가 IP당 60회/시간이라 **같은 망의 다른 교육생까지 막히고**, 큰 repo는 tree API가 목록을 잘라 소스가 조용히 빠진다(팀 PoC 실사고). **공개 레포만** 되고, 얕은 클론이라 `.git`은 남지만 커밋이 tip 하나뿐이라 `OWN_COMMIT`은 못 한다. `commitSha`는 이 경로에서만 실제 값이 채워진다.
+
+🔴 **`PARTIAL`이 실제로 나온다.** 요구사항 판정만 실패하고 문제·질문·힌트는 정상으로 나가는 경우다(2026-08-03 신설). 그때 `requirementResults`는 개수를 맞춰 오되 `verdict: "F"` + `note: "판정 실패: …"`로 채워진다 — **`SUCCEEDED`로 저장하면 화면에 "요구사항 전부 미충족"이 사실처럼 뜬다.** 문답은 그대로 진행할 수 있다.
 
 **`focusItems`를 Spring이 보내주는 이유**: `question_focus_item`의 PK가 랜덤 UUID라 AI가 그 값을 알 방법이 없다. 후보를 받아 **AI가 그중 하나의 `id`를 그대로 돌려준다.** 강사 지정 범위를 벗어날 수 없고, 항목 이름이 바뀌어도 AI 재배포가 필요 없다.
 
@@ -213,7 +226,7 @@ cloudflared tunnel --url http://localhost:8000
 {
   "jobId": "1b40467e-…", "attemptId": "att-1", "submissionId": "sub-1",
   "status": "SUCCEEDED",                     // QUEUED|RUNNING|SUCCEEDED|PARTIAL|FAILED
-  "failureReason": null,
+  "failureReason": null,                     // PARTIAL·FAILED면 사유가 들어간다
   "startedAt": "2026-07-30T05:00:00Z", "completedAt": "2026-07-30T05:00:12Z",
   "result": {
     "snapshotId": "snap-1",
@@ -256,14 +269,22 @@ cloudflared tunnel --url http://localhost:8000
   "problemType": "DESIGN_CHOICE",      // 아래 5종
   "priority": 0.91,
   "questionFocusItemId": "a3f2-…",     // 요청 focusItems에서 고른 id
+  "teachId": "tch-1",                  // 이 문제가 검증하는 개념. **항상 채워진다**
   "sourcePath": "app/main.py",
   "lineStart": 12, "lineEnd": 14,
-  "codeSnippet": "def main():\n    …",  // evidenceHash의 대상
+  "codeSnippet": "…파일 전체…",         // 🔴 문제를 낸 파일 전체 (화면에 띄울 것)
   "evidenceHash": "…",
-  "extractorVersion": "v0",            // 문자열. 룰 버전을 붙일 수 있게
-  "references": [
-    { "path": "app/cli.py", "lineStart": 30, "lineEnd": 33,
-      "evidenceHash": "…", "referenceType": "CALLER" }
+  "extractorVersion": 1739284412,      // 정수. INTEGER CHECK (> 0)
+  "references": [                      // DB assessment_problem_reference 와 1:1
+    { "referenceType": "PRIMARY_BLOCK", "displayOrder": 1,
+      "path": "app/main.py", "lineStart": 12, "lineEnd": 14, "evidenceHash": "…" },
+    { "referenceType": "QUESTION_HIGHLIGHT", "displayOrder": 2, "axisCode": "L1",
+      "path": "app/main.py", "lineStart": 12, "lineEnd": 14, "evidenceHash": "…" },
+    // L2·L3·L4 동일. 축별로 한 행씩 = 4개
+    { "referenceType": "CURRICULUM_EVIDENCE", "displayOrder": 6,
+      "teachId": "tch-1", "evidenceHash": "…" },     // 코드 라인이 없다
+    { "referenceType": "CALLER", "displayOrder": 7,
+      "path": "app/cli.py", "lineStart": 1, "lineEnd": 1, "evidenceHash": "…" }
   ],
   "stages": [
     { "axisCode": "L1", "questionText": "…", "flagged": false,
@@ -278,7 +299,37 @@ cloudflared tunnel --url http://localhost:8000
 
 **Spring이 받아서 할 일**: 문제 3행 + `problem_stage` 12행 + `stage_answer_attempt` 36행(질문 12개·힌트 24개를 넣고 답변란은 NULL)을 미리 만들어 두면, 세션 진행 중 AI에 질문을 물을 필요가 없다.
 
-**`codeSnippet`을 AI가 보내는 이유**: `evidenceHash`가 `codeSnippet` 기준 해시이고 해시를 AI가 만든다. Spring이 ZIP을 따로 잘라내면 줄바꿈·BOM이 1바이트만 달라도 해시가 안 맞는다.
+🔴 **`codeSnippet`은 문제를 낸 파일 전체다** (2026-08-03 확정). 파편만 주면 학생이 판단할 재료가 없다 — 실측에서 L2 질문이 `checkOut`·`checkIn`을 언급하는데 화면엔 선언 한 줄(41자)만 뜨는 일이 났다. **보여줄 구간은 `lineStart`~`lineEnd`**이고 이 값은 codeSnippet의 부분범위가 아니라 **파일 기준 절대 줄 번호**다. 파일이 100,000자를 넘으면 파편만 보낸다(그때도 줄 번호는 파일 기준).
+
+**`evidenceHash`는 파일 전체가 아니라 파편(`lineStart`~`lineEnd`) 기준이다.** 파일 전체 기준이면 무관한 한 줄 수정에도 "근거가 바뀌었다"가 되어 판정이 쓸모없어진다. Spring이 따로 잘라 해시를 다시 만들면 안 된다 — 줄바꿈·BOM이 1바이트만 달라도 안 맞는다.
+
+**채점에는 파일 전체를 넣지 않는다.** 매니페스트 `code_block` 상한이 4,000자라 큰 파일은 앞에서부터 잘리고, 문제 구간이 파일 뒤쪽이면 근거가 사라진 채 채점된다. `sessions._grading_code()`가 줄 범위로 ±8줄을 되잘라 쓴다.
+
+**`extractorVersion`은 정수다** — `assessment_problem.extractor_version`이 `INTEGER CHECK (> 0)`이다. 값은 룰 vendor의 `.py`+`.json` 전부를 해시해 산정한 값이라 **같은 룰이면 같은 값, 데이터 파일만 바뀌어도 다른 값**이다(재현성 근거). 사람이 읽는 버전 번호가 아니고 순서도 없다.
+
+**`teachId`는 문제↔개념 연결이고 항상 채워진다.** 강사가 teach 3개(클래스·상속·캡슐화)를 고르면 문제도 그 셋에 하나씩 붙고, 결과 화면의 "클래스는 L3까지 도달 / 상속은 L2까지 도달"이 이 값으로 그려진다.
+
+🔴 **개념이 코드에 없으면 문항을 만들지 않는다** (2026-08-03 PM 결정). 다른 개념으로 갈아끼우거나 지어내지 않는다 — **모든 학생이 오퍼레이터가 고른 같은 개념을 시험 본다**는 것이 비교 가능성의 근거다.
+
+```
+① 최대한 찾는다        p04-3 으로 고르고, 실패한 teach 만 모아 재시도 1회
+                      ("파일에 실제 존재하는 선언·호출 문자열을 그대로 써라")
+② 그래도 없으면        그 개념은 문항 없음 → unmatchedTeaches 에 담아 보낸다
+```
+
+```jsonc
+"problems": [ /* 근거를 찾은 개념만. 2개일 수 있다 */ ],
+"unmatchedTeaches": [
+  { "teachId": "t-상속", "reason": "제출 코드에서 이 개념의 근거를 찾지 못했습니다" }
+],
+"questionCountPlanned": 3
+```
+
+**`unmatchedTeaches`를 명시적으로 보내는 이유**: `problems` 길이 차이로는 "몇 개가 없다"까지만 알 수 있고 **어느 개념이 빠졌는지**는 역산해야 한다. 화면의 개념별 도달 격자에서 `―`(문항 없음)로 그릴 값이다.
+
+🔴 **`―`(문항 없음)과 `0단`(L1 미달)은 다른 것이다.** 도달 단계에 0을 박으면 "안 물어봤다"가 "틀렸다"로 바뀐다 — 문항 없음은 NULL이다.
+
+⚠️ **`isGeneral` 필드는 2026-08-03에 삭제됐다.** teach 앵커 없는 "일반 문제"를 만들지 않기로 했다.
 
 **`problemType` 5종** — "왜 이 지점을 골랐나". `questionFocusItem`의 "무엇을 묻나"와 다른 축이다.
 
@@ -299,42 +350,81 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
 ### 세션
 
 ```jsonc
-// POST /api/v0/sessions/{id}/answers
-{ "clientRequestId": "turn-7", "answerText": "재귀 대신 반복문으로 바꿨습니다" }
+// POST /api/v0/sessions/{id}/answers        헤더: X-Trace-Id(선택)
+{
+  "clientRequestId": "turn-7",
+  "answerText": "재귀 대신 반복문으로 바꿨습니다",
+  "problems": [ /* 분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다 */ ],
+  "transcript": [ /* 지금까지 확정된 턴 전부 */ ],
+  "cursor": { "problemId": "prob-1", "axisCode": "L3", "hintsUsed": 0 },
+  "providerModelCode": "deepseek-ai/deepseek-v4-flash",       // 생략 시 서버 기본값
+  "analysisContext": {                       // 선택. 분석 문서에서 두 필드만
+    "overview": "주문을 받아 결제로 넘기는 …",
+    "structure": [ { "area": "컨트롤러", "files": ["app/api.py"], "role": "요청 수신" } ]
+  }
+}
 
-// → SessionView
+// → AnswerResult
 {
   "sessionId": "sess-abc",
-  "state": "IN_PROGRESS",                    // IN_PROGRESS|PAUSED|COMPLETED|FAILED|EXPIRED
-  "current": {
-    "problemId": "prob-1", "axisCode": "L3", "sequenceNo": 5, "attemptNo": 1,
+  "state": "IN_PROGRESS",                    // DB assessment_session.status 8종. AI는 IN_PROGRESS|COMPLETED만 낸다
+  "turn": {                                  // 이번에 채점된 턴. 이것만 이어 붙여 저장하면 된다
+    "problemId": "prob-1", "axisCode": "L3", "questionText": "…", "answerText": "…",
+    "answeredAt": "…", "score": 4, "passed": true,
+    "hintsUsed": 0, "hintText": null       // hintsUsed가 어느 슬롯에 저장할지를 정한다
+  },
+  "cursor": { "problemId": "prob-1", "axisCode": "L4", "hintsUsed": 0 },  // 다음 요청에 그대로 실는다
+  "current": {                               // 다음 질문. 끝났으면 null
+    "problemId": "prob-1", "axisCode": "L4", "sequenceNo": 1, "hintsUsed": 0,
     "questionText": "…",
     "hintText": null,                        // 3점 미만이었으면 동결분에서 꺼내 채운다
-    "codeContext": { "path": "src/Solver.java", "lineStart": 42, "lineEnd": 58, "snippet": "…" }
+    "codeContext": { "path": "src/Solver.java", "lineStart": 42, "snippet": "…" }
   },
   "progress": { "problemIndex": 1, "problemTotal": 3 },
-  "transcript": [
-    { "problemId": "prob-1", "axisCode": "L1", "questionText": "…", "answerText": "…",
-      "answeredAt": "…", "bestScore": 4, "confirmedScore": 4,
-      "attemptCount": 1, "passed": true, "hintText": null, "autonomy": "SELF" }
-  ],
+  "terminationReason": null,                 // 이 턴에 문제가 끝났을 때만 채워진다
+  "endedLevel": null,
   "aiUsage": [ /* §aiUsage */ ]
 }
 ```
 
-`clientRequestId`는 세션 내 유일한 멱등키다. 같은 키로 재요청하면 처음 돌려준 응답을 그대로 반환한다.
+**요청이 상태를 들고 온다.** AI는 아무것도 기억하지 않으므로 `problems`가 없으면 물을 것이 없다(빈 채로 두면 `COMPLETED`가 나간다). `cursor`를 생략하면 `transcript`를 되짚어 위치를 복원하고, 둘 다 없으면 첫 문제의 L1로 본다.
 
-`state`는 DB `assessment_session.status`의 허용값을 따른다. **`TIMEOUT`은 폐기값이다** — 시간 초과는 `EXPIRED`다. (코드 미반영: `schemas/session.py`가 아직 `TIMEOUT`을 쓴다.)
+**응답은 `transcript`를 돌려주지 않는다.** 요청이 이미 들고 온 것이라 되돌리면 같은 payload를 두 번 실어 나른다. 이번 턴(`turn`)만 이어 붙이면 된다.
+
+`clientRequestId`는 세션 내 유일한 멱등키다. 같은 키로 재요청하면 처음 돌려준 응답을 그대로 반환한다. 채점이 실패하면 **503 `GRADING_UNAVAILABLE`(retryable=true)**이고 그 턴은 기록되지 않으므로 같은 키로 재전송하면 된다.
+
+**진행 규칙은 AI가 소유한다** — 통과선 3점 · 힌트 단계당 2회 · 점수 상한 5/4/3 · 사다리(통과→다음 축 / 미달→힌트 / 소진→다음 문제). 백엔드는 커서를 왕복시키기만 하면 되고 같은 규칙을 다시 구현하지 않는다.
+
+**종료 사유도 AI가 말한다.** 문제가 끝나는 판정이 AI 쪽에 있으므로 사유도 여기서 나간다 — 백엔드가 "커서가 다음 문제로 넘어갔으니 끝났나 보다"로 역추론하지 않는다. `assessment_problem.termination_reason`·`ended_level`에 그대로 들어간다.
+
+```
+COMPLETED_L4        L1~L4 전부 통과 (완주)        endedLevel = "L4"
+TERMINATED_AT_L3    L3에서 힌트 소진 후 미달       endedLevel = "L3"
+TERMINATED_AT_L2    L2에서                        endedLevel = "L2"
+TERMINATED_AT_L1    L1에서                        endedLevel = "L1"
+TERMINATED_AT_L4    L3까지 통과하고 L4에서 막힘     endedLevel = "L4"
+```
+
+문제가 안 끝난 턴이면 둘 다 null이다. ⚠️ 코드값 `MEAS.PROBLEM_TERMINATION_REASON`에 `TERMINATED_AT_L1`·`TERMINATED_AT_L4`가 아직 없다(백엔드 B-4). CHECK 제약이 없어 값 자체는 통과한다.
+
+**`analysisContext`는 분석 문서 전체가 아니라 `{overview, structure}` 두 필드다.** 코드 파편 하나로는 전체 흐름이 안 보여서(MVC면 model·view·controller가 다른 파일에 있다) 채점기가 학생 답변의 사실 여부를 못 가린다. 그렇다고 문서를 통째로 넣으면 채점 36회 × 5,000~7,000토큰이다 — `decisionPoints`는 문제 후보 목록이라 문제가 이미 정해진 채점에는 쓸모가 없고 부피의 대부분이다. 두 필드만 뽑으면 500~800토큰이다. **생략하면 파편만으로 채점한다**(기존 동작).
+
+**타이머는 AI 계약에 없다.** 문제당 20분·문제가 바뀌면 리셋·AI 호출 대기 중 정지는 프론트/백엔드가 소유한다 — AI는 그 값을 쓰지 않았다.
+
+`state`는 DB `assessment_session.status`의 허용값을 따른다. **`TIMEOUT`은 폐기값이다** — 시간 초과는 `EXPIRED`다.
 
 **점수 필드가 wire에 나오는 이유**: Spring이 매 턴 저장하고, 세션이 유실되면 그 기록으로 복구한다. 점수·시도 횟수가 wire에 없으면 "이 학생이 힌트를 몇 번 썼는지"를 아무도 모르게 된다.
 
 ```
-bestScore        힌트 상한 적용 "전" LLM 원점수 0~5   (DB problem_stage.best_score)
-confirmedScore   상한 적용 "후" 기록 점수             (DB problem_stage.confirmed_score)
-attemptCount     0~3. 0은 앞 단계에서 끊겨 미도달
-hintsUsed        보내지 않는다 = attemptCount - 1 (미도달이면 0)
-autonomy         SELF(힌트 0) | SELF_MAINTAINED(1) | PARTIAL(2)
+score       0~5 정수. **상한 적용 없는 루브릭 원점수다** (2026-08-03 상한 폐기)
+passed      score >= 3.  DB CHECK가 `passed=TRUE AND score>=3` 을 강제한다
+hintsUsed   0~2.  **어느 슬롯에 저장할지를 이 값이 정한다**
+            0 → question_answer_text / 1 → first_hint_* / 2 → second_hint_*
 ```
+
+🔴 **`attemptCount`·`autonomy`는 없다.** DB `problem_stage`가 한 행에 답변 3개를 담게
+되면서(2026-08-03) 둘 다 파생값이 됐다 — 어느 슬롯이 찼는지, 어느 슬롯이 통과했는지로
+계산된다.
 
 ### aiUsage — 모든 응답에 붙는다
 
@@ -343,8 +433,8 @@ DB `ai_usage`(기관별 AI 호출·토큰·비용 원장)에 대응한다. **LLM
 ```jsonc
 "aiUsage": [
   {
-    "idempotencyKey": "01H8XABC…:QUESTION_L1:1",   // {sourceId}:{sourceType}:{attemptNo}
-    "sourceType": "QUESTION_L1",                   // 값 목록 백엔드 확정 대기
+    "idempotencyKey": "sub-1:1:ANALYSIS:3",        // {요청 멱등키|sourceId}:{sourceType}:{호출순번}
+    "sourceType": "ANALYSIS",                      // ANALYSIS|GRADING|REPORT|CURRICULUM
     "sourceId": "01H8XABC…",                       // 작업 PK
     "featureCode": "QUESTION_GENERATION",
     "modelCode": "glm-5.2",           // Spring이 ai_model 조회해 model_id 확보
@@ -359,6 +449,8 @@ DB `ai_usage`(기관별 AI 호출·토큰·비용 원장)에 대응한다. **LLM
 
 `featureCode` — `CODE_ANALYSIS`(분석 문서·요구사항 판정) · `QUESTION_GENERATION`(문제 선정, 질문·힌트 동결) · `GRADING`(채점) · `SUMMARY_DRAFT`(보고서) · `CURRICULUM_ANALYSIS`(교안). 힌트는 질문과 함께 동결되므로 별도 값이 필요 없다.
 
+`sourceType` 4종 — `ANALYSIS`(분석 jobId) · `GRADING`(sessionId) · `REPORT`(보고서 jobId) · `CURRICULUM`(교안 jobId). `featureCode`보다 굵은 단위라 한 `sourceType` 안에 `featureCode`가 여럿 나온다(분석 하나에 `CODE_ANALYSIS` + `QUESTION_GENERATION`).
+
 `failureCode` 5종 — `TIMEOUT` · `RATE_LIMITED` · `PROVIDER_ERROR` · `INVALID_JSON` · `CONTEXT_OVERFLOW`.
 
 **필드 이름이 DB 컬럼명과 1:1이다.** Spring은 매핑 고민 없이 그대로 INSERT하면 된다.
@@ -371,9 +463,14 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 
 ### 보고서
 
+**보고서는 문제 단위다.** 문제 하나가 끝날 때마다 한 번씩 부르므로 세션 1회에 보고서 3개다.
+
 ```jsonc
 // POST /api/v0/reports          → 202
-{ "sessionId": "sess-abc", "transcript": [ … ],
+{ "problemId": "prob-1", "problemNo": 2,                      // 🔴 안 보내면 3건 다 1이 찍힌다
+  "sessionId": "sess-abc",
+  "providerModelCode": "deepseek-ai/deepseek-v4-flash",       // 생략 시 서버 기본값
+  "transcript": [ /* 이 문제의 턴만 */ ],
   "analysisDocuments": [ { "kind": "CODE_ANALYSIS", "content": { /* AnalysisDocument */ } } ],
   "teaches": [ … ] }
 { "jobId": "…", "status": "QUEUED" }
@@ -382,21 +479,40 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 ```jsonc
 // GET /api/v0/reports/{jobId}   → 200 (result 부분)
 {
-  "problems": [
-    { "problemNo": 1, "problemId": "…", "totalScore": 16, "maxScore": 20,
-      "stages": [ { "axisCode": "L1", "confirmedScore": 4, "bestScore": 4,
-                    "attemptCount": 1, "passed": true } ] }
-  ],
-  "reportMarkdown": "…",
+  "reportMarkdown": "…",                     // 사람이 읽는 본문 (헤딩 5개 고정)
+  "narrative": {                             // 같은 내용의 구조화본. 프론트가 파싱하지 않도록
+    "summary": "…",
+    "strengths": [ { "axis": "캡슐화", "detail": "…", "teachId": null, "studyPointer": null } ],
+    "gaps":      [ { "axis": "캡슐화", "detail": "…", "teachId": "tch-1", "studyPointer": "…" } ],
+    "autonomyNote": "…",
+    "unreachedAxes": ["L3", "L4"]            // 앞 단계에서 끝나 안 물어본 축
+  },
+  "narrativeFailed": false,                  // true면 narrative가 전부 빈다. 판정은 그때도 확정값
+  "problem": {
+    "problemNo": 1, "problemId": "…",
+    "reachedStage": 2,                       // 0~4. 앞에서부터 연속 통과한 단계 수
+    "stages": [                              // 항상 4개. DB problem_stage 4행과 1:1
+      { "axisCode": "L1", "questionScore": 5, "questionPassed": true,
+        "firstHintScore": null, "firstHintPassed": null,
+        "secondHintScore": null, "secondHintPassed": null, "status": "PASSED" },
+      { "axisCode": "L2", "questionScore": 1, "questionPassed": false,
+        "firstHintScore": 4, "firstHintPassed": true,     // 힌트 1개로 통과
+        "secondHintScore": null, "secondHintPassed": null, "status": "PASSED" },
+      { "axisCode": "L3", "questionScore": null, "status": "NOT_REACHED" }
+      // L4도 NOT_REACHED. 미도달 축은 점수가 전부 null이다
+    ]
+  },
   "curriculumRefs": [ { "teachId": "tch-1", "unitId": "u3", "sourcePages": [12, 13] } ],
-  "retestTargets": [ "prob-2" ],
-  "versions": { "modelCode": "glm-5.2", "promptVersion": "p04-6", "rubricVersion": "1" }
+  "retest": true,
+  "versions": { "modelCode": "…", "promptVersion": "p04-6", "rubricVersion": "…" }
 }
 ```
 
-**세션 총점·축 평균은 보내지 않는다.** 점수는 이미 `problem_stage`에 매 턴 저장되어 있고, 요약이 필요하면 Spring이 집계한다. LLM이 아니면 못 만드는 것(서술형 진단·교안 매핑)이 `/reports`의 본체다.
+**총점이 없다.** 이 구인은 보상을 허용하지 않고(자기 코드를 설명 못 하는데 대안을 잘 알아 총점이 높은 상태는 성립하면 안 된다), 총합은 결측을 0으로 만든다(안 물어본 단계와 못한 단계가 섞인다). 판정값은 `reachedStage`다.
 
-문제당 만점은 20(4단계 × 5). **재시험 판정은 문제 단위**이고, 커트라인은 조직 정책이라 Spring이 정한다 — AI는 `retestTargets`만 낸다.
+**세션 총점·축 평균도 보내지 않는다.** 점수는 이미 `problem_stage`에 매 턴 저장되어 있고, 요약이 필요하면 Spring이 집계한다. LLM이 아니면 못 만드는 것(서술형 진단·교안 매핑)이 `/reports`의 본체다.
+
+**재시험 판정은 문제 단위**다 — `retest`는 이 문제 하나에 대한 값이고(L1·L2 둘 다 통과해야 false), 세션 전체의 재시험 여부는 Spring이 문제 3개의 값을 모아 판단한다.
 
 ### 교안 분석
 
@@ -404,10 +520,35 @@ PDF가 항상 필요하므로 **multipart 하나만 받는다**(`payload` 문자
 
 ```jsonc
 // POST /api/v0/curricula        multipart/form-data → 202
-// payload = {"versionId": "ver-1", "modelCode": "glm-5.2"}
+// payload = {"versionId": "ver-1", "courseLabel": "Java",
+//             "providerModelCode": "minimaxai/minimax-m3"}
 // file    = 교안 PDF
 { "jobId": "…", "status": "QUEUED" }
 ```
+
+🔴 **`courseLabel`은 필수다** (2026-08-03). 생략하면 매니페스트 기본값 `'Java'`가 들어가
+다른 과정 교안에서 결과 언어·용어가 섞인다. 교안 업로드 화면이 과정을 이미 알고 있으므로
+기본값을 두지 않는다.
+
+**`teaches[]`가 문제 선정의 재료다.** `kind`·`evidence`·`siblingNames` 셋은 화면에 안 띄워도
+되지만 저장해뒀다가 `POST /analyses`에 실어 보내야 한다.
+
+```
+kind: CODE_EXAMPLE   코드 식별자 추출원 (st.title · function_tool 같은 이름이 여기서 나온다)
+kind: CAUTION        L4(언제 깨지는가) 재료 · 선별 순서 신호
+evidence             추가 식별자 추출원 — 정의 문장보다 코드 이름이 많다
+siblingNames         같은 unit의 다른 개념 = 교안이 대안을 가르쳤다는 신호
+```
+
+이 셋은 **p01-2가 이미 답에 담아 보내던 값**이라 LLM 호출이 늘지 않는다(`siblingNames`는
+unit 묶음에서 계산). 방향은 PM 설계 v2 §7 — 코드를 훑어 "중요해 보이는 곳"을 고르는 대신
+**교안에서 식별자 사전을 만들어 코드에서 찾는다.**
+
+**결과는 항상 한국어다.** 매니페스트(vendor)에 언어 지시가 없어 영어 교안을 넣으면 영어로
+나왔다 — 우리 소유 경로(`stages.call(extra_user=...)`)로 지시를 붙였다. `unitTitle`·
+`canonicalDescription`이 한국어가 되고, **기술 용어·API 이름·코드 식별자는 원문을 유지한다**
+(예: `guardrail(안전장치)`, `deterministic`). 억지로 옮기면 나중에 그 개념으로 문제를 낼 때
+교안 원문과 대조가 안 된다.
 
 ```jsonc
 // GET /api/v0/curricula/{jobId}  → 200 (result 부분)
@@ -420,7 +561,10 @@ PDF가 항상 필요하므로 **multipart 하나만 받는다**(`payload` 문자
       "teaches": [
         { "canonicalName": "try-except", "normalizedName": "try except",
           "canonicalDescription": "예외를 잡아 처리하는 구문",
-          "descriptionPageStart": 3, "descriptionPageEnd": 5 },
+          "descriptionPageStart": 3, "descriptionPageEnd": 5,
+          "kind": "CONCEPT",                      // CONCEPT | CODE_EXAMPLE | CAUTION
+          "evidence": "try 블록에서 …",            // 페이지 근거 요약
+          "siblingNames": ["finally", "raise"] },  // 같은 unit의 다른 개념
         { "canonicalName": "finally", "normalizedName": "finally",
           "canonicalDescription": null,
           "descriptionPageStart": null, "descriptionPageEnd": null }
@@ -446,8 +590,9 @@ app/
 ├─ main.py          앱 조립. 라우터 등록만. 로직 없음
 ├─ config.py        Settings — 환경변수 (engine_mode 포함)
 ├─ jobs.py          분석 job 인메모리 저장소 + 수명주기(상태 전이)
-├─ sessions.py      문답 세션 인메모리 저장소 + 진행(멱등)
+├─ sessions.py      문답 세션 진행 규칙 + 채점. **무상태** — 상태는 요청이 들고 온다
 ├─ reports.py       보고서 job 인메모리 저장소 (jobs.py와 형제)
+├─ usage.py         ai_usage 원장 행 만들기. 네 경로가 함께 쓴다
 ├─ api/             HTTP 계층 — 백엔드가 보는 면
 │  ├─ deps.py         인증
 │  ├─ errors.py       예외 핸들러
@@ -495,104 +640,84 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 ---
 
-## 5. 현재 상태와 앞으로
-
-### 지금
+## 5. 현재 상태
 
 | | |
 |---|---|
-| 엔드포인트 | **11/11 동작 (응답은 아직 스텁)** |
-| 테스트 | **112 passed** |
-| 붙일 수 있나 | **예.** 인증·에러 형식·camelCase·Swagger·`openapi.json`까지 완성 |
+| 기능 | **6/6 완성.** 교안 · 코드 분석 · 문제 선정 · 질문·힌트 동결 · 채점 · 보고서 |
+| 검증 | **전 구간 실호출 완주**(2026-08-04). 교안 → 분석 → 문답 11턴 → 보고서 2건 |
+| 엔드포인트 | **8/8 동작** (세션 무상태 전환으로 11 → 8) |
+| 테스트 | **254 passed** |
+| 계약 | **미결 0건.** DDL · `contextType` 값 집합 · `problemId` 사본 여부까지 확정 |
+| 배포 | App Runner 자동(`main` 푸시 = 배포). 팀원 소유 |
 
-**엔진 이식이 진행 중이다.** 룰 스캔 → 분석 문서 → 문제 선정 → L1·L2 질문·힌트 동결 → 채점까지 실호출로 동작을 확인했다(`app/engines/analysis/`). 팀원 PoC 규칙부와 NVIDIA 클라이언트는 **무수정 vendor**하고 우리 래퍼가 감싼다 — 갱신 절차는 각 `vendor/SOURCE.md`.
-
-엔드포인트 응답은 아직 스텁이라 **백엔드는 11개 전부 지금 바로 붙여볼 수 있다.**
-
-> ✅ 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례 대응), `focusItems`, `codeSnippet`, `requirementResults`, `bestScore`/`confirmedScore`, `analysisDocument`(JSON)가 전부 스펙에 있다.
->
-> ⚠️ **`ProblemStage.hints`의 `minItems: 2`는 사라졌다.** 혼합 모드(L1·L2 동결 / L3·L4 적응형)로 바뀌면서 축마다 채워지는 시점이 달라졌기 때문이다.
->
-> ```
-> L1·L2   questionText 필수 · hints 정확히 2개(hintLevel 1, 2 순서)
-> L3·L4   questionText null · hints 빈 배열      ← 세션 중 생성
-> ```
->
-> 이 규칙은 **축에 따라 달라지는 조건부 제약이라 OpenAPI 문법으로 표현이 안 된다.** 스키마 검증기가 막고 있고 여기 산문으로만 적혀 있다.
->
-> ⏳ **아직인 것**: p04-2(요구사항 P/F), 엔진 조립(`engine_mode="real"`), 배치 병렬화, 세션 엔드포인트 축소. 순서는 `PLAN_FASTAPI_MIGRATION.md`.
-
-### 백엔드 대기 2건
-
-이슈 `Team-IZ/Backend#31` 본문이 현재 상태판이다.
-
-| # | 내용 | 우리 작업을 막나 |
-|---|---|---|
-| C-4 | `source_type` 값 목록 | 아니다. 형식만 지키고 값은 나중에 맞춘다 |
-| C-5 | `curriculum_analysis.extraction_status`·`quality_status` 코드 카탈로그 | 아니다. CHECK가 없어 `str`로 두고 나중에 맞춘다 |
-
-C-1~C-3은 **회신 완료**다.
-
-- **C-1** 분석 요청에 `focusItems: [{id, name}]`를 싣고 AI가 `questionFocusItemId`로 하나를 돌려준다
-- **C-2** `score_run`·`axis_score` 제거 예정. 점수의 단일 소유자는 `problem_stage`이고 축 어휘는 `'L1'`~`'L4'` 한 벌
-- **C-3** **비용은 Spring이 계산한다.** AI는 토큰·모델·지연·상태만 보낸다. 모델을 고르는 주체가 백엔드·프론트라 단가도 그쪽이 먼저 안다
-
-DDL 수정 요청 4건(`attempt_count` 0~3 · `attempt_no=3` 허용 · `stage_answer_attempt` NULL 허용 + all-or-nothing CHECK · `TERMINATED_AT_L1` 코드값)도 같은 이슈에 있다.
-
-### 앞으로
+### 실측 (무료 티어)
 
 ```
-세션 시작 시 질문 생성 제거 — 질문은 분석 때 동결돼 DB에 있다 (세션 엔드포인트 축소와 함께)
-엔진 이식 (팀원 PoC feat/poc_full) — P02 규칙부, P04 LLM 스테이지
-(먼 항목) 적응형 힌트 모듈 대응 — 턴당 2콜, 힌트용 featureCode, 체크포인트 단위 모드 고정
+/curricula   34쪽 PDF   310초   섹션 15 · teach 58
+/analyses    7파일      221초   문제 2 + 문항없음 1 · 5회 재현
+채점         성공 콜 중앙 14.5초 · 턴 왕복 중앙 21.3초 · 최대 141.9초
+/reports     2건 병렬 50.5초 (순차였다면 101초)
 ```
 
-완료: 세션 턴 점수 필드 · `aiUsage` 스키마 · `/curricula` 신설 · `openapi.json` 갱신.
+🔴 **성공 콜은 목표(15초) 안에 든다. `HTTP 529 Overloaded` 재시도가 그 위에 얹힌다.**
+모델 교체로 안 풀린다 — 12종 실측. 유료 전환이 근본 해결이다.
 
-**미확정값** — 힌트 점수 상한 `{5, 4, 3}`, 재시험 커트라인, `ai_usage.source_type` 값 목록. 세부 순서·방법은 **`PLAN_FASTAPI_MIGRATION.md`**에 있다.
+⚠️ **백엔드는 `retryable: true`면 같은 `clientRequestId`로 재전송해야 한다.** 안 하면
+무료 티어에서 세션이 끊긴다. 채점 타임아웃은 30초 이상으로 잡는다.
+
+### 아직인 것
+
+```
+백엔드 연동          백엔드가 AI 연동 도메인을 아직 안 만들었다
+RELATED_CONTEXT 참조  심볼 테이블이 없어 못 만든다
+교안 대형 PDF 상한    34쪽 310초. 200쪽을 외삽할 수 없다
+선별 로직 교체        교안 사전 기반(PM 설계 v2 §7). 재료는 확보, 교체는 미착수
+```
+
+세부 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
 ---
 
 ## 6. 팀원 PoC 브랜치
 
-엔진은 여기서 이식한다. 브라우저에서 도는 PoC이고 LLM 호출은 Cloudflare Worker 프록시를 거친다.
+엔진은 여기서 이식했다. **이식은 끝났고 지금은 참조용이다.**
 
 | 브랜치 | 내용 | 워크트리 |
 |---|---|---|
-| **`feat/poc_full`** | **통합 PoC(P04).** 이식 대상 | `../ai_poc/poc_full` |
+| `feat/poc_full` | 통합 PoC(P04) — 이식 원본 | `../ai_poc/poc_full` |
 | `feat/code_Q&A` | 구 P02 코드분석 / P03 문답 | `../ai_poc/qna` |
 | `feat/pdf_analysis` | P01 교안 분석 | `../ai_poc/pdf` |
+| `feature/code-importance-map` | import 그래프 — `materialize.py`·`imports.py` 원본 | (없음) |
 
-워크트리는 **읽기 전용(detached HEAD)** 이다. 절대 수정·커밋하지 않는다. 팀원 코드를 고쳐야 하면 팀원에게 요청한다.
+🔴 **워크트리는 읽기 전용(detached HEAD)이다.** 수정·커밋하지 않는다. 팀원 코드를 고쳐야
+하면 팀원에게 요청한다.
 
-### 이식할 때
-
-- **JS는 설계 선택이 아니라 브라우저 제약의 결과다.** CORS·키 노출 때문에 프록시를 거쳐야 했고 UI가 얽혀 있었다. 서버에는 그 제약이 없으므로 **전부 Python으로 옮긴다.** Node를 띄우지 않는다
-- **프롬프트·파라미터는 매니페스트가 계약이다.** P04는 `app/prompt_manifest.json` + `app/scoring-config.js` 두 파일. 프롬프트만 바뀌면 이 파일들만 다시 가져오면 되고, 제어 흐름이 바뀔 때만 코드를 손댄다
-- **질문·힌트 동결(`hint-ladder.js`)은 그대로 옮긴다.** 문제 하나당 L1~L4 질문 4개 + 힌트 8개를 한 번에 만들어 `frozen_at`을 찍는 구조가 우리 계약과 같다
-- 🔴 **PoC의 축 순서가 우리와 반대다.** `scoring-config.js`가 L3=반례, L4=대안이다. 이식할 때 `AXES`의 `order`·`label`·루브릭 텍스트를 L3↔L4 교환한다. 순서만 맞추고 루브릭을 그대로 두면 L3 답변이 L4 기준으로 채점된다. 워크트리는 읽기 전용이므로 원본 정정은 팀원에게 요청한다
-- **잘라낼 것**: Supabase 저장(DB 주인은 Spring), Worker LLM 프록시(서버는 직접 호출), IndexedDB·sessionStorage, UI·타이머, 브라우저 pdf.js(서버 라이브러리로 교체 — 결과가 동일하지 않다)
-- **규칙 스캔부는 CPU라 이벤트 루프를 막을 수 있다.** `async def` 안에서 동기로 돌리면 문답 중인 학생까지 굳는다. `def`(threadpool)나 `run_in_executor`로 뺀다
+프롬프트·규칙부는 `app/engines/analysis/vendor/`에 vendor해 두고 우리 래퍼가 감싼다.
+**갱신은 덮어쓰기 복사라 우리 수정이 사라진다** — 절차는 `복사 → PATCHES.md 재적용 →
+pytest tests/test_vendor_patches.py`. 기준 커밋은 `vendor/SOURCE.md`.
 
 ---
 
 ## 7. 개발 규칙
 
-**브랜치**: `feature/*` → 동작·테스트 완료 후 `main` → `main` 기준 `develop` 생성 → 이후 `develop`에서 수정·테스트 후 `main` 병합. 기본 브랜치는 `develop`.
+**브랜치**: `feature/*` → 동작·테스트 통과 후 `develop` → 검증 끝난 것만 `main`.
+기본 브랜치는 `develop`이고 **`main`이 배포 브랜치다.**
 
-**커밋**
+⚠️ **`main` 머지 = 즉시 재배포**이므로 진행 중인 `/analyses`·`/reports` job이 사라진다
+(세션은 무상태라 안 깨진다). **머지 시점은 백엔드와 맞춘다.**
 
-```
-type: short description (#issue)
-```
+⚠️ **인스턴스는 1개로 고정한다.** job 저장소가 인메모리 dict라 2개면 만든 프로세스와
+조회 프로세스가 달라져 폴링이 404다.
 
-`feat` `fix` `refactor` `style` `docs` `chore` `remove` 중 하나. 동사원형 소문자로 시작, 마침표 없음, 50자 이내, 이슈가 있으면 번호 필수.
+**커밋**: `type: short description (#issue)` — `feat` `fix` `refactor` `style` `docs`
+`chore` `remove`. 동사원형 소문자 시작, 마침표 없음, 50자 이내, 이슈 있으면 번호 필수.
 
-**PR**: 제목 `[feat] add login page UI`, 본문에 `closes #번호`. 1 PR = 1 기능, 파일 10개 이내 권장, 최소 1인 승인.
+**PR**: 제목 `[feat] add login page UI`, 본문에 `closes #번호`. 1 PR = 1 기능,
+파일 10개 이내 권장, 최소 1인 승인.
 
-**커밋 전 확인**: `.env` 스테이징 금지, 브랜치 확인, 빌드 통과, 디버그 로그 제거, `main`/`develop` 직접 작업 금지.
-
-상세는 `../rule/개발/이슈 O/Git 커밋 & PR 가이드.docx`.
+**커밋 전**: `.env` 스테이징 금지, 브랜치 확인, 테스트 통과, 디버그 로그 제거,
+`main`/`develop` 직접 작업 금지.
 
 ---
 
@@ -600,15 +725,18 @@ type: short description (#issue)
 
 | 문서 | 내용 |
 |---|---|
-| `PLAN_FASTAPI_MIGRATION.md` | AI 파트 작업 계획·진행 (내부용) |
-| `../qna/2026-07-30/issue-body-v2.md` | 백엔드 이슈 #31 본문 사본 — **AI↔백엔드 현재 상태판** |
-| `../output_docs/AI파트_현황.md` | 팀 공유용 현황 요약 |
+| `PLAN_FASTAPI_MIGRATION.md` | 작업 계획·진행 (내부용) |
+| `openapi.json` | 기계용 계약. `tests/test_openapi.py`가 드리프트를 막는다 |
+| `../test_folder/` | **4단계 실호출 데이터.** 백엔드가 주고받을 형식 그대로 |
+| `../qna/2026-08-03/issue-body-v2.md` | 백엔드 이슈 `#42` 본문 |
+| `../qna/2026-08-04/` | 이슈 `#42` 회신·확인 |
+| `../output_docs/AI파트_현황.md` | 팀 공유용 현황 |
 | `../output_docs/미결_논의사항.md` | 아직 안 정해진 것 |
-| `../docs/docs_for_read/테이블정의서_v06.md` | DB 테이블·CHECK 제약 (2026-07-30 변환) |
-| `../docs/AI-Backend_API_명세서_v0.1.md` | AI↔Backend 전체 계약 (내용은 v0.2) |
-| `../docs/docs_for_read/` | 기획·요구사항 문서 Markdown 변환본 |
+| `../docs/docs_for_read/` | 기획·요구사항 Markdown 변환본 |
 | `../rule/개발/이슈 O/` | 커밋·PR 규칙 |
 
-`../docs/`의 문서는 확정 스펙이 아니라 바뀔 수 있는 기획 자료다. 실제 코드나 최근 논의와 어긋나면 문서를 맹신하지 말고 확인 후 진행한다.
+⚠️ **`../docs/`는 확정 스펙이 아니라 바뀔 수 있는 기획 자료다.** 실제 코드나 최근 논의와
+어긋나면 문서를 맹신하지 말고 확인 후 진행한다. ⚠️ **이슈 `#31`과
+`../qna/2026-08-03/issue-body.md`는 폐기다.**
 
-`_legacy/`는 재구축 이전 구현의 로컬 사본이다. `.gitignore` 대상이라 커밋되지 않으며 모듈화 참고용으로만 둔다.
+`_legacy/`는 재구축 이전 구현의 로컬 사본이다. `.gitignore` 대상이라 커밋되지 않는다.

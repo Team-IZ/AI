@@ -5,7 +5,7 @@ JSON으로 값만 뽑지 않는 이유: 각 수치의 출처(제도값 / 미측�
 자산이다. 축 순서는 이미 한 번 뒤집혀 사고가 났던 자리다.
 
 ★ 수치의 출처
-  pass=3 · MAX_HINTS_PER_LEVEL=2 · HINT_CAPS={0:5,1:4,2:3}
+  pass=3 · MAX_HINTS_PER_LEVEL=2 · 점수 상한 없음(2026-08-03 폐기)
       실측값이 아니라 **사용자가 지정한 제도값**이다. 보정 대상이 아니다.
   AXIS_WEIGHTS
       **미측정.** 완주 세션 30건이 쌓이면 축별 점수 분포·통과율로 재보정한다.
@@ -98,13 +98,18 @@ PASS_SCORE = 3            # 이 점수 이상이어야 다음 단계로
 MAX_HINTS_PER_LEVEL = 2   # 단계당 힌트 상한. 소진 후 미달 = 그 문제 종료
 QUESTIONS_PER_SUBMISSION = 3
 
-# 힌트 사용 횟수 → 그 단계에서 받을 수 있는 점수 상한.
-# graduated prompting(Campione & Brown, 1987): "몇 번째 힌트에서 통과했는가"가
-# 자력의 측정값이 되도록, 도움을 받을수록 도달 가능한 최대치를 낮춘다.
-HINT_CAPS = {0: 5, 1: 4, 2: 3}
+# 🔴 **점수 상한은 폐기됐다** (2026-08-03).
+#
+# 옛 `HINT_CAPS = {0: 5, 1: 4, 2: 3}`은 graduated prompting(Campione & Brown, 1987)에서
+# 온 값으로, "몇 번째 힌트에서 통과했는가"를 점수에 눌러 담는 장치였다. 백엔드가
+# `problem_stage`를 새로 짜면서 **질문·힌트1·힌트2 각각의 점수를 따로 저장**하게 됐고,
+# 그 순간 눌러 담을 이유가 사라졌다 — 어느 답변이 몇 점이었는지가 DB에 그대로 남는다.
+#
+# **AI는 채점만 하고 가공하지 않는다.** 상한이 필요하면 백엔드·화면이 정한다.
+# 비교 가능성은 "사다리 강도·횟수가 같다"로 보장되며, 상한은 그 근거가 아니었다.
 
-# 힌트 사용 횟수 → 자력 판정. 점수와 별개로 남겨 ZPD("혼자 할 수 있는 것"과
-# "도움받으면 할 수 있는 것"의 거리)를 보고서에서 읽게 한다.
+# 힌트 사용 횟수 → 자력 판정. **응답에는 싣지 않는다** — 어느 슬롯이 통과했는지로
+# 백엔드가 파생할 수 있어서다(#42 §4-2). 보고서 서술에서만 내부적으로 쓴다.
 AUTONOMY = {0: "SELF", 1: "SELF_MAINTAINED", 2: "PARTIAL"}
 
 # 힌트 = **재진술**이다. spec 문자열은 p04-7의 {hint_strength_spec}으로 그대로 주입된다.
@@ -169,11 +174,6 @@ RETEST_TRIGGER_AXES = ("L1", "L2")
 def is_retest_target(passed_by_axis: dict[str, bool]) -> bool:
     """이 문제가 재시험 대상인가. 미도달 단계는 통과 안 한 것으로 본다."""
     return not all(passed_by_axis.get(axis, False) for axis in RETEST_TRIGGER_AXES)
-
-def cap_for(hints_used: int) -> int:
-    """힌트를 그만큼 썼을 때 받을 수 있는 최대 점수."""
-    return HINT_CAPS.get(hints_used, min(HINT_CAPS.values()))
-
 
 def autonomy_for(hints_used: int) -> str:
     return AUTONOMY.get(hints_used, "PARTIAL")

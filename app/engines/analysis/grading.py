@@ -21,11 +21,12 @@ class Grade:
     """한 단계 한 시도의 채점 결과."""
 
     axis_code: str
-    best_score: int              # 루브릭 원점수 0~5. 힌트 상한 적용 전
-    confirmed_score: int         # 상한 적용 후. DB problem_stage에 남는 값
+    # 🔴 점수는 하나다 (2026-08-03). 옛 best/confirmed 두 필드는 힌트 상한을 적용하기
+    # 전후를 나눈 것인데, 상한 자체가 폐기됐다(scoring.py 주석). **AI는 채점만 한다.**
+    score: int                   # 루브릭 원점수 0~5
     hints_used: int
     passed: bool
-    autonomy: str                # SELF · SELF_MAINTAINED · PARTIAL
+    autonomy: str                # SELF · SELF_MAINTAINED · PARTIAL. 응답엔 안 나가고 보고서 서술에만 쓴다
     matched_level: str           # 이 점수를 준 근거가 된 루브릭 단계 서술
     evidence: str                # 답변에서 그 판단의 근거가 된 부분
     missing: str                 # 한 단계 위를 받으려면 뭐가 더 있어야 했는지
@@ -40,13 +41,56 @@ def _hints_block(hints: list[str]) -> str:
     return "\n".join(f"힌트 {i}: {text}" for i, text in enumerate(hints, start=1))
 
 
+# 맥락 블록 상한. 넘으면 자른다 — 채점은 문제당 12콜이라 여기가 부풀면 전체 비용이 는다.
+# ponytail: 문자 수로 자른다. 토큰으로 재는 것은 모델별 토크나이저가 필요해질 때.
+_CONTEXT_LIMIT = 2000
+
+
+def _context_block(context: dict[str, Any] | None) -> str:
+    """분석 문서의 `overview` + `structure`만 프롬프트용 문장으로 만든다.
+
+    **코드 파편 하나로는 전체 흐름이 안 보인다** — MVC면 model·view·controller가
+    다른 파일에 있고 클래스 정의도 다른 파일일 수 있다. 학생이 "컨트롤러가 서비스에
+    위임한다"고 답해도 파편만 본 채점기는 그게 사실인지 모른다.
+
+    **문서를 통째로 넣지 않는 이유**: `decisionPoints`가 부피의 대부분인데 문제 후보
+    전체 목록이라 채점에는 쓸모가 없다(문제는 이미 정해졌다). 20KB를 채점 36회에
+    넣으면 콜당 5,000~7,000토큰이다. 두 필드만 뽑으면 500~800토큰이다.
+    """
+    if not context:
+        return ""
+
+    lines: list[str] = []
+    overview = str(context.get("overview") or "").strip()
+    if overview:
+        lines.append(overview)
+    for area in context.get("structure") or []:
+        if not isinstance(area, dict):
+            continue
+        files = ", ".join(str(f) for f in (area.get("files") or []))
+        lines.append(f"- {area.get('area', '')} ({files}): {area.get('role', '')}")
+
+    if not lines:
+        return ""
+    body = "\n".join(lines)[:_CONTEXT_LIMIT]
+    return (
+        "\n\n## 코드 전체 맥락 (참고용)\n"
+        f"{body}\n\n"
+        "- 위 맥락은 답변이 코드 사실과 맞는지 볼 때만 참고하라. "
+        "채점 기준은 위 채점 축의 값 단계 서술뿐이고, 맥락을 근거로 기준을 늘리지 마라."
+    )
+
+
 def grade(axis_code: str, question: str, answer: str, *, model_code: str,
           hints: list[str] | None = None, code_snippet: str = "",
-          code_ref: str = "") -> Grade:
+          code_ref: str = "", analysis_context: dict[str, Any] | None = None) -> Grade:
     """답변 하나를 채점한다.
 
     hints는 이 시도 전에 학생이 받은 힌트들이다. 길이가 곧 hintsUsed이고,
     그게 점수 상한(5/4/3)과 자력 판정을 정한다.
+
+    analysis_context는 분석 문서의 `{overview, structure}`다. 없으면 파편만으로
+    채점한다 — 있던 동작 그대로다.
     """
     hints = hints or []
     hints_used = len(hints)
@@ -60,7 +104,10 @@ def grade(axis_code: str, question: str, answer: str, *, model_code: str,
         "code_ref": code_ref or "-",
         "answer": answer,
     }, model_code=model_code, timeout_s=client.SESSION_TIMEOUT_S,
-       max_attempts=client.SESSION_MAX_ATTEMPTS)
+       max_attempts=client.SESSION_MAX_ATTEMPTS,
+       # 매니페스트(vendor)에 자리가 없어 프롬프트 끝에 덧붙인다. vendor를 고치면
+       # 팀원 갱신 때마다 재적용해야 하므로 우리 소유 경로로 해결한다.
+       extra_user=_context_block(analysis_context))
 
     raw = result.data.get("score")
     try:
@@ -70,22 +117,20 @@ def grade(axis_code: str, question: str, answer: str, *, model_code: str,
         # 예외로 올려 재시도·PARTIAL 판정에 맡긴다.
         raise stages.StageError(f"p04-5: score가 정수가 아닙니다: {raw!r}", result.usages)
 
-    confirmed = min(best, scoring.cap_for(hints_used))
-    passed = confirmed >= scoring.PASS_SCORE
+    passed = best >= scoring.PASS_SCORE
 
     # 모델이 낸 도달 판정(vendor P-1). 점수(척도)와 도달(판정)을 따로 받아 교차 검증한다.
     #
-    # **어긋나면 점수를 따른다.** 힌트 상한이 점수에 걸리므로 통과 판정이 점수와 따로 놀면
-    # "5점인데 미달" 같은 상태가 생긴다 — 점수가 상한·자력 판정·정렬 tie-break의 근거라
-    # 그쪽을 단일 기준으로 둔다. 불일치는 버리지 않고 남긴다: 루브릭 문구와 도달 기준이
+    # **어긋나면 점수를 따른다.** 통과선(3점)이 계약이고 DB CHECK도 `passed=TRUE AND
+    # score>=3`으로 강제한다 — 모델 판정을 따르면 "5점인데 미달" 행이 만들어져 INSERT가
+    # 깨진다. 불일치는 버리지 않고 남긴다: 루브릭 문구와 도달 기준이
     # 서로 다른 말을 하고 있다는 신호이고, 쌓이면 루브릭을 고쳐야 한다는 뜻이다.
     raw_reached = result.data.get("reached")
     model_reached = bool(raw_reached) if isinstance(raw_reached, bool) else None
 
     return Grade(
         axis_code=axis_code,
-        best_score=best,
-        confirmed_score=confirmed,
+        score=best,
         hints_used=hints_used,
         passed=passed,
         autonomy=scoring.autonomy_for(hints_used),

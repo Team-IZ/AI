@@ -17,18 +17,20 @@ class CurriculumRequest(BaseSchema):
 
     version_id: str = Field(description="Spring curriculum_version 키(에코용)")
     curriculum_id: str | None = None
-    course_label: str | None = Field(
-        default=None, max_length=80,
-        description="과정명(예: 'SQL', 'Java'). 프롬프트 프레이밍에 쓴다 — 생략하면 "
-                    "매니페스트 기본값('Java')이 들어가고, 다른 과정 교안이면 "
-                    "모델이 흔들려 결과 언어·용어가 섞인다",
+    course_label: str = Field(
+        min_length=1, max_length=80,
+        description="🔴 **필수다.** 과정명(예: 'SQL', 'Java', 'AI Agent'). 프롬프트 "
+                    "프레이밍에 쓴다 — 없으면 매니페스트 기본값('Java')이 들어가고, "
+                    "다른 과정 교안이면 모델이 흔들려 결과 언어·용어가 섞인다. "
+                    "**교안 업로드 화면이 과정을 이미 알고 있으므로 기본값을 두지 않는다** "
+                    "(2026-08-03 확정)",
     )
-    model_code: str | None = Field(
-        default=None, description="생략 시 서버 기본값. operator가 고른다"
+    provider_model_code: str | None = Field(
+        default=None,
+        description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code`"
+                    "(벤더 접두어 포함). 생략 시 서버 기본값. operator가 고른다",
     )
-    callback_url: str | None = Field(
-        default=None, description="완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현"
-    )
+    # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다.
 
 
 class CurriculumAccepted(BaseSchema):
@@ -36,6 +38,15 @@ class CurriculumAccepted(BaseSchema):
 
     job_id: str
     status: Literal["QUEUED"]
+
+
+# 교안 항목의 성격. p01-2가 이미 이 값으로 답한다 — 예전엔 받고도 버렸다.
+#
+# 🔴 **문제 선정의 재료다** (PM 설계 v2 §7). 개념이 코드 어디 있는지 찾을 때
+#   CODE_EXAMPLE  식별자 추출원. `st.title`·`function_tool` 같은 이름이 여기서 나온다
+#   CAUTION       "언제 깨지는가"(L4)의 재료이자 선별 순서 신호
+#   CONCEPT       개념 정의. L1 재료
+TeachKind = Literal["CONCEPT", "CODE_EXAMPLE", "CAUTION"]
 
 
 class Teach(BaseSchema):
@@ -48,6 +59,25 @@ class Teach(BaseSchema):
     )
     description_page_start: int | None = Field(default=None, ge=1)
     description_page_end: int | None = Field(default=None, ge=1)
+
+    # ── 아래 3개는 2026-08-04 추가. **LLM 호출이 늘지 않는다** ──────────────
+    # p01-2가 이미 `kind`·`evidence`를 답에 담아 보내는데 우리가 버리고 있었다.
+    # `siblings`는 같은 unit의 다른 개념이라 계산만 하면 된다.
+    kind: TeachKind = Field(
+        default="CONCEPT",
+        description="교안 항목의 성격. **화면은 CONCEPT만 보여주면 된다** — "
+                    "나머지 둘은 문제 선정 재료라 저장만 하면 됩니다",
+    )
+    evidence: str | None = Field(
+        default=None,
+        description="이 개념이 나온 페이지 근거를 모델이 짧게 옮긴 것. "
+                    "코드 식별자가 여기 들어 있는 경우가 많아 사전 추출원으로 쓴다",
+    )
+    sibling_names: list[str] = Field(
+        default_factory=list,
+        description="같은 unit의 다른 개념 이름들. **교안이 대안을 가르쳤다는 신호**이고 "
+                    "L3(대안 비교) 질문의 재료다. `normalizedName` 기준",
+    )
 
     @model_validator(mode="after")
     def _check_pages(self) -> "Teach":
