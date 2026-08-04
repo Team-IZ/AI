@@ -101,7 +101,20 @@ alter default privileges in schema pdf_analysis grant all on sequences to anon, 
 -- this one tool's own future runs. DROP+CREATE (not CREATE OR REPLACE) because the new
 -- source_tool column sits in the middle of the existing column order and Postgres won't
 -- let CREATE OR REPLACE VIEW reorder/insert columns, only append at the end.
-create view public.pdf_analysis_units_view as
+-- D-fix (redteam audit H6 companion, 2026-08-04, found during cross-check on
+-- Team-IZ-AI-poc's db/migrations/p04_timing_schema.sql): same missing security_invoker
+-- gap as p04_timing_view -- ran with definer rights (view owner's permissions) regardless
+-- of the underlying pdf_analysis.runs/public.runs RLS policy. m.email/m.display_name are
+-- NOT removed here (unlike p04_timing_view) -- this view's own purpose is a "비교/리뷰
+-- 도구" that deliberately shows who uploaded what, so attribution is the point, not
+-- incidental PII. The underlying RLS on both source tables is already `using (true)`
+-- (public to all authenticated, by this repo's own documented design), so
+-- security_invoker=true doesn't change what's visible today -- it's added so that if that
+-- RLS is ever tightened later, this view actually inherits the tightening instead of
+-- silently continuing to bypass it via definer rights.
+create view public.pdf_analysis_units_view
+with (security_invoker = true)
+as
 with combined as (
   select r.id as run_id, r.member_id, r.model, r.status, r.started_at,
          r.input_meta->>'source_filename' as source_filename,
