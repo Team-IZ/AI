@@ -153,6 +153,19 @@ const CodeFragment = (() => {
    *   app/engines/codemap/shortlist.py)은 결과가 통째로 비어버린다. 여기서는 그 파일만
    *   건너뛰고 다음 파일을 계속 시도한다.
    */
+  // D-fix (redteam audit H4, 2026-08-04): a submitted file containing a literal ``` line
+  // used to close the fence early, dumping the rest of that file's content into the
+  // prompt's instruction-level context (unfenced) -- e.g. a fake "## 규칙" section could
+  // follow, and the model has no structural way to tell it apart from the real prompt.
+  // CommonMark's own rule for this: a fence only closes on a run of backticks *at least
+  // as long as* the one that opened it, so a fence longer than any backtick run inside
+  // the content can never be closed early by that content, regardless of what it says.
+  function fenceFor(text) {
+    const runs = String(text).match(/`+/g) || [];
+    const longest = runs.reduce((max, run) => Math.max(max, run.length), 0);
+    return "`".repeat(Math.max(3, longest + 1));
+  }
+
   function buildCodeBlock(files, { maxChars = 12000, order = null } = {}) {
     const paths = Array.isArray(order) && order.length
       ? order.filter((p) => Object.prototype.hasOwnProperty.call(files, p))
@@ -161,7 +174,8 @@ const CodeFragment = (() => {
     const included = [];
     const omitted = [];
     for (const path of paths) {
-      const chunk = `### ${path}\n\`\`\`\n${files[path]}\n\`\`\`\n\n`;
+      const fence = fenceFor(files[path]);
+      const chunk = `### ${path}\n${fence}\n${files[path]}\n${fence}\n\n`;
       if (used + chunk.length > maxChars) { omitted.push(path); continue; }
       included.push(chunk);
       used += chunk.length;
@@ -173,7 +187,7 @@ const CodeFragment = (() => {
     return block;
   }
 
-  return { extractFragment, locateSymbol, formatRef, formatFragmentBlock, buildCodeBlock, resolveFile };
+  return { extractFragment, locateSymbol, formatRef, formatFragmentBlock, buildCodeBlock, resolveFile, fenceFor };
 })();
 
 // D-poc13: 브라우저에는 module이 없어 no-op. node --test에서 이 파일의 순수 로직을

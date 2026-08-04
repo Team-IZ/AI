@@ -28,9 +28,32 @@ const Requirements = (() => {
     return requirements.map((req, i) => {
       const r = results[i];
       if (!r) return { requirement: req, verdict: "F", evidence: null, note: "모델이 이 요구사항에 대한 판정을 반환하지 않음" };
-      return { requirement: req, verdict: r.verdict === "P" ? "P" : "F", evidence: r.evidence || null, note: r.note || "" };
+      let verdict = r.verdict === "P" ? "P" : "F";
+      let note = r.note || "";
+      // D-fix (redteam audit H4, 2026-08-04): decision_points/topics는 이미
+      // CodeFragment.extractFragment로 실제 파일과 대조하는데(D-poc10), 이 판정만 모델의
+      // evidence를 무검증으로 채택했다 -- 제출 코드에 가짜 "## 규칙" 섹션을 심어 P를
+      // 유도하는 프롬프트 인젝션의 최종 착지점이 여기였다. P 판정은 evidence.symbol이
+      // 실제 소스에 존재할 때만 살아남는다; 못 찾으면(지어낸 코드거나 file이 틀렸으면)
+      // F로 강등한다 -- "있을 법한 P"보다 "근거 확인된 F"가 안전하다.
+      if (verdict === "P") {
+        const grounded = CodeFragment.extractFragment(files, {
+          file: r.evidence && r.evidence.file,
+          symbol: r.evidence && r.evidence.symbol,
+        });
+        if (!grounded.valid) {
+          verdict = "F";
+          note = `근거 코드를 확인할 수 없어 F로 강등(${grounded.reason})${note ? " -- " + note : ""}`;
+        }
+      }
+      return { requirement: req, verdict, evidence: r.evidence || null, note };
     });
   }
 
   return { judge, formatBlock };
 })();
+
+// D-fix (redteam audit H4, 2026-08-04): same export-guard pattern as the sibling
+// code-fragment.js in this directory, added so node --test can require() the real
+// judge() to verify the grounding check without duplicating its logic in a test.
+if (typeof module !== "undefined" && module.exports) module.exports = Requirements;
