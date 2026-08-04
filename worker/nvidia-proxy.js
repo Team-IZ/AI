@@ -459,7 +459,14 @@ export default {
     // GET /?traffic=1 -- D160: recent actual NVIDIA request timestamps (every attempt,
     // first + retries, from every client through this Worker) for debug-traffic.js (upstream).
     // Read-only, best-effort -- never blocks or affects job submission/polling.
+    // D-fix (redteam audit H8, 2026-08-04): this had no auth check at all -- unlike
+    // ?models=1 right above, which already gates on x-nvidia-api-key. The origin
+    // allowlist (isAllowedOrigin/D-fix15) only stops a browser from a disallowed origin;
+    // it does nothing against a direct curl. An unauthenticated caller could hit this in
+    // a loop and exhaust the Worker owner's daily KV list() quota. Same gate as ?models=1.
     if (request.method === "GET" && url.searchParams.has("traffic")) {
+      const trafficApiKey = request.headers.get("x-nvidia-api-key");
+      if (!trafficApiKey) return jsonResponse({ error: "missing x-nvidia-api-key header" }, 401, origin);
       const list = await env.NVIDIA_JOBS.list({ prefix: "traffic:" });
       const timestamps = list.keys
         .map((k) => Number(k.name.split(":")[1]))
