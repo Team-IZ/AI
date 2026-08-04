@@ -8,11 +8,9 @@ import uuid
 
 from datetime import datetime, timezone
 
-from pydantic import ValidationError
-
 from app.engines.base import AnalysisEngine
 from app.schemas.analysis import AnalysisJobStatus, AnalysisRequest, AnalysisResult
-from app.schemas.usage import AiUsage
+from app.usage import to_ai_usage
 
 # job_id
 _jobs: dict[str, AnalysisJobStatus] = {}
@@ -40,33 +38,6 @@ def create_job(body: AnalysisRequest, idempotency_key: str | None) -> AnalysisJo
         _job_id_by_idempotency_key[idempotency_key] = job.job_id
     return job
 
-def _to_ai_usage(raw_usages: list[dict], job_id: str,
-                 idempotency_key: str | None, trace_id: str | None) -> list[AiUsage]:
-    """엔진이 모은 호출 기록에 **요청 범위 값**을 채워 원장 행으로 만든다.
-
-    엔진은 job_id도 헤더도 모른다(알 이유도 없다). 반대로 `llm/client.py`는 어느
-    기능이 불렀는지 모른다 — 그건 엔진이 `feature_code`로 찍어 보낸다. 셋이 나눠
-    채우는 구조이고 마지막 조각이 여기다.
-
-    **한 줄이 깨져도 나머지는 보낸다.** 원장은 과금 근거라 "일부라도" 남는 게
-    "전부 없음"보다 낫다. 실패한 호출도 토큰을 태웠기 때문이다.
-    """
-    rows: list[AiUsage] = []
-    for i, usage in enumerate(raw_usages, start=1):
-        try:
-            rows.append(AiUsage.model_validate({
-                "source_type": "ANALYSIS",     # 값 목록은 백엔드 확정 대기(C-4)
-                "source_id": job_id,
-                "request_id": job_id,
-                "trace_id": trace_id or job_id,
-                "idempotency_key": idempotency_key or f"{job_id}:ANALYSIS:{i}",
-                **usage,
-            }))
-        except ValidationError:
-            continue
-    return rows
-
-
 def run_analysis(
     job_id: str, body: AnalysisRequest, engine: AnalysisEngine, zip_bytes: bytes | None,
     *, idempotency_key: str | None = None, trace_id: str | None = None,
@@ -86,8 +57,8 @@ def run_analysis(
         raw = engine.analyze(body.model_dump(), zip_bytes)
         # 원장은 결과와 별개다. **검증 실패로 결과를 버려도 태운 토큰은 남긴다** —
         # 그래서 model_validate보다 먼저 떼어낸다.
-        job.ai_usage = _to_ai_usage(raw.pop("ai_usage", []), job_id,
-                                    idempotency_key, trace_id)
+        job.ai_usage = to_ai_usage(raw.pop("ai_usage", []), "ANALYSIS", job_id,
+                                   idempotency_key=idempotency_key, trace_id=trace_id)
         result = AnalysisResult.model_validate(raw)  # 계약 위반은 여기서 예외
 
         # 요구사항 판정은 빠짐없이 와야 한다. 모델이 몇 개를 조용히 빠뜨리면
@@ -99,10 +70,30 @@ def run_analysis(
             )
 
         job.result = result
-        job.status = "SUCCEEDED"
+        # 🔴 **부분 성공을 SUCCEEDED로 덮지 않는다** (2026-08-03, `analysis_job.status`에
+        # `PARTIAL`이 있다). 요구사항 판정은 문답과 독립이라 실패해도 문제·질문·힌트는
+        # 정상으로 나가는데(엔진이 verdict='F' + "판정 실패" note로 채운다), 그걸
+        # SUCCEEDED로 보내면 **화면에 "요구사항 전부 미충족"이 사실처럼 뜬다.**
+        # 실호출에서 실제로 나오는 경로다.
+        failed_judgements = sum(
+            1 for r in result.requirement_results
+            if (r.note or "").startswith("판정 실패")
+        )
+        job.status = "PARTIAL" if failed_judgements else "SUCCEEDED"
+        if failed_judgements:
+            job.failure_reason = (
+                f"요구사항 판정 {failed_judgements}건이 실패했습니다. "
+                f"문제·질문·힌트는 정상입니다"
+            )
     except Exception as exc:
         # 엔진 터지거나 계약 어기면 job FAILED로. 예외 삼키지 말고 사유 기록
         job.status = "FAILED"
         job.failure_reason = str(exc)
+        # 🔴 **실패해도 원장은 남긴다.** 콜은 이미 나갔고 백엔드가 그걸로 비용을
+        # 집계한다. AnalysisFailed가 실패 지점까지의 usage를 들고 온다.
+        burned = getattr(exc, "ai_usage", None)
+        if burned and not job.ai_usage:
+            job.ai_usage = to_ai_usage(burned, "ANALYSIS", job_id,
+                                       idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)

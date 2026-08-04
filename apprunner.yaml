@@ -37,8 +37,12 @@ run:
       value: "real"
     - name: MODEL_CODE_ANALYSIS
       value: "nvidia/nemotron-3-ultra-550b-a55b"
+    # 🔴 채점 모델은 이것 하나뿐이다. 12종 실측(2026-08-03)에서 루브릭을 적용해 JSON까지
+    # 내는 모델이 이것뿐이었다. 옛 값 mistral-medium-3.5는 **죽어 있다**("1+1은?"도 3/3
+    # 타임아웃). 소형 모델은 빠르지만 우수·보통·애매를 전부 2점으로 줘 전원 낙제시킨다 —
+    # 속도로 고르면 안 된다.
     - name: MODEL_CODE_SESSION
-      value: "mistralai/mistral-medium-3.5-128b"
+      value: "deepseek-ai/deepseek-v4-flash"
     - name: MODEL_CODE_CURRICULUM
       value: "minimaxai/minimax-m3"
   secrets:

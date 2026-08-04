@@ -71,6 +71,35 @@ def _symbol_candidates(symbol: str) -> list[str]:
     return candidates
 
 
+MIN_PREFIX_CHARS = 16  # 이보다 짧은 접두사는 아무 줄에나 걸린다
+
+
+def _prefix_match(lines: list[str], needle: str) -> int:
+    """뒤에서부터 잘라가며 **파일에 실제로 있는 최장 접두사**를 찾는다.
+
+    🔴 **LLM은 코드를 끝까지 정확히 옮겨 적지 못한다.** 2026-08-03 실호출에서 셋 다
+    앞부분은 맞고 꼬리만 틀렸다:
+
+        worker = state.get("next_worker", "FINISH\\))     따옴표·괄호가 깨짐
+        worker = state.get("next_worker", "FINISH"}       ) 대신 }
+
+    완전 일치만 인정하면 오타 한 글자에 개념 하나가 통째로 "코드에 없음"이 된다 —
+    오퍼레이터가 고른 개념이 조용히 빠지는 것이라 가장 비싼 실패다. 시작 줄만
+    맞으면 블록 추정이 나머지를 채우므로 접두사로 충분하다.
+
+    길이 하한을 두는 이유: `worker` 같은 짧은 조각은 엉뚱한 줄에 먼저 걸린다.
+    """
+    normalized = [_normalize(ln) for ln in lines]
+    for size in range(len(needle), MIN_PREFIX_CHARS - 1, -1):
+        prefix = needle[:size].rstrip()
+        if len(prefix) < MIN_PREFIX_CHARS:
+            break
+        idx = next((i for i, ln in enumerate(normalized) if prefix in ln), -1)
+        if idx != -1:
+            return idx
+    return -1
+
+
 def locate_symbol(files: dict[str, str], ref_file: str | None, symbol: str) -> dict[str, Any]:
     """symbol이 파일의 몇 번째 줄에 있는지 찾는다.
 
@@ -93,6 +122,9 @@ def locate_symbol(files: dict[str, str], ref_file: str | None, symbol: str) -> d
             # 들여쓰기·연속 공백이 뭉개진 인용을 살린다.
             norm = _normalize(needle)
             idx = next((i for i, ln in enumerate(lines) if norm in _normalize(ln)), -1)
+        if idx == -1:
+            # 마지막 수단: 꼬리가 틀린 인용을 접두사로 살린다.
+            idx = _prefix_match(lines, _normalize(needle))
         if idx != -1:
             break
 
@@ -156,6 +188,51 @@ def format_ref(file: str, line_start: int | None, line_end: int | None) -> str:
     return f"{file}:{line_start}" if line_start == line_end else f"{file}:{line_start}-{line_end}"
 
 
+_BACKTICK = re.compile(r"`([^`\n]*)`")
+MIN_QUOTE_CHARS = 8   # 이보다 짧은 인용은 어느 줄에나 걸려 오히려 망가뜨린다
+
+
+def repair_code_quotes(text: str, code: str) -> str:
+    """질문·힌트 안의 백틱 인용이 코드 중간에서 끊겼으면 원문으로 되돌린다.
+
+    🔴 **학생이 보는 텍스트다.** 2026-08-03 실측에서 닫는 백틱이 한 글자 일찍 찍혀
+    나왔다:
+
+        이 코드 `worker = state.get("next_worker", "FINISH"`)가 실행될 때…
+                                                        ^ 여기서 끊기고 ) 가 밖으로
+
+    중첩된 따옴표가 있는 줄에서 반복해서 난다. 인용이 실제 코드 줄의 **접두사**일 때만
+    고치고, 백틱 뒤에 흘러나온 나머지(`)`)를 함께 흡수한다 — 안 그러면 `))`가 된다.
+
+    고치는 조건이 좁다: 접두사로 정확히 한 줄만 걸릴 때. LLM 문장을 우리가 다시 쓰는
+    일이 없어야 하므로, 애매하면 그대로 둔다.
+    """
+    if not text or not code:
+        return text
+    lines = [ln.strip() for ln in split_lines(code) if ln.strip()]
+
+    out, pos = [], 0
+    for m in _BACKTICK.finditer(text):
+        quoted = m.group(1).strip()
+        out.append(text[pos:m.start()])
+        pos = m.end()
+        hit = [ln for ln in lines if ln.startswith(quoted) and ln != quoted]
+        if len(quoted) < MIN_QUOTE_CHARS or len(hit) != 1:
+            out.append(m.group(0))
+            continue
+        # 🔴 **꼬리가 백틱 밖으로 흘러나왔을 때만 고친다.** 그게 이 손상의 서명이다.
+        # 이 조건이 없으면 "긴 줄에서 일부만 일부러 인용한" 정상 문장까지 통째로
+        # 늘려버린다 — LLM 문장을 우리가 다시 쓰는 셈이다.
+        tail = hit[0][len(quoted):]
+        if not text[pos:].startswith(tail):
+            out.append(m.group(0))
+            continue
+        out.append(f"`{hit[0]}`")
+        pos += len(tail)
+    out.append(text[pos:])
+    return "".join(out)
+
+
 def build_code_block(files: dict[str, str], max_chars: int = 12000) -> str:
     """코드베이스를 프롬프트용 블록 하나로. 예산을 넘으면 파일명만 남긴다.
 
@@ -172,5 +249,13 @@ def build_code_block(files: dict[str, str], max_chars: int = 12000) -> str:
         used += len(chunk)
     block = "".join(included)
     if omitted:
-        block += f"\n(문자 수 예산 초과로 아래 {len(omitted)}개 파일은 내용을 생략함: {', '.join(omitted)})"
+        # 🔴 **"생략"을 "없음"으로 읽으면 안 된다.** 2026-08-03 실측에서 모델이
+        # 생략된 파일을 `(미제공)`으로 적고 risks에 "소스 미제공으로 전체 파악 불가"를
+        # 올렸다 — 파일은 레포에 있고 스캐너도 갖고 있다. 보고서에 허위 위험이 실린다.
+        block += (
+            f"\n\n---\n아래 {len(omitted)}개 파일은 **이 요청의 길이 제한 때문에 내용만 "
+            f"싣지 않았다. 레포에는 존재한다** — \"미제공\"·\"없음\"으로 단정하거나 "
+            f"위험(risks)으로 적지 마라. 내용을 모르는 파일에 대한 추측도 적지 마라.\n"
+            f"{', '.join(omitted)}"
+        )
     return block

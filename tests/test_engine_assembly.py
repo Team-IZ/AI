@@ -6,6 +6,7 @@
 """
 import io
 import zipfile
+from copy import deepcopy
 
 import pytest
 
@@ -38,7 +39,7 @@ REQUEST = {
     "focus_items": [{"id": "focus-1", "name": "결제"}],
     "requirements": [{"requirement_id": "r1", "text": "결제를 처리한다"}],
     "teaches": [{"id": "t1", "label": "결제 흐름"}],
-    "model_code": "fake-model",
+    "provider_model_code": "fake-model",
 }
 
 # 스테이지별 가짜 응답. 실제 모델이 내는 모양을 그대로 흉내낸다.
@@ -76,9 +77,13 @@ def fake_llm(monkeypatch):
     """모든 스테이지 호출을 가로챈다. 호출된 스테이지 순서를 기록해 돌려준다."""
     called: list[str] = []
 
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+              extra_user=""):
         called.append(stage_id)
-        return stages.StageResult(data=_RESPONSES[stage_id],
+        # deepcopy가 아니면 앞 테스트가 이 dict을 고쳐놓는다 — topics.select가
+        # code_ref를 산정 결과로 갈아끼우면서 symbol을 지운다. 그러면 다음 테스트는
+        # 근거 검증에 실패해 조용히 일반 문제 폴백으로 떨어진다(에러 없이 결과만 다름).
+        return stages.StageResult(data=deepcopy(_RESPONSES[stage_id]),
                                   usages=[{"status": "SUCCEEDED", "model_code": model_code,
                                            "input_token_count": 10, "output_token_count": 5,
                                            "cached_token_count": 0, "failure_code": None,
@@ -102,6 +107,26 @@ def test_pipeline_produces_a_valid_analysis_result(fake_llm):
     assert problem.source_path == "app/pay.py"
     assert problem.line_start == 4            # symbol을 실제 파일에서 찾아 산정
     assert result.analysis_document.decision_points[0].evidence_valid is True
+
+
+def test_teach_id_is_carried_into_the_problem(fake_llm):
+    """선정은 teach 기준인데 조립기가 그 값을 안 실으면 연결이 응답에서 끊긴다.
+
+    엔진은 이미 topic["teach_id"]로 질문·힌트를 만든다 — 한 줄이 빠져 있었을 뿐이다.
+    """
+    raw = engine_mod.RealAnalysisEngine().analyze(REQUEST, _zip())
+    raw.pop("ai_usage")
+
+    problem = AnalysisResult.model_validate(raw).problems[0]
+
+    assert problem.teach_id == "t1"
+
+
+def test_provider_model_code_is_used(fake_llm):
+    """요청 필드는 providerModelCode다 — 공급자에 그대로 넘길 문자열이라야 호출이 된다."""
+    raw = engine_mod.RealAnalysisEngine().analyze(REQUEST, _zip())
+
+    assert {u["model_code"] for u in raw["ai_usage"]} == {"fake-model"}
 
 
 def test_all_four_axes_are_frozen_with_two_hints_each(fake_llm):
@@ -136,10 +161,11 @@ def test_usage_is_stamped_with_feature_code(fake_llm):
 
 def test_requirement_failure_does_not_kill_the_analysis(monkeypatch, fake_llm):
     """요구사항 판정은 문답과 독립이다(PM 설계 v2 §8-3). 깨져도 분석은 나가야 한다."""
-    def _boom(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _boom(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+              extra_user=""):
         if stage_id == "p04-2":
             raise stages.StageError("p04-2: 터짐", [])
-        return stages.StageResult(data=_RESPONSES[stage_id], usages=[])
+        return stages.StageResult(data=deepcopy(_RESPONSES[stage_id]), usages=[])
 
     for mod in ("analysis_doc", "requirements", "topics", "questions", "hints"):
         monkeypatch.setattr(f"app.engines.analysis.{mod}.stages.call", _boom)
@@ -163,7 +189,82 @@ def test_focus_item_id_is_echoed(fake_llm):
     assert AnalysisResult.model_validate(raw).problems[0].question_focus_item_id == "focus-1"
 
 
-def test_github_url_method_fails_loudly(fake_llm):
-    """ZIP이 없으면 받아올 경로가 없다. 빈 결과를 내면 '문제 0개'가 정상처럼 보인다."""
-    with pytest.raises(NotImplementedError):
+def test_github_url_without_repo_url_fails_loudly(fake_llm):
+    """받아올 곳이 없으면 끊는다. 빈 결과를 내면 '문제 0개'가 정상처럼 보인다."""
+    # AnalysisFailed로 감싸 나온다 — 원장을 들고 나오려고 엔진이 전부 감싼다.
+    with pytest.raises(engine_mod.AnalysisFailed, match="repoUrl"):
         engine_mod.RealAnalysisEngine().analyze({**REQUEST, "method": "GITHUB_URL"}, None)
+
+
+def test_failure_keeps_the_ledger(fake_llm, monkeypatch):
+    """실패해도 태운 콜은 남는다. **없으면 백엔드가 비용을 못 매긴다.**"""
+    def boom(*args, **kwargs):
+        raise engine_mod.stages.StageError("p04-3: JSON 파싱 실패", [{"status": "FAILED"}])
+
+    monkeypatch.setattr(engine_mod.topics, "select", boom)
+    with pytest.raises(engine_mod.AnalysisFailed) as exc:
+        engine_mod.RealAnalysisEngine().analyze(REQUEST, _zip())
+
+    # p04-1(분석 문서)이 태운 것 + 터진 p04-3의 것이 함께 있어야 한다.
+    assert len(exc.value.ai_usage) > 1
+    assert exc.value.ai_usage[-1]["feature_code"] == "QUESTION_GENERATION"
+
+
+def test_code_snippet_is_the_whole_file(fake_llm):
+    """파편만 주면 학생이 판단할 재료가 없다. 화면에 띄울 것은 파일 전체다."""
+    files = {"a/b.py": "\n".join(f"line {i}" for i in range(1, 41))}
+    ref = {"file": "a/b.py", "line_start": 10, "line_end": 12}
+
+    assert engine_mod._display_source(files, ref, "fragment") == files["a/b.py"]
+
+
+def test_oversized_file_falls_back_to_the_fragment(fake_llm):
+    """통째로 띄우는 것이 도움이 안 되는 크기다. 잘라서 줄 번호를 어긋나게 하지 않는다."""
+    files = {"a/b.py": "x" * (engine_mod._MAX_DISPLAY_CHARS + 1)}
+
+    assert engine_mod._display_source(files, {"file": "a/b.py"}, "fragment") == "fragment"
+
+
+def test_unmatched_teach_reaches_the_response(monkeypatch, fake_llm):
+    """개념이 코드에 없으면 `―`로 그릴 값이 응답에 실려야 한다."""
+    request = {**REQUEST, "question_budget": 2,
+               "teaches": [{"id": "t1", "label": "결제 흐름"},
+                           {"id": "t-nope", "label": "동시성 제어"}]}
+
+    raw = engine_mod.RealAnalysisEngine().analyze(request, _zip())
+    raw.pop("ai_usage")
+    result = AnalysisResult.model_validate(raw)
+
+    assert [u.teach_id for u in result.unmatched_teaches] == ["t-nope"]
+    assert result.unmatched_teaches[0].reason
+
+
+def test_references_are_filled(fake_llm):
+    """지금까지 항상 빈 배열이었다. 채우는 데 필요한 것이 다 있었는데 조립을 안 했다."""
+    raw = engine_mod.RealAnalysisEngine().analyze(REQUEST, _zip())
+    raw.pop("ai_usage")
+
+    refs = AnalysisResult.model_validate(raw).problems[0].references
+    kinds = [r.reference_type for r in refs]
+
+    assert kinds.count("PRIMARY_BLOCK") == 1
+    assert kinds.count("QUESTION_HIGHLIGHT") == 4          # 4축
+    assert kinds.count("CURRICULUM_EVIDENCE") == 1         # teach 가 붙은 문제다
+    assert [r.display_order for r in refs] == list(range(1, len(refs) + 1))
+
+    highlight = next(r for r in refs if r.reference_type == "QUESTION_HIGHLIGHT")
+    assert highlight.axis_code == "L1"                     # 축이 없으면 DB CHECK 위반
+    curriculum = next(r for r in refs if r.reference_type == "CURRICULUM_EVIDENCE")
+    assert curriculum.teach_id == "t1"
+    assert curriculum.path is None                         # 교안 근거는 코드 라인이 없다
+
+
+def test_old_reference_types_are_gone():
+    """옛 값을 보내면 새 정의서 CHECK 에 걸려 INSERT 가 깨진다."""
+    from app.schemas.analysis import ReferenceType
+    from typing import get_args
+
+    assert set(get_args(ReferenceType)) == {
+        "PRIMARY_BLOCK", "QUESTION_HIGHLIGHT", "CALLER",
+        "RELATED_CONTEXT", "CURRICULUM_EVIDENCE",
+    }

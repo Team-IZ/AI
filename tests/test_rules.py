@@ -72,7 +72,10 @@ def test_finds_candidates_from_zip():
     out = rules.find_candidates(_zip(_DUP))
 
     assert out["file_count"] == 2
-    assert out["extractor_version"].startswith("rules-")
+    # DB assessment_problem.extractor_version이 INTEGER CHECK (> 0)다.
+    # 문자열로 보내던 시절이 있었고 그대로 나가면 Spring INSERT가 깨진다.
+    assert isinstance(out["extractor_version"], int)
+    assert 0 < out["extractor_version"] <= 2_147_483_647
     assert any(c["finding_id"].startswith("repeated-pattern:") for c in out["candidates"])
 
 
@@ -95,6 +98,20 @@ def test_top_level_folder_is_stripped():
 
     paths = [c["source_path"] for c in out["candidates"] if c["source_path"]]
     assert not any(p.startswith("repo-main") for p in paths)
+
+
+def test_source_dir_at_top_is_not_stripped():
+    """`src/` 하나만 있는 ZIP에서 `src/`를 벗기면 백엔드가 파일을 못 찾는다.
+
+    학생이 프로젝트 폴더 안에서 압축하면 이 모양이 나온다. 벗기면
+    `src/main/java/A.java`가 `main/java/A.java`로 응답되는데 에러가 안 난다.
+    """
+    out = rules.find_candidates(_zip({
+        "src/billing.py": "def process_payment(order):\n    return order\n",
+        "src/checkout.py": "def process_payment(order):\n    return order\n",
+    }))
+
+    assert all(p.startswith("src/") for p in out["files"])
 
 
 def test_zip_slip_is_blocked():

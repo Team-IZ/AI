@@ -21,9 +21,14 @@ from app.schemas.report import (
     ReportRequest,
     ReportResult,
 )
+from app.usage import to_ai_usage
 
 # job_id -> 보고서 job 상태·결과
 _jobs: dict[str, ReportJobStatus] = {}
+
+# 멱등키({problemId}:{scoreRunId}) -> job_id. 재전송해도 LLM을 다시 부르지 않는다.
+# 보고서는 문제마다 1건이라 중복이 곧 비용이다.
+_job_id_by_idempotency_key: dict[str, str] = {}
 
 # 통과선. 미달이면 힌트 후 재질의. 총점은 만들지 않는다(ProblemResult 주석 참고).
 _PASS_SCORE = 3
@@ -33,7 +38,11 @@ def get_job(job_id: str) -> ReportJobStatus | None:
     return _jobs.get(job_id)
 
 
-def create_job(body: ReportRequest) -> ReportJobStatus:
+def job_id_for_key(idempotency_key: str) -> str | None:
+    return _job_id_by_idempotency_key.get(idempotency_key)
+
+
+def create_job(body: ReportRequest, idempotency_key: str | None = None) -> ReportJobStatus:
     """QUEUED 보고서 job 생성. 아직 만들지 않는다."""
     job = ReportJobStatus(
         job_id=str(uuid.uuid4()),
@@ -42,14 +51,16 @@ def create_job(body: ReportRequest) -> ReportJobStatus:
         status="QUEUED",
     )
     _jobs[job.job_id] = job
+    if idempotency_key:
+        _job_id_by_idempotency_key[idempotency_key] = job.job_id
     return job
 
 
 # problemId → 시나리오. 백엔드가 세 모양(완주 / L2 종료 / L1 종료)을 각각 불러
 # 파싱 코드를 짤 수 있게 한다. 모르는 id는 완주로 준다.
-# (원점수, 힌트사용) — 도달한 단계만. 나머지는 attemptCount=0으로 채운다.
+# (점수, 힌트사용) — 도달한 단계만. 나머지는 status=NOT_REACHED로 채운다.
 _STUB_SCRIPTS: dict[str, list[tuple[int, int]]] = {
-    "prob-stub-1": [(4, 0), (4, 1), (3, 0), (5, 2)],  # 완주. L4는 상한 3에 걸린다
+    "prob-stub-1": [(4, 0), (4, 1), (3, 0), (5, 2)],  # 완주. L4는 힌트 2개 쓰고 통과
     "prob-stub-2": [(3, 0), (2, 2)],                  # L2에서 힌트 소진 후 미달 → 재시험
     "prob-stub-3": [(2, 2)],                          # L1에서 종료 → 재시험
 }
@@ -58,36 +69,35 @@ _STUB_SCRIPTS: dict[str, list[tuple[int, int]]] = {
 def _stub_problem(problem_id: str) -> ProblemResult:
     """고정 매트릭스 하나. 백엔드가 파싱 코드를 짤 수 있도록 실제 모양을 준다.
 
-    힌트 상한(0회 5점 / 1회 4점 / 2회 3점)이 적용된 결과를 보여주는 것이 목적이라
-    완주 시나리오의 L4에 상한 3에 걸리는 케이스를 넣었다.
+    **DB `problem_stage` 한 행과 같은 모양이다** — 질문·힌트1·힌트2 슬롯에 점수가
+    흩어져 들어간다. 힌트를 쓴 시나리오는 앞 슬롯이 미통과로 채워져 있어야 DB CHECK를
+    통과한다("질문 미통과일 때만 첫 힌트 답변이 있다").
     """
     axes = list(get_args(AxisCode))
     reached = _STUB_SCRIPTS.get(problem_id, _STUB_SCRIPTS["prob-stub-1"])
-    caps = {0: 5, 1: 4, 2: 3}
-    autonomy = {0: "SELF", 1: "SELF_MAINTAINED", 2: "PARTIAL"}
+    slots = ("question", "first_hint", "second_hint")
 
     stages = []
     for i, axis in enumerate(axes):
         if i >= len(reached):
-            stages.append({"axis_code": axis, "attempt_count": 0, "passed": False})
+            stages.append({"axis_code": axis, "status": "NOT_REACHED"})
             continue
-        best, hints = reached[i]
-        confirmed = min(best, caps[hints])
-        stages.append(
-            {
-                "axis_code": axis,
-                "attempt_count": hints + 1,
-                "passed": confirmed >= _PASS_SCORE,
-                "best_score": best,
-                "confirmed_score": confirmed,
-                "hints_used": hints,
-                "autonomy": autonomy[hints],
-            }
-        )
+        score, hints = reached[i]
+        row: dict[str, Any] = {"axis_code": axis}
+        # 힌트를 쓴 만큼 앞 슬롯은 미통과로 채운다 — DB CHECK가 "질문 미통과일 때만
+        # 첫 힌트 답변이 있다"를 강제하므로 건너뛴 슬롯이 있으면 INSERT가 깨진다.
+        for used in range(hints):
+            row[f"{slots[used]}_score"] = _PASS_SCORE - 1
+            row[f"{slots[used]}_passed"] = False
+        row[f"{slots[hints]}_score"] = score
+        row[f"{slots[hints]}_passed"] = score >= _PASS_SCORE
+        row["status"] = "PASSED" if score >= _PASS_SCORE else "NOT_PASSED"
+        stages.append(row)
 
     reached = 0
-    for s in stages:
-        if not s["passed"]:
+    for row in stages:
+        if not (row.get("question_passed") or row.get("first_hint_passed")
+                or row.get("second_hint_passed")):
             break
         reached += 1
 
@@ -106,6 +116,13 @@ def _stub_result(problem_id: str) -> ReportResult:
     passed = {s.axis_code: s.passed for s in problem.stages}
     return ReportResult(
         report_markdown="# [stub] 검증 보고서\n\n실제 보고서는 엔진 이식 후 생성됩니다.",
+        narrative={
+            "summary": "[stub] 실제 서술은 엔진이 만듭니다.",
+            "strengths": [],
+            "gaps": [],
+            "autonomy_note": None,
+            "unreached_axes": [s.axis_code for s in problem.stages if s.status == "NOT_REACHED"],
+        },
         problem=problem,
         curriculum_refs=[
             {"teachId": "teach-stub-1", "unitId": "unit-stub-1", "sourcePages": [12, 13]}
@@ -135,11 +152,17 @@ def _to_snake(row: dict[str, Any]) -> dict[str, Any]:
     return {_CAMEL.sub("_", key).lower(): value for key, value in row.items()}
 
 
-def _real_result(body: ReportRequest) -> ReportResult:
+def _real_result(body: ReportRequest, job: ReportJobStatus,
+                 idempotency_key: str | None, trace_id: str | None) -> ReportResult:
     """p04-6으로 서술을 만들고, 판정은 transcript에서 결정론으로 계산한다.
 
-    `problemNo`는 요청에 없다 — 문제 단위 호출이라 Spring이 문제를 알고 있고,
-    보고서 안에서 순번이 필요한 자리가 없다. 1로 고정한다.
+    `problemNo`는 요청이 주면 그대로 돌려주고 없으면 1이다. 예전에는 1로 고정했는데,
+    **보고서가 문제 단위라 세션 하나에 3건이 나오고 세 건 모두 problemNo=1이 찍혔다**
+    (2026-08-03 실측). 화면은 "문제 2 / 3"을 그리는데 보고서만 1이라 조용히 어긋난다.
+
+    원장(`job.ai_usage`)을 여기서 채우는 이유는 **검증 실패로 결과를 버려도 태운
+    토큰은 남겨야 하기 때문**이다(jobs.py와 같은 순서). 아래 model_validate가 터지면
+    호출자는 FAILED로 적고, 그때도 원장은 이미 채워져 있다.
     """
     from app.engines.analysis import report as report_engine
 
@@ -147,19 +170,24 @@ def _real_result(body: ReportRequest) -> ReportResult:
     # 보고서는 문제가 끝날 때마다 세션 흐름 안에서 돌고(학생이 다음 문제를 푸는 동안
     # 병렬), 분석 배치와 지연 요구가 다르다. 분석 기본값(nemotron-ultra)을 쓰면
     # 세션이 끝나도 보고서가 안 나온다.
-    model_code = body.model_code or get_settings().model_code_session
+    model_code = body.provider_model_code or get_settings().model_code_session
     built = report_engine.build(
-        body.problem_id, 1,
+        body.problem_id, body.problem_no or 1,
         [_to_snake(t if isinstance(t, dict) else dict(t)) for t in body.transcript],
         model_code=model_code,
         teaches=body.teaches,
         analysis_documents=body.analysis_documents,
     )
+    job.ai_usage = to_ai_usage(built.usages, "REPORT", job.job_id,
+                               feature_code="SUMMARY_DRAFT",
+                               idempotency_key=idempotency_key, trace_id=trace_id)
     return ReportResult.model_validate({
         "report_markdown": built.report_markdown,
+        "narrative": built.narrative,
         "problem": built.problem,
         "curriculum_refs": built.curriculum_refs,
         "retest": built.retest,
+        "narrative_failed": built.narrative_failed,
         "versions": {
             "model_code": model_code,
             "prompt_version": stages.manifest_version(),
@@ -168,7 +196,8 @@ def _real_result(body: ReportRequest) -> ReportResult:
     })
 
 
-def run_report(job_id: str, body: ReportRequest | None = None) -> None:
+def run_report(job_id: str, body: ReportRequest | None = None, *,
+               idempotency_key: str | None = None, trace_id: str | None = None) -> None:
     """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED."""
     job = _jobs[job_id]
     job.status = "RUNNING"
@@ -176,7 +205,7 @@ def run_report(job_id: str, body: ReportRequest | None = None) -> None:
 
     try:
         if get_settings().engine_mode == "real" and body is not None:
-            job.result = _real_result(body)
+            job.result = _real_result(body, job, idempotency_key, trace_id)
         else:
             job.result = _stub_result(job.problem_id or "prob-stub-1")
         job.status = "SUCCEEDED"

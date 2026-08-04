@@ -36,12 +36,19 @@ class ReportRequest(BaseSchema):
     """
 
     problem_id: str = Field(description="이 보고서가 다루는 문제. 문제 단위의 키")
+    problem_no: int | None = Field(
+        default=None, ge=1,
+        description="세션 안에서 이 문제가 몇 번째인가(1~3). 응답 problem.problemNo로 "
+                    "그대로 돌아온다. 생략하면 1이 나가는데, 2·3번 문제의 보고서에도 "
+                    "1이 찍혀 화면 표기와 어긋난다",
+    )
     session_id: str | None = None
     score_run_id: str | None = Field(default=None, description="Spring ScoreRun 키(에코용)")
-    model_code: str | None = Field(
+    provider_model_code: str | None = Field(
         default=None,
-        description="생략 시 서버 기본값. `/analyses`·`/curricula`와 같은 규칙이다 — "
-                    "모델 선택은 operator 권한이고, 없으면 보고서만 비용·지연을 못 고른다",
+        description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code`"
+                    "(벤더 접두어 포함). 생략 시 서버 기본값 — `/analyses`·`/curricula`와 "
+                    "같은 규칙이다. 모델 선택은 operator 권한이다",
     )
     transcript: list[dict[str, Any]] = Field(
         default_factory=list,
@@ -55,23 +62,57 @@ class ReportRequest(BaseSchema):
     )
 
 
+# DB problem_stage.status. 이 값을 그대로 쓴다 — 별도 어휘를 만들면 Spring이 매핑을 든다.
+StageStatus = Literal[
+    "PREPARED",      # 질문·힌트만 채워진 초기 상태
+    "IN_PROGRESS",   # 답변이 시작됐다
+    "PASSED",        # 질문·힌트1·힌트2 중 하나가 통과
+    "NOT_PASSED",    # 셋 다 미통과 (= 이 축에서 문제가 끝났다)
+    "NOT_REACHED",   # 앞 단계에서 끝나 묻지 않았다
+    "NOT_ANSWERED",  # 물었는데 답이 없다 (시간 초과 등)
+]
+
+
 class StageScore(BaseSchema):
-    """문제 하나의 단계 하나. DB problem_stage 대응."""
+    """문제 하나의 단계 하나. **DB `problem_stage` 한 행과 1:1이다** (2026-08-03).
+
+    새 MEAS 정의서에서 `problem_stage`가 **한 행에 질문 1 + 힌트 2 + 답변 3 + 점수 3 +
+    통과 3**을 담게 됐다(`stage_answer_attempt` 테이블은 사라졌다). 그래서 응답도 같은
+    모양으로 낸다 — **Spring이 변환 없이 그대로 INSERT할 수 있게** 하는 것이 목적이다.
+
+    🔴 **`attemptCount`·`hintsUsed`·`autonomy`는 없다.** 셋 다 아래 6개 필드에서
+    파생된다(#42 §4-2). 자력 판정은 이렇게 계산한다.
+
+        questionPassed = true    → 스스로 답함      (SELF)
+        firstHintPassed = true   → 힌트 1개로 답함  (SELF_MAINTAINED)
+        secondHintPassed = true  → 힌트 2개로 답함  (PARTIAL)
+    """
 
     axis_code: AxisCode
-    attempt_count: int = Field(
-        ge=0, le=3, description="문답 시도 횟수. 0이면 앞 단계에서 끝나 도달하지 못했다"
+
+    question_score: int | None = Field(
+        default=None, ge=0, le=5, description="질문 답변 점수. 미응답·미도달이면 null"
     )
-    passed: bool = Field(description="confirmedScore가 통과선(3점) 이상인지")
-    best_score: int | None = Field(
-        default=None, ge=0, le=5, description="힌트 상한 적용 전 원점수. 미도달이면 null"
+    question_passed: bool | None = Field(
+        default=None, description="score >= 3. 점수와 함께 존재하거나 함께 null"
     )
-    confirmed_score: int | None = Field(
-        default=None, ge=0, le=5, description="힌트 상한 적용 후 기록 점수. 미도달이면 null"
+    first_hint_score: int | None = Field(
+        default=None, ge=0, le=5,
+        description="첫 힌트 후 답변 점수. **질문이 미통과일 때만 값이 있다**(DB CHECK)",
     )
-    # attemptCount - 1 과 같지만 직접 보낸다. 미도달(0)일 때 -1이 되는 것을 막는다.
-    hints_used: int = Field(default=0, ge=0, le=2)
-    autonomy: AutonomyCode | None = None
+    first_hint_passed: bool | None = None
+    second_hint_score: int | None = Field(
+        default=None, ge=0, le=5,
+        description="둘째 힌트 후 답변 점수. **첫 힌트가 미통과일 때만 값이 있다**(DB CHECK)",
+    )
+    second_hint_passed: bool | None = None
+
+    status: StageStatus = Field(description="DB problem_stage.status 값을 그대로 쓴다")
+
+    @property
+    def passed(self) -> bool:
+        """이 단계를 통과했는가. 세 슬롯 중 하나라도 통과면 통과다."""
+        return bool(self.question_passed or self.first_hint_passed or self.second_hint_passed)
 
 
 class ProblemResult(BaseSchema):
@@ -88,7 +129,11 @@ class ProblemResult(BaseSchema):
     tie-break·재채점 실험의 입력이다(화면에 표기할지는 프론트가 정한다).
     """
 
-    problem_no: int = Field(ge=1)
+    problem_no: int = Field(
+        ge=1,
+        description="요청의 problemNo를 그대로 돌려준다. 안 보내면 1이다 — "
+                    "**보내지 않으면 화면의 '문제 2 / 3'과 어긋난다**",
+    )
     problem_id: str
     reached_stage: int = Field(
         ge=0, le=4,
@@ -132,21 +177,74 @@ class ProblemResult(BaseSchema):
 class ReportVersions(BaseSchema):
     """어떤 모델·프롬프트·루브릭으로 만들었는지. 재현성 근거."""
 
+    # aiUsage.modelCode와 같은 값이다 — 호출에 쓴 provider 문자열을 그대로 에코한다.
     model_code: str
     prompt_version: str
     rubric_version: str
+
+
+class ReportNote(BaseSchema):
+    """서술 한 덩어리. `strengths`·`gaps`가 같은 모양이라 하나로 쓴다."""
+
+    axis: str = Field(description="모델이 붙인 이름표. 축 코드(L1~L4)가 아니라 교안 개념명이 온다")
+    detail: str = Field(description="실제 답변을 근거로 한 서술")
+    teach_id: str | None = Field(
+        default=None,
+        description="gaps에만 있다. **요청 teaches에 없는 id는 버리고 null로 만든다** — "
+                    "모델이 지어낸 교안을 가리키면 학생이 없는 페이지를 뒤진다",
+    )
+    study_pointer: str | None = Field(
+        default=None,
+        description="'어느 unit 몇 페이지를 다시 볼 것인가'의 서술. 화면의 교안 링크는 "
+                    "이 문장이 아니라 `curriculumRefs`로 그려야 한다 — 이 문장은 검증을 "
+                    "거치지 않은 모델 출력이다",
+    )
+
+
+class ReportNarrative(BaseSchema):
+    """`reportMarkdown`을 만들기 전의 구조. **같은 내용을 두 모양으로 준다.**
+
+    마크다운 하나만 주면 "잘한 것만 카드로" 같은 화면을 만들 때 프론트가 헤딩을
+    다시 파싱해야 한다. 모델이 이미 이 구조로 답하므로 노출 비용이 0이다
+    (2026-08-03 확정). 마크다운도 계속 준다 — 그냥 렌더만 하면 되는 경로를
+    남겨두는 편이 프론트 미착수 시점에 싸다.
+
+    **`narrativeFailed: true`면 이 객체는 전부 비어 있다.** 판정(`problem`)은 그때도
+    확정값이다.
+    """
+
+    summary: str | None = None
+    strengths: list[ReportNote] = Field(default_factory=list)
+    gaps: list[ReportNote] = Field(default_factory=list)
+    autonomy_note: str | None = Field(
+        default=None,
+        description="힌트 없이 답한 부분과 힌트를 받고서야 답한 부분의 차이",
+    )
+    unreached_axes: list[AxisCode] = Field(
+        default_factory=list,
+        description="앞 단계에서 끝나 묻지 않은 축. **'못한 것'이 아니라 '안 물어본 것'이다** — "
+                    "화면에서 0점이나 실패로 그리면 안 된다",
+    )
 
 
 class ReportResult(BaseSchema):
     """보고서가 완성됐을 때의 본문. **문제 하나 분량이다.**"""
 
     report_markdown: str
+    narrative: ReportNarrative
     problem: ProblemResult
     curriculum_refs: list[dict[str, Any]] = Field(default_factory=list)
     retest: bool = Field(
         description="이 문제가 재시험 대상인가. **L1·L2 둘 다 통과해야 아니다** "
                     "(scoring.RETEST_TRIGGER_AXES). 세션 전체의 재시험 여부는 "
                     "Spring이 문제 3개의 이 값을 모아 판단한다",
+    )
+    narrative_failed: bool = Field(
+        default=False,
+        description="서술 생성(LLM)이 실패해 reportMarkdown에 판정만 들어 있는가. "
+                    "**true여도 job은 SUCCEEDED다** — 점수·도달·재시험은 LLM 없이 "
+                    "계산되므로 확정값이다. 서술이 필요하면 같은 요청을 다시 보내면 "
+                    "된다(무료 티어에서 실제로 발생한다)",
     )
     versions: ReportVersions
 

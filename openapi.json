@@ -145,18 +145,6 @@
                     ],
                     "title": "Submissionid"
                   },
-                  "callbackUrl": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현",
-                    "title": "Callbackurl"
-                  },
                   "method": {
                     "enum": [
                       "GITHUB_URL",
@@ -276,7 +264,7 @@
                     ],
                     "title": "Curriculumid"
                   },
-                  "modelCode": {
+                  "providerModelCode": {
                     "anyOf": [
                       {
                         "type": "string"
@@ -285,8 +273,8 @@
                         "type": "null"
                       }
                     ],
-                    "description": "생략 시 서버 기본값. operator가 고른다",
-                    "title": "Modelcode"
+                    "description": "공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` (예: nvidia/nemotron-3-ultra-550b-a55b). 화면 선택값인 `model_code`가 아니다 — 벤더 접두어가 붙은 원본 식별자여야 호출이 된다. 생략 시 서버 기본값. operator가 고른다",
+                    "title": "Providermodelcode"
                   }
                 },
                 "required": [
@@ -341,18 +329,6 @@
                             }
                           ],
                           "title": "Submissionid"
-                        },
-                        "callbackUrl": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ],
-                          "description": "완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현",
-                          "title": "Callbackurl"
                         },
                         "method": {
                           "enum": [
@@ -473,7 +449,7 @@
                           ],
                           "title": "Curriculumid"
                         },
-                        "modelCode": {
+                        "providerModelCode": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -482,8 +458,8 @@
                               "type": "null"
                             }
                           ],
-                          "description": "생략 시 서버 기본값. operator가 고른다",
-                          "title": "Modelcode"
+                          "description": "공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` (예: nvidia/nemotron-3-ultra-550b-a55b). 화면 선택값인 `model_code`가 아니다 — 벤더 접두어가 붙은 원본 식별자여야 호출이 된다. 생략 시 서버 기본값. operator가 고른다",
+                          "title": "Providermodelcode"
                         }
                       },
                       "required": [
@@ -581,17 +557,26 @@
         }
       }
     },
-    "/api/v0/sessions": {
+    "/api/v0/sessions/{session_id}/answers": {
       "post": {
         "tags": [
           "sessions"
         ],
-        "summary": "검증 세션 시작 (P03)",
-        "description": "세션 만들고 첫 질문 돌려주기",
-        "operationId": "start_session_api_v0_sessions_post",
+        "summary": "답변 제출 -> 채점 + 다음 질문 (P03)",
+        "description": "답변을 채점하고 다음 질문(또는 종료)을 돌려준다.\n\n문제·기록·커서는 요청에 실려 온다. 같은 client_request_id 재전송 -> 처음 응답 그대로(멱등).\n\n🔴 **`async def`가 아니라 `def`여야 한다.** 이 경로는 세션에서 유일하게 LLM을\n호출하는데(`grading.grade`), vendor 클라이언트가 `urllib.request` 기반의 블로킹\n호출이다. `async def`로 두면 채점 4.5~7.7초 동안 **이벤트 루프가 통째로 멈춰**\n다른 학생의 채점은 물론 폴링·헬스체크까지 대기한다(동시 처리 1명).\n`def`면 FastAPI가 스레드풀에서 돌려 동시 40건까지 처리한다.\nLLM 호출을 비동기로 바꾸기 전까지 이 시그니처를 되돌리지 않는다.",
+        "operationId": "submit_answer_api_v0_sessions__session_id__answers_post",
         "parameters": [
           {
-            "name": "x-internal-key",
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          },
+          {
+            "name": "x-trace-id",
             "in": "header",
             "required": false,
             "schema": {
@@ -603,61 +588,10 @@
                   "type": "null"
                 }
               ],
-              "title": "X-Internal-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SessionStart"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionView"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v0/sessions/{session_id}/answers": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "답변 제출 -> 다음 질문/종료 (P03)",
-        "description": "답변 받고 다음 질문(또는 종료)를 돌려줌.\n\n같은 client_request_id 재전송 -> 처음 응답 그대로(멱등).\n세션 유실이면 404 -> Spring이 restore 호출\n\n🔴 **`async def`가 아니라 `def`여야 한다.** 이 경로는 세션에서 유일하게 LLM을\n호출하는데(`grading.grade`), vendor 클라이언트가 `urllib.request` 기반의 블로킹\n호출이다. `async def`로 두면 채점 4.5~7.7초 동안 **이벤트 루프가 통째로 멈춰**\n다른 학생의 채점은 물론 폴링·헬스체크까지 대기한다(동시 처리 1명).\n`def`면 FastAPI가 스레드풀에서 돌려 동시 40건까지 처리한다.\nLLM 호출을 비동기로 바꾸기 전까지 이 시그니처를 되돌리지 않는다.",
-        "operationId": "submit_answer_api_v0_sessions__session_id__answers_post",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
+              "description": "분산 추적 ID",
+              "title": "X-Trace-Id"
+            },
+            "description": "분산 추적 ID"
           },
           {
             "name": "x-internal-key",
@@ -692,17 +626,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionView"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "모르는 세션",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/AnswerResult"
                 }
               }
             }
@@ -730,153 +654,51 @@
         }
       }
     },
-    "/api/v0/sessions/{session_id}": {
-      "get": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "세션 상태 조회 (P03)",
-        "description": "세션 현재 상태, 질문 반환(Spring 풀링/복구용)",
-        "operationId": "get_session_api_v0_sessions__session_id__get",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          },
-          {
-            "name": "x-internal-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Internal-Key"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionView"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "모르는 세션",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v0/sessions/{session_id}/restore": {
-      "post": {
-        "tags": [
-          "sessions"
-        ],
-        "summary": "유실 세션 복원(P03)",
-        "description": "Spring이 저장해둔 transcript로 유실 세션 재구성하고 이어질 질문 반환",
-        "operationId": "restore_session_api_v0_sessions__session_id__restore_post",
-        "parameters": [
-          {
-            "name": "session_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Session Id"
-            }
-          },
-          {
-            "name": "x-internal-key",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "X-Internal-Key"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SessionRestore"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SessionView"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v0/reports": {
       "post": {
         "tags": [
           "reports"
         ],
         "summary": "세션 결과로 보고서 생성 요청",
-        "description": "요청을 접수하고 즉시 202. 실제 생성은 백그라운드에서.",
+        "description": "요청을 접수하고 즉시 202. 실제 생성은 백그라운드에서.\n\n같은 멱등키가 다시 오면 처음 jobId를 그대로 돌려주고 **LLM을 다시 부르지 않는다.**\n보고서는 문제마다 1건이라 중복이 곧 비용이다(2026-08-03, PLAN §T11 D-2).",
         "operationId": "create_report_api_v0_reports_post",
         "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "{problemId}:{scoreRunId}. 중복 요청 판별",
+              "title": "Idempotency-Key"
+            },
+            "description": "{problemId}:{scoreRunId}. 중복 요청 판별"
+          },
+          {
+            "name": "x-trace-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "분산 추적 ID",
+              "title": "X-Trace-Id"
+            },
+            "description": "분산 추적 ID"
+          },
           {
             "name": "x-internal-key",
             "in": "header",
@@ -1093,19 +915,13 @@
                           "title": "Curriculumid"
                         },
                         "courseLabel": {
-                          "anyOf": [
-                            {
-                              "maxLength": 80,
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ],
-                          "description": "과정명(예: 'SQL', 'Java'). 프롬프트 프레이밍에 쓴다 — 생략하면 매니페스트 기본값('Java')이 들어가고, 다른 과정 교안이면 모델이 흔들려 결과 언어·용어가 섞인다",
-                          "title": "Courselabel"
+                          "description": "🔴 **필수다.** 과정명(예: 'SQL', 'Java', 'AI Agent'). 프롬프트 프레이밍에 쓴다 — 없으면 매니페스트 기본값('Java')이 들어가고, 다른 과정 교안이면 모델이 흔들려 결과 언어·용어가 섞인다. **교안 업로드 화면이 과정을 이미 알고 있으므로 기본값을 두지 않는다** (2026-08-03 확정)",
+                          "maxLength": 80,
+                          "minLength": 1,
+                          "title": "Courselabel",
+                          "type": "string"
                         },
-                        "modelCode": {
+                        "providerModelCode": {
                           "anyOf": [
                             {
                               "type": "string"
@@ -1114,24 +930,13 @@
                               "type": "null"
                             }
                           ],
-                          "description": "생략 시 서버 기본값. operator가 고른다",
-                          "title": "Modelcode"
-                        },
-                        "callbackUrl": {
-                          "anyOf": [
-                            {
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ],
-                          "description": "완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현",
-                          "title": "Callbackurl"
+                          "description": "공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code`(벤더 접두어 포함). 생략 시 서버 기본값. operator가 고른다",
+                          "title": "Providermodelcode"
                         }
                       },
                       "required": [
-                        "versionId"
+                        "versionId",
+                        "courseLabel"
                       ],
                       "title": "CurriculumRequest",
                       "type": "object"
@@ -1266,17 +1071,22 @@
           "modelCode": {
             "type": "string",
             "title": "Modelcode",
-            "description": "Spring이 ai_model에서 model_id를 조회한다"
+            "description": "Spring이 ai_model에서 model_id를 조회한다. ⚠️ **AI는 호출에 쓴 provider 문자열을 그대로 에코한다**(요청의 providerModelCode 또는 서버 기본값) — AI는 화면 선택값을 모른다. Spring은 `provider_model_code`로 ai_model을 조회해야 한다"
           },
-          "sourceType": {
+          "contextType": {
             "type": "string",
-            "title": "Sourcetype",
-            "description": "값 목록은 백엔드 확정 대기(C-4)"
+            "enum": [
+              "ANALYSIS",
+              "GRADING",
+              "REPORT",
+              "CURRICULUM"
+            ],
+            "title": "Contexttype"
           },
-          "sourceId": {
+          "contextId": {
             "type": "string",
-            "title": "Sourceid",
-            "description": "작업 PK. 분석이면 analysisId"
+            "title": "Contextid",
+            "description": "작업 PK. 분석이면 분석 jobId"
           },
           "requestId": {
             "type": "string",
@@ -1290,7 +1100,7 @@
           "idempotencyKey": {
             "type": "string",
             "title": "Idempotencykey",
-            "description": "{sourceId}:{sourceType}:{attemptNo} 형식"
+            "description": "{contextId}:{contextType}:{attemptNo} 형식"
           },
           "inputTokenCount": {
             "type": "integer",
@@ -1350,8 +1160,8 @@
         "required": [
           "featureCode",
           "modelCode",
-          "sourceType",
-          "sourceId",
+          "contextType",
+          "contextId",
           "requestId",
           "traceId",
           "idempotencyKey",
@@ -1584,6 +1394,14 @@
             "type": "array",
             "title": "Problems"
           },
+          "unmatchedTeaches": {
+            "items": {
+              "$ref": "#/components/schemas/UnmatchedTeach"
+            },
+            "type": "array",
+            "title": "Unmatchedteaches",
+            "description": "🔴 **문항을 못 만든 개념.** 오퍼레이터가 고른 teach 중 제출 코드에서 근거를 못 찾은 것들이다(2026-08-03 PM 결정: 지어내지 않고 '없음'으로 둔다). `problems`에 없는 teachId를 역산하지 않도록 명시적으로 보낸다 — 화면의 개념별 도달 격자에서 `―`(문항 없음)로 그릴 값이다"
+          },
           "questionCountPlanned": {
             "type": "integer",
             "title": "Questioncountplanned",
@@ -1602,16 +1420,177 @@
         "title": "AnalysisResult",
         "description": "분석이 성공했을 때의 결과 본문.\n\n문제·질문·힌트가 전부 여기 실린다. 질문과 힌트는 분석 때 만들어 동결하므로\n세션 시작에는 AI 호출이 없다 — Spring이 이 응답을 저장해두고 꺼내 쓴다."
       },
+      "AnswerResult": {
+        "properties": {
+          "sessionId": {
+            "type": "string",
+            "title": "Sessionid"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "READY",
+              "IN_PROGRESS",
+              "PAUSED",
+              "COMPLETED",
+              "INTERRUPTED",
+              "INVALID",
+              "FAILED",
+              "SUPERSEDED"
+            ],
+            "title": "State"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TranscriptTurn"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "이번에 채점된 턴. 물을 것이 없었으면 null"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "다음에 물을 자리. 그대로 다음 요청에 실어 보낸다. 끝났으면 null"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Question"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "다음 질문과 힌트 텍스트. 끝났으면 null"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Progress"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "terminationReason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminationreason",
+            "description": "**이 턴에서 문제가 끝났을 때만 채워진다.** 진행 중이면 null. `COMPLETED_L4`(L1~L4 완주) · `TERMINATED_AT_L1`~`TERMINATED_AT_L4`(그 단계에서 힌트 소진 후 미달. L4는 L3까지 통과하고 마지막에서 막힌 경우다). DB assessment_problem.termination_reason에 그대로 들어간다 — 종료 판정은 AI가 소유하므로 백엔드가 커서 변화로 역추론하지 않아도 된다"
+          },
+          "endedLevel": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "L1",
+                  "L2",
+                  "L3",
+                  "L4"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Endedlevel",
+            "description": "문제가 끝난 단계. terminationReason과 짝이고 진행 중이면 null. DB assessment_problem.ended_level"
+          },
+          "aiUsage": {
+            "items": {
+              "$ref": "#/components/schemas/AiUsage"
+            },
+            "type": "array",
+            "title": "Aiusage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sessionId",
+          "state"
+        ],
+        "title": "AnswerResult",
+        "description": "POST /sessions/{id}/answers 응답.\n\n**transcript를 통째로 돌려주지 않는다.** 요청이 이미 들고 온 것이라 되돌리면\n같은 32KB를 두 번 실어 나르게 된다. 이번 턴(`turn`)만 주므로 백엔드는 그것만\n붙여 저장하면 된다."
+      },
       "AnswerSubmit": {
         "properties": {
           "clientRequestId": {
             "type": "string",
             "title": "Clientrequestid",
-            "description": "세션 내 유일 멱등키"
+            "description": "세션 내 유일 멱등키. 재전송하면 같은 응답이 온다"
           },
           "answerText": {
             "type": "string",
             "title": "Answertext"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/Problem"
+            },
+            "type": "array",
+            "title": "Problems",
+            "description": "분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다. **AI는 세션 중에 질문을 만들지 않는다** — 안 주면 물을 것이 없다"
+          },
+          "transcript": {
+            "items": {
+              "$ref": "#/components/schemas/TranscriptTurn"
+            },
+            "type": "array",
+            "title": "Transcript",
+            "description": "지금까지 확정된 턴 전부. `cursor`를 생략하면 이걸 되짚어 위치를 복원한다"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Cursor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "이 답변이 대답하는 자리. 생략 시 transcript로 복원"
+          },
+          "providerModelCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Providermodelcode",
+            "description": "채점에 쓸 모델. 값은 `ai_model.provider_model_code`(벤더 접두어 포함). 생략 시 서버 기본값 — `/analyses`·`/curricula`·`/reports`와 같은 규칙이다. 채점 모델은 operator가 고른다(GradingPolicy)"
+          },
+          "analysisContext": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysiscontext",
+            "description": "채점기가 코드 파편 밖을 보게 하는 최소 맥락. **분석 문서 전체가 아니라 `{overview, structure}` 두 필드만 보낸다** — `decisionPoints`는 문제 후보 목록이라 채점에 쓸모가 없고 부피의 대부분이다(20KB → 1~2KB). 생략하면 파편만으로 채점한다"
           }
         },
         "type": "object",
@@ -1620,7 +1599,7 @@
           "answerText"
         ],
         "title": "AnswerSubmit",
-        "description": "POST /sessions/{id}/answers 요청."
+        "description": "POST /sessions/{id}/answers 요청. **세션 API는 이것 하나뿐이다.**\n\nAI가 상태를 안 들고 있으므로 채점에 필요한 것이 전부 여기 실려야 한다."
       },
       "Body_create_curriculum_api_v0_curricula_post": {
         "properties": {
@@ -1893,6 +1872,39 @@
         "title": "CurriculumSection",
         "description": "교안의 모듈 하나. DB curriculum_section 대응."
       },
+      "Cursor": {
+        "properties": {
+          "problemId": {
+            "type": "string",
+            "title": "Problemid"
+          },
+          "axisCode": {
+            "type": "string",
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ],
+            "title": "Axiscode"
+          },
+          "hintsUsed": {
+            "type": "integer",
+            "maximum": 2.0,
+            "minimum": 0.0,
+            "title": "Hintsused",
+            "description": "이 단계에서 이미 연 힌트 수. 점수 상한(5/4/3)의 근거",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemId",
+          "axisCode"
+        ],
+        "title": "Cursor",
+        "description": "문답이 지금 서 있는 자리. **요청과 응답에 같은 모양으로 오간다.**\n\n백엔드는 응답의 `cursor`를 저장해 두었다가 다음 요청에 그대로 실어 보내면 된다.\n생략하면 AI가 `transcript`를 되짚어 복원한다(첫 답변이면 첫 문제의 L1)."
+      },
       "DecisionPoint": {
         "properties": {
           "title": {
@@ -2099,19 +2111,14 @@
             "title": "Questionfocusitemid",
             "description": "요청 focusItems[].id를 그대로 돌려준다. 강사 지정 없이 뽑았으면 null"
           },
-          "isGeneral": {
-            "type": "boolean",
-            "title": "Isgeneral",
-            "description": "teach에 연결되지 않은 일반 문제. 제출 코드가 teaches를 만족하지 않아 그 개념으로 문제를 못 만들었을 때 나온다. **화면에 '일반 문제'로 표기해야 한다** — 검증 개념 앵커가 없어 다른 문제와 성격이 다르고, 보고서의 교안 복습 위치 지목도 붙지 않는다 (2026-08-02 PM 확정)",
-            "default": false
-          },
           "sourcePath": {
             "type": "string",
             "title": "Sourcepath"
           },
           "lineStart": {
             "type": "integer",
-            "title": "Linestart"
+            "title": "Linestart",
+            "description": "**파일 기준 절대 줄 번호.** codeSnippet 안에서 하이라이트할 구간의 시작이다. 화면은 파일을 그리고 이 구간을 강조한다"
           },
           "lineEnd": {
             "type": "integer",
@@ -2120,17 +2127,30 @@
           "codeSnippet": {
             "type": "string",
             "title": "Codesnippet",
-            "description": "evidenceHash를 계산한 원문 그대로. Spring이 다시 자르면 해시가 어긋난다"
+            "description": "🔴 **문제를 낸 파일 전체다**(2026-08-03 확정). 파편만 주면 학생이 판단할 재료가 없다 — 질문이 주변 코드를 언급하는데 화면엔 선언 한 줄만 뜨는 일이 실제로 났다. 보여줄 구간은 lineStart~lineEnd다. 예외: 파일이 100,000자를 넘으면 파편만 온다(그때도 줄 번호는 파일 기준). **Spring이 다시 자르지 마세요** — 자를 위치는 화면이 정한다"
           },
           "evidenceHash": {
             "type": "string",
             "title": "Evidencehash",
-            "description": "codeSnippet의 sha256 hex 64자"
+            "description": "🔴 **파편(lineStart~lineEnd 구간)의 sha256 hex 64자다.** codeSnippet 전체의 해시가 아니다 — 파일 전체 기준이면 무관한 한 줄 수정에도 '근거가 바뀌었다'가 되어 판정이 쓸모없어진다. ⚠️ 테이블정의서 evidence_hash 비고('code_snippet 기준 해시')와 어긋나므로 그 문구를 고쳐야 한다"
           },
           "extractorVersion": {
-            "type": "string",
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
             "title": "Extractorversion",
-            "description": "이 문제를 뽑은 룰 버전. 재현성 근거"
+            "description": "이 문제를 뽑은 룰 버전. 재현성 근거. **정수다** — assessment_problem.extractor_version이 INTEGER CHECK (> 0)이라 문자열을 보내면 Spring INSERT가 깨진다"
+          },
+          "teachId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teachid",
+            "description": "이 문제가 검증하는 교안 개념(요청 teaches[].id). **항상 채워진다** — 문제는 오퍼레이터가 고른 개념에만 붙는다(2026-08-03 PM 결정). 화면의 '클래스는 L3까지, 상속은 L2까지' 같은 개념별 도달 표시가 이 값으로 붙는다"
           },
           "references": {
             "items": {
@@ -2168,53 +2188,110 @@
       },
       "ProblemReference": {
         "properties": {
-          "path": {
+          "referenceType": {
             "type": "string",
+            "enum": [
+              "PRIMARY_BLOCK",
+              "QUESTION_HIGHLIGHT",
+              "CALLER",
+              "RELATED_CONTEXT",
+              "CURRICULUM_EVIDENCE"
+            ],
+            "title": "Referencetype"
+          },
+          "displayOrder": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Displayorder",
+            "description": "화면에 놓는 순서. DB CHECK (> 0)",
+            "default": 1
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Path"
           },
           "lineStart": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Linestart"
           },
           "lineEnd": {
-            "type": "integer",
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Lineend"
+          },
+          "axisCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "L1",
+                  "L2",
+                  "L3",
+                  "L4"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Axiscode",
+            "description": "QUESTION_HIGHLIGHT일 때 필수. 어느 축의 강조 구간인가"
+          },
+          "teachId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teachid",
+            "description": "CURRICULUM_EVIDENCE일 때 필수. 요청 teaches[].id"
           },
           "evidenceHash": {
             "type": "string",
             "title": "Evidencehash",
             "description": "sha256 hex 64자"
-          },
-          "referenceType": {
-            "type": "string",
-            "enum": [
-              "CALLER",
-              "CALLEE",
-              "DEFINITION",
-              "TEST",
-              "CONFIG",
-              "SIMILAR"
-            ],
-            "title": "Referencetype"
           }
         },
         "type": "object",
         "required": [
-          "path",
-          "lineStart",
-          "lineEnd",
-          "evidenceHash",
-          "referenceType"
+          "referenceType",
+          "evidenceHash"
         ],
         "title": "ProblemReference",
-        "description": "문제가 가리키는 코드 위치. DB problem_reference 대응."
+        "description": "문제가 가리키는 근거. DB `assessment_problem_reference` 대응.\n\n**코드 근거와 교안 근거가 한 테이블에 섞여 있다.** 유형마다 필수 필드가 다르다.\n\n    PRIMARY_BLOCK · QUESTION_HIGHLIGHT · CALLER · RELATED_CONTEXT\n        path · lineStart · lineEnd 필수 (코드 근거)\n    CURRICULUM_EVIDENCE\n        코드 라인이 없다. teachId 로 교안을 가리킨다\n    QUESTION_HIGHLIGHT\n        axisCode 필수 — 어느 축에서 강조할 구간인지"
       },
       "ProblemResult": {
         "properties": {
           "problemNo": {
             "type": "integer",
             "minimum": 1.0,
-            "title": "Problemno"
+            "title": "Problemno",
+            "description": "요청의 problemNo를 그대로 돌려준다. 안 보내면 1이다 — **보내지 않으면 화면의 '문제 2 / 3'과 어긋난다**"
           },
           "problemId": {
             "type": "string",
@@ -2500,12 +2577,128 @@
         "title": "ReportJobStatus",
         "description": "GET /reports/{jobId} 응답.\n\nstatus 값은 analysis_job.status와 같은 집합을 쓴다. 별도 어휘를 만들면\nSpring이 enum을 하나 더 들어야 하고 DB CHECK와도 어긋난다."
       },
+      "ReportNarrative": {
+        "properties": {
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "strengths": {
+            "items": {
+              "$ref": "#/components/schemas/ReportNote"
+            },
+            "type": "array",
+            "title": "Strengths"
+          },
+          "gaps": {
+            "items": {
+              "$ref": "#/components/schemas/ReportNote"
+            },
+            "type": "array",
+            "title": "Gaps"
+          },
+          "autonomyNote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Autonomynote",
+            "description": "힌트 없이 답한 부분과 힌트를 받고서야 답한 부분의 차이"
+          },
+          "unreachedAxes": {
+            "items": {
+              "type": "string",
+              "enum": [
+                "L1",
+                "L2",
+                "L3",
+                "L4"
+              ]
+            },
+            "type": "array",
+            "title": "Unreachedaxes",
+            "description": "앞 단계에서 끝나 묻지 않은 축. **'못한 것'이 아니라 '안 물어본 것'이다** — 화면에서 0점이나 실패로 그리면 안 된다"
+          }
+        },
+        "type": "object",
+        "title": "ReportNarrative",
+        "description": "`reportMarkdown`을 만들기 전의 구조. **같은 내용을 두 모양으로 준다.**\n\n마크다운 하나만 주면 \"잘한 것만 카드로\" 같은 화면을 만들 때 프론트가 헤딩을\n다시 파싱해야 한다. 모델이 이미 이 구조로 답하므로 노출 비용이 0이다\n(2026-08-03 확정). 마크다운도 계속 준다 — 그냥 렌더만 하면 되는 경로를\n남겨두는 편이 프론트 미착수 시점에 싸다.\n\n**`narrativeFailed: true`면 이 객체는 전부 비어 있다.** 판정(`problem`)은 그때도\n확정값이다."
+      },
+      "ReportNote": {
+        "properties": {
+          "axis": {
+            "type": "string",
+            "title": "Axis",
+            "description": "모델이 붙인 이름표. 축 코드(L1~L4)가 아니라 교안 개념명이 온다"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail",
+            "description": "실제 답변을 근거로 한 서술"
+          },
+          "teachId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Teachid",
+            "description": "gaps에만 있다. **요청 teaches에 없는 id는 버리고 null로 만든다** — 모델이 지어낸 교안을 가리키면 학생이 없는 페이지를 뒤진다"
+          },
+          "studyPointer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Studypointer",
+            "description": "'어느 unit 몇 페이지를 다시 볼 것인가'의 서술. 화면의 교안 링크는 이 문장이 아니라 `curriculumRefs`로 그려야 한다 — 이 문장은 검증을 거치지 않은 모델 출력이다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "axis",
+          "detail"
+        ],
+        "title": "ReportNote",
+        "description": "서술 한 덩어리. `strengths`·`gaps`가 같은 모양이라 하나로 쓴다."
+      },
       "ReportRequest": {
         "properties": {
           "problemId": {
             "type": "string",
             "title": "Problemid",
             "description": "이 보고서가 다루는 문제. 문제 단위의 키"
+          },
+          "problemNo": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Problemno",
+            "description": "세션 안에서 이 문제가 몇 번째인가(1~3). 응답 problem.problemNo로 그대로 돌아온다. 생략하면 1이 나가는데, 2·3번 문제의 보고서에도 1이 찍혀 화면 표기와 어긋난다"
           },
           "sessionId": {
             "anyOf": [
@@ -2530,7 +2723,7 @@
             "title": "Scorerunid",
             "description": "Spring ScoreRun 키(에코용)"
           },
-          "modelCode": {
+          "providerModelCode": {
             "anyOf": [
               {
                 "type": "string"
@@ -2539,8 +2732,8 @@
                 "type": "null"
               }
             ],
-            "title": "Modelcode",
-            "description": "생략 시 서버 기본값. `/analyses`·`/curricula`와 같은 규칙이다 — 모델 선택은 operator 권한이고, 없으면 보고서만 비용·지연을 못 고른다"
+            "title": "Providermodelcode",
+            "description": "공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code`(벤더 접두어 포함). 생략 시 서버 기본값 — `/analyses`·`/curricula`와 같은 규칙이다. 모델 선택은 operator 권한이다"
           },
           "transcript": {
             "items": {
@@ -2583,6 +2776,9 @@
             "type": "string",
             "title": "Reportmarkdown"
           },
+          "narrative": {
+            "$ref": "#/components/schemas/ReportNarrative"
+          },
           "problem": {
             "$ref": "#/components/schemas/ProblemResult"
           },
@@ -2599,6 +2795,12 @@
             "title": "Retest",
             "description": "이 문제가 재시험 대상인가. **L1·L2 둘 다 통과해야 아니다** (scoring.RETEST_TRIGGER_AXES). 세션 전체의 재시험 여부는 Spring이 문제 3개의 이 값을 모아 판단한다"
           },
+          "narrativeFailed": {
+            "type": "boolean",
+            "title": "Narrativefailed",
+            "description": "서술 생성(LLM)이 실패해 reportMarkdown에 판정만 들어 있는가. **true여도 job은 SUCCEEDED다** — 점수·도달·재시험은 LLM 없이 계산되므로 확정값이다. 서술이 필요하면 같은 요청을 다시 보내면 된다(무료 티어에서 실제로 발생한다)",
+            "default": false
+          },
           "versions": {
             "$ref": "#/components/schemas/ReportVersions"
           }
@@ -2606,6 +2808,7 @@
         "type": "object",
         "required": [
           "reportMarkdown",
+          "narrative",
           "problem",
           "retest",
           "versions"
@@ -2684,198 +2887,6 @@
         "title": "RequirementResult",
         "description": "요구사항 하나의 P/F 판정. 요청 requirements와 1:1로 대응한다."
       },
-      "SessionRestore": {
-        "properties": {
-          "attemptId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attemptid"
-          },
-          "analysisJobId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysisjobid"
-          },
-          "timeLimitSec": {
-            "type": "integer",
-            "title": "Timelimitsec",
-            "description": "문제 1개당 제한 시간(초)",
-            "default": 1200
-          },
-          "elapsedSec": {
-            "type": "integer",
-            "title": "Elapsedsec",
-            "description": "현재 문제에서 흘러간 시간. 문제가 바뀌면 0으로 돌아간다",
-            "default": 0
-          },
-          "transcript": {
-            "items": {
-              "$ref": "#/components/schemas/TranscriptTurn"
-            },
-            "type": "array",
-            "title": "Transcript"
-          },
-          "problems": {
-            "items": {
-              "$ref": "#/components/schemas/Problem"
-            },
-            "type": "array",
-            "title": "Problems"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
-          }
-        },
-        "type": "object",
-        "title": "SessionRestore",
-        "description": "POST /sessions/{id}/restore 요청 (명세 §4.4)."
-      },
-      "SessionStart": {
-        "properties": {
-          "attemptId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attemptid"
-          },
-          "analysisJobId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Analysisjobid"
-          },
-          "sessionId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sessionid",
-            "description": "Spring AssessmentSession 키(에코용)"
-          },
-          "problems": {
-            "items": {
-              "$ref": "#/components/schemas/Problem"
-            },
-            "type": "array",
-            "title": "Problems",
-            "description": "분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다"
-          },
-          "selectedProblemIds": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Selectedproblemids",
-            "description": "problems 중 이 세션에 쓸 것. 생략 시 전체"
-          },
-          "timeLimitSec": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Timelimitsec",
-            "description": "**문제 1개당** 제한 시간(초). 세션 전체가 아니다 — 문제가 바뀌면 리셋되고 남은 시간은 이월되지 않는다. AI 호출 대기 동안은 멈춘다",
-            "default": 1200
-          }
-        },
-        "type": "object",
-        "title": "SessionStart",
-        "description": "POST /sessions 요청.\n\n🔴 **`problems`가 필수다** (2026-08-02, 전면 동결). 문제·질문·힌트는 분석 때\n만들어져 DB에 있고 세션은 그것을 받아 진행한다. **AI는 세션 중에 아무것도\n생성하지 않는다** — 채점만 한다. 안 주면 물을 것이 없어 세션이 성립하지 않는다."
-      },
-      "SessionView": {
-        "properties": {
-          "sessionId": {
-            "type": "string",
-            "title": "Sessionid"
-          },
-          "state": {
-            "type": "string",
-            "enum": [
-              "READY",
-              "IN_PROGRESS",
-              "PAUSED",
-              "COMPLETED",
-              "FAILED",
-              "EXPIRED"
-            ],
-            "title": "State"
-          },
-          "current": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Question"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "progress": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Progress"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "transcript": {
-            "items": {
-              "$ref": "#/components/schemas/TranscriptTurn"
-            },
-            "type": "array",
-            "title": "Transcript"
-          },
-          "aiUsage": {
-            "items": {
-              "$ref": "#/components/schemas/AiUsage"
-            },
-            "type": "array",
-            "title": "Aiusage"
-          }
-        },
-        "type": "object",
-        "required": [
-          "sessionId",
-          "state"
-        ],
-        "title": "SessionView",
-        "description": "세션 응답.\n\n명세는 진행/종료 두 형태로 나뉘지만, 스텁에서는 한 모델에 선택 필드로 담아\n단순하게 간다(진행 중이면 current+progress, 끝났으면 transcript).\n실제 계약을 굳힐 때 분리 여부를 정한다."
-      },
       "SnapshotMeta": {
         "properties": {
           "contentHash": {
@@ -2913,19 +2924,7 @@
             ],
             "title": "Axiscode"
           },
-          "attemptCount": {
-            "type": "integer",
-            "maximum": 3.0,
-            "minimum": 0.0,
-            "title": "Attemptcount",
-            "description": "문답 시도 횟수. 0이면 앞 단계에서 끝나 도달하지 못했다"
-          },
-          "passed": {
-            "type": "boolean",
-            "title": "Passed",
-            "description": "confirmedScore가 통과선(3점) 이상인지"
-          },
-          "bestScore": {
+          "questionScore": {
             "anyOf": [
               {
                 "type": "integer",
@@ -2936,10 +2935,22 @@
                 "type": "null"
               }
             ],
-            "title": "Bestscore",
-            "description": "힌트 상한 적용 전 원점수. 미도달이면 null"
+            "title": "Questionscore",
+            "description": "질문 답변 점수. 미응답·미도달이면 null"
           },
-          "confirmedScore": {
+          "questionPassed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Questionpassed",
+            "description": "score >= 3. 점수와 함께 존재하거나 함께 null"
+          },
+          "firstHintScore": {
             "anyOf": [
               {
                 "type": "integer",
@@ -2950,41 +2961,66 @@
                 "type": "null"
               }
             ],
-            "title": "Confirmedscore",
-            "description": "힌트 상한 적용 후 기록 점수. 미도달이면 null"
+            "title": "Firsthintscore",
+            "description": "첫 힌트 후 답변 점수. **질문이 미통과일 때만 값이 있다**(DB CHECK)"
           },
-          "hintsUsed": {
-            "type": "integer",
-            "maximum": 2.0,
-            "minimum": 0.0,
-            "title": "Hintsused",
-            "default": 0
-          },
-          "autonomy": {
+          "firstHintPassed": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "SELF",
-                  "SELF_MAINTAINED",
-                  "PARTIAL"
-                ]
+                "type": "boolean"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Autonomy"
+            "title": "Firsthintpassed"
+          },
+          "secondHintScore": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondhintscore",
+            "description": "둘째 힌트 후 답변 점수. **첫 힌트가 미통과일 때만 값이 있다**(DB CHECK)"
+          },
+          "secondHintPassed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondhintpassed"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PREPARED",
+              "IN_PROGRESS",
+              "PASSED",
+              "NOT_PASSED",
+              "NOT_REACHED",
+              "NOT_ANSWERED"
+            ],
+            "title": "Status",
+            "description": "DB problem_stage.status 값을 그대로 쓴다"
           }
         },
         "type": "object",
         "required": [
           "axisCode",
-          "attemptCount",
-          "passed"
+          "status"
         ],
         "title": "StageScore",
-        "description": "문제 하나의 단계 하나. DB problem_stage 대응."
+        "description": "문제 하나의 단계 하나. **DB `problem_stage` 한 행과 1:1이다** (2026-08-03).\n\n새 MEAS 정의서에서 `problem_stage`가 **한 행에 질문 1 + 힌트 2 + 답변 3 + 점수 3 +\n통과 3**을 담게 됐다(`stage_answer_attempt` 테이블은 사라졌다). 그래서 응답도 같은\n모양으로 낸다 — **Spring이 변환 없이 그대로 INSERT할 수 있게** 하는 것이 목적이다.\n\n🔴 **`attemptCount`·`hintsUsed`·`autonomy`는 없다.** 셋 다 아래 6개 필드에서\n파생된다(#42 §4-2). 자력 판정은 이렇게 계산한다.\n\n    questionPassed = true    → 스스로 답함      (SELF)\n    firstHintPassed = true   → 힌트 1개로 답함  (SELF_MAINTAINED)\n    secondHintPassed = true  → 힌트 2개로 답함  (PARTIAL)"
       },
       "Teach": {
         "properties": {
@@ -3035,6 +3071,37 @@
               }
             ],
             "title": "Descriptionpageend"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "CONCEPT",
+              "CODE_EXAMPLE",
+              "CAUTION"
+            ],
+            "title": "Kind",
+            "description": "교안 항목의 성격. **화면은 CONCEPT만 보여주면 된다** — 나머지 둘은 문제 선정 재료라 저장만 하면 됩니다",
+            "default": "CONCEPT"
+          },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Evidence",
+            "description": "이 개념이 나온 페이지 근거를 모델이 짧게 옮긴 것. 코드 식별자가 여기 들어 있는 경우가 많아 사전 추출원으로 쓴다"
+          },
+          "siblingNames": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Siblingnames",
+            "description": "같은 unit의 다른 개념 이름들. **교안이 대안을 가르쳤다는 신호**이고 L3(대안 비교) 질문의 재료다. `normalizedName` 기준"
           }
         },
         "type": "object",
@@ -3073,26 +3140,24 @@
             "type": "string",
             "title": "Answeredat"
           },
-          "bestScore": {
+          "score": {
             "type": "integer",
             "maximum": 5.0,
             "minimum": 0.0,
-            "title": "Bestscore",
-            "description": "힌트 상한 적용 전 원점수"
+            "title": "Score",
+            "description": "🔴 **점수는 하나다** (2026-08-03). 옛 bestScore/confirmedScore는 힌트 상한 적용 전후를 나눈 것인데 상한 자체가 폐기됐다 — AI는 채점만 하고 가공하지 않는다"
           },
-          "confirmedScore": {
+          "passed": {
+            "type": "boolean",
+            "title": "Passed",
+            "description": "score >= 3. DB CHECK가 이 관계를 강제한다"
+          },
+          "hintsUsed": {
             "type": "integer",
-            "maximum": 5.0,
+            "maximum": 2.0,
             "minimum": 0.0,
-            "title": "Confirmedscore",
-            "description": "힌트 상한 적용 후 기록 점수"
-          },
-          "attemptCount": {
-            "type": "integer",
-            "maximum": 3.0,
-            "minimum": 1.0,
-            "title": "Attemptcount",
-            "description": "이 단계에서 몇 번째 시도인지. 첫 답변이 1"
+            "title": "Hintsused",
+            "description": "이 답변 직전까지 받은 힌트 수. **어느 슬롯에 저장할지를 이 값이 정한다** — 0=질문 · 1=firstHint · 2=secondHint"
           },
           "hintText": {
             "anyOf": [
@@ -3105,22 +3170,6 @@
             ],
             "title": "Hinttext",
             "description": "이 턴 직전에 보여준 힌트. 첫 시도면 null"
-          },
-          "autonomy": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "SELF",
-                  "SELF_MAINTAINED",
-                  "PARTIAL"
-                ]
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Autonomy"
           }
         },
         "type": "object",
@@ -3130,12 +3179,33 @@
           "questionText",
           "answerText",
           "answeredAt",
-          "bestScore",
-          "confirmedScore",
-          "attemptCount"
+          "score",
+          "passed",
+          "hintsUsed"
         ],
         "title": "TranscriptTurn",
-        "description": "확정된 문답 한 턴. Spring이 즉시 영속화하는 복구 근거.\n\n한 턴 = 질문 1개 + 답변 1개 + 채점 1개. 힌트 후 재질의는 별도 턴이 되고\nattempt_no가 올라간다(DB stage_answer_attempt 한 행에 대응)."
+        "description": "확정된 문답 한 턴. Spring이 즉시 영속화하는 복구 근거.\n\n한 턴 = 질문 1개 + 답변 1개 + 채점 1개. 힌트 후 재질의도 한 턴이다.\n\n**DB `problem_stage` 한 행의 슬롯 하나에 들어간다** — `hintsUsed`가 0이면 질문 슬롯,\n1이면 첫 번째 힌트 슬롯, 2면 두 번째 힌트 슬롯이다(2026-08-03, 새 MEAS 정의서).\n옛 `stage_answer_attempt` 테이블은 사라졌다."
+      },
+      "UnmatchedTeach": {
+        "properties": {
+          "teachId": {
+            "type": "string",
+            "title": "Teachid",
+            "description": "요청 teaches[].id 그대로"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "description": "왜 못 만들었는지. 화면에 그대로 띄워도 되는 한 문장"
+          }
+        },
+        "type": "object",
+        "required": [
+          "teachId",
+          "reason"
+        ],
+        "title": "UnmatchedTeach",
+        "description": "문항을 못 만든 검증 개념. **`―`(문항 없음)의 근거다.**\n\n🔴 **0단(L1 미달)과 다르다.** 0단은 물어봤는데 못 푼 것이고 이건 안 물어본 것이다.\n도달 단계 컬럼에 0을 박으면 둘이 섞여 \"안 물어봤다\"가 \"틀렸다\"로 바뀐다 — NULL이어야 한다.\n\nAI는 이 개념을 **두 번** 찾는다(p04-3 + 실패분 재시도 1회). 그래도 못 찾으면 여기 담긴다."
       },
       "ValidationError": {
         "properties": {

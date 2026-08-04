@@ -8,6 +8,7 @@
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -99,6 +100,23 @@ def _truncate(values: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
     return out
 
 
+def resolve_choice(raw: Any, allowed: set[str | None]) -> Any:
+    """모델이 돌려준 식별자를 **허용 집합의 실제 값으로** 되돌린다.
+
+    🔴 **모델은 준 id를 그대로 안 돌려준다.** 2026-08-03 실측: 목록이
+    `- {id}: {label}` 형식인데 id와 label이 비슷해서 **줄 전체**를 적어 왔다
+    (`"매니저 패턴의 동작 방식: 매니저 패턴의 동작 방식"`). 정확 일치만 인정하면
+    개념이 코드에 있는데도 전부 "없음"으로 나간다.
+
+    되살리는 조건은 **정확히 하나로 좁혀질 때뿐이다** — 여러 개가 걸리면 어느 것을
+    가리켰는지 알 수 없으므로 원본을 그대로 돌려준다(호출부가 버린다).
+    """
+    if raw in allowed or not isinstance(raw, str):
+        return raw
+    hit = [value for value in allowed if value and (raw.startswith(value) or value in raw)]
+    return hit[0] if len(hit) == 1 else raw
+
+
 def parse_json(text: str) -> dict[str, Any]:
     """모델 출력에서 JSON 객체를 뽑는다. 실패하면 ValueError."""
     cleaned = _FENCE.sub("", (text or "").strip())
@@ -112,14 +130,28 @@ def parse_json(text: str) -> dict[str, Any]:
         return json.loads(m.group(0))
 
 
+# 배치 스테이지의 기본 시도 횟수. **아무도 안 기다리는 경로라 넉넉히 준다.**
+# 2로는 부족하다 — 무료 티어 529 실패율이 64%라 "파싱 한 번 깨지고 재시도가 529"면
+# 그것만으로 소진된다(2026-08-03 실호출: p04-3이 INVALID_JSON + PROVIDER_ERROR로
+# 2회를 다 쓰고 job이 FAILED). 세션 경로는 학생이 기다리므로 여기 값을 안 쓰고
+# client.SESSION_MAX_ATTEMPTS를 넘긴다.
+BATCH_MAX_ATTEMPTS = 4
+
+
 def call(stage_id: str, values: dict[str, Any], *, model_code: str,
-         max_attempts: int = 2, timeout_s: float | None = None) -> StageResult:
+         max_attempts: int = BATCH_MAX_ATTEMPTS, timeout_s: float | None = None,
+         extra_user: str = "") -> StageResult:
     """스테이지 하나 실행. 파싱 실패하면 한 번 더 시도한다.
 
     재시도하는 이유: temperature 0이어도 JSON이 깨져 나오는 경우가 실재한다
     (팀원 실측: 251페이지 실행에서 26청크 중 2건이 배열 중간에서 잘렸다).
     전송 실패(429·타임아웃)는 vendor 클라이언트가 이미 키를 바꿔가며 재시도하므로
     여기서 다시 돌리지 않는다 — 같은 실패를 두 계층에서 세면 예산이 곱해진다.
+
+    `extra_user`는 매니페스트에 자리가 없는 블록을 사용자 메시지 뒤에 덧붙인다.
+    **vendor를 고치지 않기 위한 통로다** — 매니페스트에 자리표시자를 추가하면
+    팀원 갱신(덮어쓰기 복사)마다 재적용해야 하고, 그건 PATCHES.md가 감당하는
+    유지비다. 자리표시자가 상류에 생기면 이 인자 대신 values로 옮긴다.
     """
     stage = get_stage(stage_id)
 
@@ -137,7 +169,7 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
     filled = _truncate({**defaults, **values}, stage.get("truncation", {}))
     messages = [
         {"role": "system", "content": stage["system"]},
-        {"role": "user", "content": _fill(stage["user_template"], filled)},
+        {"role": "user", "content": _fill(stage["user_template"], filled) + extra_user},
     ]
 
     usages: list[dict[str, Any]] = []
@@ -166,7 +198,12 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
             # 그 턴을 통째로 버리면 안 된다 (실측: mistral 채점에서 HTTP 504).
             # 대신 재시도하는 동안 학생은 계속 기다린다 — 세션 경로의 타임아웃은
             # 배치보다 짧아야 한다(T7c 실측 후 결정).
-            if failure in ("PROVIDER_ERROR", "TIMEOUT") and attempt < max_attempts:
+            if failure in ("PROVIDER_ERROR", "TIMEOUT", "RATE_LIMITED") and attempt < max_attempts:
+                # 529 Overloaded는 0.3초에 즉답이라 쉬지 않고 재시도하면 6회가 2초 만에
+                # 소진된다 — 공급자가 회복할 틈을 안 주고 실패만 앞당긴다. 타임아웃으로
+                # 실패한 경우엔 이미 오래 기다렸으니 더 쉬지 않는다.
+                if failure != "TIMEOUT":
+                    time.sleep(min(0.5 * 2 ** (attempt - 1), 4.0))
                 continue
 
             raise StageError(f"{stage_id}: {exc}", usages) from exc

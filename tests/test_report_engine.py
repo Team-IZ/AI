@@ -12,13 +12,13 @@ TEACHES = [
 ]
 
 
-def _turn(axis: str, confirmed: int, best: int | None = None, hint: str | None = None):
+def _turn(axis: str, score: int, hints_used: int = 0, hint: str | None = None):
+    """턴 하나. `hints_used`가 problem_stage 의 어느 슬롯에 들어갈지를 정한다."""
     return {
         "problem_id": "p-1", "axis_code": axis, "question_text": f"{axis} 질문",
         "answer_text": "답변", "answered_at": "2026-08-02T00:00:00Z",
-        "best_score": best if best is not None else confirmed,
-        "confirmed_score": confirmed, "attempt_count": 1,
-        "hint_text": hint, "autonomy": "SELF",
+        "score": score, "passed": score >= 3, "hints_used": hints_used,
+        "hint_text": hint,
     }
 
 
@@ -43,18 +43,21 @@ NARRATIVE = {
 
 # ── ① 판정 (결정론) ───────────────────────────────────────────────────────────
 
-def test_last_turn_of_an_axis_is_the_recorded_result():
-    """힌트 후 재질의도 한 턴이다. 축의 결과는 **마지막 시도**의 점수다."""
+def test_each_attempt_lands_in_its_own_slot():
+    """한 축의 답변 3개가 problem_stage 한 행의 서로 다른 슬롯에 들어간다.
+
+    마지막 시도만 남기면 "힌트 없이 몇 점이었나"가 사라져 자력 판정을 못 한다.
+    """
     rows = report.summarize_stages([
-        _turn("L1", 2), _turn("L1", 2, hint="힌트1"), _turn("L1", 4, best=5, hint="힌트2"),
+        _turn("L1", 2), _turn("L1", 2, hints_used=1, hint="힌트1"),
+        _turn("L1", 4, hints_used=2, hint="힌트2"),
     ])
 
     l1 = rows[0]
-    assert l1["confirmed_score"] == 4
-    assert l1["best_score"] == 5
-    assert l1["attempt_count"] == 3
-    assert l1["hints_used"] == 2
-    assert l1["passed"] is True
+    assert (l1["question_score"], l1["question_passed"]) == (2, False)
+    assert (l1["first_hint_score"], l1["first_hint_passed"]) == (2, False)
+    assert (l1["second_hint_score"], l1["second_hint_passed"]) == (4, True)
+    assert l1["status"] == "PASSED"
 
 
 def test_unreached_axes_are_still_four_rows():
@@ -63,9 +66,9 @@ def test_unreached_axes_are_still_four_rows():
 
     assert [r["axis_code"] for r in rows] == ["L1", "L2", "L3", "L4"]
     for r in rows[1:]:
-        assert r["attempt_count"] == 0
-        assert r["passed"] is False
-        assert "confirmed_score" not in r      # 점수를 지어내지 않는다
+        assert r["status"] == "NOT_REACHED"
+        assert report.stage_passed(r) is False
+        assert "question_score" not in r        # 점수를 지어내지 않는다
 
 
 def test_reached_stage_counts_consecutive_passes():
@@ -94,11 +97,15 @@ def test_markdown_has_no_numeric_scores(monkeypatch):
     """화면에 숫자 점수가 없다(PM 설계 v2 §10-3). 도달 단계와 서술만 쓴다."""
     _fake(monkeypatch, NARRATIVE)
 
-    md = report.build("p-1", 1, [_turn("L1", 4), _turn("L2", 3)], model_code="m").report_markdown
+    md = report.build("p-1", 1, [_turn("L1", 4), _turn("L2", 3)], model_code="m",
+                      teaches=[{"id": "t1", "label": "흐름",
+                                "unit_id": "u1", "source_pages": [36, 46]}]).report_markdown
 
     assert "2단 / 4단" in md
     assert "대안을 대지 못했습니다" in md
-    assert "Unit u1 · 36~46쪽" in md
+    # 복습 위치는 요청 teaches에서 만든다 — 모델의 study_pointer를 그대로 쓰지 않는다.
+    assert "단원 u1" in md and "p.36, 46" in md
+    assert "36~46쪽" not in md
     for forbidden in ("4점", "3점", "총점", "평균"):
         assert forbidden not in md
 
@@ -120,6 +127,35 @@ def test_invented_teach_id_is_dropped(monkeypatch):
     built = report.build("p-1", 1, [_turn("L1", 4)], model_code="m", teaches=TEACHES)
 
     assert built.curriculum_refs == []
+    # 구조화 필드에도 새면 안 된다 — 두 필드가 다른 교안을 가리키게 된다.
+    assert built.narrative["gaps"][0]["teach_id"] is None
+
+
+def test_narrative_mirrors_the_markdown(monkeypatch):
+    """마크다운과 구조화 필드는 같은 내용이다. 프론트가 헤딩을 다시 파싱하지 않도록."""
+    _fake(monkeypatch, NARRATIVE)
+
+    built = report.build("p-1", 1, [_turn("L1", 4)], model_code="m", teaches=TEACHES)
+
+    assert built.narrative["summary"] == NARRATIVE["summary"]
+    assert built.narrative["gaps"][0]["teach_id"] == "t1"
+    # 앞 단계에서 끝나 안 물어본 축. "못한 것"이 아니라 "안 물어본 것"이다.
+    assert built.narrative["unreached_axes"] == ["L2", "L3", "L4"]
+
+
+def test_failed_narrative_is_empty_not_an_apology(monkeypatch):
+    """실패 안내 문장을 summary로 내보내면 백엔드가 '요약이 있다'로 읽는다."""
+    def _boom(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+        raise stages.StageError("p04-6: 터짐", [{"status": "FAILED"}])
+
+    monkeypatch.setattr(report.stages, "call", _boom)
+
+    built = report.build("p-1", 1, [_turn("L1", 4)], model_code="m", teaches=TEACHES)
+
+    assert built.narrative_failed is True
+    assert built.narrative["summary"] is None
+    assert built.narrative["strengths"] == built.narrative["gaps"] == []
+    assert "서술 생성에 실패" in built.report_markdown    # 마크다운에는 사유가 남는다
 
 
 def test_curriculum_refs_come_from_gaps(monkeypatch):
@@ -150,9 +186,31 @@ def test_transcript_block_shows_hint_usage(monkeypatch):
     """힌트를 몇 개 받고 답했는지가 보여야 모델이 자력을 서술한다."""
     call = _fake(monkeypatch, NARRATIVE)
 
-    report.build("p-1", 1, [_turn("L1", 2), _turn("L1", 4, hint="L1 힌트 1")],
+    report.build("p-1", 1, [_turn("L1", 2), _turn("L1", 4, hints_used=1, hint="L1 힌트 1")],
                  model_code="m")
 
     block = call.values["transcript_block"]
     assert "힌트 없이 답함" in block
     assert "직전 힌트: L1 힌트 1" in block
+
+def test_markdown_pointer_never_disagrees_with_curriculum_refs():
+    """🔴 화면의 "교안: …"과 `curriculumRefs`가 서로 다른 말을 하면 안 된다.
+
+    2026-08-04 실측: 모델이 teach_id를 라벨로 되돌려줘 필터에 걸렸는데, 마크다운은
+    검증 안 된 `study_pointer`를 그대로 찍어 **참조는 비었는데 화면엔 교안이 떴다.**
+    """
+    teaches = [{"id": "t1", "label": "도구", "unit_id": "u6", "source_pages": [9]}]
+    stage_rows = [{"axis_code": "L1", "status": "PASSED"}]
+
+    # ① 모델이 모르는 teach를 지목하면 교안 줄이 아예 안 나간다.
+    made_up = {"gaps": [{"axis": "도구", "detail": "부족",
+                         "teach_id": "없는-teach", "study_pointer": "Unit u99 · p.404"}]}
+    md = report._render_markdown(made_up, stage_rows, 1, teaches)
+    assert "u99" not in md and "p.404" not in md
+    assert report._curriculum_refs(made_up, teaches) == []
+
+    # ② 라벨로 되돌려줘도 되살려 같은 teach를 가리킨다.
+    echoed = {"gaps": [{"axis": "도구", "detail": "부족", "teach_id": "t1: 도구"}]}
+    md = report._render_markdown(echoed, stage_rows, 1, teaches)
+    assert "단원 u6" in md and "p.9" in md
+    assert report._curriculum_refs(echoed, teaches)[0]["teachId"] == "t1"

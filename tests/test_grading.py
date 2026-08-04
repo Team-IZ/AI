@@ -5,8 +5,10 @@ from app.engines.analysis import grading, stages
 
 
 def _fake(monkeypatch, data):
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+              extra_user=""):
         _call.values = values
+        _call.extra_user = extra_user
         return stages.StageResult(data=data, usages=[{"status": "SUCCEEDED"}])
 
     monkeypatch.setattr(grading.stages, "call", _call)
@@ -18,25 +20,26 @@ def _data(score=4):
             "evidence": "학생이 인용한 부분", "missing": "데이터 흐름 연결"}
 
 
-def test_hint_cap_lowers_confirmed_score(monkeypatch):
-    """원점수는 그대로 두고 상한만 씌운다 — '몇 번째 힌트에서 통과했나'가 자력의 측정값이다."""
+def test_hints_do_not_lower_the_score(monkeypatch):
+    """🔴 상한 폐기(2026-08-03). 힌트를 써도 점수를 깎지 않는다 — AI는 채점만 한다.
+
+    problem_stage 가 질문·힌트1·힌트2 점수를 따로 저장하므로 눌러 담을 이유가 없다.
+    자력은 '어느 슬롯에서 통과했나'로 읽는다.
+    """
     _fake(monkeypatch, _data(score=5))
 
     g = grading.grade("L1", "q", "a", model_code="m", hints=["h1", "h2"])
 
-    assert g.best_score == 5           # 루브릭 원점수는 보존
-    assert g.confirmed_score == 3      # 힌트 2회 상한
+    assert g.score == 5                # 힌트를 2개 썼어도 그대로
+    assert g.hints_used == 2           # 어느 슬롯인지는 이 값이 정한다
     assert g.autonomy == "PARTIAL"
 
 
-def test_pass_uses_confirmed_not_best(monkeypatch):
-    """best로 판정하면 힌트 상한이 무력해진다."""
-    _fake(monkeypatch, _data(score=5))
+def test_pass_line_is_the_raw_score(monkeypatch):
+    """통과 판정은 원점수 기준이다. DB CHECK도 `passed=TRUE AND score>=3`이다."""
+    _fake(monkeypatch, _data(score=3))
 
-    g = grading.grade("L1", "q", "a", model_code="m", hints=["h1", "h2"])
-
-    assert g.passed is True            # 상한 3점 = 통과선 3점
-    assert grading.grade("L1", "q", "a", model_code="m", hints=["h1", "h2"]).confirmed_score == 3
+    assert grading.grade("L1", "q", "a", model_code="m", hints=["h1", "h2"]).passed is True
 
 
 def test_no_hint_keeps_full_score(monkeypatch):
@@ -44,7 +47,7 @@ def test_no_hint_keeps_full_score(monkeypatch):
 
     g = grading.grade("L1", "q", "a", model_code="m")
 
-    assert (g.best_score, g.confirmed_score, g.autonomy) == (5, 5, "SELF")
+    assert (g.score, g.passed, g.autonomy) == (5, True, "SELF")
 
 
 def test_below_pass_line_fails(monkeypatch):
@@ -121,3 +124,49 @@ def test_missing_reach_field_does_not_break_grading(monkeypatch):
     assert g.model_reached is None
     assert g.reach_conflict is False
     assert g.passed is True
+
+
+def test_analysis_context_reaches_the_grader(monkeypatch):
+    """코드 파편 밖의 구조가 프롬프트에 실려야 한다.
+
+    MVC면 model·view·controller가 다른 파일에 있다. 파편만 본 채점기는 학생이
+    "컨트롤러가 서비스에 위임한다"고 답해도 사실 여부를 모른다.
+    """
+    call = _fake(monkeypatch, _data())
+
+    grading.grade("L1", "q", "a", model_code="m", analysis_context={
+        "overview": "주문을 받아 결제로 넘기는 서비스다.",
+        "structure": [{"area": "컨트롤러", "files": ["app/api.py"], "role": "요청 수신"}],
+    })
+
+    assert "주문을 받아 결제로 넘기는 서비스다." in call.extra_user
+    assert "app/api.py" in call.extra_user
+    # 맥락이 루브릭을 밀어내면 안 된다 — 채점 기준은 값 단계 서술뿐이다.
+    assert "기준을 늘리지 마라" in call.extra_user
+
+
+def test_analysis_context_is_optional(monkeypatch):
+    """안 주면 지금과 똑같이 동작해야 한다(하위 호환)."""
+    call = _fake(monkeypatch, _data())
+
+    grading.grade("L1", "q", "a", model_code="m")
+
+    assert call.extra_user == ""
+
+
+def test_decision_points_are_not_sent(monkeypatch):
+    """분석 문서를 통째로 넣으면 채점 36회 × 5,000~7,000토큰이다.
+
+    `decisionPoints`는 문제 후보 전체 목록이고 문제는 이미 정해졌다 — 부피만 차지한다.
+    """
+    call = _fake(monkeypatch, _data())
+
+    grading.grade("L1", "q", "a", model_code="m", analysis_context={
+        "overview": "개요",
+        "structure": [],
+        "decision_points": [{"title": "여기 있으면 안 된다"}],
+        "risks": ["이것도"],
+    })
+
+    assert "여기 있으면 안 된다" not in call.extra_user
+    assert "이것도" not in call.extra_user

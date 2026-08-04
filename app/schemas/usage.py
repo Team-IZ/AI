@@ -21,6 +21,26 @@ FeatureCode = Literal[
     "SUMMARY_DRAFT",        # 보고서 서술
 ]
 
+# 어느 작업에 딸린 호출인가. featureCode보다 굵은 단위다 — 한 ContextType 안에서
+# featureCode가 여럿 나올 수 있다(ANALYSIS 하나에 CODE_ANALYSIS + QUESTION_GENERATION).
+#
+# 필드명이 `source_type`/`source_id` → `context_type`/`context_id`로 바뀌었다
+# (2026-08-03). **아래 값 집합으로 확정됐다** (2026-08-04 백엔드 회신).
+#
+# `PROBLEM_STAGE`(테이블 이름) 대신 `GRADING`(세션 단위)으로 간다. 전자는 `context_id`가
+# `problem_stage_id`여야 하는데 **AI는 그 값을 모른다** — 세션 요청에 오는 것은
+# sessionId·problemId·axisCode뿐이다. 백엔드가 요청에 `problemStageId`를 실어 주면
+# AI는 반향 한 줄로 바꿀 수 있다. 백엔드가 추가 작업 없는 세션 단위를 택했다.
+ContextType = Literal[
+    "ANALYSIS",     # POST /analyses                 contextId = 분석 jobId
+    "GRADING",      # POST /sessions/{id}/answers    contextId = sessionId
+    "REPORT",       # POST /reports                  contextId = 보고서 jobId
+    "CURRICULUM",   # POST /curricula                contextId = 교안 jobId
+]
+
+# 옛 이름. 다른 모듈이 아직 import할 수 있어 남겨둔다.
+SourceType = ContextType
+
 # 기술적 실패 유형. status가 FAILED·PARTIAL일 때만 채운다.
 FailureCode = Literal[
     "TIMEOUT",
@@ -35,15 +55,20 @@ class AiUsage(BaseSchema):
     """LLM 호출 한 번의 기록. DB ai_usage 한 행에 대응한다."""
 
     feature_code: FeatureCode
-    model_code: str = Field(description="Spring이 ai_model에서 model_id를 조회한다")
+    model_code: str = Field(
+        description="Spring이 ai_model에서 model_id를 조회한다. "
+                    "⚠️ **AI는 호출에 쓴 provider 문자열을 그대로 에코한다**(요청의 "
+                    "providerModelCode 또는 서버 기본값) — AI는 화면 선택값을 모른다. "
+                    "Spring은 `provider_model_code`로 ai_model을 조회해야 한다",
+    )
 
     # 어느 작업에 딸린 호출인가. 다형 참조라 FK가 없다.
-    source_type: str = Field(description="값 목록은 백엔드 확정 대기(C-4)")
-    source_id: str = Field(description="작업 PK. 분석이면 analysisId")
+    context_type: ContextType
+    context_id: str = Field(description="작업 PK. 분석이면 분석 jobId")
     request_id: str
     trace_id: str = Field(description="요청 헤더 X-Trace-Id를 그대로 잇는다")
     idempotency_key: str = Field(
-        description="{sourceId}:{sourceType}:{attemptNo} 형식"
+        description="{contextId}:{contextType}:{attemptNo} 형식"
     )
 
     input_token_count: int = Field(ge=0)

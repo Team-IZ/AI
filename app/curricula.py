@@ -16,6 +16,7 @@ from app.schemas.curriculum import (
     CurriculumRequest,
     CurriculumResult,
 )
+from app.usage import to_ai_usage
 
 # job_id -> 교안 분석 job 상태·결과
 _jobs: dict[str, CurriculumJobStatus] = {}
@@ -101,20 +102,27 @@ def _stub_result(body: CurriculumRequest, pdf_bytes: bytes | None) -> Curriculum
     )
 
 
-def _real_result(body: CurriculumRequest, pdf_bytes: bytes) -> CurriculumResult:
+def _real_result(body: CurriculumRequest, pdf_bytes: bytes, job: CurriculumJobStatus,
+                 idempotency_key: str | None, trace_id: str | None) -> CurriculumResult:
     """PDF를 실제로 분석한다.
 
     **청크가 하나라도 깨지면 `fallback_used`를 세운다.** 결과는 나오지만 그 페이지
     범위의 개념이 빠져 있다는 뜻이라, 강사가 teach 3건을 고르기 전에 알아야 한다.
+
+    원장(`job.ai_usage`)은 검증보다 먼저 채운다 — 결과를 버려도 태운 토큰은 남긴다
+    (jobs.py와 같은 순서). 교안은 청크마다 호출이라 행이 여러 개다.
     """
     from app.engines import curriculum as engine
 
     settings = get_settings()
     built = engine.analyse(
         pdf_bytes,
-        model_code=body.model_code or settings.model_code_curriculum,
-        course_label=body.course_label or "",
+        model_code=body.provider_model_code or settings.model_code_curriculum,
+        course_label=body.course_label,
     )
+    job.ai_usage = to_ai_usage(built.usages, "CURRICULUM", job.job_id,
+                               feature_code="CURRICULUM_ANALYSIS",
+                               idempotency_key=idempotency_key, trace_id=trace_id)
     return CurriculumResult.model_validate({
         "version_id": body.version_id,
         "analysis_version": engine.ANALYSIS_VERSION,
@@ -126,7 +134,8 @@ def _real_result(body: CurriculumRequest, pdf_bytes: bytes) -> CurriculumResult:
     })
 
 
-def run_curriculum(job_id: str, body: CurriculumRequest, pdf_bytes: bytes | None) -> None:
+def run_curriculum(job_id: str, body: CurriculumRequest, pdf_bytes: bytes | None, *,
+                   idempotency_key: str | None = None, trace_id: str | None = None) -> None:
     """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED."""
     job = _jobs[job_id]
     job.status = "RUNNING"
@@ -134,7 +143,7 @@ def run_curriculum(job_id: str, body: CurriculumRequest, pdf_bytes: bytes | None
 
     try:
         if get_settings().engine_mode == "real" and pdf_bytes:
-            job.result = _real_result(body, pdf_bytes)
+            job.result = _real_result(body, pdf_bytes, job, idempotency_key, trace_id)
         else:
             job.result = _stub_result(body, pdf_bytes)
         job.status = "SUCCEEDED"

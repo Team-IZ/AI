@@ -52,8 +52,16 @@ def format_validation_message(errors: list) -> str:
     조립을 여기 한곳에 두기.
     """
     first = errors[0]
-    # loc = ("body", "source", "repoUrl") 같은 경로. 맨 앞 "body"는 빼고 이어붙이기
-    where = ".".join(str(part) for part in first["loc"][1:])
+    # loc = ("body", "source", "repoUrl") 같은 경로. 맨 앞 "body"는 빼고 이어붙인다.
+    #
+    # 🔴 **무조건 [1:]로 자르면 안 된다.** 라우터가 손으로 검증하는 경로(multipart의
+    # payload를 직접 파싱하는 /analyses·/curricula)는 loc에 "body"가 없어서
+    # `("courseLabel",)`이 통째로 잘려 `": Field required"`가 나갔다 — **백엔드가 어느
+    # 필드를 빠뜨렸는지 알 수 없는 메시지다**(2026-08-03 발견).
+    loc = first["loc"]
+    if loc and loc[0] in ("body", "query", "path", "header"):
+        loc = loc[1:]
+    where = ".".join(str(part) for part in loc)
     # 본문 자체가 JSON 아니면 loc이 필드 경로가 아니라 문자 위치라 의미가 없다
     if first["type"] == "json_invalid":
         return first["msg"]
