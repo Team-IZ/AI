@@ -125,6 +125,7 @@
                   "attemptId": {
                     "anyOf": [
                       {
+                        "format": "uuid",
                         "type": "string"
                       },
                       {
@@ -137,6 +138,7 @@
                   "submissionId": {
                     "anyOf": [
                       {
+                        "format": "uuid",
                         "type": "string"
                       },
                       {
@@ -253,16 +255,18 @@
                     "title": "Teaches",
                     "type": "array"
                   },
-                  "curriculumId": {
+                  "curriculumVersionId": {
                     "anyOf": [
                       {
+                        "format": "uuid",
                         "type": "string"
                       },
                       {
                         "type": "null"
                       }
                     ],
-                    "title": "Curriculumid"
+                    "description": "teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. 🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 이름만으로 구분되지 않았다",
+                    "title": "Curriculumversionid"
                   },
                   "providerModelCode": {
                     "anyOf": [
@@ -310,6 +314,7 @@
                         "attemptId": {
                           "anyOf": [
                             {
+                              "format": "uuid",
                               "type": "string"
                             },
                             {
@@ -322,6 +327,7 @@
                         "submissionId": {
                           "anyOf": [
                             {
+                              "format": "uuid",
                               "type": "string"
                             },
                             {
@@ -438,16 +444,18 @@
                           "title": "Teaches",
                           "type": "array"
                         },
-                        "curriculumId": {
+                        "curriculumVersionId": {
                           "anyOf": [
                             {
+                              "format": "uuid",
                               "type": "string"
                             },
                             {
                               "type": "null"
                             }
                           ],
-                          "title": "Curriculumid"
+                          "description": "teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. 🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 이름만으로 구분되지 않았다",
+                          "title": "Curriculumversionid"
                         },
                         "providerModelCode": {
                           "anyOf": [
@@ -899,19 +907,22 @@
                       "description": "POST /api/v0/curricula 요청. PDF는 multipart의 file 파트로 온다.",
                       "properties": {
                         "versionId": {
-                          "description": "Spring curriculum_version 키(에코용)",
+                          "description": "분석 대상 교안 **버전**. `curriculum_version.version_id`다. `/analyses` 요청의 `curriculumVersionId`와 같은 값이다",
+                          "format": "uuid",
                           "title": "Versionid",
                           "type": "string"
                         },
                         "curriculumId": {
                           "anyOf": [
                             {
+                              "format": "uuid",
                               "type": "string"
                             },
                             {
                               "type": "null"
                             }
                           ],
+                          "description": "교안 자산 `curriculum_material.material_id`. **버전이 아니다** — 버전은 위 `versionId`가 가리킨다",
                           "title": "Curriculumid"
                         },
                         "courseLabel": {
@@ -1245,7 +1256,8 @@
           "attemptId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -1256,7 +1268,8 @@
           "submissionId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -1431,6 +1444,7 @@
         "properties": {
           "sessionId": {
             "type": "string",
+            "format": "uuid",
             "title": "Sessionid"
           },
           "state": {
@@ -1682,7 +1696,8 @@
           "versionId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -1768,6 +1783,7 @@
         "properties": {
           "versionId": {
             "type": "string",
+            "format": "uuid",
             "title": "Versionid"
           },
           "analysisVersion": {
@@ -1899,6 +1915,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "axisCode": {
@@ -1974,7 +1991,8 @@
           "relatedTeachId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2088,6 +2106,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "problemNo": {
@@ -2189,7 +2208,8 @@
           "teachId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2312,7 +2332,8 @@
           "teachId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2345,6 +2366,7 @@
           },
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "reachedStage": {
@@ -2443,6 +2465,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "axisCode": {
@@ -2533,7 +2556,8 @@
           "problemId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2545,7 +2569,8 @@
           "sessionId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2700,7 +2725,8 @@
           "teachId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2734,6 +2760,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid",
             "description": "이 보고서가 다루는 문제. 문제 단위의 키"
           },
@@ -2753,7 +2780,8 @@
           "sessionId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2894,6 +2922,7 @@
         "properties": {
           "requirementId": {
             "type": "string",
+            "format": "uuid",
             "title": "Requirementid"
           },
           "verdict": {
@@ -3175,6 +3204,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "axisCode": {
@@ -3249,6 +3279,7 @@
         "properties": {
           "teachId": {
             "type": "string",
+            "format": "uuid",
             "title": "Teachid",
             "description": "요청 teaches[].id 그대로"
           },

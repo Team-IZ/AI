@@ -6,7 +6,7 @@ from app.schemas.usage import AiUsage
 
 from pydantic import Field, model_validator
 
-from app.schemas.common import BaseSchema
+from app.schemas.common import BaseSchema, UuidStr
 
 class AnalysisSource(BaseSchema):
     repo_url: str | None = Field(
@@ -27,8 +27,8 @@ class FocusItem(BaseSchema):
 class AnalysisRequest(BaseSchema):
     """ POST /api/v0/analyses 요청 본문 """
     
-    attempt_id: str | None = Field(default=None, description="Spring 측 측정수행 키(에코용)")
-    submission_id: str | None = None
+    attempt_id: UuidStr | None = Field(default=None, description="Spring 측 측정수행 키(에코용)")
+    submission_id: UuidStr | None = None
     # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다 —
     # AI→백엔드 방향 통신이 0이라 그 구간의 인증·방화벽을 새로 정할 일이 없다.
     method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
@@ -45,7 +45,13 @@ class AnalysisRequest(BaseSchema):
     teaches: list[dict[str, Any]] = Field(
         default_factory=list, description="[{id, label, unitId, sourcePages}] 교안 참조용"
     )
-    curriculum_id: str | None = None
+    curriculum_version_id: UuidStr | None = Field(
+        default=None,
+        description="teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. "
+                    "🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산"
+                    "(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 "
+                    "이름만으로 구분되지 않았다",
+    )
     provider_model_code: str | None = Field(
         default=None,
         description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` "
@@ -118,7 +124,7 @@ class ProblemReference(BaseSchema):
     axis_code: AxisCode | None = Field(
         default=None, description="QUESTION_HIGHLIGHT일 때 필수. 어느 축의 강조 구간인가",
     )
-    teach_id: str | None = Field(
+    teach_id: UuidStr | None = Field(
         default=None, description="CURRICULUM_EVIDENCE일 때 필수. 요청 teaches[].id",
     )
     evidence_hash: str = Field(description="sha256 hex 64자")
@@ -207,7 +213,7 @@ ProblemType = Literal[
 class Problem(BaseSchema):
     """출제 대상 코드 지점. DB assessment_problem 대응."""
 
-    problem_id: str
+    problem_id: UuidStr
     problem_no: int = Field(ge=1, description="문제 순번 1~3. 화면·보고서가 이것으로 가리킨다")
     # 문답 진행 상태다. 분석이 만드는 것은 전부 READY.
     # (후보 선별 상태 CANDIDATE/USED/SKIPPED는 DB CHECK에 없어 보내면 INSERT가 깨진다)
@@ -273,7 +279,7 @@ class Problem(BaseSchema):
                     "룰이 바뀐 건지 코드가 바뀐 건지를 이 값 하나로 가른다 — "
                     "컬럼을 두시거나 버리시거나 백엔드 판단이다",
     )
-    teach_id: str | None = Field(
+    teach_id: UuidStr | None = Field(
         default=None,
         description="이 문제가 검증하는 교안 개념(요청 teaches[].id). **항상 채워진다** — "
                     "문제는 오퍼레이터가 고른 개념에만 붙는다(2026-08-03 PM 결정). "
@@ -298,7 +304,7 @@ class Problem(BaseSchema):
 class RequirementResult(BaseSchema):
     """요구사항 하나의 P/F 판정. 요청 requirements와 1:1로 대응한다."""
 
-    requirement_id: str
+    requirement_id: UuidStr
     verdict: Literal["PASS", "FAIL"] = Field(
         description="DB `project_requirement_assessment.result` CHECK와 같은 값이다. "
                     "🔴 옛 축약값 'P'/'F'는 폐기했다(2026-08-04) — CHECK가 "
@@ -331,7 +337,7 @@ class DecisionPoint(BaseSchema):
     line_start: int | None = Field(default=None, ge=1)
     line_end: int | None = Field(default=None, ge=1)
     why_it_matters: str
-    related_teach_id: str | None = None
+    related_teach_id: UuidStr | None = None
     evidence_valid: bool = Field(description="symbol을 실제 소스에서 찾았는지")
     
     @model_validator(mode="after")
@@ -373,7 +379,7 @@ class UnmatchedTeach(BaseSchema):
     AI는 이 개념을 **두 번** 찾는다(p04-3 + 실패분 재시도 1회). 그래도 못 찾으면 여기 담긴다.
     """
 
-    teach_id: str = Field(description="요청 teaches[].id 그대로")
+    teach_id: UuidStr = Field(description="요청 teaches[].id 그대로")
     reason: str = Field(description="왜 못 만들었는지. 화면에 그대로 띄워도 되는 한 문장")
 
 
@@ -412,8 +418,8 @@ class AnalysisJobStatus(BaseSchema):
     """
 
     job_id: str
-    attempt_id: str | None = None
-    submission_id: str | None = None
+    attempt_id: UuidStr | None = None
+    submission_id: UuidStr | None = None
     status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
     failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
     started_at: datetime | None = None

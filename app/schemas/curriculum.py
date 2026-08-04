@@ -8,15 +8,22 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from app.schemas.common import BaseSchema
+from app.schemas.common import BaseSchema, UuidStr
 from app.schemas.usage import AiUsage
 
 
 class CurriculumRequest(BaseSchema):
     """POST /api/v0/curricula 요청. PDF는 multipart의 file 파트로 온다."""
 
-    version_id: str = Field(description="Spring curriculum_version 키(에코용)")
-    curriculum_id: str | None = None
+    version_id: UuidStr = Field(
+        description="분석 대상 교안 **버전**. `curriculum_version.version_id`다. "
+                    "`/analyses` 요청의 `curriculumVersionId`와 같은 값이다",
+    )
+    curriculum_id: UuidStr | None = Field(
+        default=None,
+        description="교안 자산 `curriculum_material.material_id`. **버전이 아니다** — "
+                    "버전은 위 `versionId`가 가리킨다",
+    )
     course_label: str = Field(
         min_length=1, max_length=80,
         description="🔴 **필수다.** 과정명(예: 'SQL', 'Java', 'AI Agent'). 프롬프트 "
@@ -155,7 +162,7 @@ class CurriculumSection(BaseSchema):
 class CurriculumResult(BaseSchema):
     """교안 분석이 끝났을 때의 결과 본문. DB curriculum_analysis 대응."""
 
-    version_id: str
+    version_id: UuidStr
     analysis_version: int = Field(ge=1, description="분석 파이프라인 버전. 재현성 근거")
     heuristic_version: int | None = None
     prompt_version: int | None = None
@@ -174,7 +181,7 @@ class CurriculumJobStatus(BaseSchema):
     """GET /curricula/{jobId} 응답. analysis_job과 같은 상태 어휘를 쓴다."""
 
     job_id: str
-    version_id: str | None = None
+    version_id: UuidStr | None = None
     status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
     failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
     started_at: datetime | None = None
