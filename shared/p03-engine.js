@@ -264,20 +264,23 @@ import json
 if _category == "cognition-isolation":
     from isolation_classifier import classify_justification
     _r = classify_justification(_answer)
-    _n = len(_r["matched_categories"])
+    # D-fix5 게이트 재배선(2026-08-04 redteam 감사): substantive는 계산만 되고 여기서
+    # 안 읽혀 20자 미만 답변도 패턴 매치 개수만으로 defended가 나갔다. has_match 유무와
+    # 무관하게 substantive가 False면 매치 개수를 0으로 강제해 D-fix5 원래 의도대로 만든다.
+    _n = len(_r["matched_categories"]) if _r["substantive"] else 0
     _verdict = "surface" if _n == 0 else ("partial" if _n == 1 else "defended")
 else:
     from reflection_signal import evaluate_reflection
     _r = evaluate_reflection(_answer)
     if _level == "reflection":
-        if not _r["required_ok"]:
+        if not _r["substantive"] or not _r["required_ok"]:
             _verdict = "surface"
         elif _r["optional_matches"] < _r["min_optional_required"]:
             _verdict = "partial"
         else:
             _verdict = "defended"
     else:
-        _n = _r["optional_matches"]
+        _n = _r["optional_matches"] if _r["substantive"] else 0
         _verdict = "surface" if _n == 0 else ("partial" if _n == 1 else "defended")
 _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
 `);
