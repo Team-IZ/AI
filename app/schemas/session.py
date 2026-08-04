@@ -61,6 +61,16 @@ class Cursor(BaseSchema):
     hints_used: int = Field(
         default=0, ge=0, le=2, description="이 단계에서 이미 연 힌트 수. 점수 상한(5/4/3)의 근거",
     )
+    mac: str | None = Field(
+        default=None,
+        description="🔴 D-fix(redteam audit H10, 2026-08-04). 응답이 이 커서와 함께 실어 "
+                    "보낸 problems/transcript 상태에 대한 HMAC-SHA256 서명(별도 설정값 "
+                    "session_cursor_hmac_secret로 계산, x-internal-key와 다른 비밀). "
+                    "다음 요청에 그대로 되돌려 보내면 서버가 재계산해 대조한다 -- 셋 중 "
+                    "무엇이든 바뀌면 불일치로 거부된다. 생략하면(하위호환 단계, 또는 "
+                    "session_cursor_hmac_secret 미설정) 오늘처럼 무검증으로 신뢰된다 -- "
+                    "완전한 방어가 아니라 점진적 도입 단계라는 뜻이다.",
+    )
 
 
 class TranscriptTurn(BaseSchema):

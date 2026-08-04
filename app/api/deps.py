@@ -4,6 +4,8 @@ FastAPI에서 '의존성'은 엔드포인트 실행 전에 먼저 돌려서
 인증·검증 같은 공통 작업을 처리하는 함수
 """
 
+import hmac
+
 from fastapi import Header
 
 from app.api.errors import ApiError
@@ -24,7 +26,10 @@ def require_internal_key(x_internal_key: str | None = Header(default=None)) -> N
     if not expected:
         return
     
-    if x_internal_key != expected:
+    # D-fix (found during H10 cross-check, 2026-08-04): != is not constant-time --
+    # in theory lets a timing attack narrow down `expected` byte by byte.
+    # compare_digest is the same check without that side channel.
+    if not hmac.compare_digest(x_internal_key or "", expected):
         # HTTPException 대신 ApiError를 던지기
         raise ApiError(
             status_code=401,
