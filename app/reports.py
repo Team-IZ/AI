@@ -178,7 +178,9 @@ def _real_result(body: ReportRequest, job: ReportJobStatus,
         teaches=body.teaches,
         analysis_documents=body.analysis_documents,
     )
-    job.ai_usage = to_ai_usage(built.usages, "REPORT", job.job_id,
+    # ⚠️ contextId가 report_snapshot.snapshot_id여야 하는데 **AI는 그 값을 모른다**
+    # (스냅샷은 Spring이 저장할 때 생긴다). jobId를 넣고 Spring이 교체한다.
+    job.ai_usage = to_ai_usage(built.usages, "REPORT_SNAPSHOT", job.job_id,
                                feature_code="SUMMARY_DRAFT",
                                idempotency_key=idempotency_key, trace_id=trace_id)
     return ReportResult.model_validate({

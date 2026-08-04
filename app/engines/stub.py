@@ -29,6 +29,10 @@ def _stub_problem(problem_no: int, focus_item_id: str | None = None,
         "problem_id": f"00000000-0000-0000-0000-{problem_no:012d}",
         "problem_no": problem_no,
         "status": "READY",
+        # GENERATED 문제에 NOT NULL인 3개(테이블정의서 v06).
+        "title": f"stub 문제 {problem_no}",
+        "snippet_key": f"p{problem_no}-{str(problem_no) * 16}",
+        "code_language": "PYTHON",
         "problem_type": "RISK_POINT",
         "priority": 1.0,
         # 요청 focusItems[].id를 그대로 돌려준다. 후보가 없으면 자율 선정(None).
@@ -40,6 +44,7 @@ def _stub_problem(problem_no: int, focus_item_id: str | None = None,
         "line_end": 14,
         # evidence_hash는 이 문자열 기준 해시다. Spring이 다시 자르면 어긋난다.
         "code_snippet": f"# stub problem {problem_no}\napi_key = 'hardcoded'\n",
+        "content_hash": str(problem_no) * 64,
         "evidence_hash": str(problem_no) * 64,
         # DB가 INTEGER CHECK (> 0)이라 정수다. 스텁은 1로 고정한다.
         "extractor_version": 1,
@@ -115,7 +120,7 @@ class StubAnalysisEngine:
             "requirement_results": [
                 {
                     "requirement_id": req["requirementId"],
-                    "verdict": "P",
+                    "verdict": "PASS",
                     "evidence": "app/main.py:12",
                     "note": None,
                 }

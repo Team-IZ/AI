@@ -267,16 +267,20 @@ def _merge(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
 
     ordered = sorted(units, key=lambda u: (u["page_start"], u["page_end"]))
-    return [
-        {
+    sections = []
+    for no, unit in enumerate(ordered, start=1):
+        teaches = _with_siblings(list(unit["teaches"].values()))
+        sections.append({
             "module_no": no,
             "title": unit["title"][:200],
             "page_start": unit["page_start"],
             "page_end": max(unit["page_end"], unit["page_start"]),
-            "teaches": _with_siblings(list(unit["teaches"].values())),
-        }
-        for no, unit in enumerate(ordered, start=1)
-    ]
+            # DB curriculum_section.keywords가 NOT NULL이다. 별도 호출 없이
+            # 이 구간에서 나온 개념 이름을 그대로 모은다.
+            "keywords": [t["canonical_name"] for t in teaches],
+            "teaches": teaches,
+        })
+    return sections
 
 
 def _find_continuation(units: list[dict[str, Any]], title: str,
@@ -324,6 +328,7 @@ def analyse(pdf_bytes: bytes, *, model_code: str, course_label: str = "") -> Cur
     results: list[dict[str, Any]] = []
     usages: list[dict[str, Any]] = []
     failed: list[str] = []
+    failed_ranges: list[tuple[int, int]] = []
 
     # **병합 순서는 청크 순서여야 한다.** 개념 중복은 "먼저 온 것"을 남기는데,
     # 완료 순서로 합치면 그 "먼저"가 실행마다 달라져 결과가 재현되지 않는다.
@@ -331,8 +336,37 @@ def analyse(pdf_bytes: bytes, *, model_code: str, course_label: str = "") -> Cur
         if isinstance(outcome, stages.StageError):
             usages.extend(outcome.usages)
             failed.append(f"{start}-{end}")
+            failed_ranges.append((start, end))
             continue
         usages.extend(outcome.usages)
         results.append({**outcome.data, "_range": (start, end)})
 
-    return Curriculum(sections=_merge(results), usages=usages, failed_chunks=failed)
+    sections = _merge(results)
+    _mark_confidence(sections, failed_ranges)
+    return Curriculum(sections=sections, usages=usages, failed_chunks=failed)
+
+
+# 청크가 깨진 페이지 범위에 걸친 구간의 신뢰도. **확률이 아니라 등급이다** —
+# 모델은 신뢰도를 내지 않는다. 이 구간은 개념이 빠졌을 수 있다는 표시일 뿐이다.
+_DEGRADED_CONFIDENCE = 0.5
+
+
+def _mark_confidence(sections: list[dict[str, Any]],
+                     failed_ranges: list[tuple[int, int]]) -> None:
+    """실패한 청크와 페이지가 겹치는 구간만 신뢰도를 낮춘다.
+
+    DB `curriculum_section.confidence`·`curriculum_teaches_mapping.confidence`가
+    NOT NULL이라 값이 있어야 한다. 전부 1.0으로 채우면 "251쪽 중 2청크가 깨져서
+    이 단원의 개념 절반이 없다"는 사실이 응답 어디에도 안 남는다 —
+    `fallbackUsed`는 교안 전체가 하나로 묶여 어느 구간인지 못 가리킨다.
+    """
+    if not failed_ranges:
+        return
+    for section in sections:
+        overlaps = any(section["page_start"] <= hi and lo <= section["page_end"]
+                       for lo, hi in failed_ranges)
+        if not overlaps:
+            continue
+        section["confidence"] = _DEGRADED_CONFIDENCE
+        for teach in section["teaches"]:
+            teach["confidence"] = _DEGRADED_CONFIDENCE

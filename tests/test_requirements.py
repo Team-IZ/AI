@@ -39,7 +39,7 @@ def test_results_map_one_to_one(monkeypatch):
     out = requirements.judge(REQS, FILES, model_code="m")
 
     assert [r["requirement_id"] for r in out.results] == ["r1", "r2", "r3"]
-    assert [r["verdict"] for r in out.results] == ["P", "F", "F"]
+    assert [r["verdict"] for r in out.results] == ["PASS", "FAIL", "FAIL"]
     for r in out.results:
         RequirementResult.model_validate(r)
 
@@ -55,7 +55,7 @@ def test_shuffled_results_are_matched_by_text(monkeypatch):
     out = requirements.judge(REQS, FILES, model_code="m")
 
     assert {r["requirement_id"]: r["verdict"] for r in out.results} == {
-        "r1": "P", "r2": "F", "r3": "F",
+        "r1": "PASS", "r2": "FAIL", "r3": "FAIL",
     }
 
 
@@ -69,8 +69,8 @@ def test_missing_result_does_not_shift_the_rest(monkeypatch):
     out = requirements.judge(REQS, FILES, model_code="m")
 
     verdicts = {r["requirement_id"]: r["verdict"] for r in out.results}
-    assert verdicts["r2"] == "F"          # 밀린 값을 쓰지 않았다
-    assert verdicts["r3"] == "P"          # r3은 제 자리를 찾았다
+    assert verdicts["r2"] == "FAIL"          # 밀린 값을 쓰지 않았다
+    assert verdicts["r3"] == "PASS"          # r3은 제 자리를 찾았다
     assert out.unmatched == ["r2"]
     assert "찾지 못했" in [r for r in out.results if r["requirement_id"] == "r2"][0]["note"]
 
@@ -85,7 +85,7 @@ def test_unlabeled_result_falls_back_to_position(monkeypatch):
 
     out = requirements.judge(REQS, FILES, model_code="m")
 
-    assert {r["requirement_id"]: r["verdict"] for r in out.results}["r2"] == "P"
+    assert {r["requirement_id"]: r["verdict"] for r in out.results}["r2"] == "PASS"
     assert out.unmatched == []
 
 
@@ -99,7 +99,7 @@ def test_non_p_verdicts_become_fail(monkeypatch):
 
     out = requirements.judge(REQS, FILES, model_code="m")
 
-    assert [r["verdict"] for r in out.results] == ["F", "F", "F"]
+    assert [r["verdict"] for r in out.results] == ["FAIL", "FAIL", "FAIL"]
 
 
 def test_evidence_is_flattened_to_one_line(monkeypatch):

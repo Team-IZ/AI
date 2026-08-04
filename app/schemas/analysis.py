@@ -221,6 +221,25 @@ class Problem(BaseSchema):
     # 🔴 `isGeneral`은 삭제됐다 (2026-08-03 PM 결정). teach 앵커 없는 "일반 문제"를
     # 만들지 않는다 — 오퍼레이터가 고른 개념이 코드에 없으면 **그 개념은 문항 없음**이고,
     # 다른 개념으로 갈아끼우거나 지어내지 않는다. 모든 학생이 같은 개념 3개를 본다.
+    title: str = Field(
+        max_length=200,
+        description="문제 제목. DB `assessment_problem.title`은 generation_status="
+                    "GENERATED에서 NOT NULL이다 — 안 보내면 INSERT가 깨진다. "
+                    "검증하는 교안 개념 이름을 쓴다(개념이 곧 문제의 주제다)",
+    )
+    snippet_key: str = Field(
+        max_length=128,
+        description="DB `assessment_problem.source_snippet_key` = "
+                    "`submission.code_snippets[].snippet_key`. **두 곳을 잇는 유일한 키다** "
+                    "— 문제는 원문을 중복 저장하지 않고 이 키로 제출의 스니펫을 찾는다. "
+                    "같은 분석 안에서 유일하고 재분석해도 같은 코드면 같은 값이 나온다",
+    )
+    code_language: str = Field(
+        max_length=30,
+        description="DB `assessment_problem.code_language`(GENERATED면 NOT NULL). "
+                    "파일 확장자에서 정한다(JAVA·PYTHON·JAVASCRIPT·YAML …). "
+                    "모르는 확장자는 `UNKNOWN`이다 — 빈 문자열은 DB CHECK가 막는다",
+    )
     source_path: str
     line_start: int = Field(
         description="**파일 기준 절대 줄 번호.** codeSnippet 안에서 하이라이트할 구간의 "
@@ -234,18 +253,25 @@ class Problem(BaseSchema):
                     "예외: 파일이 100,000자를 넘으면 파편만 온다(그때도 줄 번호는 파일 기준). "
                     "**Spring이 다시 자르지 마세요** — 자를 위치는 화면이 정한다",
     )
+    content_hash: str = Field(
+        description="**codeSnippet 전체(파일)의 sha256 hex 64자.** DB "
+                    "`submission.code_snippets[].content_hash`에 그대로 넣는다 — "
+                    "그 컬럼은 `content`의 무결성 해시라 대상이 파일 전체여야 한다",
+    )
     evidence_hash: str = Field(
-        description="🔴 **파편(lineStart~lineEnd 구간)의 sha256 hex 64자다.** codeSnippet "
-                    "전체의 해시가 아니다 — 파일 전체 기준이면 무관한 한 줄 수정에도 "
-                    "'근거가 바뀌었다'가 되어 판정이 쓸모없어진다. "
-                    "⚠️ 테이블정의서 evidence_hash 비고('code_snippet 기준 해시')와 "
-                    "어긋나므로 그 문구를 고쳐야 한다",
+        description="🔴 **파편(lineStart~lineEnd 구간)의 sha256 hex 64자다.** "
+                    "DB `assessment_problem.code_snippet_hash`에 넣는다. "
+                    "contentHash와 대상이 다르다 — 파일 전체 기준이면 무관한 한 줄 "
+                    "수정에도 '근거가 바뀌었다'가 되어 판정이 쓸모없어진다. "
+                    "출제 근거가 그대로인지는 이 값으로만 판정할 수 있다",
     )
     extractor_version: int = Field(
         gt=0,
         description="이 문제를 뽑은 룰 버전. 재현성 근거. "
-                    "**정수다** — assessment_problem.extractor_version이 INTEGER "
-                    "CHECK (> 0)이라 문자열을 보내면 Spring INSERT가 깨진다",
+                    "⚠️ **테이블정의서 v06에는 assessment_problem.extractor_version이 "
+                    "없다**(옛 정의서에 있던 컬럼이 빠졌다). 재분석 결과가 달라졌을 때 "
+                    "룰이 바뀐 건지 코드가 바뀐 건지를 이 값 하나로 가른다 — "
+                    "컬럼을 두시거나 버리시거나 백엔드 판단이다",
     )
     teach_id: str | None = Field(
         default=None,
@@ -273,7 +299,12 @@ class RequirementResult(BaseSchema):
     """요구사항 하나의 P/F 판정. 요청 requirements와 1:1로 대응한다."""
 
     requirement_id: str
-    verdict: Literal["P", "F"]
+    verdict: Literal["PASS", "FAIL"] = Field(
+        description="DB `project_requirement_assessment.result` CHECK와 같은 값이다. "
+                    "🔴 옛 축약값 'P'/'F'는 폐기했다(2026-08-04) — CHECK가 "
+                    "PENDING/PASS/FAIL이라 Spring이 매번 풀어야 했다. "
+                    "AI는 PENDING을 보내지 않는다(판정을 못 하면 FAIL + note다)",
+    )
     evidence: str | None = Field(default=None, description="판정 근거가 된 코드 위치·인용")
     note: str | None = Field(default=None, description="판정 실패 등 특이사항")
 
@@ -325,6 +356,9 @@ class AnalysisDocument(BaseSchema):
     두 번째는 파싱이라 깨진다. 사람이 읽는 화면은 이걸 렌더한 결과다.
     """
 
+    # DB `code_analysis.analysis_document` 제약이 "schema_version을 포함해야 한다"고
+    # 못 박고 있다. 재분석 때 옛 문서를 어느 계약으로 읽어야 하는지가 이 값 하나로 갈린다.
+    schema_version: int = Field(default=1, ge=1, description="분석 문서 계약 버전")
     overview: str
     structure: list[DocumentArea] = Field(default_factory=list)
     decision_points: list[DecisionPoint] = Field(default_factory=list)

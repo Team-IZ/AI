@@ -120,7 +120,9 @@ def _real_result(body: CurriculumRequest, pdf_bytes: bytes, job: CurriculumJobSt
         model_code=body.provider_model_code or settings.model_code_curriculum,
         course_label=body.course_label,
     )
-    job.ai_usage = to_ai_usage(built.usages, "CURRICULUM", job.job_id,
+    # ⚠️ contextId가 curriculum_analysis.analysis_id여야 하는데 **AI는 그 값을 모른다**
+    # (요청에 오는 것은 versionId뿐이다). jobId를 넣고 Spring이 교체한다.
+    job.ai_usage = to_ai_usage(built.usages, "CURRICULUM_ANALYSIS", job.job_id,
                                feature_code="CURRICULUM_ANALYSIS",
                                idempotency_key=idempotency_key, trace_id=trace_id)
     return CurriculumResult.model_validate({
