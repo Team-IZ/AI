@@ -120,6 +120,10 @@ def freeze(topic: dict[str, Any], files: dict[str, str], teach: dict[str, Any] |
                       f"(levels {len(got) if isinstance(got, list) else '없음'}개)")
             continue
 
+        # 학생이 보는 텍스트다. 백틱 인용이 코드 중간에서 끊긴 채로 나가면 안 된다.
+        for level in levels:
+            level["question"] = fragments.repair_code_quotes(level["question"], code_block)
+
         violations = guard.check_levels(
             [{"axis": lv["axis_code"], "question": lv["question"]} for lv in levels]
         )

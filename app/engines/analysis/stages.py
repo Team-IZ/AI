@@ -100,6 +100,23 @@ def _truncate(values: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
     return out
 
 
+def resolve_choice(raw: Any, allowed: set[str | None]) -> Any:
+    """모델이 돌려준 식별자를 **허용 집합의 실제 값으로** 되돌린다.
+
+    🔴 **모델은 준 id를 그대로 안 돌려준다.** 2026-08-03 실측: 목록이
+    `- {id}: {label}` 형식인데 id와 label이 비슷해서 **줄 전체**를 적어 왔다
+    (`"매니저 패턴의 동작 방식: 매니저 패턴의 동작 방식"`). 정확 일치만 인정하면
+    개념이 코드에 있는데도 전부 "없음"으로 나간다.
+
+    되살리는 조건은 **정확히 하나로 좁혀질 때뿐이다** — 여러 개가 걸리면 어느 것을
+    가리켰는지 알 수 없으므로 원본을 그대로 돌려준다(호출부가 버린다).
+    """
+    if raw in allowed or not isinstance(raw, str):
+        return raw
+    hit = [value for value in allowed if value and (raw.startswith(value) or value in raw)]
+    return hit[0] if len(hit) == 1 else raw
+
+
 def parse_json(text: str) -> dict[str, Any]:
     """모델 출력에서 JSON 객체를 뽑는다. 실패하면 ValueError."""
     cleaned = _FENCE.sub("", (text or "").strip())

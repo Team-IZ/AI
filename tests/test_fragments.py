@@ -96,3 +96,33 @@ def test_short_prefix_does_not_match_anything():
     files = {"a.py": "worker = 1\nother = 2\n"}
 
     assert fragments.locate_symbol(files, "a.py", "worker(((")["valid"] is False
+
+
+def test_broken_backtick_quote_is_repaired():
+    """🔴 학생이 보는 텍스트다. 닫는 백틱이 한 글자 일찍 찍혀 나온다."""
+    code = '    worker = state.get("next_worker", "FINISH")\n    return worker\n'
+    broken = '이 코드 `worker = state.get("next_worker", "FINISH"`)가 실행될 때'
+
+    fixed = fragments.repair_code_quotes(broken, code)
+
+    assert fixed == '이 코드 `worker = state.get("next_worker", "FINISH")`가 실행될 때'
+
+
+def test_repair_leaves_text_alone_when_unsure():
+    """LLM 문장을 우리가 다시 쓰지 않는다 — 애매하면 그대로 둔다."""
+    code = "a = compute(1)\nb = compute(2)\n"
+
+    # 짧은 인용은 어느 줄에나 걸린다.
+    assert fragments.repair_code_quotes("`a =` 를 보세요", code) == "`a =` 를 보세요"
+    # 이미 온전한 인용은 안 건드린다.
+    assert fragments.repair_code_quotes("`a = compute(1)` 를", code) == "`a = compute(1)` 를"
+    # 접두사로 두 줄이 걸리면 어느 쪽인지 모른다.
+    assert fragments.repair_code_quotes("`compute(` 확인", code) == "`compute(` 확인"
+
+
+def test_repair_does_not_expand_a_deliberate_partial_quote():
+    """긴 줄에서 일부만 인용한 정상 문장은 그대로 둔다. 손상 서명은 '꼬리가 밖에 있음'이다."""
+    code = 'worker = state.get("next_worker", "FINISH")\n'
+    text = '`state.get("next_worker"` 부분을 보세요'   # 꼬리가 이어지지 않는다
+
+    assert fragments.repair_code_quotes(text, code) == text

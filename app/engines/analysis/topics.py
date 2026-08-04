@@ -85,21 +85,9 @@ def _missing_api_token(teach: dict[str, Any], files: dict[str, str]) -> str | No
     return None
 
 
-def _resolve_teach_id(raw: Any, teach_ids: set[str | None]) -> Any:
-    """LLM이 돌려준 teach_id를 실제 id로 되돌린다.
-
-    🔴 **모델은 준 id를 그대로 안 돌려준다.** 2026-08-03 실측: 목록이
-    `- {id}: {label}` 형식인데 id와 label이 비슷해서 **줄 전체**를 id로 적어 왔다
-    (`"매니저 패턴의 동작 방식: 매니저 패턴의 동작 방식"`). 정확 일치만 인정하면
-    개념이 코드에 있는데도 전부 "없음"으로 나간다.
-
-    되살리는 조건은 **정확히 하나로 좁혀질 때뿐이다** — 여러 id가 걸리면 어느 것을
-    물으려 했는지 알 수 없으므로 버린다.
-    """
-    if raw in teach_ids or not isinstance(raw, str):
-        return raw
-    hit = [tid for tid in teach_ids if tid and (raw.startswith(tid) or tid in raw)]
-    return hit[0] if len(hit) == 1 else raw
+# 모델이 돌려준 teach_id를 실제 id로 되돌린다. p04-1도 같은 문제를 겪어
+# `stages`에 두고 함께 쓴다 — 두 곳에서 따로 고치면 한쪽만 낡는다.
+_resolve_teach_id = stages.resolve_choice
 
 
 def select(files: dict[str, str], teaches: list[dict[str, Any]],

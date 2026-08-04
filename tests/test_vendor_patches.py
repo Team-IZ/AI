@@ -43,3 +43,15 @@ def test_p1_grading_returns_reached():
 
     assert '"reached": true 또는 false' in template
     assert "점수와 따로 판단하라" in template
+
+
+def test_p2_no_stale_score_cap():
+    """P-2 — p04-5가 폐기된 "점수 상한"을 말하면 안 된다.
+
+    상한은 2026-08-03에 폐기됐고 적용하는 코드가 없다. 프롬프트만 남으면
+    읽는 사람이 없는 후처리를 찾게 된다. **모델 동작은 안 바뀌므로 테스트가 유일한 감시다.**
+    """
+    template = stages.get_stage("p04-5")["user_template"]
+
+    assert "상한" not in template
+    assert "힌트를 받았다는 이유로 점수를 깎지 마라" in template
