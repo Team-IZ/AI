@@ -50,10 +50,36 @@ TeachKind = Literal["CONCEPT", "CODE_EXAMPLE", "CAUTION"]
 
 
 class Teach(BaseSchema):
-    """교안에서 뽑은 학습 개념 하나. DB teaches 대응."""
+    """교안에서 뽑은 학습 개념 하나. **두 테이블에 나뉘어 들어간다.**
 
-    canonical_name: str = Field(max_length=200, description="표준 개념명")
-    normalized_name: str = Field(max_length=200, description="중복 판정용 정규화 이름")
+        teaches                     canonicalName · normalizedName · canonicalDescription
+        curriculum_teaches_mapping  extractedName(=canonicalName) · descriptionPage* ·
+                                    confidence · kind · evidence · siblingNames
+
+    ⚠️ **AI는 기관 표준명을 정할 수 없다.** 교안 한 권만 보기 때문이다 — 여기서 나오는
+    `canonicalName`은 "이 교안에서 실제로 쓰인 표현"이고 그게 곧
+    `curriculum_teaches_mapping.extracted_name`이다. `teaches.canonical_name`은
+    **개념을 새로 만들 때만** 같은 값으로 시작하고, 이후 기존 개념과 묶을지(MERGED)
+    표준명을 뭘로 쓸지는 기관 원장을 가진 Spring이 정한다.
+    """
+
+    canonical_name: str = Field(
+        max_length=200,
+        description="이 교안에서 실제로 쓰인 개념 표현. "
+                    "`curriculum_teaches_mapping.extracted_name`에 그대로 넣으면 되고, "
+                    "`teaches.canonical_name`은 신규 개념일 때만 같은 값으로 시작한다",
+    )
+    normalized_name: str = Field(
+        max_length=200,
+        description="중복 판정용 정규화 이름. ⚠️ AI는 공백·대소문자만 정리한다 — "
+                    "활성 개념 부분 UNIQUE의 판정 주체가 Spring이므로 "
+                    "**기관 규칙(NFKC 등)으로 다시 정규화하는 쪽이 안전하다**",
+    )
+    confidence: float = Field(
+        default=1.0, ge=0.0, le=1.0,
+        description="DB `curriculum_teaches_mapping.confidence`(NOT NULL, 0~1). "
+                    "구간 confidence와 같은 의미의 거친 등급이다 — 확률이 아니다",
+    )
     canonical_description: str | None = Field(
         default=None, description="설명을 못 찾으면 null"
     )
@@ -94,10 +120,28 @@ class Teach(BaseSchema):
 class CurriculumSection(BaseSchema):
     """교안의 모듈 하나. DB curriculum_section 대응."""
 
-    module_no: int = Field(ge=1, description="교안 안에서의 모듈 순서")
+    module_no: int = Field(
+        ge=1,
+        description="교안 안에서의 모듈 순서. DB `curriculum_section.sequence_no`다 "
+                    "(이름만 다르다). 1부터 빈틈없이 증가하고 UNIQUE(분석, 순번)를 만족한다",
+    )
     title: str = Field(max_length=200)
     page_start: int = Field(ge=1)
     page_end: int = Field(ge=1)
+    keywords: list[str] = Field(
+        default_factory=list,
+        description="DB `curriculum_section.keywords`(JSONB, NOT NULL). "
+                    "이 구간에서 뽑힌 개념 이름들이다 — 별도 LLM 호출로 만든 값이 아니라 "
+                    "`teaches[].canonicalName`을 모아 둔 것이다. 검색·목록 미리보기용",
+    )
+    confidence: float = Field(
+        default=1.0, ge=0.0, le=1.0,
+        description="DB `curriculum_section.confidence`(NOT NULL, 0~1). "
+                    "⚠️ **확률이 아니다.** 모델은 신뢰도를 내지 않는다 — 두 등급뿐이다: "
+                    "1.0=정상 추출, 0.5=이 구간의 페이지에 걸친 청크가 실패해 개념이 "
+                    "빠졌을 수 있음. `fallbackUsed`가 교안 전체 단위인 데 비해 이 값은 "
+                    "**어느 구간이 부실한지**를 가리킨다. 정렬·경고 표시에만 쓰세요",
+    )
     teaches: list[Teach] = Field(default_factory=list)
 
     @model_validator(mode="after")

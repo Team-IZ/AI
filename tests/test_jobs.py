@@ -67,7 +67,7 @@ def test_requirement_failure_makes_the_job_partial():
         def analyze(self, request, zip_bytes=None):
             raw = StubAnalysisEngine().analyze(request, zip_bytes)
             raw["requirement_results"] = [
-                {"requirement_id": "r1", "verdict": "F", "evidence": None,
+                {"requirement_id": "r1", "verdict": "FAIL", "evidence": None,
                  "note": "판정 실패: p04-2 터짐"}
             ]
             return raw
