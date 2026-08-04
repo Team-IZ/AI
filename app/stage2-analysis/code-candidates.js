@@ -238,6 +238,15 @@ const CodeCandidates = (() => {
   // 전부 1.0에서 시작하는 unmeasured/provisional 값이다. judgment/rank_weights/
   // rank_weights.json의 provenance 필드와 같은 정직성 규약을 코드 안에서 지킨다.
   // 재보정 조건은 파일 헤더 3단계의 EXIT 참조 -- 측정 전에 감으로 고치지 말 것.
+  // D-owncommit1 (2026-08-04): own_commit 항 추가 -- "누가 이 코드를 커밋했는가"
+  // 신호(app/stage2-analysis/own-commit.js)를 7번째 랭킹 축으로 반영한다. 이 항의
+  // 값(0~1)은 own-commit.js의 WEIGHT_BY_TYPE(AUTHORED=1.0/MODIFIED=0.6/UNTOUCHED=0/
+  // UNKNOWN=0, codemap의 rank.py::_OWN_COMMIT_WEIGHT_BY_TYPE에서 가져온 것)로 이미
+  // own-commit.js가 계산해 confidence 필드에 넣어 준다 -- 여기서는 파일 경로로
+  // 찾아 그대로 읽기만 한다(모듈 간 hard-import 없음, opts.ownCommit은 그냥
+  // {path:{attribution_type,confidence}} 모양의 평범한 맵). own_commit도 다른 6개와
+  // 마찬가지로 등가중(1.0)에서 시작한다 -- 이 항목 하나만 다른 근거로 무게를 올리면
+  // RANK_WEIGHTS_PROVENANCE가 요구하는 정직성이 깨진다.
   const RANK_WEIGHTS = {
     llm_proposed: 1.0,
     finding_rank: 1.0,
@@ -245,9 +254,10 @@ const CodeCandidates = (() => {
     ground: 1.0,
     teach_linked: 1.0,
     agreement: 1.0,
+    own_commit: 1.0,
   };
   const RANK_WEIGHTS_PROVENANCE =
-    "provisional-equal (D-poc13) -- 실제 제출물에 대한 Precision@3 측정 전. 데이터 없이 조정 금지.";
+    "provisional-equal (D-poc13, own_commit은 D-owncommit1) -- 실제 제출물에 대한 Precision@3 측정 전. 데이터 없이 조정 금지.";
 
   // 2단계 confidence 등급 -- 파일 헤더 2단계 COST 참조.
   const GROUND_CONFIDENCE = { exactUnique: 1.0, exactAmbiguous: 0.6, normalized: 0.5 };
@@ -485,11 +495,25 @@ const CodeCandidates = (() => {
    * @param {Array} grounded  groundCandidates()의 결과
    * @param {object} opts.fanIn  {basename: count} -- 선택
    * @param {object} opts.weights  RANK_WEIGHTS 오버라이드 -- 선택
+   * @param {object} opts.ownCommit  {path: {attribution_type, confidence}} --
+   *   own-commit.js::fetchOwnCommitSignals()의 반환값을 그대로 넘긴다. 선택(없으면
+   *   own_commit 항은 전부 0 -- opts.ownCommit 없이 부르는 기존 호출부는 동작이
+   *   한 비트도 안 바뀐다, D-owncommit1 EXIT).
    * @returns {Array} rank/rank_score/rank_evidence가 붙고 정렬된 후보
    */
   function rankCandidates(grounded, opts = {}) {
-    const weights = { ...RANK_WEIGHTS, ...(opts.weights || {}) };
     const fanIn = opts.fanIn || {};
+    const ownCommit = opts.ownCommit || {};
+    // own_commit 항은 신호가 실제로 있을 때만 weights에 넣는다(weightSum에 반영). 신호가
+    // 없는데도 항상 넣으면 항 자체는 0이라도 weightSum이 6->7로 늘어 rank_score(분모가
+    // 커짐)가 기존 호출부에서도 미세하게 달라진다 -- "opts.ownCommit 없으면 기존 동작과
+    // 완전히 동일"(위 JSDoc, D-owncommit1 EXIT)이라는 약속을 숫자 단위로 지키기 위함이다.
+    const { own_commit: _ownCommitWeight, ...baseWeights } = RANK_WEIGHTS;
+    const weights = {
+      ...baseWeights,
+      ...(Object.keys(ownCommit).length ? { own_commit: _ownCommitWeight } : {}),
+      ...(opts.weights || {}),
+    };
     const merged = mergeByLocation(grounded || []);
 
     const maxFanIn = Math.max(0, ...Object.values(fanIn).map((v) => Number(v) || 0));
@@ -507,6 +531,10 @@ const CodeCandidates = (() => {
         ground: c.confidence || 0,
         teach_linked: c.meta && c.meta.teach_linked ? 1 : 0,
         agreement: (c.sources || []).length >= 2 ? 1 : 0,
+        own_commit: (() => {
+          const sig = ownCommit[c.fileResolved || c.file];
+          return sig ? Number(sig.confidence) || 0 : 0;
+        })(),
       };
       const weighted = Object.keys(terms).reduce((sum, k) => sum + (weights[k] || 0) * terms[k], 0);
       const rank_score = weightSum > 0 ? Number((weighted / weightSum).toFixed(6)) : 0;
@@ -789,11 +817,13 @@ const CodeCandidates = (() => {
    * K=0으로 깎이면 호출 자체를 건너뛴다. 어느 경우에도 decision_points는 유효한 배열로
    * 돌아오므로, 호출부는 반환값을 그대로 쓰면 된다.
    *
-   * @param {object} input {analysisDoc, files, findings, fanIn, teachIds, model, k, onProgress}
+   * @param {object} input {analysisDoc, files, findings, fanIn, ownCommit, teachIds, model, k, onProgress}
+   *   ownCommit은 own-commit.js::fetchOwnCommitSignals()의 반환값(선택) -- rankCandidates()로
+   *   그대로 전달된다(D-owncommit1). 없으면 own_commit 랭킹 항은 전부 0(기존 동작 그대로).
    * @param {object} opts  주입구 {call, locate, extract, getRate} -- 테스트/재사용용
    */
   async function runFanout(input = {}, opts = {}) {
-    const { analysisDoc, files = {}, findings, fanIn, teachIds, model, k = 3, onProgress } = input;
+    const { analysisDoc, files = {}, findings, fanIn, ownCommit, teachIds, model, k = 3, onProgress } = input;
     const log = typeof onProgress === "function" ? onProgress : () => {};
     const dps = analysisDoc && Array.isArray(analysisDoc.decision_points) ? analysisDoc.decision_points : [];
     const skip = (reason) => ({
@@ -803,7 +833,7 @@ const CodeCandidates = (() => {
     if (!dps.length) return skip("decision_points 없음");
 
     const candidates = collectCandidates({ analysisDoc, findings, fanIn, files, teachIds });
-    const ranked = rankCandidates(groundCandidates(files, candidates, opts), { fanIn });
+    const ranked = rankCandidates(groundCandidates(files, candidates, opts), { fanIn, ownCommit });
 
     // fan-out 대상은 decision_point에 연결된 후보로 한정한다.
     //   WHY: 심층 분석 결과가 갈 자리(decision_points[i].deep_dive)가 있는 후보만 태운다는

@@ -95,22 +95,31 @@
     </div>
 
     <!-- ── 코드 제출 ─────────────────────────────────────────────────────────── -->
+    <!-- D-owncommit1 (2026-08-04, app/stage2-analysis/own-commit.js에 전문): ZIP
+         제출은 저장소 정체성이 없어 own-commit 귀속 신호를 원천적으로 못 낸다 --
+         D-zip1(codemap)과 같은 이유로 폐지, GitHub URL만 남긴다. 아래 ZIP 버튼/
+         입력 UI는 주석 처리(legacy). -->
     <div class="step">
       <div class="sh"><span class="n">2</span> 코드 제출</div>
       <div class="toggle" id="method-toggle">
         <button type="button" class="on" data-method="pat">GitHub URL</button>
+        <!-- D-owncommit1: legacy, 주석 처리. 되살리려면 poc-engine.js의
+             resolveFiles()/resolveFileContents()의 주석 처리된 zip 분기도 같이 복원할 것.
         <button type="button" data-method="zip">ZIP</button>
+        -->
       </div>
 
       <div id="method-pat">
         <div class="fld"><div class="fl">저장소</div><input class="inp" type="text" id="repo-input" placeholder="owner/repo 또는 https://github.com/owner/repo"></div>
         <div class="fld"><div class="fl">브랜치 <span class="hint">· 선택</span></div><input class="inp" type="text" id="branch-input" placeholder="비우면 기본 브랜치"></div>
       </div>
+      <!-- D-owncommit1: legacy, 주석 처리.
       <div id="method-zip" class="hidden">
         <div class="dropzone" id="dropzone">여기로 .zip 파일을 드래그하거나 클릭해서 선택</div>
         <input type="file" id="zip-input" accept=".zip" class="hidden">
         <div class="fwarn" id="zip-status"></div>
       </div>
+      -->
 
       <div class="fld" style="margin-top:var(--sp-4)">
         <div class="fl">모델 <span class="hint">· 분석·질문 생성·채점 전부에 쓰입니다</span></div>
@@ -157,8 +166,9 @@
   let selectedTeachIds = new Set();
   let selectedCurriculum = null;  // {run_id, schema, ...} 또는 null(수동 입력)
   let currentMethod = "pat";
-  let zipFiles = null;
-  let zipName = null;
+  // D-owncommit1: zipFiles/zipName은 legacy(ZIP 제출 폐지, 아래 handleZip() 등도 주석 처리).
+  // let zipFiles = null;
+  // let zipName = null;
   let selectedModel = null;
   let selectedHintMode = null; // POCScoring 로드 후 init()에서 hintMode.default로 초기화
 
@@ -280,69 +290,72 @@
   }
 
   // ── 제출 방식 ───────────────────────────────────────────────────────────────
+  // D-owncommit1 (2026-08-04, app/stage2-analysis/own-commit.js에 전문): ZIP 제출
+  // 폐지로 dropzone/zipInput/handleZip/ensureJsZip/loadScript가 전부 legacy -- 주석
+  // 처리. GitHub URL 경로만 남는다.
   $("method-toggle").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-method]");
     if (!btn) return;
     currentMethod = btn.dataset.method;
     document.querySelectorAll("#method-toggle button").forEach((b) => b.classList.toggle("on", b === btn));
     $("method-pat").classList.toggle("hidden", currentMethod !== "pat");
-    $("method-zip").classList.toggle("hidden", currentMethod !== "zip");
+    // $("method-zip").classList.toggle("hidden", currentMethod !== "zip");
   });
 
-  const dropzone = $("dropzone");
-  const zipInput = $("zip-input");
-  dropzone.addEventListener("click", () => zipInput.click());
-  dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("drag-over"); });
-  dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag-over"));
-  dropzone.addEventListener("drop", (e) => {
-    e.preventDefault();
-    dropzone.classList.remove("drag-over");
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) handleZip(e.dataTransfer.files[0]);
-  });
-  zipInput.addEventListener("change", () => { if (zipInput.files[0]) handleZip(zipInput.files[0]); });
+  // const dropzone = $("dropzone");
+  // const zipInput = $("zip-input");
+  // dropzone.addEventListener("click", () => zipInput.click());
+  // dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("drag-over"); });
+  // dropzone.addEventListener("dragleave", () => dropzone.classList.remove("drag-over"));
+  // dropzone.addEventListener("drop", (e) => {
+  //   e.preventDefault();
+  //   dropzone.classList.remove("drag-over");
+  //   if (e.dataTransfer.files && e.dataTransfer.files[0]) handleZip(e.dataTransfer.files[0]);
+  // });
+  // zipInput.addEventListener("change", () => { if (zipInput.files[0]) handleZip(zipInput.files[0]); });
 
   // ZIP 파싱은 P02Engine이 소유한다(vendored, 무수정). 여기서는 그 결과만 받아 IndexedDB에
   // 넘긴다 -- 파싱 로직을 이 파일에 복제하면 그쪽이 고쳐져도 이쪽은 안 따라간다.
-  async function handleZip(file) {
-    zipName = file.name;
-    $("zip-status").textContent = `${file.name} 읽는 중…`;
-    try {
-      await ensureJsZip();
-      const parsed = await P02Engine.parseZipFile(file);
-      zipFiles = parsed.files;
-      $("zip-status").textContent = P02Engine.formatZipStatus(parsed, file.name);
-      const saved = await SessionState.saveZipFileMap(zipFiles);
-      if (saved && saved.ok === false) $("zip-status").textContent += " · 파일 캐시 저장 실패(문답 중 실시간 재확인 불가)";
-    } catch (err) {
-      zipFiles = null;
-      $("zip-status").textContent = `ZIP 읽기 실패: ${err.message}`;
-    }
-  }
+  // async function handleZip(file) {
+  //   zipName = file.name;
+  //   $("zip-status").textContent = `${file.name} 읽는 중…`;
+  //   try {
+  //     await ensureJsZip();
+  //     const parsed = await P02Engine.parseZipFile(file);
+  //     zipFiles = parsed.files;
+  //     $("zip-status").textContent = P02Engine.formatZipStatus(parsed, file.name);
+  //     const saved = await SessionState.saveZipFileMap(zipFiles);
+  //     if (saved && saved.ok === false) $("zip-status").textContent += " · 파일 캐시 저장 실패(문답 중 실시간 재확인 불가)";
+  //   } catch (err) {
+  //     zipFiles = null;
+  //     $("zip-status").textContent = `ZIP 읽기 실패: ${err.message}`;
+  //   }
+  // }
 
   // p02-engine.js/session-state.js는 이 페이지에서 ZIP 처리에만 필요하다 -- 미리 로드하지
   // 않고 실제로 ZIP을 올릴 때 가져온다(GitHub 경로만 쓰는 사용자는 받을 이유가 없다).
-  let depsPromise = null;
-  function ensureJsZip() {
-    if (depsPromise) return depsPromise;
-    depsPromise = (async () => {
-      await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
-        "sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG");
-      await loadScript("../shared/pyodide-shared.js");
-      await loadScript("../shared/session-state.js");
-      await loadScript("../shared/p02-engine.js");
-    })();
-    return depsPromise;
-  }
-  function loadScript(src, integrity) {
-    return new Promise((resolve, reject) => {
-      const el = document.createElement("script");
-      el.src = src;
-      if (integrity) { el.integrity = integrity; el.crossOrigin = "anonymous"; }
-      el.onload = resolve;
-      el.onerror = () => reject(new Error(`스크립트 로드 실패: ${src}`));
-      document.head.appendChild(el);
-    });
-  }
+  // let depsPromise = null;
+  // function ensureJsZip() {
+  //   if (depsPromise) return depsPromise;
+  //   depsPromise = (async () => {
+  //     await loadScript("https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js",
+  //       "sha384-+mbV2IY1Zk/X1p/nWllGySJSUN8uMs+gUAN10Or95UBH0fpj6GfKgPmgC5EXieXG");
+  //     await loadScript("../shared/pyodide-shared.js");
+  //     await loadScript("../shared/session-state.js");
+  //     await loadScript("../shared/p02-engine.js");
+  //   })();
+  //   return depsPromise;
+  // }
+  // function loadScript(src, integrity) {
+  //   return new Promise((resolve, reject) => {
+  //     const el = document.createElement("script");
+  //     el.src = src;
+  //     if (integrity) { el.integrity = integrity; el.crossOrigin = "anonymous"; }
+  //     el.onload = resolve;
+  //     el.onerror = () => reject(new Error(`스크립트 로드 실패: ${src}`));
+  //     document.head.appendChild(el);
+  //   });
+  // }
 
   // ── 모델 ────────────────────────────────────────────────────────────────────
   // D-poc12 (2026-07-30, 실사용 재현): "key 미입력 시 default 모델 리스트 존재" 보고.
@@ -447,10 +460,12 @@
       if (!repoInput) return showError("저장소를 입력하세요 (owner/repo).");
       submission.repoInput = repoInput;
       submission.branch = $("branch-input").value.trim() || null;
-    } else {
-      if (!zipFiles) return showError("ZIP 파일을 먼저 올리세요.");
-      submission.zipName = zipName;
     }
+    // D-owncommit1: ZIP 분기(else) legacy, 주석 처리.
+    // else {
+    //   if (!zipFiles) return showError("ZIP 파일을 먼저 올리세요.");
+    //   submission.zipName = zipName;
+    // }
 
     const chosen = teaches.filter((t) => selectedTeachIds.has(t.id));
     const saved = POCState.saveSetup({

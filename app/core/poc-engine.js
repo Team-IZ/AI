@@ -5,15 +5,19 @@
 const POCEngine = (() => {
   /**
    * 1단계에서 저장된 setup으로부터 files를 다시 확보한다.
-   * D-poc5: files 본문은 세션 저장소를 거치지 않는다 -- ZIP은 IndexedDB(session-state.js),
-   * GitHub는 repoRef만 들고 있다가 매번 다시 가져온다(D200/D210이 P03에서 확립한 패턴과 동일).
+   * D-poc5: files 본문은 세션 저장소를 거치지 않는다 -- GitHub는 repoRef만 들고 있다가
+   * 매번 다시 가져온다(D200/D210이 P03에서 확립한 패턴과 동일).
+   *
+   * D-owncommit1 (2026-08-04, app/stage2-analysis/own-commit.js에 전문): ZIP 제출은
+   * 저장소 정체성이 없어 own-commit 귀속 신호를 못 내므로 폐지(D-zip1과 같은 이유) --
+   * 아래 zip 분기는 legacy로 주석 처리, GitHub 경로만 남는다.
    */
   async function resolveFiles(setup, hooks) {
-    if (setup.submission.method === "zip") {
-      const zipFiles = await SessionState.loadZipFileMap();
-      if (!zipFiles) throw new Error("ZIP 파일 캐시를 찾을 수 없습니다 -- 1단계에서 다시 업로드하세요.");
-      return { scanInput: { method: "zip", zipFiles } };
-    }
+    // if (setup.submission.method === "zip") {
+    //   const zipFiles = await SessionState.loadZipFileMap();
+    //   if (!zipFiles) throw new Error("ZIP 파일 캐시를 찾을 수 없습니다 -- 1단계에서 다시 업로드하세요.");
+    //   return { scanInput: { method: "zip", zipFiles } };
+    // }
     return {
       scanInput: {
         method: "pat",
@@ -27,15 +31,16 @@ const POCEngine = (() => {
    * 실제 파일 내용 맵을 다시 확보한다(재스캔은 하지 않는다) -- session.html의 코드 패널처럼
    * 원문(하이라이트용 전체 파일)이 필요하지만 Pyodide 구조 스캔은 불필요한 경우 전용.
    * resolveFiles()는 P02Engine.run() 앞단(스캔용) 입력만 만드는 반면, 이건 그 자체로 files를
-   * 반환한다 -- session.html은 pyodide.js/jszip.min.js 스크립트 태그 없이도 이걸 쓸 수 있다
-   * (ZIP 경로는 이미 파싱된 IndexedDB 캐시를 읽기만 하고, GitHub 경로는 fetch만 한다).
+   * 반환한다 -- session.html은 pyodide.js 스크립트 태그 없이도 이걸 쓸 수 있다(GitHub
+   * 경로는 fetch만 한다).
    */
   async function resolveFileContents(setup, onProgress) {
-    if (setup.submission.method === "zip") {
-      const zipFiles = await SessionState.loadZipFileMap();
-      if (!zipFiles) throw new Error("ZIP 파일 캐시를 찾을 수 없습니다 -- 1단계에서 다시 업로드하세요.");
-      return zipFiles;
-    }
+    // D-owncommit1: ZIP 분기 legacy, 주석 처리.
+    // if (setup.submission.method === "zip") {
+    //   const zipFiles = await SessionState.loadZipFileMap();
+    //   if (!zipFiles) throw new Error("ZIP 파일 캐시를 찾을 수 없습니다 -- 1단계에서 다시 업로드하세요.");
+    //   return zipFiles;
+    // }
     const { owner, repo } = P02Engine.parseRepoInput(setup.submission.repoInput);
     const pat = LabConfig.get("github-pat");
     const fetched = await P02Engine.fetchGithubRepo(owner, repo, setup.submission.branch || null, pat, onProgress || (() => {}));
@@ -136,10 +141,45 @@ const POCEngine = (() => {
     //   반대인 이유는 code-candidates.js 4단계 설계 규칙 3에 있다).
     //   신뢰성 계약: 실패하거나 K=0으로 깎이면 decision_points에 deep_dive 키가 아예 안 붙고,
     //   화면은 오늘과 정확히 같다(근거 코드 파편 + why_it_matters 한 줄).
+    // ── own-commit: "누가 이 코드를 커밋했는가" 랭킹 신호 ─────────────────────
+    // D-owncommit1 (2026-08-04, app/stage2-analysis/own-commit.js에 전문): fan-out과
+    // 같은 try/catch로 감싼다 -- 이 신호도 **부가 정보**다(내부 랭킹용, 화면 미노출,
+    // 이번 세션 결정 4). 실패해도 own_commit 항이 0으로 남을 뿐 2단계 전체는 안 죽는다.
+    //   WHY 대상 파일을 전체 리포가 아니라 후보 풀로 제한하는가: REST 폴백은 파일당 1콜이다
+    //   (own-commit.js 주석의 D192 재확인). 전체 파일에 돌리면 own-commit.js가 굳이 감수한다고
+    //   써둔 그 위험을, 여기서 다시 전면적으로 재현하게 된다. collectCandidates()는 이미
+    //   1단계에서 후보 풀을 decision_points(<=수십개) + finding 소스 + 구조 top-5로 좁혀 두므로,
+    //   그 파일 집합만 대상으로 삼는다 -- runFanout이 내부에서 collectCandidates를 다시 부르는
+    //   것과 중복 계산이지만(둘 다 순수 함수, 네트워크 없음) 이렇게 해야 own-commit 호출
+    //   범위가 fan-out이 실제로 볼 후보 범위와 항상 일치한다(따로 관리하면 둘이 벌어질 수 있다).
+    let ownCommit = {};
+    try {
+      const email = typeof LabDB !== "undefined" && LabDB.currentMemberOrNull
+        ? (await LabDB.currentMemberOrNull() || {}).email
+        : null;
+      if (email && typeof OwnCommit !== "undefined" && repoRef) {
+        const candidatePaths = Array.from(new Set(
+          CodeCandidates.collectCandidates({ analysisDoc, findings, fanIn, files, teachIds: setup.teaches.map((t) => t.id) })
+            .map((c) => c.file)
+            .filter(Boolean)
+        ));
+        if (candidatePaths.length) {
+          const pat = LabConfig.get("github-pat");
+          hooks.onProgress(`own-commit 귀속 신호 조회 중... (파일 ${candidatePaths.length}개${pat ? ", GraphQL" : ", PAT 없음 -> REST 폴백"})`);
+          ownCommit = await OwnCommit.fetchOwnCommitSignals({
+            owner: repoRef.owner, repo: repoRef.repo, branch: repoRef.branch,
+            paths: candidatePaths, email, pat, onProgress: hooks.onProgress,
+          });
+        }
+      }
+    } catch (e) {
+      hooks.onProgress(`⚠ own-commit 신호 조회를 건너뜁니다(랭킹은 이 항 없이 진행): ${e.message}`);
+    }
+
     let fanout = null;
     try {
       fanout = await CodeCandidates.runFanout({
-        analysisDoc, files, findings, fanIn,
+        analysisDoc, files, findings, fanIn, ownCommit,
         teachIds: setup.teaches.map((t) => t.id),
         model, k: 3, onProgress: hooks.onProgress,
       });

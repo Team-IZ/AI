@@ -104,6 +104,10 @@
      groundCandidates / rankCandidates / runFanout). code-fragment.js 다음이어야 하는 건
      groundCandidates()/deepDiveCandidate()가 전역 CodeFragment를 기본 주입값으로 쓰기
      때문이고, llm-stage.js(POCStage)는 runFanout이 **호출 시점에** 참조하므로 순서 무관. -->
+<!-- D-owncommit1 (2026-08-04): "누가 이 코드를 커밋했는가" 신호. P02Engine(githubRateLimitError
+     재사용)와 LabConfig/LabDB 뒤, code-candidates.js보다 앞이면 순서상 충분하다(poc-engine.js가
+     호출 시점에 전역으로 참조하므로 code-candidates.js와의 상대 순서 자체는 무관). -->
+<script src="stage2-analysis/own-commit.js"></script>
 <script src="stage2-analysis/code-candidates.js"></script>
 <script src="stage3-session/question-guard.js"></script>
 <script src="core/llm-stage.js"></script>
