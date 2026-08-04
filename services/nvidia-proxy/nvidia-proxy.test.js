@@ -33,6 +33,14 @@ class MemoryKv {
   async put(key, value) {
     this.values.set(key, value);
   }
+
+  // Minimal stand-in for KVNamespace#list(), added for the ?traffic=1 test below --
+  // real Cloudflare KV returns { keys: [{name}, ...], list_complete, cursor }, but
+  // nvidia-proxy.js only ever reads .keys[].name, so that's all this needs to provide.
+  async list({ prefix = "" } = {}) {
+    const keys = [...this.values.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name }));
+    return { keys, list_complete: true, cursor: undefined };
+  }
 }
 
 function limiterBinding(response = { wait_ms: 0, slot_at: Date.now(), generation: 0, rpm: 36 }) {
@@ -309,6 +317,55 @@ test("LANGSMITH_TAGS overrides the default tag list", async () => {
   const trace = JSON.parse(requests.find((entry) => entry.url.endsWith("/runs")).options.body);
   assert.equal(trace.session_name, "team-iz-nvidia-usage-code-qna");
   assert.deepEqual(trace.tags, ["nvidia", "code-qna", "production"]);
+});
+
+// D-fix (redteam audit H2, 2026-08-04): these two tests were the gap the audit called
+// out by name -- "nvidia-proxy.test.js에는 인증 관련 테스트가 하나도 없습니다" -- every
+// existing test above exercises worker.queue() (the Cloudflare Queue consumer), none
+// exercise worker.fetch() (the HTTP entrypoint, where the origin/auth bugs actually lived).
+
+test("access-control-allow-origin reflects only allowlisted origins, never an arbitrary one", async () => {
+  const kv = new MemoryKv();
+  const env = { NVIDIA_JOBS: kv };
+
+  const allowed = await worker.fetch(
+    new Request("https://proxy.internal/?job=missing", { headers: { origin: "https://team-iz.github.io" } }),
+    env
+  );
+  assert.equal(allowed.headers.get("access-control-allow-origin"), "https://team-iz.github.io");
+
+  const allowedMirror = await worker.fetch(
+    new Request("https://proxy.internal/?job=missing", { headers: { origin: "https://popixoxipop-collab.github.io" } }),
+    env
+  );
+  assert.equal(allowedMirror.headers.get("access-control-allow-origin"), "https://popixoxipop-collab.github.io");
+
+  const allowedLocal = await worker.fetch(
+    new Request("https://proxy.internal/?job=missing", { headers: { origin: "http://localhost:8080" } }),
+    env
+  );
+  assert.equal(allowedLocal.headers.get("access-control-allow-origin"), "http://localhost:8080");
+
+  const attacker = await worker.fetch(
+    new Request("https://proxy.internal/?job=missing", { headers: { origin: "https://evil.example.com" } }),
+    env
+  );
+  assert.equal(attacker.headers.has("access-control-allow-origin"), false);
+});
+
+test("?traffic=1 requires x-nvidia-api-key, same gate as ?models=1", async () => {
+  const kv = new MemoryKv();
+  const env = { NVIDIA_JOBS: kv };
+
+  const unauthenticated = await worker.fetch(new Request("https://proxy.internal/?traffic=1"), env);
+  assert.equal(unauthenticated.status, 401);
+
+  const authenticated = await worker.fetch(
+    new Request("https://proxy.internal/?traffic=1", { headers: { "x-nvidia-api-key": "nvapi-test" } }),
+    env
+  );
+  assert.equal(authenticated.status, 200);
+  assert.deepEqual((await authenticated.json()).timestamps, []);
 });
 
 test("terminal 429 is explicitly exposed to the orchestrator", async () => {

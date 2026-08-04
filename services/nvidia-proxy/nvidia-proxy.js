@@ -71,10 +71,25 @@
 
 const NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions";
 
-// Restrict to your GitHub Pages origin once you know it -- "*" works but means any
-// website could relay calls through your worker using a visitor's own pasted key
-// (that key is still theirs, but it's needless exposure of your worker as an open relay).
-const ALLOWED_ORIGIN = "*"; // e.g. "https://popixoxipop-collab.github.io"
+// D-fix (redteam audit H2, 2026-08-04): this was "*" -- any website could relay NVIDIA
+// calls through this Worker using a visitor's own pasted key (the key is still theirs,
+// but it's needless exposure of this Worker as an open relay). Porting the sibling fix
+// already applied to the code_Q&A branch's copy of this file (D-fix15, 2026-07-23),
+// widened to the two origins p01-orchestrator/index.js's own ALLOWED_ORIGINS already
+// lists as legitimate for this tool (main repo's Pages deploy + the Team-IZ mirror) --
+// a single hardcoded origin would have broken whichever mirror isn't picked.
+//   WHY: reflect back the origin only if it's one of these two exact values or a local
+//   dev origin, instead of trusting whatever the browser sends.
+//   COST: any other legitimate caller (a third mirror, a different Team-IZ page) needs
+//   adding to this array explicitly.
+//   EXIT: if a self-hosted deploy of this Worker needs a different origin, edit this
+//   array for that deployment -- it's already meant to be forked/redeployed per person
+//   (see this file's own header comment).
+const ALLOWED_ORIGINS = ["https://popixoxipop-collab.github.io", "https://team-iz.github.io"];
+const LOCAL_ORIGIN_RE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/;
+function isAllowedOrigin(origin) {
+  return ALLOWED_ORIGINS.includes(origin) || LOCAL_ORIGIN_RE.test(origin || "");
+}
 
 const JOB_TTL_SECONDS = 3600; // 1 hour -- generous for an actively-polling client, not indefinite
 
@@ -447,12 +462,13 @@ async function recordTrafficSample(env) {
 }
 
 function corsHeaders(origin) {
-  return {
-    "access-control-allow-origin": ALLOWED_ORIGIN === "*" ? "*" : ALLOWED_ORIGIN,
+  const headers = {
     "access-control-allow-methods": "GET, POST, OPTIONS",
     "access-control-allow-headers": "content-type, x-nvidia-api-key, x-max-attempts",
     "access-control-max-age": "86400",
   };
+  if (isAllowedOrigin(origin)) headers["access-control-allow-origin"] = origin;
+  return headers;
 }
 
 function jsonResponse(obj, status, origin) {
@@ -537,7 +553,14 @@ export default {
     // GET /?traffic=1 -- D160: recent actual NVIDIA request timestamps (every attempt,
     // first + retries, from every client through this Worker) for debug-traffic.js (upstream).
     // Read-only, best-effort -- never blocks or affects job submission/polling.
+    // D-fix (redteam audit H8, 2026-08-04): this had no auth check at all -- unlike
+    // ?models=1 right above, which already gates on x-nvidia-api-key. CORS (the
+    // isAllowedOrigin fix above) only stops a browser from a disallowed origin; it does
+    // nothing against a direct curl. An unauthenticated caller could hit this in a loop
+    // and exhaust the Worker owner's daily KV list() quota. Same gate as ?models=1.
     if (request.method === "GET" && url.searchParams.has("traffic")) {
+      const trafficApiKey = request.headers.get("x-nvidia-api-key");
+      if (!trafficApiKey) return jsonResponse({ error: "missing x-nvidia-api-key header" }, 401, origin);
       const list = await env.NVIDIA_JOBS.list({ prefix: "traffic:" });
       const timestamps = list.keys
         .map((k) => Number(k.name.split(":")[1]))
