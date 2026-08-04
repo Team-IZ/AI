@@ -1,6 +1,6 @@
 # AI 서비스 (FastAPI)
 
-> 갱신: **2026-08-03** · **이 문서는 지금 코드가 실제로 하는 일을 적는다.**
+> 갱신: **2026-08-04** · **이 문서는 지금 코드가 실제로 하는 일을 적는다.**
 > 백엔드와의 계약 현황은 이슈 `Team-IZ/Backend#42`, 작업 계획은 `PLAN_FASTAPI_MIGRATION.md`.
 
 교육생이 제출한 코드를 분석해 **문답 문제를 뽑고**, 학생과 **문답을 진행하며 채점**하고, 끝나면 **보고서**를 내는 서비스. Spring Boot가 호출하는 내부 서비스다.
@@ -46,12 +46,12 @@ React(Frontend) ──▶ Spring Boot(Backend) ──▶ FastAPI(이 저장소) 
 "어느 슬롯에서 통과했나"로 읽는다 — 질문 통과=`SELF` / 힌트1 통과=`SELF_MAINTAINED` /
 힌트2 통과=`PARTIAL`.
 
-| 단계 | 무엇을 묻나 | DB `axis_score.axis_code` 대응 |
-|---|---|---|
-| L1 | 무엇을 하는 코드인가 | `CODE_UNDERSTANDING` |
-| L2 | 왜 그렇게 했는가 | `DESIGN_LOGIC` |
-| L3 | 다른 방법과 비교 (대안) | `ALTERNATIVE_COMPARISON` |
-| L4 | 언제 깨지는가 (반례·한계) | `COUNTEREXAMPLE_RESPONSE` |
+| 단계 | 무엇을 묻나 |
+|---|---|
+| L1 | 무엇을 하는 코드인가 |
+| L2 | 왜 그렇게 했는가 |
+| L3 | 다른 방법과 비교 (대안) |
+| L4 | 언제 깨지는가 (반례·한계) |
 
 wire와 DB `problem_stage.axis_code`에는 **짧은 값 `"L1"`~`"L4"`**를 쓴다.
 
@@ -109,30 +109,14 @@ https://cpiysizen3.ap-northeast-1.awsapprunner.com     고정 HTTPS. 주소가 �
 ⚠️ **인스턴스는 1개로 고정해야 한다.** job 저장소가 인메모리 dict라 2개로 늘면 만든
 프로세스와 조회 프로세스가 달라져 폴링이 404가 난다.
 
-<details>
-<summary>옛 방식 — EC2 + cloudflared (2026-08-02 ~ 08-03, 폐기)</summary>
+### 로컬에서 백엔드와 붙여볼 때
 
-서울 EC2 t3.small에 `main`을 체크아웃해 두고 `git pull && systemctl restart iz-get-ai`로
-수동 배포했다. quick tunnel URL이 cloudflared 재시작마다 바뀌어서 백엔드가 주소를 설정값으로
-들고 있어야 했다. **App Runner 고정 주소로 대체됐다.**
+`.env`의 `INTERNAL_API_KEY`에 값이 있으면 헤더 `X-Internal-Key`가 필요하다(health만 면제).
+비우면 인증이 꺼진다. 로컬을 외부에 노출해야 하면 `cloudflared tunnel --url http://localhost:8000`
+(가입 불필요, 실행마다 URL이 바뀐다).
 
-</details>
-
-### 백엔드와 통신 테스트 (배포 없이)
-
-로컬 FastAPI를 터널로 노출해 확인한다. 백엔드는 서울 EC2(`http://13.209.190.34`)에 떠 있다.
-
-```bash
-./.venv/Scripts/python.exe -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# 다른 터미널 (cloudflared — 가입·토큰 불필요)
-cloudflared tunnel --url http://localhost:8000
-#   → https://xxxx.trycloudflare.com 발급 → 백엔드에 전달 (prefix /api/v0)
-```
-
-- `.env`의 `INTERNAL_API_KEY`에 값이 있으면 헤더 `X-Internal-Key`가 필요하다(health만 면제). 비우면 인증이 꺼진다.
-- quick tunnel은 실행마다 URL이 바뀌고, 창을 닫거나 PC가 절전에 들어가면 끊긴다.
-- 상세 절차: `../output_docs/AI-Backend_통신테스트_계획_2026-07-24.md`
+**주고받을 데이터의 실제 모양은 `../test_folder/`에 있다** — 교안·분석·문답·보고서 4단계의
+요청·응답이 형식 그대로 저장돼 있고, 각 `input_data/*/README.md`가 필드의 백엔드 출처를 적어 뒀다.
 
 ### 계약이 바뀌면 openapi.json 갱신
 
@@ -656,129 +640,84 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 ---
 
-## 5. 현재 상태와 앞으로
-
-### 지금
+## 5. 현재 상태
 
 | | |
 |---|---|
+| 기능 | **6/6 완성.** 교안 · 코드 분석 · 문제 선정 · 질문·힌트 동결 · 채점 · 보고서 |
+| 검증 | **전 구간 실호출 완주**(2026-08-04). 교안 → 분석 → 문답 11턴 → 보고서 2건 |
 | 엔드포인트 | **8/8 동작** (세션 무상태 전환으로 11 → 8) |
-| 테스트 | **198 passed** |
-| 붙일 수 있나 | **예.** 인증·에러 형식·camelCase·Swagger·`openapi.json`까지 완성 |
+| 테스트 | **254 passed** |
+| 계약 | **미결 0건.** DDL · `contextType` 값 집합 · `problemId` 사본 여부까지 확정 |
+| 배포 | App Runner 자동(`main` 푸시 = 배포). 팀원 소유 |
 
-**엔진 이식이 끝났다.** 룰 스캔 → 분석 문서 → 요구사항 P/F → 문제 선정 → 4축 질문·힌트 동결 → 채점 → 보고서까지 실호출로 동작을 확인했다(`app/engines/analysis/`). 팀원 PoC 규칙부와 NVIDIA 클라이언트는 vendor해 두고 우리 래퍼가 감싼다 — 갱신 절차는 `vendor/SOURCE.md`, 우리 수정 이력은 `vendor/PATCHES.md`.
-
-> ✅ 축 값 `"L1"`~`"L4"`(L3=대안 비교 / L4=반례·한계), `focusItems`, `codeSnippet`, `requirementResults`, `analysisDocument`(JSON)가 전부 스펙에 있다. ⚠️ `bestScore`/`confirmedScore`는 2026-08-03에 `score` 하나로 합쳐졌다.
->
-> ⚠️ **질문·힌트는 전면 동결이다.** 혼합 모드(L1·L2만 동결)는 폐기됐다 — **4축 전부** 분석 배치에서 만든다.
->
-> ```
-> L1~L4   questionText 필수 · hints 정확히 2개(hintLevel 1, 2 순서)
-> ```
->
-> 이 규칙은 **OpenAPI 문법으로 표현이 안 된다.** 스키마 검증기가 막고 있고 여기 산문으로만 적혀 있다.
->
-> ⏳ **아직인 것**: 백엔드 연동, `references[]` 채우기. 배포·주소는 해결됐다(App Runner 자동 배포). 순서는 `PLAN_FASTAPI_MIGRATION.md`.
-
-### 백엔드 대기 2건
-
-이슈 `Team-IZ/Backend#31` 본문이 현재 상태판이다.
-
-| # | 내용 | 우리 작업을 막나 |
-|---|---|---|
-| C-4 | ~~`source_type` 값 목록~~ | **닫힘.** 2026-08-03에 우리가 `ANALYSIS`·`GRADING`·`REPORT`·`CURRICULUM`로 정해 통보한다 |
-| C-5 | `curriculum_analysis.extraction_status`·`quality_status` 코드 카탈로그 | 아니다. CHECK가 없어 `str`로 두고 나중에 맞춘다 |
-
-C-1~C-3은 **회신 완료**다.
-
-- **C-1** 분석 요청에 `focusItems: [{id, name}]`를 싣고 AI가 `questionFocusItemId`로 하나를 돌려준다
-- **C-2** `score_run`·`axis_score` 제거 예정. 점수의 단일 소유자는 `problem_stage`이고 축 어휘는 `'L1'`~`'L4'` 한 벌
-- **C-3** **비용은 Spring이 계산한다.** AI는 토큰·모델·지연·상태만 보낸다. 백엔드에 단가 관리 화면(`PUT /platform/operations/models/{modelId}/pricing`)과 비용 집계 화면이 이미 있는 것을 2026-08-03에 확인했다
-
-**DDL 요청은 2건이고 전달본은 `../qna/2026-08-03/issue-body-v2.md`(= 이슈 `Team-IZ/Backend#42`)다.**
+### 실측 (무료 티어)
 
 ```
-B-12  🔴 assessment_problem_reference 에 code_text TEXT
-      학생에게 보여줄 코드가 DB 어디에도 안 들어간다
-B-13  🔴 code_analysis 에 analysis_document JSONB
-      문제 출제 근거이자 채점 컨텍스트가 사라진다
+/curricula   34쪽 PDF   310초   섹션 15 · teach 58
+/analyses    7파일      221초   문제 2 + 문항없음 1 · 5회 재현
+채점         성공 콜 중앙 14.5초 · 턴 왕복 중앙 21.3초 · 최대 141.9초
+/reports     2건 병렬 50.5초 (순차였다면 101초)
 ```
 
-⚠️ **옛 요청 목록(B-1~B-11)은 폐기다.** `테이블정의서_v06` 기준이었고, 백엔드가 새 MEAS에서
-`problem_stage`를 다시 짜면서 대부분 해결됐다.
+🔴 **성공 콜은 목표(15초) 안에 든다. `HTTP 529 Overloaded` 재시도가 그 위에 얹힌다.**
+모델 교체로 안 풀린다 — 12종 실측. 유료 전환이 근본 해결이다.
+
+⚠️ **백엔드는 `retryable: true`면 같은 `clientRequestId`로 재전송해야 한다.** 안 하면
+무료 티어에서 세션이 끊긴다. 채점 타임아웃은 30초 이상으로 잡는다.
+
+### 아직인 것
 
 ```
-해결   B-9  질문·힌트 저장 자리    question_text · first_hint_text · second_hint_text 가 이미 있다
-       B-1  attempt_count 0~3     컬럼이 사라지고 답변 슬롯 3개로 대체
-       B-2  attempt_no IN (2,3)   stage_answer_attempt 테이블 자체가 사라짐
-       B-4  TERMINATED_AT_L1·L4   termination_reason 컬럼이 사라짐
-철회   B-10 teach_id · is_general  일반 문제를 안 만들기로 했다 (2026-08-03 PM)
-       B-5  TEXT → JSONB          컬럼이 통째로 사라져 B-13 신설로 바뀜
-       B-3 · B-8                  2026-08-03 이전에 이미 철회
-해결   B-11 ai_model 등록          2026-08-04 3건 등록 완료
-       B-12 code_text · B-13 analysis_document JSONB   컬럼 추가 완료
-       teaches kind·evidence·sibling_names             컬럼 추가 완료
+백엔드 연동          백엔드가 AI 연동 도메인을 아직 안 만들었다
+RELATED_CONTEXT 참조  심볼 테이블이 없어 못 만든다
+교안 대형 PDF 상한    34쪽 310초. 200쪽을 외삽할 수 없다
+선별 로직 교체        교안 사전 기반(PM 설계 v2 §7). 재료는 확보, 교체는 미착수
 ```
 
-**확인 완료**(2026-08-04): 도달 단계는 팀원 개별 속성 · 문항 없음은 `NOT_GENERATED` ·
-`contextType` 값 집합.
-
-### 앞으로
-
-```
-백엔드 연동 — 주소를 설정값으로, 채점 타임아웃 30초 이상
-RELATED_CONTEXT 근거 — 심볼 테이블이 없어 아직 못 만든다
-유료 전환 — 529 실패율 64%. 채점 목표 15초를 못 지키는 원인 (팀 논의)
-교안 소요 실측 — 34쪽 451초. 200쪽 상한을 아직 못 준다
-(먼 항목) 적응형 힌트 모듈 대응 — 턴당 2콜, 힌트용 featureCode, 체크포인트 단위 모드 고정
-```
-
-완료: 세션 턴 점수 필드 · `aiUsage` 스키마·배선 · `/curricula` 신설 · 엔진 이식 · **세션 무상태 전환**(2026-08-03).
-
-**미확정값** — 재시험 커트라인(L1·L2 기준은 가설이다). 힌트 점수 상한은 2026-08-03에 폐기됐다. 세부 순서·방법은 **`PLAN_FASTAPI_MIGRATION.md`**에 있다.
+세부 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
 ---
 
 ## 6. 팀원 PoC 브랜치
 
-엔진은 여기서 이식한다. 브라우저에서 도는 PoC이고 LLM 호출은 Cloudflare Worker 프록시를 거친다.
+엔진은 여기서 이식했다. **이식은 끝났고 지금은 참조용이다.**
 
 | 브랜치 | 내용 | 워크트리 |
 |---|---|---|
-| **`feat/poc_full`** | **통합 PoC(P04).** 이식 대상 | `../ai_poc/poc_full` |
+| `feat/poc_full` | 통합 PoC(P04) — 이식 원본 | `../ai_poc/poc_full` |
 | `feat/code_Q&A` | 구 P02 코드분석 / P03 문답 | `../ai_poc/qna` |
 | `feat/pdf_analysis` | P01 교안 분석 | `../ai_poc/pdf` |
+| `feature/code-importance-map` | import 그래프 — `materialize.py`·`imports.py` 원본 | (없음) |
 
-워크트리는 **읽기 전용(detached HEAD)** 이다. 절대 수정·커밋하지 않는다. 팀원 코드를 고쳐야 하면 팀원에게 요청한다.
+🔴 **워크트리는 읽기 전용(detached HEAD)이다.** 수정·커밋하지 않는다. 팀원 코드를 고쳐야
+하면 팀원에게 요청한다.
 
-### 이식할 때
-
-- **JS는 설계 선택이 아니라 브라우저 제약의 결과다.** CORS·키 노출 때문에 프록시를 거쳐야 했고 UI가 얽혀 있었다. 서버에는 그 제약이 없으므로 **전부 Python으로 옮긴다.** Node를 띄우지 않는다
-- **프롬프트·파라미터는 매니페스트가 계약이다.** P04는 `app/prompt_manifest.json` + `app/scoring-config.js` 두 파일. 프롬프트만 바뀌면 이 파일들만 다시 가져오면 되고, 제어 흐름이 바뀔 때만 코드를 손댄다
-- **질문·힌트 동결(`hint-ladder.js`)은 그대로 옮긴다.** 문제 하나당 L1~L4 질문 4개 + 힌트 8개를 한 번에 만들어 `frozen_at`을 찍는 구조가 우리 계약과 같다
-- 🔴 **PoC의 축 순서가 우리와 반대다.** `scoring-config.js`가 L3=반례, L4=대안이다. 이식할 때 `AXES`의 `order`·`label`·루브릭 텍스트를 L3↔L4 교환한다. 순서만 맞추고 루브릭을 그대로 두면 L3 답변이 L4 기준으로 채점된다. 워크트리는 읽기 전용이므로 원본 정정은 팀원에게 요청한다
-- **잘라낼 것**: Supabase 저장(DB 주인은 Spring), Worker LLM 프록시(서버는 직접 호출), IndexedDB·sessionStorage, UI·타이머, 브라우저 pdf.js(서버 라이브러리로 교체 — 결과가 동일하지 않다)
-- **규칙 스캔부는 CPU라 이벤트 루프를 막을 수 있다.** `async def` 안에서 동기로 돌리면 문답 중인 학생까지 굳는다. `def`(threadpool)나 `run_in_executor`로 뺀다
+프롬프트·규칙부는 `app/engines/analysis/vendor/`에 vendor해 두고 우리 래퍼가 감싼다.
+**갱신은 덮어쓰기 복사라 우리 수정이 사라진다** — 절차는 `복사 → PATCHES.md 재적용 →
+pytest tests/test_vendor_patches.py`. 기준 커밋은 `vendor/SOURCE.md`.
 
 ---
 
 ## 7. 개발 규칙
 
-**브랜치**: `feature/*` → 동작·테스트 완료 후 `main` → `main` 기준 `develop` 생성 → 이후 `develop`에서 수정·테스트 후 `main` 병합. 기본 브랜치는 `develop`.
+**브랜치**: `feature/*` → 동작·테스트 통과 후 `develop` → 검증 끝난 것만 `main`.
+기본 브랜치는 `develop`이고 **`main`이 배포 브랜치다.**
 
-**커밋**
+⚠️ **`main` 머지 = 즉시 재배포**이므로 진행 중인 `/analyses`·`/reports` job이 사라진다
+(세션은 무상태라 안 깨진다). **머지 시점은 백엔드와 맞춘다.**
 
-```
-type: short description (#issue)
-```
+⚠️ **인스턴스는 1개로 고정한다.** job 저장소가 인메모리 dict라 2개면 만든 프로세스와
+조회 프로세스가 달라져 폴링이 404다.
 
-`feat` `fix` `refactor` `style` `docs` `chore` `remove` 중 하나. 동사원형 소문자로 시작, 마침표 없음, 50자 이내, 이슈가 있으면 번호 필수.
+**커밋**: `type: short description (#issue)` — `feat` `fix` `refactor` `style` `docs`
+`chore` `remove`. 동사원형 소문자 시작, 마침표 없음, 50자 이내, 이슈 있으면 번호 필수.
 
-**PR**: 제목 `[feat] add login page UI`, 본문에 `closes #번호`. 1 PR = 1 기능, 파일 10개 이내 권장, 최소 1인 승인.
+**PR**: 제목 `[feat] add login page UI`, 본문에 `closes #번호`. 1 PR = 1 기능,
+파일 10개 이내 권장, 최소 1인 승인.
 
-**커밋 전 확인**: `.env` 스테이징 금지, 브랜치 확인, 빌드 통과, 디버그 로그 제거, `main`/`develop` 직접 작업 금지.
-
-상세는 `../rule/개발/이슈 O/Git 커밋 & PR 가이드.docx`.
+**커밋 전**: `.env` 스테이징 금지, 브랜치 확인, 테스트 통과, 디버그 로그 제거,
+`main`/`develop` 직접 작업 금지.
 
 ---
 
@@ -786,15 +725,18 @@ type: short description (#issue)
 
 | 문서 | 내용 |
 |---|---|
-| `PLAN_FASTAPI_MIGRATION.md` | AI 파트 작업 계획·진행 (내부용) |
-| `../qna/2026-07-30/issue-body-v2.md` | 백엔드 이슈 #31 본문 사본 — **AI↔백엔드 현재 상태판** |
-| `../output_docs/AI파트_현황.md` | 팀 공유용 현황 요약 |
+| `PLAN_FASTAPI_MIGRATION.md` | 작업 계획·진행 (내부용) |
+| `openapi.json` | 기계용 계약. `tests/test_openapi.py`가 드리프트를 막는다 |
+| `../test_folder/` | **4단계 실호출 데이터.** 백엔드가 주고받을 형식 그대로 |
+| `../qna/2026-08-03/issue-body-v2.md` | 백엔드 이슈 `#42` 본문 |
+| `../qna/2026-08-04/` | 이슈 `#42` 회신·확인 |
+| `../output_docs/AI파트_현황.md` | 팀 공유용 현황 |
 | `../output_docs/미결_논의사항.md` | 아직 안 정해진 것 |
-| `../docs/docs_for_read/테이블정의서_v06.md` | DB 테이블·CHECK 제약 (2026-07-30 변환) |
-| `../docs/AI-Backend_API_명세서_v0.1.md` | AI↔Backend 전체 계약 (내용은 v0.2) |
-| `../docs/docs_for_read/` | 기획·요구사항 문서 Markdown 변환본 |
+| `../docs/docs_for_read/` | 기획·요구사항 Markdown 변환본 |
 | `../rule/개발/이슈 O/` | 커밋·PR 규칙 |
 
-`../docs/`의 문서는 확정 스펙이 아니라 바뀔 수 있는 기획 자료다. 실제 코드나 최근 논의와 어긋나면 문서를 맹신하지 말고 확인 후 진행한다.
+⚠️ **`../docs/`는 확정 스펙이 아니라 바뀔 수 있는 기획 자료다.** 실제 코드나 최근 논의와
+어긋나면 문서를 맹신하지 말고 확인 후 진행한다. ⚠️ **이슈 `#31`과
+`../qna/2026-08-03/issue-body.md`는 폐기다.**
 
-`_legacy/`는 재구축 이전 구현의 로컬 사본이다. `.gitignore` 대상이라 커밋되지 않으며 모듈화 참고용으로만 둔다.
+`_legacy/`는 재구축 이전 구현의 로컬 사본이다. `.gitignore` 대상이라 커밋되지 않는다.
