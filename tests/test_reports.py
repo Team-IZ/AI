@@ -163,6 +163,19 @@ def test_same_idempotency_key_returns_same_job_id():
                        ).json()["jobId"] != first.json()["jobId"]
 
 
+def test_reused_idempotency_key_with_different_problem_id_is_rejected():
+    """멱등키 재사용인데 problemId가 다르면 409 (H12 companion)."""
+    headers = {**HEADERS, "Idempotency-Key": "shared-key:1"}
+    first = client.post("/api/v0/reports", json=BODY, headers=headers)
+    assert first.status_code == 202
+
+    other_body = {**BODY, "problemId": "prob-someone-elses"}
+    r = client.post("/api/v0/reports", json=other_body, headers=headers)
+
+    assert r.status_code == 409
+    assert r.json()["error"] == "IDEMPOTENCY_CONFLICT"
+
+
 def test_ai_usage_is_reported_for_reports(monkeypatch):
     """🔴 보고서 토큰이 원장에 실려야 한다 (§T11 F1). 엔진이 주는데 버리고 있었다."""
     from datetime import datetime, timezone

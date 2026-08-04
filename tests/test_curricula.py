@@ -73,6 +73,24 @@ def test_same_idempotency_key_returns_same_job_id():
     assert first["jobId"] == second["jobId"]
 
 
+def test_reused_idempotency_key_with_different_version_id_is_rejected():
+    """멱등키 재사용인데 versionId가 다르면 409 (H12 companion)."""
+    headers = {"Idempotency-Key": "ver-shared:1"}
+    first = _post(headers)
+    assert first["_status"] == 202
+
+    other_payload = {**PAYLOAD, "versionId": "ver-someone-elses"}
+    r = client.post(
+        "/api/v0/curricula",
+        data={"payload": json.dumps(other_payload)},
+        files={"file": PDF},
+        headers={**HEADERS, **headers},
+    )
+
+    assert r.status_code == 409
+    assert r.json()["error"] == "IDEMPOTENCY_CONFLICT"
+
+
 def test_ai_usage_is_reported_for_curricula(monkeypatch):
     """🔴 교안 토큰이 원장에 실려야 한다 (§T11 F1). 엔진이 주는데 버리고 있었다."""
     from datetime import datetime, timezone

@@ -38,8 +38,18 @@ def get_job(job_id: str) -> ReportJobStatus | None:
     return _jobs.get(job_id)
 
 
-def job_id_for_key(idempotency_key: str) -> str | None:
-    return _job_id_by_idempotency_key.get(idempotency_key)
+# D-fix (redteam audit H12 companion, 2026-08-04): jobs.py(analyses.py)의 같은 패턴을
+# 여기도 대조 없이 갖고 있었다. problem_id가 필수(ReportRequest)라 "둘 다 없으면 거부"
+# 구멍은 원천적으로 없다.
+def job_id_for_key(idempotency_key: str, problem_id: str) -> str | None:
+    """재사용 시 problem_id가 최초 요청과 일치해야 기존 job_id를 돌려준다."""
+    existing_job_id = _job_id_by_idempotency_key.get(idempotency_key)
+    if existing_job_id is None:
+        return None
+    existing_job = _jobs.get(existing_job_id)
+    if existing_job is None or existing_job.problem_id != problem_id:
+        raise ValueError("idempotencyKey가 이전 요청의 problemId와 일치하지 않습니다")
+    return existing_job_id
 
 
 def create_job(body: ReportRequest, idempotency_key: str | None = None) -> ReportJobStatus:

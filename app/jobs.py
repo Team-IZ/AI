@@ -21,8 +21,26 @@ _job_id_by_idempotency_key: dict[str, str] = {}
 def get_job(job_id: str) -> AnalysisJobStatus | None:
     return _jobs.get(job_id)
 
-def job_id_for_key(idempotency_key: str) -> str | None:
-    return _job_id_by_idempotency_key.get(idempotency_key)
+# D-fix (redteam audit H12, 2026-08-04): job_id_for_key()가 idempotency_key만 보고 신원
+# 대조 없이 기존 job_id를 그대로 돌려줬다 -- 저엔트로피 멱등키(submissionId:attemptNo)를
+# 추측/재사용하면 남의 job_id(그리고 그 결과인 제출 코드 전문)를 받아갈 수 있었다.
+#   WHY: 원래 감사가 제안한 "(caller, key) 복합키"는 이 서비스에 caller 개념이 없어서
+#   (deps.py: 단일 공유 시크릿, Spring이 유일 호출자) 적용 불가 -- 대신 재사용 요청의
+#   submission_id/attempt_id가 최초 요청 때와 같은지 대조한다.
+#   COST: 둘 다 optional(AnalysisRequest)이라 "둘 다 없으면 무조건 거부"를 명시적으로
+#   넣어야 한다 -- 안 그러면 그냥 둘 다 생략한 재사용 요청이 None==None으로 통과해버려
+#   방어가 무력화된다.
+def job_id_for_key(idempotency_key: str, submission_id: str | None, attempt_id: str | None) -> str | None:
+    """재사용 시 신원이 최초 요청과 일치해야 기존 job_id를 돌려준다. 불일치/신원부재는 예외."""
+    existing_job_id = _job_id_by_idempotency_key.get(idempotency_key)
+    if existing_job_id is None:
+        return None
+    if not submission_id and not attempt_id:
+        raise ValueError("idempotencyKey 재사용에는 submissionId/attemptId 중 최소 하나가 필요합니다")
+    existing_job = _jobs.get(existing_job_id)
+    if existing_job is None or existing_job.submission_id != submission_id or existing_job.attempt_id != attempt_id:
+        raise ValueError("idempotencyKey가 이전 요청의 submissionId/attemptId와 일치하지 않습니다")
+    return existing_job_id
 
 def create_job(body: AnalysisRequest, idempotency_key: str | None) -> AnalysisJobStatus:
     """ QUEUED 상태 job을 만들어 저장. 아직 분석 X -> result 없음 """
