@@ -35,6 +35,16 @@ const REASONING_EFFORT_BY_MODEL = { "stepfun-ai/step-3.7-flash": "low" }; // llm
 const SUPABASE_URL = "https://oziaeqcvrkrqkhwrybfj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96aWFlcWN2cmtycWtod3J5YmZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMDA4MTksImV4cCI6MjA5OTU3NjgxOX0.hBgzs0V7Nw3WLB8_zNuPDfluYrqOH2_Dto1weQF5iKo";
 
+// D-fix (redteam audit H1, 2026-08-04): /analyses used to take `proxyUrl` from the
+// request body and fetch() it server-side with no validation -- a logged-in caller could
+// point it at an arbitrary URL and read back up to 300 chars of the response via a
+// failed-job error message (readable SSRF from the Cloudflare edge). The orchestrator
+// only exists to reuse nvidia-proxy.js's shared quota/retry infrastructure (unlike the
+// browser, it needs no CORS workaround), so there is exactly one legitimate target here,
+// always: the team's own deployed proxy (same default as config.js's DEFAULT_PROXY_URL).
+// Pinning it removes the client's ability to choose without removing any real capability.
+const TEAM_PROXY_URL = "https://team-iz-nvidia-proxy.popixoxipop.workers.dev";
+
 // D-cors-array: two legitimate origins serve curriculum-manager today (main repo's own
 // Pages deploy + the Team-IZ mirror) -- services/nvidia-proxy/nvidia-proxy.js's own D-fix15 EXIT note
 // anticipated needing exactly this ("if a second legitimate origin needs access... an
@@ -202,7 +212,13 @@ async function callChunkAnalysis({ proxyUrl, apiKey, model, courseLabel, chunk, 
 
 // ---- ported from p01-runner.js:172-201 (makeUnitMap) ----
 function makeUnitMap(chunkResults) {
-  const unitMap = {};
+  // D-fix (redteam audit H3, 2026-08-04): was `{}`. A PDF crafted to make the LLM emit
+  // unit_id="__proto__" made unitMap["__proto__"] resolve to Object.prototype (truthy),
+  // so the `if (!unitMap[unitId])` init below was skipped and the next line's
+  // `.source_pages.push` threw on undefined -- inside alarm()'s per-round block, which
+  // has no try/catch, permanently stuck the job. Object.create(null) has no prototype
+  // chain, so "__proto__"/"constructor"/"toString" become ordinary own-property keys.
+  const unitMap = Object.create(null);
   for (const chunk of chunkResults) {
     for (const unit of chunk.units || []) {
       const unitId = String(unit.unit_id || "unknown");
@@ -230,7 +246,11 @@ function makeUnitMap(chunkResults) {
 // ---- ported from p01-runner.js:216-246 (normalizeUnitMap) -- pipelineId/LabApp.log
 // dropped (nothing to log to server-side; progress is written to DO storage instead) ----
 function normalizeUnitMap(unitMap) {
-  const normalized = {};
+  // D-fix (redteam audit H3, 2026-08-04): same class of bug as makeUnitMap() above, one
+  // step downstream -- unitId="__proto__" here doesn't throw, it silently reassigns
+  // normalized's own prototype (JS's special __proto__ setter) instead of creating an
+  // entry, so that unit's data vanishes from the result with no error at all.
+  const normalized = Object.create(null);
   for (const [unitId, unit] of Object.entries(unitMap)) {
     const dedupeItems = (items) => {
       const seen = new Set();
@@ -605,9 +625,12 @@ export default {
 
     if (url.pathname === "/analyses" && request.method === "POST") {
       const body = await request.json();
-      const { model, courseLabel, chunks, nvidiaApiKey, proxyUrl, supabaseAccessToken, sourceFilename } = body;
-      if (!nvidiaApiKey || !proxyUrl || !supabaseAccessToken || !Array.isArray(chunks) || !chunks.length) {
-        return new Response(JSON.stringify({ error: "INVALID_REQUEST", message: "model/courseLabel/chunks/nvidiaApiKey/proxyUrl/supabaseAccessToken 필요" }), {
+      // D-fix (redteam audit H1): proxyUrl is no longer read from the request body --
+      // see TEAM_PROXY_URL's own comment for why. Kept out of the destructure entirely
+      // so a client-supplied value can't accidentally slip back in below.
+      const { model, courseLabel, chunks, nvidiaApiKey, supabaseAccessToken, sourceFilename } = body;
+      if (!nvidiaApiKey || !supabaseAccessToken || !Array.isArray(chunks) || !chunks.length) {
+        return new Response(JSON.stringify({ error: "INVALID_REQUEST", message: "model/courseLabel/chunks/nvidiaApiKey/supabaseAccessToken 필요" }), {
           status: 422, headers: { ...headers, "content-type": "application/json" },
         });
       }
@@ -621,7 +644,7 @@ export default {
       const initRes = await stub.fetch("http://do/init", {
         method: "POST",
         body: JSON.stringify({
-          runId: run.id, accessToken: supabaseAccessToken, apiKey: nvidiaApiKey, proxyUrl, model,
+          runId: run.id, accessToken: supabaseAccessToken, apiKey: nvidiaApiKey, proxyUrl: TEAM_PROXY_URL, model,
           courseLabel: courseLabel || "Java", chunks, sourceFilename: sourceFilename || null,
         }),
       });

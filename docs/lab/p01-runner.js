@@ -170,7 +170,14 @@ const P01Runner = (() => {
   }
 
   function makeUnitMap(chunkResults) {
-    const unitMap = {};
+    // D-fix (redteam audit H3, 2026-08-04): was `{}`. A PDF crafted to make the LLM emit
+    // unit_id="__proto__" made unitMap["__proto__"] resolve to Object.prototype (truthy),
+    // so the `if (!unitMap[unitId])` init below was skipped and the next line's
+    // `.source_pages.push` threw on undefined, breaking the analysis with an uncaught
+    // exception. Object.create(null) has no prototype chain, so "__proto__"/"constructor"/
+    // "toString" become ordinary own-property keys. Same fix applied to the server-side
+    // port of this function in services/p01-orchestrator/index.js.
+    const unitMap = Object.create(null);
     for (const chunk of chunkResults) {
       for (const unit of chunk.units || []) {
         const unitId = String(unit.unit_id || "unknown");
@@ -216,7 +223,11 @@ const P01Runner = (() => {
   function normalizeUnitMap(unitMap, pipelineId) {
     let droppedUngrounded = 0;
     let droppedDuplicates = 0;
-    const normalized = {};
+    // D-fix (redteam audit H3, 2026-08-04): same class of bug as makeUnitMap() above, one
+    // step downstream -- unitId="__proto__" here doesn't throw, it silently reassigns
+    // normalized's own prototype (JS's special __proto__ setter) instead of creating an
+    // entry, so that unit's data vanishes from the result with no error at all.
+    const normalized = Object.create(null);
     for (const [unitId, unit] of Object.entries(unitMap)) {
       const dedupeItems = (items) => {
         const seen = new Set();
