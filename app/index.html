@@ -67,6 +67,11 @@
           <span class="hint">· 정확히 <b id="teach-required">3</b>개</span>
           <span class="teach-count" id="teach-count" style="margin-left:auto">0 / 3</span>
         </div>
+        <!-- D-teachsearch1 (2026-08-04): 교안이 크면 concepts+code_examples+cautions를
+             합친 teach 목록이 수십 개가 될 수 있어, 스크롤로 3개를 찾는 대신 검색으로
+             좁혀서 고르게 한다. teaches가 없을 때(교안 미선택)는 검색해도 의미가 없으므로
+             숨겨둔다(JS의 renderTeaches()가 토글). -->
+        <input class="inp hidden" type="text" id="teach-search" placeholder="teach 이름/요약/유닛으로 검색…" style="margin-bottom:var(--sp-2)" autocomplete="off">
         <div class="curpick" id="teach-pick"><div class="teach-empty">교안을 먼저 선택하세요.</div></div>
         <div class="fwarn">
           고른 teach 하나가 문제 하나가 됩니다. 각 문제는 L1 코드기술 → L2 설계논리 → L3 대안 비교 → L4 반례 대응·한계 순으로 진행됩니다.
@@ -164,6 +169,8 @@
   let curricula = [];
   let teaches = [];               // 현재 교안의 전체 teach 목록
   let selectedTeachIds = new Set();
+  let teachSearchQuery = "";      // D-teachsearch1: teach-pick 필터. 선택 상태(selectedTeachIds)와
+                                   // 분리 -- 검색으로 화면에서 가려져도 선택은 유지된다.
   let selectedCurriculum = null;  // {run_id, schema, ...} 또는 null(수동 입력)
   let currentMethod = "pat";
   // D-owncommit1: zipFiles/zipName은 legacy(ZIP 제출 폐지, 아래 handleZip() 등도 주석 처리).
@@ -197,6 +204,8 @@
   $("curriculum-select").addEventListener("change", async (e) => {
     const idx = e.target.value;
     selectedTeachIds.clear();
+    teachSearchQuery = "";
+    $("teach-search").value = "";
     if (idx === "") { selectedCurriculum = null; teaches = []; renderTeaches(); return; }
     selectedCurriculum = curricula[Number(idx)];
     $("teach-pick").innerHTML = `<div class="teach-empty">교안 내용을 불러오는 중…</div>`;
@@ -215,15 +224,34 @@
     renderTeaches();
   });
 
+  // D-teachsearch1: name/summary/unit_title/unit_id/kind를 대상으로 한 부분 문자열
+  // 매칭(대소문자 무시). 형태소 분석 등은 없다 -- 교안 하나의 teach 수가 전형적으로
+  // 수십 개 이하라 이 정도로 충분하고, 그 이상 정교한 검색엔진을 붙이는 건 과하다.
+  function matchesTeachSearch(t, query) {
+    if (!query) return true;
+    const haystack = [t.name, t.summary, t.unit_title, t.unit_id, t.kind]
+      .filter(Boolean).join(" ").toLowerCase();
+    return haystack.includes(query);
+  }
+
   function renderTeaches() {
     const box = $("teach-pick");
+    const searchInput = $("teach-search");
+    searchInput.classList.toggle("hidden", !teaches.length);
     if (!teaches.length) {
       box.innerHTML = `<div class="teach-empty">교안을 먼저 선택하세요.</div>`;
       updateTeachCount();
       return;
     }
+    const query = teachSearchQuery.trim().toLowerCase();
+    const visible = teaches.filter((t) => matchesTeachSearch(t, query));
+    if (!visible.length) {
+      box.innerHTML = `<div class="teach-empty">"${esc(teachSearchQuery)}"와 일치하는 teach가 없습니다.</div>`;
+      updateTeachCount();
+      return;
+    }
     const atLimit = selectedTeachIds.size >= REQUIRED_TEACHES;
-    box.innerHTML = teaches.map((t) => {
+    box.innerHTML = visible.map((t) => {
       const on = selectedTeachIds.has(t.id);
       // 상한에 도달하면 미선택 항목을 비활성 표시 -- 와이어프레임의 .dis와 같은 처리.
       const dis = !on && atLimit;
@@ -238,6 +266,11 @@
     }).join("");
     updateTeachCount();
   }
+
+  $("teach-search").addEventListener("input", (e) => {
+    teachSearchQuery = e.target.value;
+    renderTeaches();
+  });
 
   $("teach-pick").addEventListener("click", (e) => {
     const el = e.target.closest("[data-teach]");
@@ -262,6 +295,8 @@
       teaches = TeachesSource.parseManualTeaches(raw);
       selectedCurriculum = null;
       selectedTeachIds.clear();
+      teachSearchQuery = "";
+      $("teach-search").value = "";
       $("curriculum-select").value = "";
       renderTeaches();
     } catch (err) {
