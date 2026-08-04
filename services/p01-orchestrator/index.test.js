@@ -61,6 +61,40 @@ const TARGETS = {
   "browser (docs/lab/p01-runner.js)": path.join(__dirname, "..", "..", "docs", "lab", "p01-runner.js"),
 };
 
+// isAllowedProxyUrl() regression test (2026-08-04, redteam audit H1, revisited).
+// A first attempt at this fix hardcoded a single proxyUrl -- reverted because it broke
+// the documented self-hosted-Worker feature (config.js's DEFAULT_PROXY_URL comment).
+async function loadIsAllowedProxyUrl() {
+  const source = readFileSync(path.join(__dirname, "index.js"), "utf-8");
+  const constMatch = source.match(/const ALLOWED_PROXY_HOST_SUFFIXES = \[[^\]]*\];/);
+  assert.ok(constMatch, "ALLOWED_PROXY_HOST_SUFFIXES const not found");
+  const fnSrc = extractFunction(source, "isAllowedProxyUrl");
+  const moduleFile = path.join(scratchDir, `extracted-proxy-${moduleCounter++}.mjs`);
+  writeFileSync(moduleFile, `${constMatch[0]}\n${fnSrc}\nexport { isAllowedProxyUrl };\n`);
+  return (await import(pathToFileURL(moduleFile).href)).isAllowedProxyUrl;
+}
+
+test("isAllowedProxyUrl(): accepts the team default and any other *.workers.dev origin", async () => {
+  const isAllowedProxyUrl = await loadIsAllowedProxyUrl();
+  assert.equal(isAllowedProxyUrl("https://team-iz-nvidia-proxy.popixoxipop.workers.dev"), true);
+  assert.equal(isAllowedProxyUrl("https://someone-elses-deploy.workers.dev"), true);
+});
+
+test("isAllowedProxyUrl(): rejects non-workers.dev hosts, including private/internal-looking ones", async () => {
+  const isAllowedProxyUrl = await loadIsAllowedProxyUrl();
+  assert.equal(isAllowedProxyUrl("http://169.254.169.254/latest/meta-data/"), false);
+  assert.equal(isAllowedProxyUrl("https://169.254.169.254/latest/meta-data/"), false);
+  assert.equal(isAllowedProxyUrl("https://evil.example.com"), false);
+  assert.equal(isAllowedProxyUrl("https://team-iz-nvidia-proxy.popixoxipop.workers.dev.evil.com"), false);
+});
+
+test("isAllowedProxyUrl(): rejects non-https schemes and malformed URLs", async () => {
+  const isAllowedProxyUrl = await loadIsAllowedProxyUrl();
+  assert.equal(isAllowedProxyUrl("http://team-iz-nvidia-proxy.popixoxipop.workers.dev"), false);
+  assert.equal(isAllowedProxyUrl("ext::sh -c 'touch pwned'"), false);
+  assert.equal(isAllowedProxyUrl("not a url at all"), false);
+});
+
 for (const [label, sourceFilePath] of Object.entries(TARGETS)) {
   test(`${label}: makeUnitMap() does not crash on unit_id="__proto__"`, async () => {
     const { makeUnitMap } = await loadBothFunctions(sourceFilePath);

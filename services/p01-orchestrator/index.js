@@ -35,15 +35,40 @@ const REASONING_EFFORT_BY_MODEL = { "stepfun-ai/step-3.7-flash": "low" }; // llm
 const SUPABASE_URL = "https://oziaeqcvrkrqkhwrybfj.supabase.co";
 const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im96aWFlcWN2cmtycWtod3J5YmZqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQwMDA4MTksImV4cCI6MjA5OTU3NjgxOX0.hBgzs0V7Nw3WLB8_zNuPDfluYrqOH2_Dto1weQF5iKo";
 
-// D-fix (redteam audit H1, 2026-08-04): /analyses used to take `proxyUrl` from the
-// request body and fetch() it server-side with no validation -- a logged-in caller could
-// point it at an arbitrary URL and read back up to 300 chars of the response via a
-// failed-job error message (readable SSRF from the Cloudflare edge). The orchestrator
-// only exists to reuse nvidia-proxy.js's shared quota/retry infrastructure (unlike the
-// browser, it needs no CORS workaround), so there is exactly one legitimate target here,
-// always: the team's own deployed proxy (same default as config.js's DEFAULT_PROXY_URL).
-// Pinning it removes the client's ability to choose without removing any real capability.
-const TEAM_PROXY_URL = "https://team-iz-nvidia-proxy.popixoxipop.workers.dev";
+// D-fix (redteam audit H1, revisited 2026-08-04): /analyses used to take `proxyUrl` from
+// the request body and fetch() it server-side with no validation -- a logged-in caller
+// could point it at an arbitrary URL and read back up to 300 chars of the response via a
+// failed-job error message (readable SSRF from the Cloudflare edge). First attempt at a
+// fix pinned this to a single hardcoded constant, but that breaks a real, documented
+// feature: config.js's own comment says DEFAULT_PROXY_URL is "NOT force-hardcoded... a
+// starting value in an editable field", and curriculum-manager/index.html has an actual
+// "프록시 URL" input teammates use to point at their own self-deployed Worker
+// (nvidia-proxy.js's header comment: "deployable by anyone on the team as their own
+// Cloudflare Worker"). Pinning silently breaks that for anyone not using the default.
+//   WHY: allowlist instead of pin. A self-deployed copy of nvidia-proxy.js always lands
+//   on Cloudflare's own *.workers.dev domain (Cloudflare controls that DNS, not the
+//   deployer), which is also where the orchestrator's own fetch() -- itself running
+//   inside the Workers sandbox -- is already unable to reach internal/private addresses
+//   regardless of proxyUrl's value (Cloudflare Workers' documented fetch() restriction).
+//   So the residual risk this closes isn't "reach internal infra" (the platform already
+//   blocks that) but "use this authenticated endpoint as an open relay to arbitrary
+//   public URLs" -- which a *.workers.dev-only allowlist directly stops while keeping
+//   every legitimate per-teammate deployment working.
+//   COST: someone self-hosting nvidia-proxy.js on a custom domain (not *.workers.dev)
+//   would be rejected -- not a documented use case today, but worth knowing if it ever
+//   comes up.
+//   EXIT: if a legitimate non-workers.dev deployment is ever needed, add its exact
+//   origin to ALLOWED_PROXY_HOST_SUFFIXES below rather than reopening this to "any URL".
+const ALLOWED_PROXY_HOST_SUFFIXES = [".workers.dev"];
+function isAllowedProxyUrl(proxyUrl) {
+  let parsed;
+  try {
+    parsed = new URL(proxyUrl);
+  } catch {
+    return false;
+  }
+  return parsed.protocol === "https:" && ALLOWED_PROXY_HOST_SUFFIXES.some((suffix) => parsed.hostname.endsWith(suffix));
+}
 
 // D-cors-array: two legitimate origins serve curriculum-manager today (main repo's own
 // Pages deploy + the Team-IZ mirror) -- services/nvidia-proxy/nvidia-proxy.js's own D-fix15 EXIT note
@@ -625,12 +650,16 @@ export default {
 
     if (url.pathname === "/analyses" && request.method === "POST") {
       const body = await request.json();
-      // D-fix (redteam audit H1): proxyUrl is no longer read from the request body --
-      // see TEAM_PROXY_URL's own comment for why. Kept out of the destructure entirely
-      // so a client-supplied value can't accidentally slip back in below.
-      const { model, courseLabel, chunks, nvidiaApiKey, supabaseAccessToken, sourceFilename } = body;
-      if (!nvidiaApiKey || !supabaseAccessToken || !Array.isArray(chunks) || !chunks.length) {
-        return new Response(JSON.stringify({ error: "INVALID_REQUEST", message: "model/courseLabel/chunks/nvidiaApiKey/supabaseAccessToken 필요" }), {
+      const { model, courseLabel, chunks, nvidiaApiKey, proxyUrl, supabaseAccessToken, sourceFilename } = body;
+      if (!nvidiaApiKey || !proxyUrl || !supabaseAccessToken || !Array.isArray(chunks) || !chunks.length) {
+        return new Response(JSON.stringify({ error: "INVALID_REQUEST", message: "model/courseLabel/chunks/nvidiaApiKey/proxyUrl/supabaseAccessToken 필요" }), {
+          status: 422, headers: { ...headers, "content-type": "application/json" },
+        });
+      }
+      // D-fix (redteam audit H1): see isAllowedProxyUrl's own comment above for why this
+      // is an allowlist (self-deployed Workers on *.workers.dev), not a hardcoded pin.
+      if (!isAllowedProxyUrl(proxyUrl)) {
+        return new Response(JSON.stringify({ error: "INVALID_REQUEST", message: "proxyUrl은 https://*.workers.dev 형식만 허용합니다" }), {
           status: 422, headers: { ...headers, "content-type": "application/json" },
         });
       }
@@ -644,7 +673,7 @@ export default {
       const initRes = await stub.fetch("http://do/init", {
         method: "POST",
         body: JSON.stringify({
-          runId: run.id, accessToken: supabaseAccessToken, apiKey: nvidiaApiKey, proxyUrl: TEAM_PROXY_URL, model,
+          runId: run.id, accessToken: supabaseAccessToken, apiKey: nvidiaApiKey, proxyUrl, model,
           courseLabel: courseLabel || "Java", chunks, sourceFilename: sourceFilename || null,
         }),
       });
