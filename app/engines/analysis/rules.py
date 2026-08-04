@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import shutil
 import sys
 import tempfile
@@ -212,6 +213,35 @@ def find_candidates(zip_bytes: bytes) -> dict[str, Any]:
         return scan_directory(str(_repo_root(Path(tmp))))
 
 
+def _strip_symlinks(root: str) -> None:
+    """스캔 전 심볼릭 링크를 전부 지운다(2026-08-04 redteam 감사 발견).
+
+    ZIP 경로(`_safe_extract`)는 심볼릭 링크 항목을 애초에 안 풀어서 안전하지만,
+    GITHUB_URL 클론 경로(`materialize.py`)는 git이 만든 심볼릭 링크가 그대로 남는다.
+    vendor/ 스캐너가 내부적으로 링크를 따라가는지 우리가 보장할 수 없으므로(팀원
+    소유 코드, vendor/SOURCE.md), 두 경로가 같은 결과를 내려면(위 docstring) vendor를
+    부르기 전에 여기서 링크 자체를 제거하는 것이 유일하게 양쪽을 동시에 막는 지점이다.
+
+    top-down + `followlinks=False`로 걷고 `dirnames`를 그 자리에서 가지치기한다 —
+    중간 경로가 링크인 채로 `os.path.join`을 하면 `unlink`가 링크를 타고 나가버려
+    루트 밖의 실제 파일을 지울 위험이 있다. 발견 즉시 가지치기하면 그 경로 자체가
+    생기지 않는다.
+    """
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        keep = []
+        for name in dirnames:
+            full = os.path.join(dirpath, name)
+            if os.path.islink(full):
+                os.unlink(full)
+            else:
+                keep.append(name)
+        dirnames[:] = keep
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            if os.path.islink(full):
+                os.unlink(full)
+
+
 def scan_directory(root: str) -> dict[str, Any]:
     """이미 풀려 있는(또는 클론된) 디렉터리를 스캔한다.
 
@@ -219,6 +249,7 @@ def scan_directory(root: str) -> dict[str, Any]:
     `materialize.py`가 클론한 디렉터리를 준다. 두 경로가 같은 스캔을 타야
     "링크로 낸 제출물"과 "ZIP으로 낸 제출물"의 결과가 갈리지 않는다.
     """
+    _strip_symlinks(root)
     two_tier_scan, score_findings = _load_vendor()
 
     scan = two_tier_scan.scan(root)
