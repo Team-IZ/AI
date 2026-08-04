@@ -63,6 +63,10 @@ class Selection:
 # 고유의 API라 다른 말로 바꿔 쓸 수 없다 — 코드에 그 문자열이 없으면 그 개념은 없다.
 _API_TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\.[A-Za-z_][A-Za-z0-9_]*")
 
+# 문항을 못 만든 사유의 기본 문장. **교육생 화면에 그대로 뜬다** — 백엔드가
+# `assessment_problem`에 저장한다(2026-08-04 확정). 내부 진단 용어를 쓰지 않는다.
+NOT_FOUND_REASON = "제출 코드에서 이 개념에 해당하는 부분을 찾지 못했습니다"
+
 
 def _missing_api_token(teach: dict[str, Any], files: dict[str, str]) -> str | None:
     """teach 이름의 API 식별자가 코드에 아예 없으면 그 이름을 돌려준다.
@@ -167,12 +171,17 @@ def select(files: dict[str, str], teaches: list[dict[str, Any]],
     # 요청받은 teach 중 문항이 안 나온 것. 지어내지 않고 "없음"으로 남긴다
     # (2026-08-03 PM 결정). 사유는 화면에 그대로 띄울 수 있는 한 문장으로 만든다.
     matched = {t.get("teach_id") for t in picked}
-    reason_by_teach = {d.get("teach_id"): d.get("reason") for d in dropped if d.get("teach_id")}
-    # 사전 제외분(blocked)이 먼저다 — 사유가 "코드에 그 API가 없다"로 구체적이다.
+    # 🔴 **`dropped`의 사유를 여기로 흘리지 않는다.** 백엔드가 이 문장을
+    # `assessment_problem`에 저장해 **교육생 화면에 그대로 띄운다**(2026-08-04 확정).
+    # `dropped`는 우리 진단용이라 화면에 낼 물건이 아니다 —
+    # `코드에서 찾을 수 없음: "worker = state.get(...\\))"`는 **모델이 잘못 인용한 원문**을
+    # 학생에게 보여주는 것이고, `코드가 아니라 문자열·주석을 가리킵니다`는 학생이 아니라
+    # 모델 얘기다. 진단은 로그에 남는다(아래 log.warning).
+    #
+    # 사전 제외분(blocked)만 구체적인 사유를 갖는다 — "코드에 그 API가 없다"는
+    # 결정론적으로 확인한 사실이라 화면에 내도 된다.
     unmatched = blocked + [
-        {"teach_id": t["id"],
-         "reason": reason_by_teach.get(t["id"])
-                   or "제출 코드에서 이 개념의 근거를 찾지 못했습니다"}
+        {"teach_id": t["id"], "reason": NOT_FOUND_REASON}
         for t in teaches[:question_budget] if t.get("id") and t["id"] not in matched
     ]
 

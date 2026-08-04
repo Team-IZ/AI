@@ -206,3 +206,25 @@ def test_prose_anchor_is_rejected():
     # 코드는 식별자·연산자라 거의 ASCII다. 한글 주석이 꼬리에 붙어도 통과한다.
     assert topics._is_prose("is_relevant = min_score < 0.95") is False
     assert topics._is_prose("worker = state.get('next_worker', 'FINISH')  # 다음 워커") is False
+
+
+def test_unmatched_reason_is_safe_to_show_a_trainee(monkeypatch):
+    """🔴 이 문장은 **교육생 화면에 그대로 뜬다**(백엔드가 assessment_problem에 저장).
+
+    내부 진단(`dropped`)을 흘리면 모델이 잘못 인용한 코드 원문이나
+    "문자열·주석을 가리킵니다" 같은 모델 얘기가 학생에게 보인다.
+    """
+    def _call(stage_id, values, *, model_code, max_attempts=None, timeout_s=None,
+              extra_user=""):
+        return stages.StageResult(
+            data={"topics": [_topic("t1", "제목", "없는_심볼(")]},
+            usages=[{"status": "SUCCEEDED"}])
+
+    monkeypatch.setattr(topics.stages, "call", _call)
+    sel = topics.select(FILES, TEACHES, {}, [], model_code="m", question_budget=2)
+
+    assert sel.topics == []
+    for u in sel.unmatched:
+        assert u["reason"] == topics.NOT_FOUND_REASON
+    # 진단은 사라지지 않는다 — dropped 에는 남는다.
+    assert any("없는_심볼" in d["reason"] for d in sel.dropped)
