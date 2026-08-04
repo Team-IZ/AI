@@ -18,7 +18,7 @@
 | 제출 | **ZIP · GitHub 링크 둘 다 동작.** 링크는 서버에서 `git clone --depth 1` |
 | 배포 | **App Runner 자동 배포**(`main` 푸시 = 배포). 주소 고정. 팀원 소유 — 우리 작업 아님 |
 | 계약 | `openapi.json`. `tests/test_openapi.py`가 드리프트를 막는다 |
-| 다음 | **§T16 백엔드 회신 대기**(`#42` 1차 반영 완료 → §T17). 그 다음 §T13 백엔드 연동 |
+| 다음 | **§T13 백엔드 연동**. §T16 회신은 2026-08-04 전부 도착 — 우리 쪽 변경 0 |
 | 기준 | **§기능 동결 스펙** · **§계약 기준값**. 앞선 절과 충돌하면 이 둘이 이긴다 |
 | 막힌 것 | **DDL 2건**(`code_text`·`analysis_document`). 이슈 `#42`로 요청함 |
 | 🔴 위험 | **무료 티어 529 실패율 64%.** 유료 전환이 근본 해결(`../output_docs/미결_논의사항.md` P-3) |
@@ -406,8 +406,9 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
 ```
 analysis_job.status          QUEUED, RUNNING, SUCCEEDED, PARTIAL, FAILED
 assessment_problem.problem_no        BETWEEN 1 AND 3   ← questionBudget 상한이 3이다
-assessment_problem.problem_scope     TEAM_COMMON, INDIVIDUAL_OWN_COMMIT
-assessment_problem.final_score       NULL 또는 0~5     ← TEAM_COMMON은 NULL 유지 요청(#42 C-3)
+assessment_problem.problem_scope     TEAM_SHARED_PROBLEM, INDIVIDUAL_OWN_COMMIT
+                                     ← 2026-08-04 개명. 옛 이름 TEAM_COMMON
+assessment_problem.generation_status NOT_GENERATED     ← unmatchedTeaches 가 이 값이 된다
 assessment_session.status    READY, IN_PROGRESS, PAUSED, COMPLETED,
                              INTERRUPTED, INVALID, FAILED, SUPERSEDED
 problem_stage.axis_code      L1, L2, L3, L4
@@ -756,18 +757,39 @@ evidence      전부 채워짐
 `evidence`가 사전 크기를 키웠다. **커버리지(teach 수)는 안 늘었다** — `evidence`에 식별자가
 있는 teach는 이미 `canonicalDescription`에도 있었다.
 
-### T16 — 백엔드 회신 대기 ← **지금 여기**
+### T16 — 백엔드 회신 ✅ **전부 회신됨** (2026-08-04)
 
-**우리가 막힌 것은 없다** — 응답은 이미 그 값을 들고 있고 저장 자리만 없다.
+**우리 쪽 코드 변경은 0이었다.** 응답이 이미 그 값을 들고 있었고 저장 자리만 없었다.
 
-| 대기 | 오면 할 일 |
-|---|---|
-| **B-12** `code_text` 컬럼 | 없음(이미 `codeSnippet`으로 보낸다). 백엔드 저장 코드만 열린다 |
-| **B-13** `analysis_document JSONB` | 없음(이미 보낸다) |
-| **되물음 1** 도달 단계 컬럼 위치 | 없음. `TEAM_COMMON`은 한 행에 학생 N명분을 못 담는다는 지적 |
-| **되물음 2** `ai_model` 등록 2건 | 없음. 등록 전까지 AI 기본값이 나간다 |
-| **되물음 3** 문항 없음 = NULL | 없음. 백엔드 저장 규칙이다 |
-| **고지** `contextType` 값 집합 | 값을 바꾸라고 하면 Literal 교체. `PROBLEM_STAGE`면 요청에 `problemStageId`가 필요하다 |
+| 항목 | 회신 | 우리가 한 일 |
+|---|---|---|
+| **B-12** `code_text` 컬럼 | 반영 | 없음(이미 `codeSnippet`으로 보낸다) |
+| **B-13** `analysis_document JSONB` | 반영 | 없음(이미 보낸다) |
+| **되물음 1** 도달 단계 컬럼 위치 | `best_success_stage`는 **팀원 개별 속성**이다. 문제 행이 팀원마다 복사된다 | 없음 |
+| **되물음 2** `ai_model` 등록 | 3건 등록 완료 | 없음. 이제 기본값 대신 등록된 코드가 온다 |
+| **되물음 3** 문항 없음 | `generation_status='NOT_GENERATED'`로 저장 | 없음. `unmatchedTeaches[]`가 그 재료다 |
+| **고지** `contextType` 값 집합 | ⓑ 채택 — `GRADING` / `sessionId` | 없음(이미 그 동작). 주석의 "미확정" 경고만 삭제 |
+| **요청** `teaches` 3컬럼 | `kind`·`evidence`·`sibling_names` 추가 완료 | 없음(이미 보낸다) |
+
+**개명**: `TEAM_COMMON` → `TEAM_SHARED_PROBLEM`. 뜻이 "팀원이 problemId를 공유한다"가 아니라
+**"팀 코드 분석에서 한 번 생성되어 팀원 개인 세션이 개별로 갖는 문제 원본"**이었다.
+
+#### 🔴 세션 생성 모델이 드러났다 — 문제 행은 팀원마다 복사된다
+
+```
+팀원 1명이 제출        submission (+ submission_artifact)
+분석 1회               code_analysis          ← 다른 팀원 제출은 재분석 방지
+팀원 수만큼 세션 생성   assessment_session × N
+세션마다 문제·단계      assessment_problem 3 × N,  problem_stage 4 × 3 × N
+```
+
+팀원 8명이면 **문제 행이 24개**다. AI는 `problemId`를 3개만 발급한다 —
+**그 3개는 원본이고 팀원별 사본은 백엔드가 PK를 새로 판다.**
+
+AI는 무상태라 **받은 id를 그대로 되돌려주므로 어느 쪽이 와도 동작한다.** 다만 백엔드가
+세션·보고서 요청에 **사본 id**를 실어야 응답을 그 행에 바로 쓸 수 있다(원본 id를 보내면
+팀원 8명의 응답이 같은 `problemId`를 달고 와서 `sessionId`로 되짚어야 한다). 회신에서
+확인받을 항목이다.
 
 ### T13 — 백엔드 연동 + `references[]` 채우기
 

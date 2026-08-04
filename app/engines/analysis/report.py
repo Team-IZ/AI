@@ -144,7 +144,7 @@ def _requirements_block(results: list[dict[str, Any]]) -> str:
 
 
 def _render_markdown(data: dict[str, Any], stage_rows: list[dict[str, Any]],
-                     reached: int) -> str:
+                     reached: int, teaches: list[dict[str, Any]] | None = None) -> str:
     """모델 JSON을 사람이 읽는 문서로.
 
     **숫자 점수를 쓰지 않는다**(PM 설계 v2 §10-3). 총점을 만들지 않기로 한 이상
@@ -165,10 +165,19 @@ def _render_markdown(data: dict[str, Any], stage_rows: list[dict[str, Any]],
     gaps = [g for g in (data.get("gaps") or []) if isinstance(g, dict)]
     if gaps:
         parts.append("### 더 볼 것")
+        by_id = {t["id"]: t for t in (teaches or []) if t.get("id")}
         for g in gaps:
             line = f"- **{g.get('axis', '')}** {g.get('detail', '')}"
-            if g.get("study_pointer"):
-                line += f"\n  - 교안: {g['study_pointer']}"
+            # 🔴 **복습 위치는 요청 teaches에서 만든다 — 모델의 study_pointer를 쓰지 않는다.**
+            # 그 값은 검증되지 않은 자유 텍스트라 없는 페이지를 가리킬 수 있고, teach_id가
+            # 걸러진 경우 `curriculumRefs`는 비었는데 화면에는 교안이 뜬다 — 두 필드가
+            # 서로 다른 말을 한다(2026-08-04 실측: 문제 2가 그 상태로 나갔다).
+            teach = by_id.get(stages.resolve_choice(g.get("teach_id"), set(by_id)))
+            if teach:
+                pages = ", ".join(str(x) for x in (teach.get("source_pages")
+                                                   or teach.get("sourcePages") or []))
+                unit = teach.get("unit_id") or teach.get("unitId") or "-"
+                line += f"\n  - 교안: 단원 {unit}" + (f" · p.{pages}" if pages else "")
             parts.append(line)
         parts.append("")
 
@@ -191,7 +200,7 @@ def _note(entry: dict[str, Any], by_id: dict[str, dict[str, Any]]) -> dict[str, 
     필터다. 여기서 안 거르면 구조화 필드로는 지어낸 교안이 나가고 `curriculumRefs`
     에는 없는, 두 필드가 다른 말을 하는 상태가 된다.
     """
-    teach_id = entry.get("teach_id")
+    teach_id = stages.resolve_choice(entry.get("teach_id"), set(by_id))
     return {
         "axis": str(entry.get("axis") or ""),
         "detail": str(entry.get("detail") or ""),
@@ -225,7 +234,7 @@ def _curriculum_refs(data: dict[str, Any],
     for gap in data.get("gaps") or []:
         if not isinstance(gap, dict):
             continue
-        teach = by_id.get(gap.get("teach_id"))
+        teach = by_id.get(stages.resolve_choice(gap.get("teach_id"), set(by_id)))
         if teach is None or teach["id"] in seen:
             continue
         seen.add(teach["id"])
@@ -279,7 +288,7 @@ def build(problem_id: str, problem_no: int, transcript: list[dict[str, Any]], *,
             "reached_stage": reached,
             "stages": stage_rows,
         },
-        report_markdown=_render_markdown(data, stage_rows, reached),
+        report_markdown=_render_markdown(data, stage_rows, reached, teaches),
         # 서술이 실패하면 data에 남는 것은 실패 안내 문장뿐이다. 그걸 summary로
         # 내보내면 백엔드가 "요약이 있다"로 읽는다 — narrativeFailed와 같이 비운다.
         narrative=({"summary": None, "strengths": [], "gaps": [], "autonomy_note": None,

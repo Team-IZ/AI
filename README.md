@@ -715,10 +715,12 @@ B-13  🔴 code_analysis 에 analysis_document JSONB
 철회   B-10 teach_id · is_general  일반 문제를 안 만들기로 했다 (2026-08-03 PM)
        B-5  TEXT → JSONB          컬럼이 통째로 사라져 B-13 신설로 바뀜
        B-3 · B-8                  2026-08-03 이전에 이미 철회
-남음   B-11 ai_model 등록 2건 + 1건 INACTIVE
+해결   B-11 ai_model 등록          2026-08-04 3건 등록 완료
+       B-12 code_text · B-13 analysis_document JSONB   컬럼 추가 완료
+       teaches kind·evidence·sibling_names             컬럼 추가 완료
 ```
 
-**확인 대기 3건**: 도달 단계 컬럼 위치(`TEAM_COMMON` 공유 문제) · 문항 없음을 NULL로 구분 ·
+**확인 완료**(2026-08-04): 도달 단계는 팀원 개별 속성 · 문항 없음은 `NOT_GENERATED` ·
 `contextType` 값 집합.
 
 ### 앞으로

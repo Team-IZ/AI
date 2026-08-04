@@ -97,11 +97,15 @@ def test_markdown_has_no_numeric_scores(monkeypatch):
     """화면에 숫자 점수가 없다(PM 설계 v2 §10-3). 도달 단계와 서술만 쓴다."""
     _fake(monkeypatch, NARRATIVE)
 
-    md = report.build("p-1", 1, [_turn("L1", 4), _turn("L2", 3)], model_code="m").report_markdown
+    md = report.build("p-1", 1, [_turn("L1", 4), _turn("L2", 3)], model_code="m",
+                      teaches=[{"id": "t1", "label": "흐름",
+                                "unit_id": "u1", "source_pages": [36, 46]}]).report_markdown
 
     assert "2단 / 4단" in md
     assert "대안을 대지 못했습니다" in md
-    assert "Unit u1 · 36~46쪽" in md
+    # 복습 위치는 요청 teaches에서 만든다 — 모델의 study_pointer를 그대로 쓰지 않는다.
+    assert "단원 u1" in md and "p.36, 46" in md
+    assert "36~46쪽" not in md
     for forbidden in ("4점", "3점", "총점", "평균"):
         assert forbidden not in md
 
@@ -188,3 +192,25 @@ def test_transcript_block_shows_hint_usage(monkeypatch):
     block = call.values["transcript_block"]
     assert "힌트 없이 답함" in block
     assert "직전 힌트: L1 힌트 1" in block
+
+def test_markdown_pointer_never_disagrees_with_curriculum_refs():
+    """🔴 화면의 "교안: …"과 `curriculumRefs`가 서로 다른 말을 하면 안 된다.
+
+    2026-08-04 실측: 모델이 teach_id를 라벨로 되돌려줘 필터에 걸렸는데, 마크다운은
+    검증 안 된 `study_pointer`를 그대로 찍어 **참조는 비었는데 화면엔 교안이 떴다.**
+    """
+    teaches = [{"id": "t1", "label": "도구", "unit_id": "u6", "source_pages": [9]}]
+    stage_rows = [{"axis_code": "L1", "status": "PASSED"}]
+
+    # ① 모델이 모르는 teach를 지목하면 교안 줄이 아예 안 나간다.
+    made_up = {"gaps": [{"axis": "도구", "detail": "부족",
+                         "teach_id": "없는-teach", "study_pointer": "Unit u99 · p.404"}]}
+    md = report._render_markdown(made_up, stage_rows, 1, teaches)
+    assert "u99" not in md and "p.404" not in md
+    assert report._curriculum_refs(made_up, teaches) == []
+
+    # ② 라벨로 되돌려줘도 되살려 같은 teach를 가리킨다.
+    echoed = {"gaps": [{"axis": "도구", "detail": "부족", "teach_id": "t1: 도구"}]}
+    md = report._render_markdown(echoed, stage_rows, 1, teaches)
+    assert "단원 u6" in md and "p.9" in md
+    assert report._curriculum_refs(echoed, teaches)[0]["teachId"] == "t1"

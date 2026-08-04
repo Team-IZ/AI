@@ -24,14 +24,13 @@ FeatureCode = Literal[
 # 어느 작업에 딸린 호출인가. featureCode보다 굵은 단위다 — 한 ContextType 안에서
 # featureCode가 여럿 나올 수 있다(ANALYSIS 하나에 CODE_ANALYSIS + QUESTION_GENERATION).
 #
-# 🔴 필드명이 `source_type`/`source_id` → `context_type`/`context_id`로 바뀌었다
-# (2026-08-03, 백엔드 확인). **값 집합은 아직 확정이 아니다** — 새 MEAS 비고가
-# `context_type=ANALYSIS_JOB`·`context_type=PROBLEM_STAGE`처럼 **테이블 이름**을 쓰는데,
-# 우리 값은 동사(ANALYSIS·GRADING·…)다. 아래를 확인받기 전까지 값은 그대로 둔다.
+# 필드명이 `source_type`/`source_id` → `context_type`/`context_id`로 바뀌었다
+# (2026-08-03). **아래 값 집합으로 확정됐다** (2026-08-04 백엔드 회신).
 #
-#   ⚠️ `PROBLEM_STAGE`로 가면 `context_id`가 `problem_stage_id`여야 하는데
-#      **AI는 그 값을 모른다.** 세션 요청에 오는 것은 sessionId·problemId·axisCode뿐이다.
-#      백엔드가 요청에 실어 보내거나, 채점 컨텍스트를 세션 단위로 두어야 한다.
+# `PROBLEM_STAGE`(테이블 이름) 대신 `GRADING`(세션 단위)으로 간다. 전자는 `context_id`가
+# `problem_stage_id`여야 하는데 **AI는 그 값을 모른다** — 세션 요청에 오는 것은
+# sessionId·problemId·axisCode뿐이다. 백엔드가 요청에 `problemStageId`를 실어 주면
+# AI는 반향 한 줄로 바꿀 수 있다. 백엔드가 추가 작업 없는 세션 단위를 택했다.
 ContextType = Literal[
     "ANALYSIS",     # POST /analyses                 contextId = 분석 jobId
     "GRADING",      # POST /sessions/{id}/answers    contextId = sessionId
