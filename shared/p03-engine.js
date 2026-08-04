@@ -972,7 +972,15 @@ _classify_result = json.dumps({"verdict": _verdict, "raw": _r})
       // browser crashed/closed between classifying that answer and finishing grading --
       // don't re-run the turn loop in that case, go straight to grading below.
       let verdict = transcript.some((t) => t.classification && t.classification.verdict === "defended") ? "defended" : "exhausted_at_cap";
-      const maxTurns = LabApp.resolveParam("p03", "p03-6", "max_turns") || 4;
+      // D-fix (redteam audit H7, 2026-08-04): max_turns came only from LabApp.resolveParam,
+      // which LabApp.setOverride can change at runtime from devtools -- there is no
+      // server-side session/turn counter anywhere in P03 to catch an inflated value (same
+      // root cause as the still-open C2 finding: no server component re-verifies anything
+      // here). This ceiling only stops the casual case (calling setOverride from the
+      // console); it does nothing against someone who edits and redeploys this file
+      // directly. A real fix needs the server-side session component C2 would require.
+      const HARD_TURN_CEILING = 8; // LEVELS.length is 4 today; doubles that with room to grow
+      const maxTurns = Math.min(LabApp.resolveParam("p03", "p03-6", "max_turns") || 4, HARD_TURN_CEILING);
       const totalTurns = Math.min(LEVELS.length, maxTurns);
 
       // D193 (2026-07-16): open the DB-side run row *before* the turn loop instead of
