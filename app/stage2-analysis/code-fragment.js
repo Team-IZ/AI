@@ -125,9 +125,16 @@ const CodeFragment = (() => {
 
   /** 여러 파편을 프롬프트에 넣을 하나의 코드 블록으로 합친다. */
   function formatFragmentBlock(fragments) {
+    // D-fix (redteam audit H4 companion, 2026-08-04, found during cross-check): same
+    // fence-escape gap buildCodeBlock() had -- no current caller (this function is
+    // presently unused, grep-confirmed), but fixing it now means a future caller doesn't
+    // reintroduce the bug. See fenceFor()'s own comment for the WHY.
     return fragments
       .filter((f) => f.valid)
-      .map((f) => `### ${formatRef(f)}\n\`\`\`\n${f.text}\n\`\`\``)
+      .map((f) => {
+        const fence = fenceFor(f.text);
+        return `### ${formatRef(f)}\n${fence}\n${f.text}\n${fence}`;
+      })
       .join("\n\n");
   }
 

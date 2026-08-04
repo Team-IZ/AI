@@ -30,6 +30,7 @@ const Requirements = (() => {
       if (!r) return { requirement: req, verdict: "F", evidence: null, note: "모델이 이 요구사항에 대한 판정을 반환하지 않음" };
       let verdict = r.verdict === "P" ? "P" : "F";
       let note = r.note || "";
+      let evidence = r.evidence || null;
       // D-fix (redteam audit H4, 2026-08-04): decision_points/topics는 이미
       // CodeFragment.extractFragment로 실제 파일과 대조하는데(D-poc10), 이 판정만 모델의
       // evidence를 무검증으로 채택했다 -- 제출 코드에 가짜 "## 규칙" 섹션을 심어 P를
@@ -44,9 +45,18 @@ const Requirements = (() => {
         if (!grounded.valid) {
           verdict = "F";
           note = `근거 코드를 확인할 수 없어 F로 강등(${grounded.reason})${note ? " -- " + note : ""}`;
+        } else {
+          // D-fix (found during cross-check, 2026-08-04): this used to fall through to
+          // r.evidence (the model's raw {file, symbol}) even on a grounded P -- but
+          // analysis.html renders r.evidence.lines for the line-number display, and the
+          // new evidence shape has no `lines` field, so that display silently went blank
+          // for every P verdict. locateSymbol() already computed the real line numbers
+          // right above (poc-engine.js:235 does the same {file, lines} normalization for
+          // decision_points/topics) -- use those instead of discarding them.
+          evidence = { file: grounded.file, lines: grounded.lines };
         }
       }
-      return { requirement: req, verdict, evidence: r.evidence || null, note };
+      return { requirement: req, verdict, evidence, note };
     });
   }
 

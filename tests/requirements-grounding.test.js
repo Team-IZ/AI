@@ -30,7 +30,7 @@ function stubPOCStage(results) {
 
 const Requirements = require("../app/stage2-analysis/requirements.js");
 
-test("verdict=P with evidence grounded in the actual file stays P", async () => {
+test("verdict=P with evidence grounded in the actual file stays P and returns real line numbers", async () => {
   stubPOCStage([{
     verdict: "P",
     evidence: { file: "src/payment.py", symbol: "if order.total <= 0:" },
@@ -38,6 +38,13 @@ test("verdict=P with evidence grounded in the actual file stays P", async () => 
   }]);
   const results = await Requirements.judge(["금액 검증이 있어야 한다"], FILES, {});
   assert.equal(results[0].verdict, "P");
+  // D-fix (found during cross-check, 2026-08-04): a grounded P used to fall through to
+  // the model's raw {file, symbol} evidence (no `lines`), which analysis.html renders as
+  // a line-number suffix -- silently blank for every single P verdict. Must now be the
+  // locateSymbol-computed {file, lines}, matching poc-engine.js's decision_points/topics.
+  assert.equal(results[0].evidence.file, "src/payment.py");
+  assert.ok(Array.isArray(results[0].evidence.lines), "evidence.lines must be a real [start,end] pair, not absent");
+  assert.equal(results[0].evidence.lines[0], 2); // "if order.total <= 0:" is line 2 of FILES fixture
 });
 
 test("verdict=P with a fabricated symbol not present in the file is downgraded to F", async () => {
