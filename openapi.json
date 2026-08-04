@@ -158,10 +158,7 @@
                     "title": "Callbackurl"
                   },
                   "method": {
-                    "enum": [
-                      "GITHUB_URL",
-                      "ZIP_WITH_GITLOG"
-                    ],
+                    "const": "GITHUB_URL",
                     "title": "Method",
                     "type": "string"
                   },
@@ -303,27 +300,6 @@
                 },
                 "extractionScope": "TOTAL",
                 "questionBudget": 4
-              }
-            },
-            "multipart/form-data": {
-              "schema": {
-                "type": "object",
-                "required": [
-                  "payload",
-                  "file"
-                ],
-                "properties": {
-                  "payload": {
-                    "type": "string",
-                    "description": "요청 JSON을 문자열로. method는 ZIP_WITH_GITLOG",
-                    "example": "{\"method\":\"ZIP_WITH_GITLOG\",\"extractionScope\":\"TOTAL\"}"
-                  },
-                  "file": {
-                    "type": "string",
-                    "format": "binary",
-                    "description": "제출 ZIP"
-                  }
-                }
               }
             }
           }

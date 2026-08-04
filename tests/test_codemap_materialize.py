@@ -1,54 +1,28 @@
 """ app/engines/codemap/materialize.py -- clone/unzip 유일한 지점 테스트
 
-zip-slip 방어가 핵심: 학생이 올린 ZIP은 신뢰 안 되는 입력이라, 실행은 물론이고
-"압축을 어디에 풀지"조차 그대로 믿으면 안 된다.
+GITHUB_URL 경로의 flag-smuggling/서브프로토콜 방어가 핵심. ZIP_WITH_GITLOG는
+D-zip1(2026-08-04)로 폐지됐다 -- 아래 test_zip_with_gitlog_now_rejected가 그
+사실만 증명한다.
 """
-import io
 import os
-import zipfile
 
 import pytest
 
 from app.engines.codemap.materialize import default_materialize_repo
 
 
-def _make_zip(entries: dict[str, str]) -> bytes:
-    buf = io.BytesIO()
-    with zipfile.ZipFile(buf, "w") as zf:
-        for name, content in entries.items():
-            zf.writestr(name, content)
-    return buf.getvalue()
+# D-zip1 (2026-08-04, app/schemas/analysis.py에 전문): ZIP_WITH_GITLOG 폐지로
+# 추출 성공/zip-slip 방어 2종을 검증하던 원래의 4개 테스트는 제거된 기능을
+# 테스트하던 것이라 지웠다(materialize.py의 _safe_extractall 자체는 legacy로
+# 주석 보존됨, 되살리면 이 테스트들도 git 이력에서 그대로 복원 가능).
+# test_zip_with_gitlog_now_rejected 하나만 남겨서 "예전엔 되던 게 이제 막힌다"를
+# 증명한다.
 
 
-def test_zip_with_gitlog_extracts_files(tmp_path):
-    zip_bytes = _make_zip({"main.py": "print(1)\n", "src/util.py": "x = 1\n"})
+def test_zip_with_gitlog_now_rejected():
     request = {"method": "ZIP_WITH_GITLOG"}
-    with default_materialize_repo(request, zip_bytes, str(tmp_path)) as repo_dir:
-        assert (tmp_path.__class__(repo_dir) / "main.py").read_text() == "print(1)\n"
-        assert (tmp_path.__class__(repo_dir) / "src" / "util.py").read_text() == "x = 1\n"
-
-
-def test_zip_without_bytes_raises():
-    request = {"method": "ZIP_WITH_GITLOG"}
-    with pytest.raises(ValueError, match="zip_bytes"):
-        with default_materialize_repo(request, None, None):
-            pass
-
-
-def test_zip_slip_path_traversal_is_rejected(tmp_path):
-    """ 학생 ZIP이 ../../로 저장소 밖을 가리키면 압축 해제 자체를 거부한다 (D12) """
-    zip_bytes = _make_zip({"../../../etc/evil.py": "malicious\n"})
-    request = {"method": "ZIP_WITH_GITLOG"}
-    with pytest.raises(ValueError, match="zip-slip"):
-        with default_materialize_repo(request, zip_bytes, str(tmp_path)):
-            pass
-
-
-def test_zip_slip_absolute_path_is_rejected(tmp_path):
-    zip_bytes = _make_zip({"/etc/evil.py": "malicious\n"})
-    request = {"method": "ZIP_WITH_GITLOG"}
-    with pytest.raises(ValueError, match="zip-slip"):
-        with default_materialize_repo(request, zip_bytes, str(tmp_path)):
+    with pytest.raises(ValueError, match="알 수 없는 method"):
+        with default_materialize_repo(request, b"anything", None):
             pass
 
 
@@ -117,11 +91,15 @@ def test_unknown_method_raises():
             pass
 
 
-def test_temp_directory_is_cleaned_up_after_context_exits(tmp_path):
-    zip_bytes = _make_zip({"a.py": "x\n"})
-    request = {"method": "ZIP_WITH_GITLOG"}
+def test_temp_directory_is_cleaned_up_after_context_exits(tmp_path, monkeypatch):
+    # D-zip1: ZIP_WITH_GITLOG를 쓰던 원래 버전은 지웠다 -- 이제 유일하게 남은
+    # method(GITHUB_URL)로 같은 정리 동작을 검증한다. 실제 clone은 안 타게
+    # subprocess.run을 페이크로 바꾼다(test_github_url_clone_command_uses_double_dash_separator
+    # 와 같은 패턴).
+    monkeypatch.setattr("subprocess.run", lambda cmd, **kwargs: type("R", (), {"returncode": 0})())
+    request = {"method": "GITHUB_URL", "source": {"repo_url": "https://github.com/owner/repo"}}
     captured_dir = None
-    with default_materialize_repo(request, zip_bytes, str(tmp_path)) as repo_dir:
+    with default_materialize_repo(request, None, str(tmp_path)) as repo_dir:
         captured_dir = repo_dir
         assert os.path.isdir(captured_dir)
     assert not os.path.isdir(captured_dir)

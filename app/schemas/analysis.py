@@ -32,7 +32,19 @@ class AnalysisRequest(BaseSchema):
     callback_url: str | None = Field(
         default=None, description="완료 통지 수신 주소. 현재는 수용만 하고 전송은 미구현"
     )
-    method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
+    # D-zip1 (2026-08-04): ZIP_WITH_GITLOG 제출 방식 폐지, GITHUB_URL만 허용.
+    #   WHY: 저장소 소유자 결정. 이 method는 이름과 달리 git log 추출 로직이 없어서
+    #     (materialize.py를 보면 그냥 zipfile.extractall뿐) OWN_COMMIT 귀속에 필요한
+    #     .git 히스토리가 애초에 없는 반쪽짜리 경로였다 -- feature/own-commit-attribution
+    #     병합 논의 중 발견.
+    #   COST: multipart ZIP 업로드로 제출하던 경로가 전부 422로 막힌다.
+    #     materialize.py의 zip-slip 방어 로직(_safe_extractall)은 주석 처리로 legacy 보존.
+    #   EXIT: 아래 Literal에 "ZIP_WITH_GITLOG"를 다시 추가하고, materialize.py/
+    #     api/analyses.py의 주석 처리된 블록을 복원하면 되돌아간다. 단
+    #     _safe_extractall의 zip-slip 방어는 유효하지만 "ZIP도 .git 히스토리를
+    #     가져야 attribution이 되게 하려면" 실제 gitlog 추출 로직을 새로 짜야 한다
+    #     (이름이 약속했지만 한 번도 구현 안 됐던 부분).
+    method: Literal["GITHUB_URL"]
     source: AnalysisSource = Field(default_factory=AnalysisSource)
     extraction_scope: Literal["TOTAL", "OWN_COMMIT"] = "TOTAL"
     commit_email: str | None = Field(default=None, description="OWN_COMMIT일 때 필수")

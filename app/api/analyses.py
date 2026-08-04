@@ -93,20 +93,11 @@ _REQUEST_BODY = {
                 "questionBudget": 4,
             },
         },
-        "multipart/form-data": {
-            "schema": {
-                "type": "object",
-                "required": ["payload", "file"],
-                "properties": {
-                    "payload": {
-                        "type": "string",
-                        "description": "요청 JSON을 문자열로. method는 ZIP_WITH_GITLOG",
-                        "example": '{"method":"ZIP_WITH_GITLOG","extractionScope":"TOTAL"}',
-                    },
-                    "file": {"type": "string", "format": "binary", "description": "제출 ZIP"},
-                },
-            }
-        },
+        # D-zip1 (2026-08-04, app/schemas/analysis.py에 전문): ZIP_WITH_GITLOG 폐지로
+        # multipart 스키마 예시를 뺐다 -- 남겨두면 이제 없는 method를 Swagger에
+        # 광고하는 꼴이라(코드 주석과 달리 API 소비자에게 그대로 노출됨) 여긴
+        # 주석 처리가 아니라 실제로 제거한다. _read_request()의 multipart 파싱
+        # 자체는 범용 유틸이라 그대로 둠(무해, 어떤 method도 더는 그 경로를 안 씀).
     },
 }
 
@@ -139,11 +130,11 @@ async def create_analysis(
     payload, zip_bytes = await _read_request(request)
     body = _validate(payload)
     
-    # method와 실제 전송 형태 어긋나면 여기서 잡음
-    # 스키마만으로 표현할 수 없음 - Content-Type은 본문 밖의 정보
-    if body.method == "ZIP_WITH_GITLOG" and not zip_bytes:
-        raise _invalid("method=ZIP_WITH_GITLOG는 multipart/form-data로 ZIP을 함께 보내야 합니다")
-        
+    # D-zip1: ZIP_WITH_GITLOG 폐지로 이 체크는 도달 불가능해짐(스키마의 Literal이
+    # 이미 그 값을 422로 막는다) -- 주석 처리, legacy로 보존.
+    # if body.method == "ZIP_WITH_GITLOG" and not zip_bytes:
+    #     raise _invalid("method=ZIP_WITH_GITLOG는 multipart/form-data로 ZIP을 함께 보내야 합니다")
+
     if idempotency_key:
         # 같은 요청 다시 온 경우 새로 만들지 않고 처음 것 돌려주기.
         existing = jobs.job_id_for_key(idempotency_key)

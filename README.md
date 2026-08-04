@@ -176,10 +176,11 @@ cloudflared tunnel --url http://localhost:8000
 ### 분석
 
 ```jsonc
-// POST /api/v0/analyses          Content-Type: application/json 또는 multipart/form-data
+// POST /api/v0/analyses          Content-Type: application/json
+// D-zip1 (2026-08-04): ZIP_WITH_GITLOG(multipart ZIP 업로드) 폐지, GITHUB_URL만 허용.
 {
   "attemptId": "att-1", "submissionId": "sub-1",
-  "method": "GITHUB_URL",                    // 또는 ZIP_WITH_GITLOG (multipart로 ZIP 첨부)
+  "method": "GITHUB_URL",
   "source": { "repoUrl": "https://github.com/...", "branch": "main" },
   "extractionScope": "TOTAL",                // 또는 OWN_COMMIT (이때 commitEmail 필수)
   "questionBudget": 3,

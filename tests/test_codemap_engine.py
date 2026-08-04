@@ -87,7 +87,11 @@ def _fake_crew_chat():
 
 
 REQUEST = {
-    "method": "ZIP_WITH_GITLOG",
+    # D-zip1 (2026-08-04): ZIP_WITH_GITLOG 폐지, GITHUB_URL만 허용(app/schemas/
+    # analysis.py에 전문). 이 파일은 페이크 materializer를 주입해 실제 git/zip
+    # I/O를 안 타므로 이 값 자체는 순수 placeholder였지만(스키마 검증도 안 거침),
+    # 존재하지 않는 method를 픽스처에 남겨두면 오해를 준다 -- 정확성을 위해 고침.
+    "method": "GITHUB_URL",
     "extraction_scope": "TOTAL",
     "question_budget": 2,
     "requirements": [{"requirementId": "r1", "text": "must have a helper"}, {"requirementId": "r2", "text": "must be documented"}],

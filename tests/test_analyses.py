@@ -75,23 +75,14 @@ def _zip_bytes() -> bytes:
     return buffer.getvalue()
 
 
-def test_accepts_zip_upload():
-    """multipart로 payload+file을 보내면 202. JSON 경로와 같은 스키마를 쓴다."""
-    payload = {"method": "ZIP_WITH_GITLOG", "extractionScope": "TOTAL"}
-
-    response = client.post(
-        "/api/v0/analyses",
-        data={"payload": json.dumps(payload)},
-        files={"file": ("submission.zip", _zip_bytes(), "application/zip")},
-        headers=HEADERS,
-    )
-
-    assert response.status_code == 202
-    assert response.json()["jobId"]
-
-
-def test_rejects_zip_method_without_file():
-    """method=ZIP_WITH_GITLOG인데 JSON으로만 보내면 422. Content-Type과 method 불일치."""
+# D-zip1 (2026-08-04, app/schemas/analysis.py에 전문): ZIP_WITH_GITLOG 폐지로
+# multipart ZIP 업로드가 202를 받던 test_accepts_zip_upload는 지웠다(제거된
+# 기능을 테스트하던 것이라). 아래는 그 대신 "ZIP_WITH_GITLOG는 이제 전송 방식과
+# 무관하게 스키마 자체에서 막힌다"를 증명하는 테스트로 재작성했다 -- 원래
+# 이름(test_rejects_zip_method_without_file)이 검증하던 "content-type 불일치"
+# 시나리오는 더 이상 성립하지 않는다(어떤 전송 방식이든 이 method 값 자체가 막힘).
+def test_rejects_zip_with_gitlog_method():
+    """method=ZIP_WITH_GITLOG는 스키마의 Literal이 더는 허용하지 않는다 -- 422."""
     payload = {"method": "ZIP_WITH_GITLOG", "extractionScope": "TOTAL"}
 
     response = client.post("/api/v0/analyses", json=payload, headers=HEADERS)
@@ -123,16 +114,21 @@ def test_rejects_malformed_json_body():
     assert response.json()["error"] == "INVALID_REQUEST"
 
 
-def test_openapi_documents_both_content_types():
-    """Swagger에 JSON·multipart 두 형태가 노출되고, JSON 스키마가 실체를 갖는지 고정한다.
+def test_openapi_documents_json_content_type():
+    """Swagger에 JSON 형태가 노출되고, 스키마가 실체를 갖는지 고정한다.
 
     자동 바인딩을 포기하면 $ref가 빈 곳을 가리키기 쉬운 자리다.
+
+    D-zip1 (2026-08-04, app/schemas/analysis.py에 전문): 원래 이 테스트는
+    multipart/form-data도 같이 문서화되는지 확인했다 -- ZIP_WITH_GITLOG 폐지로
+    그 콘텐츠 타입 스키마 블록 자체를 api/analyses.py에서 뺐으므로(더는 없는
+    method를 Swagger에 광고하지 않기 위해) 여기서도 그 단언을 지웠다.
     """
     schema = client.get("/openapi.json").json()
     content = schema["paths"]["/api/v0/analyses"]["post"]["requestBody"]["content"]
 
     assert "application/json" in content
-    assert "multipart/form-data" in content
+    assert "multipart/form-data" not in content
 
     json_schema = content["application/json"]["schema"]
     # $ref만 남아 있으면 실체가 없다는 뜻 — 필드가 실제로 실려야 한다
