@@ -176,7 +176,7 @@ def test_requirement_failure_does_not_kill_the_analysis(monkeypatch, fake_llm):
 
     # 개수는 유지된다 — jobs.py가 요청 requirements와 1:1을 검사한다
     assert len(result.requirement_results) == 1
-    assert result.requirement_results[0].verdict == "F"
+    assert result.requirement_results[0].verdict == "FAIL"
     assert "판정 실패" in result.requirement_results[0].note
     assert len(result.problems) == 1        # 문답은 살아 있다
 

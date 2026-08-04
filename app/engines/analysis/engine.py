@@ -57,6 +57,48 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# 확장자 → assessment_problem.code_language. DB CHECK가 "공백 아님"만 요구하므로
+# 값 집합은 우리가 정한다. 정의서 예시(JAVA·PYTHON·JAVASCRIPT·YAML)를 따른다.
+_LANGUAGE_BY_SUFFIX = {
+    "py": "PYTHON", "java": "JAVA", "js": "JAVASCRIPT", "jsx": "JAVASCRIPT",
+    "ts": "TYPESCRIPT", "tsx": "TYPESCRIPT", "kt": "KOTLIN", "go": "GO",
+    "rb": "RUBY", "c": "C", "h": "C", "cpp": "CPP", "cc": "CPP", "hpp": "CPP",
+    "cs": "CSHARP", "rs": "RUST", "php": "PHP", "swift": "SWIFT", "scala": "SCALA",
+    "sql": "SQL", "sh": "SHELL", "yml": "YAML", "yaml": "YAML",
+    "json": "JSON", "xml": "XML", "html": "HTML", "css": "CSS", "md": "MARKDOWN",
+}
+
+
+def _code_language(path: str) -> str:
+    """파일 확장자로 언어를 정한다. 모르면 UNKNOWN — 빈 값은 DB CHECK가 막는다."""
+    suffix = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+    return _LANGUAGE_BY_SUFFIX.get(suffix, "UNKNOWN")
+
+
+def _snippet_key(problem_no: int, evidence_hash: str) -> str:
+    """`submission.code_snippets[].snippet_key`와 맞물릴 안정 키.
+
+    문제 번호로 분석 안에서의 유일성이 보장되고, 해시를 붙여 **같은 코드면 재분석해도
+    같은 값**이 나오게 한다(문제 번호만 쓰면 순서가 바뀔 때 다른 코드에 같은 키가 붙는다).
+    """
+    return f"p{problem_no}-{evidence_hash[:16]}"
+
+
+def _problem_title(topic: dict[str, Any], teach: dict[str, Any] | None,
+                   source_path: str) -> str:
+    """`assessment_problem.title`(GENERATED면 NOT NULL).
+
+    p04-3이 낸 topic 제목이 이 지점을 가장 잘 설명한다. 없으면 검증 개념 이름으로,
+    그것도 없으면 파일 경로로 물러난다 — 빈 문자열은 INSERT가 거부한다.
+    """
+    for value in (topic.get("title"), (teach or {}).get("label"),
+                  (teach or {}).get("id"), source_path):
+        text = str(value or "").strip()
+        if text:
+            return text[:200]
+    return "코드 이해 문제"
+
+
 # 화면에 통째로 띄울 파일의 상한. 실측(spring-petclinic 49개 파일)에서 중앙 1,987자·
 # p90 6,264자·최대 10,464자라 평범한 소스는 전부 들어온다. 이 상한에 걸리는 파일은
 # 생성물이거나 한 파일에 다 밀어 넣은 경우인데, 그때는 통째로 띄우는 것 자체가
@@ -291,7 +333,7 @@ class RealAnalysisEngine:
                 requirement_results = [
                     {"requirement_id": str(r.get("requirement_id") or r.get("requirementId")
                                            or f"req-{i + 1}"),
-                     "verdict": "F", "evidence": None,
+                     "verdict": "FAIL", "evidence": None,
                      "note": f"판정 실패: {exc}"}
                     for i, r in enumerate(reqs)
                 ]
@@ -359,17 +401,26 @@ class RealAnalysisEngine:
                 for i, axis in enumerate(scoring.AXIS_CODES)
             ]
 
+            evidence_hash = _sha256(snippet)
+            source_path = ref.get("file", "")
+            display_source = _display_source(files, ref, snippet)
             problems.append({
                 "problem_id": str(uuid.uuid4()),
                 "problem_no": no,
                 "status": "READY",
+                # 아래 3개는 DB assessment_problem이 GENERATED에서 NOT NULL로 요구한다
+                # (테이블정의서 v06). 안 보내면 문제가 하나도 안 들어간다.
+                "title": _problem_title(topic, teach_map.get(topic.get("teach_id")),
+                                        source_path),
+                "snippet_key": _snippet_key(no, evidence_hash),
+                "code_language": _code_language(source_path),
                 "problem_type": _problem_type(topic, candidates),
                 "priority": _priority(topic, candidates),
                 "question_focus_item_id": focus_ids[no - 1] if no <= len(focus_ids) else None,
                 # 어느 교안 개념을 검증하는 문제인가. 일반 문제면 None이다
                 # (topics._general_topics가 teach_id를 비운다).
                 "teach_id": topic.get("teach_id"),
-                "source_path": ref.get("file", ""),
+                "source_path": source_path,
                 # 파일 전체 안에서 **하이라이트할 구간**이다. codeSnippet의 부분범위가
                 # 아니라 파일 기준 절대 줄 번호다 — 화면이 파일을 그리고 이 구간을 강조한다.
                 "line_start": ref.get("line_start") or 1,
@@ -377,10 +428,15 @@ class RealAnalysisEngine:
                 # 🔴 **파일 전체다**(2026-08-03 확정). 파편만 주면 학생이 판단할 재료가
                 # 없다 — L2 질문이 checkOut을 언급하는데 화면엔 선언 한 줄만 뜨는 일이
                 # 실제로 났다(실측: 스니펫 29~51자, 1줄).
-                "code_snippet": _display_source(files, ref, snippet),
+                "code_snippet": display_source,
+                # 해시가 둘이다. **대상이 다르다.**
+                #   content_hash   codeSnippet 전체 = submission.code_snippets[].content_hash
+                #   evidence_hash  파편           = assessment_problem.code_snippet_hash
+                # 하나로 합치면 둘 중 하나가 틀린 것을 가리킨다.
+                "content_hash": _sha256(display_source),
                 # 🔴 해시는 **파편** 기준을 유지한다. 파일 전체로 바꾸면 무관한 한 줄
                 # 수정에도 "근거가 바뀌었다"가 되어 판정이 쓸모없어진다.
-                "evidence_hash": _sha256(snippet),
+                "evidence_hash": evidence_hash,
                 "extractor_version": scan["extractor_version"],
                 "references": _references(ref, snippet, teach_map.get(topic.get("teach_id")),
                                          importers.get(ref.get("file", ""), [])),

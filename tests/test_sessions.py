@@ -35,8 +35,10 @@ def _stage(axis: str) -> dict:
 def _problem(no: int) -> dict:
     return {
         "problemId": f"prob-{no}", "problemNo": no, "problemType": "DESIGN_CHOICE",
+        "title": f"결제 처리 {no}", "snippetKey": f"p{no}-" + "a" * 16,
+        "codeLanguage": "PYTHON",
         "priority": 1.0, "sourcePath": "app/pay.py", "lineStart": 4, "lineEnd": 7,
-        "codeSnippet": "def pay(order, method):", "evidenceHash": "a" * 64,
+        "codeSnippet": "def pay(order, method):", "contentHash": "a" * 64, "evidenceHash": "a" * 64,
         "extractorVersion": 1, "teachId": f"teach-{no}",
         "stages": [_stage(a) for a in ("L1", "L2", "L3", "L4")],
     }
@@ -330,8 +332,8 @@ def test_ai_usage_is_reported_for_grading(monkeypatch):
     usage = Backend(session_id="usage-1").answer()["aiUsage"]
 
     assert len(usage) == 1
-    assert usage[0]["featureCode"] == "GRADING"
-    assert usage[0]["contextType"] == "GRADING"
+    assert usage[0]["featureCode"] == "ANSWER_EVALUATION"
+    assert usage[0]["contextType"] == "ASSESSMENT_SESSION"
     assert usage[0]["contextId"] == "usage-1"
     assert usage[0]["inputTokenCount"] == 100
     assert "estimatedCost" not in usage[0]      # 금액은 Spring이 계산한다
