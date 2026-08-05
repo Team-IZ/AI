@@ -52,6 +52,30 @@ class Settings(BaseSettings):
     model_code_session: str = "deepseek-ai/deepseek-v4-flash"
     model_code_curriculum: str = "minimaxai/minimax-m3"
 
+    # analysis-inputs 분리(D1/D2/D3, 2026-08-06) 관련 설정.
+    #
+    # 🔴 기존 GIT_CLONE_TIMEOUT_S(materialize.py, 300초)는 그대로 둔다 -- 그건 비동기
+    # /analyses 잡 경로용이고, 이건 백엔드 동기 호출(목표 p95 5초, 타임아웃 15초)용이라
+    # 훨씬 짧아야 한다.
+    analysis_input_clone_timeout_s: int = 10
+    # Phase B(히스토리 수집)는 별도의 더 짧은 예산 -- 넘겨도 Phase A(코드 자체) 결과는
+    # 절대 안 버린다. 커밋 개수가 아니라 시간으로 상한을 둔다는 D1 결정 그대로.
+    git_history_budget_s: int = 3
+    git_history_since_days: int = 180
+    git_history_max_commits: int = 500
+    # 콤마 구분 문자열(리스트 필드는 .env 파싱이 번거로워 pydantic-settings 관례상 문자열로 둠).
+    allowed_repo_hosts: str = "github.com,www.github.com"
+    # 비워두면(기본) presigned URL 다운로드를 전부 거부한다 -- SSRF 방지를 위한
+    # fail-closed 기본값. 백엔드가 실제 스토리지 호스트를 알려주면 그때 채운다.
+    allowed_storage_hosts: str = ""
+    # ZIP에 .git이 없고 백엔드도 히스토리를 안 실어 보내면 기본은 200+빈 배열(D3).
+    # true면 422 GIT_LOG_MISSING으로 전환 -- 이건 코드가 아니라 정책 결정이라
+    # 설정값으로 백엔드에 맡긴다.
+    zip_require_git_log: bool = False
+    # 같은 입력이면 같은 id(derived, 기본) vs 매번 새 id(random). 백엔드의
+    # analysisInputId 컬럼이 팀 단위로 UNIQUE면 derived가 충돌할 수 있어 대비해 둔다.
+    analysis_input_id_mode: Literal["derived", "random"] = "derived"
+
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 # NVIDIA 키는 개수가 가변이라(NVIDIA_API_KEY_1..N) Settings 필드로 못 만든다.

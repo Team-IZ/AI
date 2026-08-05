@@ -24,6 +24,19 @@ D12 보안(2026-07-30, 자동 리뷰 발견): `repo_url`·`branch`는 결국 요
 `extractionScope="OWN_COMMIT"`(작성자별 필터)은 이걸로 못 한다. 지금은 전체 코드를
 출제 대상으로 보기로 해서(2026-08-03) 범위 밖이고, 필요해지면 depth를 푸는 것이
 그때의 변경 지점이다. **`.git`을 지우지 않는다** — 지우면 그 시점에 복구가 불가능해진다.
+
+D-git-rce(2026-08-06, `fetch.py` D3): ZIP 안에 `.git`이 들어있으면(`rules._safe_extract`가
+이름으로 안 걸러서 그대로 남는다) 그걸 직접 파싱해 git 이력을 뽑는 경로가 있다. 이건
+학생이 조작한 `.git/config`(`core.fsmonitor` 등 훅성 설정)를 그대로 실행하면 임의 명령
+실행으로 이어지는 **다섯 번째 방어 대상**이다 — "클론한 코드는 읽기만 한다"는 위
+원칙이 임베디드 `.git`에도 그대로 적용돼야 한다.
+
+  5. `.git/config`·`hooks/`를 먼저 지운 뒤에만 임베디드 `.git`에 git을 부른다
+     `GIT_CONFIG_NOSYSTEM=1`/`GIT_CONFIG_GLOBAL=/dev/null` + 매 호출
+     `-c core.fsmonitor= -c core.hooksPath=/dev/null -c protocol.ext.allow=never`
+     `log`/`rev-parse`만 쓰고 `fetch`/`remote`(네트워크) 절대 금지
+
+구현은 `fetch.py`의 `_sandbox_git_env()`/`_strip_git_config()`/`_try_embedded_git_history()`.
 """
 from __future__ import annotations
 
@@ -43,7 +56,14 @@ GIT_CLONE_TIMEOUT_S = 300
 _ALLOWED_URL_SCHEMES = {"http", "https"}
 
 
-def _validate_repo_url(repo_url: str) -> None:
+# D-fetch-shared (2026-08-06): D12 방어 3종을 public으로 승격 -- app/engines/analysis/
+# fetch.py(analysis-inputs 분리 작업)가 그대로 재사용한다.
+#   WHY: 클론 인자 검증은 이 파일과 fetch.py 둘 다에서 필요한데, 복사하면 한쪽만
+#   패치되고 다른 쪽이 낡는 사고가 난다(이 세션에서 vendor drift로 실제 겪은 것과
+#   같은 클래스).
+#   COST: 없음 -- 원래도 이 모듈 안에서만 쓰이던 순수 함수라 외부 노출 비용이 없다.
+#   EXIT: 세 번째 소비자가 생기면 별도 `security.py` 모듈로 옮기는 것을 검토한다.
+def validate_repo_url(repo_url: str) -> None:
     parsed = urlparse(repo_url)
     if parsed.scheme not in _ALLOWED_URL_SCHEMES or not parsed.netloc:
         raise ValueError(
@@ -52,12 +72,12 @@ def _validate_repo_url(repo_url: str) -> None:
         )
 
 
-def _validate_branch(branch: str) -> None:
+def validate_branch(branch: str) -> None:
     if branch.startswith("-"):
         raise ValueError(f"branch가 '-'로 시작할 수 없습니다(git 옵션으로 오인될 위험): {branch!r}")
 
 
-def _git_env() -> dict[str, str]:
+def git_env() -> dict[str, str]:
     return {
         **os.environ,
         "GIT_TERMINAL_PROMPT": "0",
@@ -74,7 +94,7 @@ def head_sha(repo_dir: str) -> str | None:
     try:
         out = subprocess.run(
             ["git", "-C", repo_dir, "rev-parse", "HEAD"],
-            check=True, capture_output=True, timeout=30, env=_git_env(),
+            check=True, capture_output=True, timeout=30, env=git_env(),
         )
     except (subprocess.SubprocessError, OSError):
         return None
@@ -96,18 +116,18 @@ def materialize(request: Mapping[str, Any], zip_bytes: bytes | None) -> Iterator
             repo_url = (source.get("repo_url") or "").strip()
             if not repo_url:
                 raise ValueError("method=GITHUB_URL인데 source.repoUrl이 없습니다")
-            _validate_repo_url(repo_url)
+            validate_repo_url(repo_url)
 
             branch = (source.get("branch") or "").strip()
             cmd = ["git", "clone", "--depth", "1"]
             if branch:
-                _validate_branch(branch)
+                validate_branch(branch)
                 cmd += ["--branch", branch]
             cmd += ["--", repo_url, tmp]
 
             try:
                 subprocess.run(cmd, check=True, capture_output=True,
-                               timeout=GIT_CLONE_TIMEOUT_S, env=_git_env())
+                               timeout=GIT_CLONE_TIMEOUT_S, env=git_env())
             except subprocess.CalledProcessError as exc:
                 # stderr에 URL이 그대로 들어 있다. 공개 레포만 받으므로 비밀은 아니지만
                 # 원문을 그대로 올리면 job 실패 사유가 장황해진다 — 마지막 줄만 쓴다.
