@@ -204,6 +204,21 @@ def test_router_returns_200_with_usage_headers(monkeypatch):
     assert r.headers["x-ai-usage-model-code"]
 
 
+def test_router_usage_meta_body_field_matches_headers(monkeypatch):
+    """D-ib2: 헤더/본문 둘 다 채우고, 같은 값이어야 한다(같은 dict에서 뽑으므로)."""
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
+
+    r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
+
+    meta = r.json()["usageMeta"]
+    assert meta["modelCode"] == r.headers["x-ai-usage-model-code"]
+    assert str(meta["inputTokenCount"]) == r.headers["x-ai-usage-input-tokens"]
+    assert str(meta["outputTokenCount"]) == r.headers["x-ai-usage-output-tokens"]
+    assert str(meta["latencyMs"]) == r.headers["x-ai-usage-latency-ms"]
+    assert meta["status"] == r.headers["x-ai-usage-status"] == "SUCCEEDED"
+    assert meta["failureCode"] is None
+
+
 def test_router_returns_503_with_failure_code_on_stage_error(monkeypatch):
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()[:1]})
 

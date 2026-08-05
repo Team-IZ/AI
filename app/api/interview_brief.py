@@ -16,17 +16,27 @@ router = APIRouter(tags=["interview-brief"])
 # §7: AI가 제공하는 값만 여기 담는다(model_code/토큰 3종/latency/status/failureCode).
 # feature_code·context_type·context_id·trigger_type·actor_user_id·request_id·
 # idempotency_key는 전부 백엔드가 이미 아는 값이라 AI가 되돌려줄 필요가 없다.
-#
-# ⚠️ 확인 필요(계획 문서 참고): 명세 §7이 "응답 헤더 또는 본문 메타"라고만 적어
-# 실제 와이어 모양이 미정이다. 잠정적으로 응답 헤더로 구현 -- 백엔드가 본문 필드를
-# 원하면 이 부분만 바꾸면 된다(engine.generate()의 반환값은 그대로 재사용).
 _USAGE_HEADER_PREFIX = "X-Ai-Usage-"
 
 
-def _set_usage_headers(response: Response, usages: list[dict]) -> None:
-    if not usages:
+# D-ib2: 사용량 값을 헤더와 본문 둘 다에 싣는다.
+#   WHY: 명세 §7이 "응답 헤더 또는 본문 메타"라고만 적어 실제 와이어 모양이
+#   미정이다(2026-08-05, 사용자 확인). 백엔드가 확정하기 전에 어느 한쪽만 골라
+#   구현하면 그게 틀렸을 때 다시 계약을 왕복해야 한다 -- 둘 다 채워두면 백엔드가
+#   자기 파서 짜기 편한 쪽을 그냥 읽으면 된다.
+#   COST: 같은 값이 응답 하나에 두 번(헤더 7개 + 본문 usageMeta 객체) 실린다 --
+#   페이로드가 약간 커지고, 두 값이 어긋나면(그럴 일은 없지만) 혼란의 소지가
+#   생긴다. 그래서 반드시 **같은 dict 하나에서** 둘 다 뽑는다(아래 함수 하나).
+#   EXIT: 백엔드가 한쪽을 정하면 다른 쪽 삭제. 헤더만 남기면 _usage_meta()
+#   호출과 InterviewBriefResponse.usage_meta 필드를 지운다. 본문만 남기면
+#   _set_usage_headers() 호출과 이 상수·함수를 지운다.
+def _last_usage(usages: list[dict]) -> dict | None:
+    return usages[-1] if usages else None
+
+
+def _set_usage_headers(response: Response, last: dict | None) -> None:
+    if last is None:
         return
-    last = usages[-1]
     response.headers[f"{_USAGE_HEADER_PREFIX}Model-Code"] = str(last.get("model_code", ""))
     response.headers[f"{_USAGE_HEADER_PREFIX}Input-Tokens"] = str(last.get("input_token_count", 0))
     response.headers[f"{_USAGE_HEADER_PREFIX}Output-Tokens"] = str(last.get("output_token_count", 0))
@@ -35,6 +45,20 @@ def _set_usage_headers(response: Response, usages: list[dict]) -> None:
     response.headers[f"{_USAGE_HEADER_PREFIX}Status"] = str(last.get("status", ""))
     if last.get("failure_code"):
         response.headers[f"{_USAGE_HEADER_PREFIX}Failure-Code"] = str(last["failure_code"])
+
+
+def _usage_meta(last: dict | None) -> dict | None:
+    if last is None:
+        return None
+    return {
+        "model_code": last.get("model_code", ""),
+        "input_token_count": last.get("input_token_count", 0),
+        "output_token_count": last.get("output_token_count", 0),
+        "cached_token_count": last.get("cached_token_count", 0),
+        "latency_ms": last.get("latency_ms", 0),
+        "status": last.get("status", "SUCCEEDED"),
+        "failure_code": last.get("failure_code"),
+    }
 
 
 def _failure_code_for(exc: StageError) -> str:
@@ -81,7 +105,8 @@ def generate_interview_brief(
             message=f"면담 브리프 생성에 실패했습니다: {exc}",
         ) from exc
 
-    _set_usage_headers(response, result.usages)
+    last_usage = _last_usage(result.usages)
+    _set_usage_headers(response, last_usage)
     return InterviewBriefResponse(
         opening_remark=result.opening_remark,
         items=[
@@ -93,4 +118,5 @@ def generate_interview_brief(
             }
             for item in result.items
         ],
+        usage_meta=_usage_meta(last_usage),
     )

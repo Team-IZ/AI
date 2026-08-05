@@ -248,8 +248,25 @@ class InterviewBriefItem(BaseSchema):
     )
 
 
+class UsageMeta(BaseSchema):
+    """§7의 AI 제공 사용량 값(model_code·토큰 3종·latency·status·failureCode)을
+    본문에도 싣는다. `app/api/interview_brief.py`의 D-ib2 주석 참고 -- 응답 헤더
+    (X-Ai-Usage-*)와 완전히 같은 값을 두 군데에 싣는 임시 조치다."""
+
+    model_code: str
+    input_token_count: int = Field(ge=0)
+    output_token_count: int = Field(ge=0)
+    cached_token_count: int = Field(default=0, ge=0)
+    latency_ms: int = Field(ge=0)
+    status: Literal["SUCCEEDED", "FAILED", "PARTIAL"]
+    failure_code: str | None = None
+
+
 class InterviewBriefResponse(BaseSchema):
-    """성공 응답 본문. §5. jobId 없음 -- 이 응답이 곧 결과다."""
+    """성공 응답 본문. §5. jobId 없음 -- 이 응답이 곧 결과다.
+
+    `usageMeta`는 §5 명세 예시엔 없는 필드다 -- D-ib2(app/api/interview_brief.py) 참고.
+    """
 
     opening_remark: str = Field(
         description="1~3문장, 구어체. 교육생 이름은 부르되 점수·단계·위험 유형은 "
@@ -259,4 +276,9 @@ class InterviewBriefResponse(BaseSchema):
         min_length=4, max_length=8,
         description="4~8개(첫 면담이면 6~8개 -- engine이 강제). suggestedOrder는 "
                     "1부터 중복 없는 연속 정수여야 한다",
+    )
+    usage_meta: UsageMeta | None = Field(
+        default=None,
+        description="응답 헤더(X-Ai-Usage-*)와 동일한 값의 본문 사본. 헤더/본문 "
+                    "어느 쪽을 쓸지 백엔드가 정하기 전까지 둘 다 채운다",
     )
