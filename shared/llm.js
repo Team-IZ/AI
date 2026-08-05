@@ -319,6 +319,14 @@ const LabLLM = (() => {
       if (call.function.name === terminalToolName) {
         return JSON.parse(call.function.arguments);
       }
+      // D200 companion (redteam audit M6, 2026-08-05): `forced` only offers terminalDef and
+      // sets tool_choice to force it, but tool_choice is a request the model can still ignore
+      // -- a non-compliant model calling a non-terminal tool here would otherwise execute it
+      // and bump `round` past maxRounds, breaking the "guaranteed termination" this branch
+      // exists for. Same failure mode as the no-calls case just above; same fix (throw).
+      if (forced) {
+        throw new Error(`chatToolLoop: 강제 종료 라운드에서 non-terminal tool 호출: ${call.function.name}`);
+      }
 
       const executor = executors[call.function.name];
       if (!executor) throw new Error(`chatToolLoop: executor 없음: ${call.function.name}`);
@@ -350,3 +358,8 @@ const LabLLM = (() => {
 
   return { chatJSON, chatTool, chatToolLoop, extractJsonObject, getRequestLog };
 })();
+
+// 브라우저에는 module이 없어 no-op. node --test(tests/js/llm-chat-tool-loop.test.js)가
+// chatToolLoop()의 강제-종료 라운드 보장(redteam audit M6)을 실제 구현으로 검증하기
+// 위한 가드 -- shared/p03-engine.js 맨 끝과 같은 형태.
+if (typeof module !== "undefined" && module.exports) module.exports = LabLLM;
