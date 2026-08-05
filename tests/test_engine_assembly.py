@@ -190,10 +190,15 @@ def test_focus_item_id_is_echoed(fake_llm):
 
 
 def test_github_url_without_repo_url_fails_loudly(fake_llm):
-    """받아올 곳이 없으면 끊는다. 빈 결과를 내면 '문제 0개'가 정상처럼 보인다."""
-    # AnalysisFailed로 감싸 나온다 — 원장을 들고 나오려고 엔진이 전부 감싼다.
-    with pytest.raises(engine_mod.AnalysisFailed, match="repoUrl"):
+    """받아올 곳이 없으면 끊는다. 빈 결과를 내면 '문제 0개'가 정상처럼 보인다.
+
+    (M4) `fetch.FetchError`로 나온다 -- `AnalysisFailed`로 감싸지 않는다. fetch
+    실패 시점엔 LLM 콜이 아직 없어 원장을 잃을 게 없고, jobs.py가 이 예외를 따로
+    받아 failureCode로 정확히 분류한다(감싸면 그 분류가 무너진다).
+    """
+    with pytest.raises(engine_mod.fetch.FetchError, match="repositoryUrl") as exc:
         engine_mod.RealAnalysisEngine().analyze({**REQUEST, "method": "GITHUB_URL"}, None)
+    assert exc.value.failure_code == "INVALID_REPOSITORY_URL"
 
 
 def test_failure_keeps_the_ledger(fake_llm, monkeypatch):

@@ -109,13 +109,16 @@ class _TreeMeta:
 
 
 @contextmanager
-def fetch(spec: Mapping[str, Any]) -> Iterator[FetchedInput]:
+def fetch(spec: Mapping[str, Any], zip_bytes: bytes | None = None) -> Iterator[FetchedInput]:
     """method에 따라 fetch하고 스캔 루트를 담은 `FetchedInput`을 내어준다.
 
     `materialize.materialize()`와 동일하게 `with` 블록을 빠져나가면 임시 디렉터리를
     지운다 -- `/analysis-inputs`도 fetch한 코드 원문을 디스크에 남기지 않는다(D2는
     "두 번째 fetch(`/analysis`)가 캐시를 재사용하지 않는다"는 뜻이지, 이 첫 fetch가
     원칙을 벗어나도 된다는 뜻이 아니다).
+
+    `zip_bytes`(M4, engine.py의 기존 경로 통합용) -- `/analyses`의 멀티파트 업로드는
+    downloadUrl 없이 바이트를 직접 들고 있다. 있으면 `_download()`를 건너뛴다.
     """
     method = spec.get("method")
     with tempfile.TemporaryDirectory(prefix="analysis-input-") as tmp:
@@ -123,7 +126,7 @@ def fetch(spec: Mapping[str, Any]) -> Iterator[FetchedInput]:
             yield _fetch_github(spec, tmp)
             return
         if method == "ZIP_WITH_GITLOG":
-            yield _fetch_zip(spec, tmp)
+            yield _fetch_zip(spec, tmp, zip_bytes)
             return
         raise FetchError("INVALID_REPOSITORY_URL", f"알 수 없는 method입니다: {method!r}")
 
@@ -511,23 +514,23 @@ def _download(url: str) -> bytes:
     return resp.content
 
 
-def _fetch_zip(spec: Mapping[str, Any], tmp: str) -> FetchedInput:
-    download_url = (spec.get("download_url") or "").strip()
-    storage_uri = (spec.get("storage_uri") or "").strip()
+def _fetch_zip(spec: Mapping[str, Any], tmp: str, zip_bytes: bytes | None = None) -> FetchedInput:
+    if zip_bytes is None:
+        download_url = (spec.get("download_url") or "").strip()
+        storage_uri = (spec.get("storage_uri") or "").strip()
 
-    if not download_url and storage_uri.startswith("s3://"):
-        # 지금 이 서비스엔 boto3/AWS 자격증명이 전혀 없다(requirements.txt 확인) --
-        # 조용히 500 내는 대신 명확한 사유로 즉시 실패시킨다.
-        raise FetchError(
-            "ARCHIVE_INVALID",
-            "s3:// 스토리지 URI는 아직 지원하지 않습니다 -- presigned HTTPS URL(downloadUrl)로 "
-            "보내주세요",
-        )
-    download_url = download_url or storage_uri
-    if not download_url:
-        raise FetchError("ARCHIVE_INVALID", "storageUri/downloadUrl이 없습니다")
-
-    zip_bytes = _download(download_url)
+        if not download_url and storage_uri.startswith("s3://"):
+            # 지금 이 서비스엔 boto3/AWS 자격증명이 전혀 없다(requirements.txt 확인) --
+            # 조용히 500 내는 대신 명확한 사유로 즉시 실패시킨다.
+            raise FetchError(
+                "ARCHIVE_INVALID",
+                "s3:// 스토리지 URI는 아직 지원하지 않습니다 -- presigned HTTPS URL(downloadUrl)로 "
+                "보내주세요",
+            )
+        download_url = download_url or storage_uri
+        if not download_url:
+            raise FetchError("ARCHIVE_INVALID", "storageUri/downloadUrl이 없습니다")
+        zip_bytes = _download(download_url)
 
     tmp_path = Path(tmp)
     try:
