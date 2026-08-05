@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 class ApiError(Exception):
     """ 우리 코드에서 던지는 에러. 아래 핸들러가 계약 형태로 변환 """
-    
+
     def __init__(
         self, status_code: int, error: str, message: str, retryable: bool = False
     ) -> None:
@@ -21,7 +21,22 @@ class ApiError(Exception):
         self.error = error
         self.message = message
         self.retryable = retryable
-        
+
+
+class AnalysisInputError(Exception):
+    """`/analysis-inputs` 전용 에러 -- {failureCode, message, requestId} 모양.
+
+    다른 네 엔드포인트가 쓰는 공용 ApiError({error,message,retryable})와 계약 자체가
+    다르다(백엔드 프로포절이 이 모양·11개 failureCode를 명시했다) -- 그래서 하나로
+    합치지 않고 별도 예외+핸들러를 둔다.
+    """
+
+    def __init__(self, failure_code: str, message: str, request_id: str | None = None) -> None:
+        self.failure_code = failure_code
+        self.message = message
+        self.request_id = request_id
+
+
 def _body(error: str, message: str, retryable: bool) -> dict:
     return {"error": error, "message": message, "retryable": retryable}
 
@@ -43,7 +58,21 @@ def register_error_handlers(app: FastAPI) -> None:
             status_code=422,
             content=_body("INVALID_REQUEST", format_validation_message(exc.errors()), False),
         )
-        
+
+    @app.exception_handler(AnalysisInputError)
+    async def _handle_analysis_input_error(
+        request: Request, exc: AnalysisInputError
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "failureCode": exc.failure_code,
+                "message": exc.message,
+                "requestId": exc.request_id,
+            },
+        )
+
+
 
 def format_validation_message(errors: list) -> str:
     """ pydantic 검증 실패 목록에서 메시지 한 줄 만들기.
