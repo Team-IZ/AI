@@ -246,6 +246,26 @@ const P02Engine = (() => {
     return !name || name.startsWith("/") || name.split("/").some((seg) => seg === "..");
   }
 
+  // D-fix (redteam audit M5, 2026-08-05): parseZipFile/fetchGithubRepo/writeTargetFiles
+  // had no cap on submitted file count or total size -- a high-compression-ratio zip or a
+  // large public repo could OOM the grader's own browser tab. This pipeline's threat model
+  // treats a malicious/careless submitter as a normal user category, not a hypothetical.
+  // Tracked incrementally (not just checked once at the end) so oversized input is
+  // rejected as soon as it's detected, before everything is fully decoded into memory.
+  const MAX_SUBMISSION_FILES = 2000;
+  const MAX_SUBMISSION_BYTES = 20 * 1024 * 1024; // 20MB
+
+  function _trackSubmissionSize(state, content) {
+    state.fileCount += 1;
+    if (state.fileCount > MAX_SUBMISSION_FILES) {
+      throw new Error(`제출물 파일 수가 상한(${MAX_SUBMISSION_FILES}개)을 넘습니다`);
+    }
+    state.totalBytes += content.length;
+    if (state.totalBytes > MAX_SUBMISSION_BYTES) {
+      throw new Error(`제출물 총 용량이 상한(${Math.round(MAX_SUBMISSION_BYTES / (1024 * 1024))}MB)을 넘습니다`);
+    }
+  }
+
   // Change #2: split from the original handleZipFile(file, container), which interleaved
   // this exact parsing/categorization with `container.querySelector("#p02-zip-status")`
   // DOM writes. Throws on a genuine unzip failure (JSZip.loadAsync) -- the page catches
@@ -258,6 +278,7 @@ const P02Engine = (() => {
     // 원인 파악이 안 됨. 스킵된 확장자별 개수를 세어뒀다가, 0개일 때만 진단으로 보여줌.
     const skippedExtCounts = {};
     let notebookCodeCount = 0;
+    const sizeState = { fileCount: 0, totalBytes: 0 };
     for (const entry of entries) {
       // D-fix1: reject path-traversal entries before any other categorization -- see
       // isUnsafeZipPath()'s comment above.
@@ -266,17 +287,23 @@ const P02Engine = (() => {
         continue;
       }
       if (isNotebookPath(entry.name)) {
+        let raw;
         try {
-          const raw = await entry.async("string");
-          const src = extractNotebookSource(raw);
-          if (src && src.trim()) {
-            files[entry.name + ".py"] = src;
-            notebookCodeCount += 1;
-          } else {
-            skippedExtCounts[".ipynb(코드셀 없음/파싱실패)"] = (skippedExtCounts[".ipynb(코드셀 없음/파싱실패)"] || 0) + 1;
-          }
+          raw = await entry.async("string");
         } catch (e) {
           skippedExtCounts[".ipynb(읽기실패)"] = (skippedExtCounts[".ipynb(읽기실패)"] || 0) + 1;
+          continue;
+        }
+        const src = extractNotebookSource(raw);
+        if (src && src.trim()) {
+          // M5's size check is deliberately outside the try/catch above -- an oversized-
+          // submission error must propagate as a real rejection, not get silently
+          // absorbed by the ".ipynb(읽기실패)" bucket meant for genuine parse failures.
+          _trackSubmissionSize(sizeState, src);
+          files[entry.name + ".py"] = src;
+          notebookCodeCount += 1;
+        } else {
+          skippedExtCounts[".ipynb(코드셀 없음/파싱실패)"] = (skippedExtCounts[".ipynb(코드셀 없음/파싱실패)"] || 0) + 1;
         }
         continue;
       }
@@ -285,9 +312,14 @@ const P02Engine = (() => {
         skippedExtCounts[ext] = (skippedExtCounts[ext] || 0) + 1;
         continue;
       }
+      let content;
       try {
-        files[entry.name] = await entry.async("string");
-      } catch (e) { /* binary file, skip */ }
+        content = await entry.async("string");
+      } catch (e) {
+        continue; // binary file, skip
+      }
+      _trackSubmissionSize(sizeState, content);
+      files[entry.name] = content;
     }
     return { files, loadedCount: Object.keys(files).length, notebookCodeCount, skippedExtCounts };
   }
@@ -375,6 +407,7 @@ const P02Engine = (() => {
     const files = {};
     const CONCURRENCY = 6;
     let done = 0;
+    const sizeState = { fileCount: 0, totalBytes: 0 };
     for (let i = 0; i < blobs.length; i += CONCURRENCY) {
       const batch = blobs.slice(i, i + CONCURRENCY);
       await Promise.all(batch.map(async (b) => {
@@ -382,15 +415,26 @@ const P02Engine = (() => {
         if (blobRes.ok) {
           const blobData = await blobRes.json();
           if (blobData.encoding === "base64") {
+            let decoded;
             try {
-              const decoded = decodeURIComponent(escape(atob(blobData.content.replace(/\n/g, ""))));
+              decoded = decodeURIComponent(escape(atob(blobData.content.replace(/\n/g, ""))));
+            } catch (e) {
+              decoded = undefined; // binary content, skip
+            }
+            // M5's size check is deliberately outside the try/catch above -- see
+            // parseZipFile's matching comment.
+            if (decoded !== undefined) {
               if (isNotebookPath(b.path)) {
                 const src = extractNotebookSource(decoded);
-                if (src && src.trim()) files[b.path + ".py"] = src;
+                if (src && src.trim()) {
+                  _trackSubmissionSize(sizeState, src);
+                  files[b.path + ".py"] = src;
+                }
               } else {
+                _trackSubmissionSize(sizeState, decoded);
                 files[b.path] = decoded;
               }
-            } catch (e) { /* binary content, skip */ }
+            }
           }
         } else {
           // D192: rate-limit이면 즉시 중단 — 조용히 파일만 빠진 "성공"을 만들지 않는다.
@@ -431,6 +475,14 @@ for p in ["/lib", "/lib/cognition", "/lib/judgment"]:
   }
 
   function writeTargetFiles(files) {
+    // D-fix (redteam audit M5, 2026-08-05): defense-in-depth -- parseZipFile/
+    // fetchGithubRepo already cap size/count at the source, but this is the last point
+    // before Pyodide FS actually materializes everything, so check again here too in
+    // case a caller ever feeds in a `files` map from somewhere else.
+    const sizeState = { fileCount: 0, totalBytes: 0 };
+    for (const content of Object.values(files)) {
+      _trackSubmissionSize(sizeState, content);
+    }
     if (pyodide.FS.analyzePath("/target").exists) {
       pyodide.runPython(`
 import shutil
@@ -593,10 +645,15 @@ _result = webtool_driver.run_scan("/target", overrides_json)
 
   return {
     resolveConnectableFile, findFileByBasename, findReferencedFiles,
-    parseRepoInput, fetchGithubRepo, parseZipFile, formatZipStatus,
+    parseRepoInput, fetchGithubRepo, parseZipFile, formatZipStatus, writeTargetFiles,
     // D200: exported (logic unchanged) so P03's new live-fetch tools can reuse the exact
     // same D192 rate-limit DETECTION instead of re-implementing/drifting from it.
     githubRateLimitError,
     run, MAX_CONNECT_FILES, SRC_EXTS,
+    // D-fix (redteam audit M5, 2026-08-05): exported for node --test coverage of the new
+    // size/count caps, not for any runtime caller.
+    MAX_SUBMISSION_FILES, MAX_SUBMISSION_BYTES,
   };
 })();
+
+if (typeof module !== "undefined" && module.exports) module.exports = P02Engine;
