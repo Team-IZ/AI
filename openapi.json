@@ -1064,7 +1064,7 @@
               "QUESTION_GENERATION",
               "ANSWER_EVALUATION",
               "CURRICULUM_ANALYSIS",
-              "SUMMARY_DRAFT"
+              "REPORT_GENERATION"
             ],
             "title": "Featurecode"
           },

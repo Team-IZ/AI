@@ -12,16 +12,33 @@ from pydantic import Field, model_validator
 from app.schemas.common import BaseSchema
 
 # 어느 기능이 호출했나. **DB ai_usage.feature_code CHECK와 글자까지 같은 집합이다**
-# (테이블정의서 v06 기준, 2026-08-04 정렬).
+# (테이블정의서 v08 기준, 2026-08-05 정렬).
 #
 # 🔴 옛 `GRADING`은 폐기했다 — v06 CHECK에 없는 값이라 채점 호출의 원장 행이
 # 전부 INSERT에서 거부됐을 자리다. 정식 이름은 `ANSWER_EVALUATION`이다.
+#
+# 🔴 v08(2026-08-05, 면담브리프 API 명세서 §2.4): `SUMMARY_DRAFT`는 CHECK에서
+# 제거되고 `REPORT_GENERATION`이 신설됐다 — `SUMMARY_DRAFT`를 그대로 두면 이전의
+# GRADING과 같은 사고(INSERT 거부)가 `/reports` 원장 행에서 반복된다. 여기서는
+# 반영했다(app/reports.py도 같이 고침).
+#
+#   WHY: 같은 v08 DDL 주석은 "QUESTION_GENERATION → CODE_SESSION(명칭변경)"이라고도
+#   적혀 있다. 하지만 CODE_SESSION에만 걸리는 티어 제약(tier_code/tier_policy_id
+#   필수)과 박종호님의 채팅 표현("이해도 검증 세션...CODE_SESSION으로 변경")을 보면
+#   오히려 `ANSWER_EVALUATION`(세션 채점 호출) 쪽이 CODE_SESSION이 돼야 하는 것처럼
+#   읽힌다 — 문서 간 서술이 어긋난다.
+#   COST: 잘못 추측해서 바꾸면 `/analyses`(질문생성)나 `/sessions/answers`(채점) 둘 중
+#   하나의 원장 행이 새 CHECK 밖으로 나가 INSERT가 거부된다 — 추측성 수정이 이 값을
+#   맞히려다 다른 값을 깨뜨릴 위험이 실재한다. 그래서 QUESTION_GENERATION은 아직
+#   그대로 둔다(app/engines/analysis/engine.py의 5곳 stamp 미변경).
+#   EXIT: 백엔드에 "QUESTION_GENERATION이 CODE_SESSION이 맞나요, 아니면
+#   ANSWER_EVALUATION인가요?" 확인 후 정확한 쪽만 바꾼다.
 FeatureCode = Literal[
     "CODE_ANALYSIS",        # 코드 분석 문서
-    "QUESTION_GENERATION",  # 문제·질문·힌트 동결 생성
+    "QUESTION_GENERATION",  # 문제·질문·힌트 동결 생성 -- CODE_SESSION 개명 대상인지 확인 필요(위 주석)
     "ANSWER_EVALUATION",    # 답변 채점 (세션 중 유일한 호출)
     "CURRICULUM_ANALYSIS",  # 교안 분석
-    "SUMMARY_DRAFT",        # 보고서 서술
+    "REPORT_GENERATION",    # 보고서 서술 (v08, 옛 SUMMARY_DRAFT)
 ]
 
 # 어느 **업무 엔터티**를 처리한 호출인가. featureCode보다 굵은 단위다 — 한 ContextType
