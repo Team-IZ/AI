@@ -49,6 +49,10 @@
       <div class="card">
         <h3>분석 문서</h3>
         <p id="doc-overview" style="font-size:var(--fs-sm);color:var(--c-text-2);line-height:1.7"></p>
+        <!-- D-fix (redteam audit M4, 2026-08-05): risks[]는 p04-1이 생성해도 이 파일 어디서도
+        렌더되지 않았다 -- Tier B(정규식 위험스캔) 삭제 이후 그 자리를 대체하기로 한 LLM 출력이
+        사람 눈에 안 보이는 채로 폐기되고 있었다. -->
+        <div id="doc-risks" style="margin-top:var(--sp-3)"></div>
         <div id="doc-decision-points" style="margin-top:var(--sp-4)"></div>
       </div>
 
@@ -246,6 +250,12 @@
 
   function renderResults(analysis) {
     $("doc-overview").textContent = analysis.analysisDoc.overview || "";
+    // D-fix (redteam audit M4, 2026-08-05): risks[]를 실제로 화면에 보여주는 유일한 소비자.
+    const risks = analysis.analysisDoc.risks || [];
+    $("doc-risks").innerHTML = risks.length
+      ? `<div class="fwarn danger"><b>확인된 위험 요소</b><ul style="margin:4px 0 0;padding-left:1.2em">`
+        + risks.map((r) => `<li>${esc(r)}</li>`).join("") + `</ul></div>`
+      : "";
     $("doc-decision-points").innerHTML = (analysis.decisionPoints || []).map((dp) => {
       const badge = dp.fragment.valid ? `<span class="badge ok">근거 확인됨</span>` : `<span class="badge bad">근거 무효</span>`;
       const ref = dp.fragment.valid ? CodeFragment.formatRef(dp.fragment) : `${dp.file || "?"}:${(dp.lines || []).join("-")}`;
