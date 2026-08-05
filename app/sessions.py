@@ -48,6 +48,23 @@ _AXES = list(get_args(AxisCode))
 # ponytail: 상한 있는 dict. 재시작하면 비지만 그때 잃는 것은 "재전송 한 번이
 # 중복 채점이 된다"뿐이다(세션 진행은 요청이 들고 온다). Redis는 그게 실제로
 # 문제가 될 때.
+#
+# M8 (redteam audit, 2026-08-05): 이 키가 안전하려면 **session_id가 프로세스
+# 수명 동안 전역 유일**해야 한다 -- 계약이지 코드가 강제하는 것이 아니다.
+#   WHY: 서로 다른 두 학생 세션이 같은 session_id를 쓰면(Spring이 재사용하거나,
+#   초기화 로직이 이전 세션과 같은 id를 다시 발급하면) 뒤 세션의 client_request_id가
+#   앞 세션의 것과 우연히 같을 때 앞 세션의 채점 응답을 그대로 받아간다 --
+#   tests/test_sessions.py의 Backend 헬퍼가 이미 이 현상을 주석으로 관측하고
+#   `uuid.uuid4()`로 회피하고 있다("멱등 캐시가 프로세스 전역이라 세션 id가
+#   겹치면 앞 테스트의 응답이 돌아온다").
+#   COST: 근본 수정(예: problems/transcript 해시를 키에 같이 접어 넣어 session_id
+#   충돌이 나도 문제 내용까지 같아야 충돌하게 만드는 것)은 여기서 하지 않는다 --
+#   이 서비스는 의도적으로 무상태다(파일 상단 🔴). session_id의 유일성은 그래서
+#   **Spring 쪽 계약 사항**으로 남긴다: session_id는 절대 재사용/재발급하지 않아야
+#   한다.
+#   EXIT: 실제로 session_id 충돌이 관측되면(로그·리포트로), H10의 _compute_cursor_mac
+#   과 같은 해시-접기 패턴을 이 키에도 적용 -- 그 전까지는 이 계약 위반이 실제로
+#   일어나지 않는다는 전제 위에서만 안전하다.
 _ANSWERED_MAX = 2000
 _answered: "OrderedDict[str, AnswerResult]" = OrderedDict()
 
