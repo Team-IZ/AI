@@ -9,6 +9,7 @@
 
 import re
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, get_args
 
@@ -24,11 +25,14 @@ from app.schemas.report import (
 from app.usage import to_ai_usage
 
 # job_id -> 보고서 job 상태·결과
-_jobs: dict[str, ReportJobStatus] = {}
+# M9 (redteam audit, 2026-08-05): jobs.py와 같은 문제 -- 무제한 dict라 장기가동 시
+# 메모리가 계속 는다. sessions.py의 _answered와 같은 OrderedDict+상한 패턴.
+_JOBS_MAX = 2000
+_jobs: "OrderedDict[str, ReportJobStatus]" = OrderedDict()
 
 # 멱등키({problemId}:{scoreRunId}) -> job_id. 재전송해도 LLM을 다시 부르지 않는다.
 # 보고서는 문제마다 1건이라 중복이 곧 비용이다.
-_job_id_by_idempotency_key: dict[str, str] = {}
+_job_id_by_idempotency_key: "OrderedDict[str, str]" = OrderedDict()
 
 # 통과선. 미달이면 힌트 후 재질의. 총점은 만들지 않는다(ProblemResult 주석 참고).
 _PASS_SCORE = 3
@@ -47,7 +51,12 @@ def job_id_for_key(idempotency_key: str, problem_id: str) -> str | None:
     if existing_job_id is None:
         return None
     existing_job = _jobs.get(existing_job_id)
-    if existing_job is None or existing_job.problem_id != problem_id:
+    if existing_job is None:
+        # M9: 신원 불일치가 아니라 원본 job이 상한을 넘겨 밀려난 것 -- "처음 보는 키"와
+        # 동일하게 취급한다.
+        del _job_id_by_idempotency_key[idempotency_key]
+        return None
+    if existing_job.problem_id != problem_id:
         raise ValueError("idempotencyKey가 이전 요청의 problemId와 일치하지 않습니다")
     return existing_job_id
 
@@ -61,8 +70,12 @@ def create_job(body: ReportRequest, idempotency_key: str | None = None) -> Repor
         status="QUEUED",
     )
     _jobs[job.job_id] = job
+    while len(_jobs) > _JOBS_MAX:
+        _jobs.popitem(last=False)
     if idempotency_key:
         _job_id_by_idempotency_key[idempotency_key] = job.job_id
+        while len(_job_id_by_idempotency_key) > _JOBS_MAX:
+            _job_id_by_idempotency_key.popitem(last=False)
     return job
 
 

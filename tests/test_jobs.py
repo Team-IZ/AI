@@ -77,3 +77,42 @@ def test_requirement_failure_makes_the_job_partial():
     assert job.status == "PARTIAL"
     assert "요구사항 판정 1건" in job.failure_reason
     assert job.result.problems              # 문답은 살아 있다
+
+
+# ── M9 (redteam audit, 2026-08-05): _jobs 상한/eviction ──────────────────────────
+# 무제한 dict였다 -- 업로드 상한(H13)과 별개로 job 자체가 영원히 안 지워져 장기가동
+# 시 메모리가 계속 는다. sessions.py의 _answered와 같은 OrderedDict+상한 패턴이
+# 실제로 밀어내는지, 그리고 밀려난 job의 멱등키가 "불일치"가 아니라 "새 키"로
+# 취급되는지(안 그러면 정상 재시도가 409로 막힌다) 검증한다. 실제 2000개를 다
+# 만들지 않도록 상한 자체를 낮춰서 검증한다.
+
+def test_old_jobs_are_evicted_past_the_cap(monkeypatch):
+    """상한을 넘기면 가장 먼저 만든 job부터 밀려난다."""
+    from app import jobs as jobs_module
+
+    monkeypatch.setattr(jobs_module, "_jobs", type(jobs_module._jobs)())
+    monkeypatch.setattr(jobs_module, "_job_id_by_idempotency_key", type(jobs_module._job_id_by_idempotency_key)())
+    monkeypatch.setattr(jobs_module, "_JOBS_MAX", 3)
+
+    first = create_job(BODY, idempotency_key=None)
+    for _ in range(3):
+        create_job(BODY, idempotency_key=None)
+
+    assert get_job(first.job_id) is None
+    assert len(jobs_module._jobs) == 3
+
+
+def test_evicted_jobs_idempotency_key_is_treated_as_fresh(monkeypatch):
+    """멱등키가 가리키던 job이 상한으로 밀려났으면 신원불일치(409)가 아니라
+    '처음 보는 키'로 취급해야 한다."""
+    from app import jobs as jobs_module
+
+    monkeypatch.setattr(jobs_module, "_jobs", type(jobs_module._jobs)())
+    monkeypatch.setattr(jobs_module, "_job_id_by_idempotency_key", type(jobs_module._job_id_by_idempotency_key)())
+    monkeypatch.setattr(jobs_module, "_JOBS_MAX", 3)
+
+    create_job(BODY, idempotency_key="evict-me")
+    for _ in range(3):
+        create_job(BODY, idempotency_key=None)
+
+    assert jobs_module.job_id_for_key("evict-me", BODY.submission_id, BODY.attempt_id) is None
