@@ -15,6 +15,14 @@ class MemoryKv {
   async put(key, value) {
     this.values.set(key, value);
   }
+
+  // Minimal stand-in for KVNamespace#list(), added for the ?traffic=1 test below --
+  // real Cloudflare KV returns { keys: [{name}, ...], list_complete, cursor }, but
+  // nvidia-proxy.js only ever reads .keys[].name, so that's all this needs to provide.
+  async list({ prefix = "" } = {}) {
+    const keys = [...this.values.keys()].filter((k) => k.startsWith(prefix)).map((name) => ({ name }));
+    return { keys, list_complete: true, cursor: undefined };
+  }
 }
 
 function queueMessage(body) {
@@ -211,4 +219,21 @@ test("terminal 429 is marked retryable without a rate-limiter Durable Object", a
   const stored = JSON.parse(await kv.get("job-429"));
   assert.equal(stored.status, "error");
   assert.equal(stored.retryable, true);
+});
+
+// D-fix (redteam audit H8, 2026-08-04): worker.fetch() (the HTTP entrypoint) had no
+// coverage in this file at all -- every test above exercises worker.queue().
+test("?traffic=1 requires x-nvidia-api-key, same gate as ?models=1", async () => {
+  const kv = new MemoryKv();
+  const env = { NVIDIA_JOBS: kv };
+
+  const unauthenticated = await worker.fetch(new Request("https://proxy.internal/?traffic=1"), env);
+  assert.equal(unauthenticated.status, 401);
+
+  const authenticated = await worker.fetch(
+    new Request("https://proxy.internal/?traffic=1", { headers: { "x-nvidia-api-key": "nvapi-test" } }),
+    env
+  );
+  assert.equal(authenticated.status, 200);
+  assert.deepEqual((await authenticated.json()).timestamps, []);
 });

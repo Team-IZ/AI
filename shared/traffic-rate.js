@@ -32,7 +32,13 @@ const DebugTraffic = (() => {
     if (!proxyUrl) return null;
     try {
       const base = proxyUrl.split("?")[0];
-      const res = await fetch(`${base}?traffic=1`);
+      // D-fix (redteam audit H8 companion, 2026-08-04): worker/nvidia-proxy.js's ?traffic=1
+      // now requires x-nvidia-api-key (H8) -- this call used to send no headers at all, so
+      // without this it would silently start 401ing and getCurrentRate() would fall back to
+      // tab-local-only counting with no error surfaced (fetchServerTimestamps' own catch
+      // treats any failure as "proxy unreachable/misconfigured").
+      const nvidiaKey = LabConfig.get("nvidia-key");
+      const res = await fetch(`${base}?traffic=1`, { headers: nvidiaKey ? { "x-nvidia-api-key": nvidiaKey } : {} });
       if (!res.ok) return null;
       const data = await res.json();
       return Array.isArray(data.timestamps) ? data.timestamps : null;
@@ -62,5 +68,7 @@ const DebugTraffic = (() => {
     return { count, isServerWide, threshold: RATE_LIMIT_THRESHOLD };
   }
 
-  return { getCurrentRate };
+  return { getCurrentRate, fetchServerTimestamps };
 })();
+
+if (typeof module !== "undefined" && module.exports) module.exports = DebugTraffic;
