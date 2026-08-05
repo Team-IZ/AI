@@ -33,9 +33,21 @@ MAX_SOURCE_BYTES = 200 * 1024
 
 # finding id 접두사 → assessment_problem.problem_type (이슈 #31 D-5의 5종)
 # REQUIREMENT_IMPL·EXTERNAL_INTEGRATION은 룰이 만들지 않는다. LLM 선정 단계의 몫이다.
+#
+# D-tierb-sync (2026-08-05): "tier-b-risk" 접두사 항목을 지웠다. vendor의 D-tierb1
+# (2026-07-31, `two_tier_scan.py`)이 이 접두사를 내는 스캔 자체를 폐기해서 영구
+# 미도달이었다 -- vendor를 최신으로 동기화하며 여기도 같이 정리한다.
+#   WHY: 학생 제출물의 하드코딩 시크릿/eval 결정론적 탐지는 이 서비스에 불필요하다고
+#   확인됐다(사용자 확인, 2026-08-05). vendor 원본도 같은 결론 -- 정규식 기반이라
+#   matched_text가 짧아 위치 특정이 안 되고 새 패턴을 못 잡아 "위험 목록"으로도
+#   "질문 근거"로도 어중간했다(D-tierb1 커밋 메시지).
+#   COST: 결정론적 시크릿/eval 탐지 수단을 잃는다. RISK_POINT 문제 유형은 이제 이
+#   경로로는 영구히 안 나온다(schemas의 유효값 자체는 유지 -- 다른 경로가 낼 수도
+#   있어 스키마는 안 좁힌다).
+#   EXIT: 이 능력이 다시 필요해지면 정규식 재도입이 아니라 semgrep 같은 전용 SAST를
+#   붙인다(vendor 원본 커밋이 명시한 방향). 그때 이 dict에 접두사를 다시 추가한다.
 _PROBLEM_TYPE_BY_PREFIX = {
     "architecture-diffusion": "DESIGN_CHOICE",
-    "tier-b-risk": "RISK_POINT",
     "cognition-isolation": "COMPLEXITY_HOTSPOT",
     "repeated-pattern": "COMPLEXITY_HOTSPOT",
 }
