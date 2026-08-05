@@ -42,9 +42,12 @@
 `prompt_manifest.json`은 **이번엔 같이 갱신하지 않았다** — poc_full과의 diff(p04-1/2/5)를
 전수 대조한 결과 develop이 이미 코드 레벨(미병합 `fix/redteam-security-audit`의 `_wrap_untrusted`·
 `fragments.locate_symbol`)로 동등하거나 더 나은 방어를 갖고 있어, 매니페스트 텍스트를 poc 것으로
-덮어쓸 이유가 없었다. 실제 미해결 항목은 매니페스트가 아니라 ① `fix/redteam-security-audit` 병합
-② `fragments.py:build_code_block()`의 코드펜스 길이 계산 이식(poc `4d9967a`에 있는데 develop엔
-없음) 둘이다 — `prompt_manifest.json`의 기준 커밋은 그래서 그대로 둔다.
+덮어쓸 이유가 없었다. `prompt_manifest.json`의 기준 커밋은 그래서 그대로 둔다. 실제 필요했던
+액션은 매니페스트가 아니라 두 가지였다:
+① `fix/redteam-security-audit` 병합 — **아직 미해결.**
+② `fragments.py:build_code_block()`의 코드펜스 길이 계산 이식(poc `4d9967a`) — **해결됨**
+(`fix/vendor-drift-cleanup` 브랜치 `7e04fbd`, 2026-08-05). `_fence_for()`가 파일 내용의 최장
+백틱 연속보다 긴 펜스를 동적 계산한다.
 
 **`stages.py`가 두 매니페스트를 함께 읽는다.** stage id에 파이프라인 접두사가 있어
 (`p01-2`·`p04-5`) 충돌하지 않으므로 호출부는 어느 파일에 있는지 몰라도 된다.
