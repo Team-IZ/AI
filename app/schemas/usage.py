@@ -22,27 +22,31 @@ from app.schemas.common import BaseSchema
 # GRADING과 같은 사고(INSERT 거부)가 `/reports` 원장 행에서 반복된다. 여기서는
 # 반영했다(app/reports.py도 같이 고침).
 #
-#   WHY: 같은 v08 DDL 주석은 "QUESTION_GENERATION → CODE_SESSION(명칭변경)"이라고도
-#   적혀 있다. 하지만 CODE_SESSION에만 걸리는 티어 제약(tier_code/tier_policy_id
-#   필수)과 박종호님의 채팅 표현("이해도 검증 세션...CODE_SESSION으로 변경")을 보면
-#   오히려 `ANSWER_EVALUATION`(세션 채점 호출) 쪽이 CODE_SESSION이 돼야 하는 것처럼
-#   읽힌다 — 문서 간 서술이 어긋난다.
-#   COST: 잘못 추측해서 바꾸면 `/analyses`(질문생성)나 `/sessions/answers`(채점) 둘 중
-#   하나의 원장 행이 새 CHECK 밖으로 나가 INSERT가 거부된다 — 추측성 수정이 이 값을
-#   맞히려다 다른 값을 깨뜨릴 위험이 실재한다. 그래서 QUESTION_GENERATION은 아직
-#   그대로 둔다(app/engines/analysis/engine.py의 5곳 stamp 미변경).
-#   EXIT: 백엔드에 "QUESTION_GENERATION이 CODE_SESSION이 맞나요, 아니면
-#   ANSWER_EVALUATION인가요?" 확인 후 정확한 쪽만 바꾼다.
+# 🔴 QUESTION_GENERATION → CODE_SESSION 개명 확정(2026-08-05, Team-IZ/Backend
+# `origin/feat/DangerTrainee` 대조): 이전엔 "CODE_SESSION에만 걸리는 티어 제약"과
+# 채팅 표현이 서로 어긋나 보여 ANSWER_EVALUATION 쪽 아닌가 의심했었다(EXIT: 백엔드
+# 확인 필요로 보류). 실제로 백엔드 소스를 열어 확인한 결과:
+#   - `AiUsage.java` javadoc: "QUESTION_GENERATION·SUMMARY_DRAFT가 CODE_SESSION
+#     하나로 통합" (SUMMARY_DRAFT는 여기서 질문생성 파이프라인 내부의 옛 요약
+#     서브스텝 명칭이라 /reports의 SUMMARY_DRAFT와는 다른 계보 — REPORT_GENERATION
+#     매핑과 충돌하지 않는다. `OrganizationUsageResponse.java`가 최종 확인.)
+#   - `OrganizationPolicy.java`: "질문 생성·요약이 CODE_SESSION 기능 하나로
+#     통합되면서 티어도 한 값(code_session_tier_code)으로 합쳐졌다" — 의심했던
+#     티어 제약이 오히려 이 매핑을 뒷받침한다(합쳐지기 전엔 question_generation_
+#     tier_code/summary_tier_code 두 컬럼이었다).
+#   - `OrganizationUsageResponse.java`(API 문서, 결정적): "CODE_SESSION(코드 세션
+#     질문 생성)" — ANSWER_EVALUATION은 별도로 "(답변 채점)"이라 명시돼 겹치지 않는다.
+# 세 소스가 전부 같은 결론이라 engine.py의 5개 stamp도 함께 바꾼다.
 FeatureCode = Literal[
     "CODE_ANALYSIS",        # 코드 분석 문서
-    "QUESTION_GENERATION",  # 문제·질문·힌트 동결 생성 -- CODE_SESSION 개명 대상인지 확인 필요(위 주석)
+    "CODE_SESSION",         # 문제·질문·힌트 동결 생성 (v08, 옛 QUESTION_GENERATION)
     "ANSWER_EVALUATION",    # 답변 채점 (세션 중 유일한 호출)
     "CURRICULUM_ANALYSIS",  # 교안 분석
     "REPORT_GENERATION",    # 보고서 서술 (v08, 옛 SUMMARY_DRAFT)
 ]
 
 # 어느 **업무 엔터티**를 처리한 호출인가. featureCode보다 굵은 단위다 — 한 ContextType
-# 안에서 featureCode가 여럿 나온다(SUBMISSION 하나에 CODE_ANALYSIS + QUESTION_GENERATION).
+# 안에서 featureCode가 여럿 나온다(SUBMISSION 하나에 CODE_ANALYSIS + CODE_SESSION).
 #
 # 🔴 옛 값 4개(`ANALYSIS`·`GRADING`·`REPORT`·`CURRICULUM`)는 **전부 v06 CHECK 밖이었다**
 # (2026-08-04 대조). 그대로 두면 네 API의 원장 행이 하나도 안 들어간다. 아래는 v06

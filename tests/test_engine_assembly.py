@@ -156,7 +156,7 @@ def test_usage_is_stamped_with_feature_code(fake_llm):
     raw = engine_mod.RealAnalysisEngine().analyze(REQUEST, _zip())
 
     codes = {u["feature_code"] for u in raw["ai_usage"]}
-    assert codes == {"CODE_ANALYSIS", "QUESTION_GENERATION"}
+    assert codes == {"CODE_ANALYSIS", "CODE_SESSION"}
 
 
 def test_requirement_failure_does_not_kill_the_analysis(monkeypatch, fake_llm):
@@ -207,7 +207,7 @@ def test_failure_keeps_the_ledger(fake_llm, monkeypatch):
 
     # p04-1(분석 문서)이 태운 것 + 터진 p04-3의 것이 함께 있어야 한다.
     assert len(exc.value.ai_usage) > 1
-    assert exc.value.ai_usage[-1]["feature_code"] == "QUESTION_GENERATION"
+    assert exc.value.ai_usage[-1]["feature_code"] == "CODE_SESSION"
 
 
 def test_code_snippet_is_the_whole_file(fake_llm):
