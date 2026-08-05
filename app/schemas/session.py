@@ -176,12 +176,20 @@ class AnswerResult(BaseSchema):
         description="**이 턴에서 문제가 끝났을 때만 채워진다.** 진행 중이면 null. "
                     "`COMPLETED_L4`(L1~L4 완주) · `TERMINATED_AT_L1`~`TERMINATED_AT_L4`"
                     "(그 단계에서 힌트 소진 후 미달. L4는 L3까지 통과하고 마지막에서 막힌 경우다). "
-                    "DB assessment_problem.termination_reason에 그대로 들어간다 — "
-                    "종료 판정은 AI가 소유하므로 백엔드가 커서 변화로 역추론하지 않아도 된다",
+                    "⚠️ **저장할 컬럼이 없다** — 테이블정의서 v06의 assessment_problem에는 "
+                    "termination_reason 컬럼이 없고, assessment_session.end_reason_code는 "
+                    "세션 단위(ALL_PROBLEMS_TERMINAL 등)라 값 집합이 다르다. "
+                    "**진행 신호로 쓰는 값이다**: 이게 null이 아니면 그 문제의 보고서를 "
+                    "생성할 때이고, 문제 3개가 모두 끝나면 세션 end_reason_code를 "
+                    "ALL_PROBLEMS_TERMINAL로 닫으면 된다. 종료 판정은 AI가 소유하므로 "
+                    "백엔드가 커서 변화로 역추론하지 않아도 된다",
     )
     ended_level: AxisCode | None = Field(
         default=None,
         description="문제가 끝난 단계. terminationReason과 짝이고 진행 중이면 null. "
-                    "DB assessment_problem.ended_level",
+                    "⚠️ 저장할 컬럼이 없다 — v06에서 assessment_problem.best_success_stage는 "
+                    "TEAM_SHARED_PROBLEM이면 NULL을 강제하고(SSOT가 ProblemStage다) "
+                    "ended_level 컬럼 자체가 없다. problem_stage 4행에서 파생되는 값이라 "
+                    "저장할 필요도 없다",
     )
     ai_usage: list[AiUsage] = Field(default_factory=list)

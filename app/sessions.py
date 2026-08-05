@@ -299,7 +299,8 @@ def _seek(walk: _Walk, session_id: str, cursor: Cursor | None,
 
 def _to_result(session_id: str, walk: _Walk, turn: TranscriptTurn | None,
                trace_id: str | None, transcript_so_far: list[dict[str, Any]],
-               ended: tuple[str, str] | None = None) -> AnswerResult:
+               ended: tuple[str, str] | None = None,
+               request_key: str | None = None) -> AnswerResult:
     completed = _current_stage(walk) is None
     return AnswerResult(
         session_id=session_id,
@@ -312,8 +313,14 @@ def _to_result(session_id: str, walk: _Walk, turn: TranscriptTurn | None,
         ),
         termination_reason=ended[0] if ended else None,
         ended_level=ended[1] if ended else None,
-        ai_usage=to_ai_usage(walk.usages, "GRADING", session_id,
-                             feature_code="GRADING", trace_id=trace_id),
+        # 🔴 멱등키에 **요청 단위 키(clientRequestId)**를 넣는다. 세션 id만 쓰면
+        # 순번이 요청마다 1부터 다시 시작해 턴끼리 키가 겹치고, DB에서
+        # ai_usage.idempotency_key가 전역 UNIQUE라 두 번째 턴부터 원장이 통째로
+        # 거부된다(실측: 11턴 37행 중 서로 다른 키가 5개뿐이었다).
+        ai_usage=to_ai_usage(walk.usages, "ASSESSMENT_SESSION", session_id,
+                             feature_code="ANSWER_EVALUATION",
+                             idempotency_key=request_key or session_id,
+                             trace_id=trace_id),
     )
 
 
@@ -340,7 +347,8 @@ def submit_answer(session_id: str, req: AnswerSubmit,
     current = _current_stage(walk)
     if current is None:
         # 이미 끝난 세션. 조용히 끝난 상태를 돌려준다(채점할 것이 없다).
-        return _to_result(session_id, walk, None, trace_id, transcript_dicts)
+        return _to_result(session_id, walk, None, trace_id, transcript_dicts,
+                          request_key=f"{session_id}:{req.client_request_id}")
     problem, stage = current
 
     axis_code = stage.get("axis_code")
@@ -379,4 +387,5 @@ def submit_answer(session_id: str, req: AnswerSubmit,
     # transcript 전체를 안 돌려주므로(AnswerResult 자체 계약), 다음 요청에서 클라이언트가
     # 이 turn을 자기 쪽 transcript에 이어붙여 그대로 되돌려 보내는 것이 전제다.
     next_transcript = transcript_dicts + [turn.model_dump(mode="json")]
-    return _remember(key, _to_result(session_id, walk, turn, trace_id, next_transcript, ended))
+    return _remember(key, _to_result(session_id, walk, turn, trace_id, next_transcript, ended,
+                                     request_key=f"{session_id}:{req.client_request_id}"))

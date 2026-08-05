@@ -1062,7 +1062,7 @@
             "enum": [
               "CODE_ANALYSIS",
               "QUESTION_GENERATION",
-              "GRADING",
+              "ANSWER_EVALUATION",
               "CURRICULUM_ANALYSIS",
               "SUMMARY_DRAFT"
             ],
@@ -1076,17 +1076,17 @@
           "contextType": {
             "type": "string",
             "enum": [
-              "ANALYSIS",
-              "GRADING",
-              "REPORT",
-              "CURRICULUM"
+              "SUBMISSION",
+              "ASSESSMENT_SESSION",
+              "REPORT_SNAPSHOT",
+              "CURRICULUM_ANALYSIS"
             ],
             "title": "Contexttype"
           },
           "contextId": {
             "type": "string",
             "title": "Contextid",
-            "description": "작업 PK. 분석이면 분석 jobId"
+            "description": "처리한 업무 엔터티의 PK. SUBMISSION이면 submissionId, ASSESSMENT_SESSION이면 sessionId. ⚠️ REPORT_SNAPSHOT· CURRICULUM_ANALYSIS는 AI가 그 PK를 몰라 jobId가 들어간다 — Spring이 저장 시점에 실제 PK로 교체해야 한다"
           },
           "requestId": {
             "type": "string",
@@ -1100,7 +1100,7 @@
           "idempotencyKey": {
             "type": "string",
             "title": "Idempotencykey",
-            "description": "{contextId}:{contextType}:{attemptNo} 형식"
+            "description": "`{요청 단위 키}:{contextType}:{호출 순번}`. 🔴 DB에서 **전역 UNIQUE**라 요청 단위 키가 요청마다 달라야 한다 — 세션은 clientRequestId, 분석은 submissionId:attemptNo, 보고서는 problemId:scoreRunId, 교안은 versionId:analysisVersion이다"
           },
           "inputTokenCount": {
             "type": "integer",
@@ -1196,6 +1196,13 @@
       },
       "AnalysisDocument": {
         "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Schemaversion",
+            "description": "분석 문서 계약 버전",
+            "default": 1
+          },
           "overview": {
             "type": "string",
             "title": "Overview"
@@ -1493,7 +1500,7 @@
               }
             ],
             "title": "Terminationreason",
-            "description": "**이 턴에서 문제가 끝났을 때만 채워진다.** 진행 중이면 null. `COMPLETED_L4`(L1~L4 완주) · `TERMINATED_AT_L1`~`TERMINATED_AT_L4`(그 단계에서 힌트 소진 후 미달. L4는 L3까지 통과하고 마지막에서 막힌 경우다). DB assessment_problem.termination_reason에 그대로 들어간다 — 종료 판정은 AI가 소유하므로 백엔드가 커서 변화로 역추론하지 않아도 된다"
+            "description": "**이 턴에서 문제가 끝났을 때만 채워진다.** 진행 중이면 null. `COMPLETED_L4`(L1~L4 완주) · `TERMINATED_AT_L1`~`TERMINATED_AT_L4`(그 단계에서 힌트 소진 후 미달. L4는 L3까지 통과하고 마지막에서 막힌 경우다). ⚠️ **저장할 컬럼이 없다** — 테이블정의서 v06의 assessment_problem에는 termination_reason 컬럼이 없고, assessment_session.end_reason_code는 세션 단위(ALL_PROBLEMS_TERMINAL 등)라 값 집합이 다르다. **진행 신호로 쓰는 값이다**: 이게 null이 아니면 그 문제의 보고서를 생성할 때이고, 문제 3개가 모두 끝나면 세션 end_reason_code를 ALL_PROBLEMS_TERMINAL로 닫으면 된다. 종료 판정은 AI가 소유하므로 백엔드가 커서 변화로 역추론하지 않아도 된다"
           },
           "endedLevel": {
             "anyOf": [
@@ -1511,7 +1518,7 @@
               }
             ],
             "title": "Endedlevel",
-            "description": "문제가 끝난 단계. terminationReason과 짝이고 진행 중이면 null. DB assessment_problem.ended_level"
+            "description": "문제가 끝난 단계. terminationReason과 짝이고 진행 중이면 null. ⚠️ 저장할 컬럼이 없다 — v06에서 assessment_problem.best_success_stage는 TEAM_SHARED_PROBLEM이면 NULL을 강제하고(SSOT가 ProblemStage다) ended_level 컬럼 자체가 없다. problem_stage 4행에서 파생되는 값이라 저장할 필요도 없다"
           },
           "aiUsage": {
             "items": {
@@ -1837,7 +1844,7 @@
             "type": "integer",
             "minimum": 1.0,
             "title": "Moduleno",
-            "description": "교안 안에서의 모듈 순서"
+            "description": "교안 안에서의 모듈 순서. DB `curriculum_section.sequence_no`다 (이름만 다르다). 1부터 빈틈없이 증가하고 UNIQUE(분석, 순번)를 만족한다"
           },
           "title": {
             "type": "string",
@@ -1853,6 +1860,22 @@
             "type": "integer",
             "minimum": 1.0,
             "title": "Pageend"
+          },
+          "keywords": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keywords",
+            "description": "DB `curriculum_section.keywords`(JSONB, NOT NULL). 이 구간에서 뽑힌 개념 이름들이다 — 별도 LLM 호출로 만든 값이 아니라 `teaches[].canonicalName`을 모아 둔 것이다. 검색·목록 미리보기용"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "description": "DB `curriculum_section.confidence`(NOT NULL, 0~1). ⚠️ **확률이 아니다.** 모델은 신뢰도를 내지 않는다 — 두 등급뿐이다: 1.0=정상 추출, 0.5=이 구간의 페이지에 걸친 청크가 실패해 개념이 빠졌을 수 있음. `fallbackUsed`가 교안 전체 단위인 데 비해 이 값은 **어느 구간이 부실한지**를 가리킨다. 정렬·경고 표시에만 쓰세요",
+            "default": 1.0
           },
           "teaches": {
             "items": {
@@ -2123,6 +2146,24 @@
             "title": "Questionfocusitemid",
             "description": "요청 focusItems[].id를 그대로 돌려준다. 강사 지정 없이 뽑았으면 null"
           },
+          "title": {
+            "type": "string",
+            "maxLength": 200,
+            "title": "Title",
+            "description": "문제 제목. DB `assessment_problem.title`은 generation_status=GENERATED에서 NOT NULL이다 — 안 보내면 INSERT가 깨진다. 검증하는 교안 개념 이름을 쓴다(개념이 곧 문제의 주제다)"
+          },
+          "snippetKey": {
+            "type": "string",
+            "maxLength": 128,
+            "title": "Snippetkey",
+            "description": "DB `assessment_problem.source_snippet_key` = `submission.code_snippets[].snippet_key`. **두 곳을 잇는 유일한 키다** — 문제는 원문을 중복 저장하지 않고 이 키로 제출의 스니펫을 찾는다. 같은 분석 안에서 유일하고 재분석해도 같은 코드면 같은 값이 나온다"
+          },
+          "codeLanguage": {
+            "type": "string",
+            "maxLength": 30,
+            "title": "Codelanguage",
+            "description": "DB `assessment_problem.code_language`(GENERATED면 NOT NULL). 파일 확장자에서 정한다(JAVA·PYTHON·JAVASCRIPT·YAML …). 모르는 확장자는 `UNKNOWN`이다 — 빈 문자열은 DB CHECK가 막는다"
+          },
           "sourcePath": {
             "type": "string",
             "title": "Sourcepath"
@@ -2141,16 +2182,21 @@
             "title": "Codesnippet",
             "description": "🔴 **문제를 낸 파일 전체다**(2026-08-03 확정). 파편만 주면 학생이 판단할 재료가 없다 — 질문이 주변 코드를 언급하는데 화면엔 선언 한 줄만 뜨는 일이 실제로 났다. 보여줄 구간은 lineStart~lineEnd다. 예외: 파일이 100,000자를 넘으면 파편만 온다(그때도 줄 번호는 파일 기준). **Spring이 다시 자르지 마세요** — 자를 위치는 화면이 정한다"
           },
+          "contentHash": {
+            "type": "string",
+            "title": "Contenthash",
+            "description": "**codeSnippet 전체(파일)의 sha256 hex 64자.** DB `submission.code_snippets[].content_hash`에 그대로 넣는다 — 그 컬럼은 `content`의 무결성 해시라 대상이 파일 전체여야 한다"
+          },
           "evidenceHash": {
             "type": "string",
             "title": "Evidencehash",
-            "description": "🔴 **파편(lineStart~lineEnd 구간)의 sha256 hex 64자다.** codeSnippet 전체의 해시가 아니다 — 파일 전체 기준이면 무관한 한 줄 수정에도 '근거가 바뀌었다'가 되어 판정이 쓸모없어진다. ⚠️ 테이블정의서 evidence_hash 비고('code_snippet 기준 해시')와 어긋나므로 그 문구를 고쳐야 한다"
+            "description": "🔴 **파편(lineStart~lineEnd 구간)의 sha256 hex 64자다.** DB `assessment_problem.code_snippet_hash`에 넣는다. contentHash와 대상이 다르다 — 파일 전체 기준이면 무관한 한 줄 수정에도 '근거가 바뀌었다'가 되어 판정이 쓸모없어진다. 출제 근거가 그대로인지는 이 값으로만 판정할 수 있다"
           },
           "extractorVersion": {
             "type": "integer",
             "exclusiveMinimum": 0.0,
             "title": "Extractorversion",
-            "description": "이 문제를 뽑은 룰 버전. 재현성 근거. **정수다** — assessment_problem.extractor_version이 INTEGER CHECK (> 0)이라 문자열을 보내면 Spring INSERT가 깨진다"
+            "description": "이 문제를 뽑은 룰 버전. 재현성 근거. ⚠️ **테이블정의서 v06에는 assessment_problem.extractor_version이 없다**(옛 정의서에 있던 컬럼이 빠졌다). 재분석 결과가 달라졌을 때 룰이 바뀐 건지 코드가 바뀐 건지를 이 값 하나로 가른다 — 컬럼을 두시거나 버리시거나 백엔드 판단이다"
           },
           "teachId": {
             "anyOf": [
@@ -2187,10 +2233,14 @@
           "problemNo",
           "problemType",
           "priority",
+          "title",
+          "snippetKey",
+          "codeLanguage",
           "sourcePath",
           "lineStart",
           "lineEnd",
           "codeSnippet",
+          "contentHash",
           "evidenceHash",
           "extractorVersion",
           "stages"
@@ -2861,10 +2911,11 @@
           "verdict": {
             "type": "string",
             "enum": [
-              "P",
-              "F"
+              "PASS",
+              "FAIL"
             ],
-            "title": "Verdict"
+            "title": "Verdict",
+            "description": "DB `project_requirement_assessment.result` CHECK와 같은 값이다. 🔴 옛 축약값 'P'/'F'는 폐기했다(2026-08-04) — CHECK가 PENDING/PASS/FAIL이라 Spring이 매번 풀어야 했다. AI는 PENDING을 보내지 않는다(판정을 못 하면 FAIL + note다)"
           },
           "evidence": {
             "anyOf": [
@@ -3040,13 +3091,21 @@
             "type": "string",
             "maxLength": 200,
             "title": "Canonicalname",
-            "description": "표준 개념명"
+            "description": "이 교안에서 실제로 쓰인 개념 표현. `curriculum_teaches_mapping.extracted_name`에 그대로 넣으면 되고, `teaches.canonical_name`은 신규 개념일 때만 같은 값으로 시작한다"
           },
           "normalizedName": {
             "type": "string",
             "maxLength": 200,
             "title": "Normalizedname",
-            "description": "중복 판정용 정규화 이름"
+            "description": "중복 판정용 정규화 이름. ⚠️ AI는 공백·대소문자만 정리한다 — 활성 개념 부분 UNIQUE의 판정 주체가 Spring이므로 **기관 규칙(NFKC 등)으로 다시 정규화하는 쪽이 안전하다**"
+          },
+          "confidence": {
+            "type": "number",
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "description": "DB `curriculum_teaches_mapping.confidence`(NOT NULL, 0~1). 구간 confidence와 같은 의미의 거친 등급이다 — 확률이 아니다",
+            "default": 1.0
           },
           "canonicalDescription": {
             "anyOf": [
@@ -3122,7 +3181,7 @@
           "normalizedName"
         ],
         "title": "Teach",
-        "description": "교안에서 뽑은 학습 개념 하나. DB teaches 대응."
+        "description": "교안에서 뽑은 학습 개념 하나. **두 테이블에 나뉘어 들어간다.**\n\n    teaches                     canonicalName · normalizedName · canonicalDescription\n    curriculum_teaches_mapping  extractedName(=canonicalName) · descriptionPage* ·\n                                confidence · kind · evidence · siblingNames\n\n⚠️ **AI는 기관 표준명을 정할 수 없다.** 교안 한 권만 보기 때문이다 — 여기서 나오는\n`canonicalName`은 \"이 교안에서 실제로 쓰인 표현\"이고 그게 곧\n`curriculum_teaches_mapping.extracted_name`이다. `teaches.canonical_name`은\n**개념을 새로 만들 때만** 같은 값으로 시작하고, 이후 기존 개념과 묶을지(MERGED)\n표준명을 뭘로 쓸지는 기관 원장을 가진 Spring이 정한다."
       },
       "TranscriptTurn": {
         "properties": {

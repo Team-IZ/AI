@@ -11,31 +11,35 @@ from pydantic import Field, model_validator
 
 from app.schemas.common import BaseSchema
 
-# 어느 기능이 호출했나. DB ai_usage.feature_code CHECK와 같은 집합.
-# SESSION_DIALOG는 CHECK에 남아 있지만 쓰지 않는다 — 세션 중 LLM 호출은 채점뿐이다.
+# 어느 기능이 호출했나. **DB ai_usage.feature_code CHECK와 글자까지 같은 집합이다**
+# (테이블정의서 v06 기준, 2026-08-04 정렬).
+#
+# 🔴 옛 `GRADING`은 폐기했다 — v06 CHECK에 없는 값이라 채점 호출의 원장 행이
+# 전부 INSERT에서 거부됐을 자리다. 정식 이름은 `ANSWER_EVALUATION`이다.
 FeatureCode = Literal[
     "CODE_ANALYSIS",        # 코드 분석 문서
     "QUESTION_GENERATION",  # 문제·질문·힌트 동결 생성
-    "GRADING",              # 답변 채점 (세션 중 유일한 호출)
+    "ANSWER_EVALUATION",    # 답변 채점 (세션 중 유일한 호출)
     "CURRICULUM_ANALYSIS",  # 교안 분석
     "SUMMARY_DRAFT",        # 보고서 서술
 ]
 
-# 어느 작업에 딸린 호출인가. featureCode보다 굵은 단위다 — 한 ContextType 안에서
-# featureCode가 여럿 나올 수 있다(ANALYSIS 하나에 CODE_ANALYSIS + QUESTION_GENERATION).
+# 어느 **업무 엔터티**를 처리한 호출인가. featureCode보다 굵은 단위다 — 한 ContextType
+# 안에서 featureCode가 여럿 나온다(SUBMISSION 하나에 CODE_ANALYSIS + QUESTION_GENERATION).
 #
-# 필드명이 `source_type`/`source_id` → `context_type`/`context_id`로 바뀌었다
-# (2026-08-03). **아래 값 집합으로 확정됐다** (2026-08-04 백엔드 회신).
+# 🔴 옛 값 4개(`ANALYSIS`·`GRADING`·`REPORT`·`CURRICULUM`)는 **전부 v06 CHECK 밖이었다**
+# (2026-08-04 대조). 그대로 두면 네 API의 원장 행이 하나도 안 들어간다. 아래는 v06
+# CHECK 8종 중 AI가 쓰는 4개다 — 값은 테이블 이름이지 기능 이름이 아니다.
 #
-# `PROBLEM_STAGE`(테이블 이름) 대신 `GRADING`(세션 단위)으로 간다. 전자는 `context_id`가
-# `problem_stage_id`여야 하는데 **AI는 그 값을 모른다** — 세션 요청에 오는 것은
-# sessionId·problemId·axisCode뿐이다. 백엔드가 요청에 `problemStageId`를 실어 주면
-# AI는 반향 한 줄로 바꿀 수 있다. 백엔드가 추가 작업 없는 세션 단위를 택했다.
+# ⚠️ **contextId의 주인이 둘로 갈린다.**
+#   SUBMISSION·ASSESSMENT_SESSION — AI가 요청에서 받은 실제 PK를 넣는다. 그대로 쓰면 된다.
+#   REPORT_SNAPSHOT·CURRICULUM_ANALYSIS — **AI는 그 PK를 받은 적이 없다.** 지금은 AI
+#     내부 jobId가 들어간다. 저장할 때 Spring이 자기가 아는 PK로 교체해야 한다.
 ContextType = Literal[
-    "ANALYSIS",     # POST /analyses                 contextId = 분석 jobId
-    "GRADING",      # POST /sessions/{id}/answers    contextId = sessionId
-    "REPORT",       # POST /reports                  contextId = 보고서 jobId
-    "CURRICULUM",   # POST /curricula                contextId = 교안 jobId
+    "SUBMISSION",           # POST /analyses               contextId = submissionId ✅
+    "ASSESSMENT_SESSION",   # POST /sessions/{id}/answers  contextId = sessionId ✅
+    "REPORT_SNAPSHOT",      # POST /reports                contextId = 보고서 jobId ⚠️ Spring이 교체
+    "CURRICULUM_ANALYSIS",  # POST /curricula              contextId = 교안 jobId ⚠️ Spring이 교체
 ]
 
 # 옛 이름. 다른 모듈이 아직 import할 수 있어 남겨둔다.
@@ -64,11 +68,19 @@ class AiUsage(BaseSchema):
 
     # 어느 작업에 딸린 호출인가. 다형 참조라 FK가 없다.
     context_type: ContextType
-    context_id: str = Field(description="작업 PK. 분석이면 분석 jobId")
+    context_id: str = Field(
+        description="처리한 업무 엔터티의 PK. SUBMISSION이면 submissionId, "
+                    "ASSESSMENT_SESSION이면 sessionId. ⚠️ REPORT_SNAPSHOT· "
+                    "CURRICULUM_ANALYSIS는 AI가 그 PK를 몰라 jobId가 들어간다 — "
+                    "Spring이 저장 시점에 실제 PK로 교체해야 한다",
+    )
     request_id: str
     trace_id: str = Field(description="요청 헤더 X-Trace-Id를 그대로 잇는다")
     idempotency_key: str = Field(
-        description="{contextId}:{contextType}:{attemptNo} 형식"
+        description="`{요청 단위 키}:{contextType}:{호출 순번}`. "
+                    "🔴 DB에서 **전역 UNIQUE**라 요청 단위 키가 요청마다 달라야 한다 — "
+                    "세션은 clientRequestId, 분석은 submissionId:attemptNo, "
+                    "보고서는 problemId:scoreRunId, 교안은 versionId:analysisVersion이다",
     )
 
     input_token_count: int = Field(ge=0)

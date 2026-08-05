@@ -257,9 +257,11 @@ def test_problem_rejects_wrong_stage_order():
 
     base = {
         "problemId": "p-1", "problemNo": 1, "problemType": "RISK_POINT",
+        "title": "하드코딩된 키", "snippetKey": "p1-" + "a" * 16,
+        "codeLanguage": "PYTHON",
         "priority": 0.9, "sourcePath": "app/main.py",
         "lineStart": 10, "lineEnd": 20,
-        "codeSnippet": "x = 1", "evidenceHash": "a" * 64,
+        "codeSnippet": "x = 1", "contentHash": "a" * 64, "evidenceHash": "a" * 64,
         "extractorVersion": 1,
     }
 
@@ -292,8 +294,10 @@ def test_extractor_version_must_be_a_positive_integer():
 
     base = {
         "problemId": "p-1", "problemNo": 1, "problemType": "RISK_POINT",
+        "title": "하드코딩된 키", "snippetKey": "p1-" + "a" * 16,
+        "codeLanguage": "PYTHON",
         "priority": 0.9, "sourcePath": "app/main.py", "lineStart": 10, "lineEnd": 20,
-        "codeSnippet": "x = 1", "evidenceHash": "a" * 64,
+        "codeSnippet": "x = 1", "contentHash": "a" * 64, "evidenceHash": "a" * 64,
         "stages": [stage(a) for a in ("L1", "L2", "L3", "L4")],
     }
 

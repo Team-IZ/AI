@@ -198,7 +198,7 @@ def test_ai_usage_is_reported_for_reports(monkeypatch):
 
     assert len(job["aiUsage"]) == 1
     assert job["aiUsage"][0]["featureCode"] == "SUMMARY_DRAFT"
-    assert job["aiUsage"][0]["contextType"] == "REPORT"
+    assert job["aiUsage"][0]["contextType"] == "REPORT_SNAPSHOT"
     assert job["aiUsage"][0]["traceId"] == "trace-9"        # 헤더가 원장으로 이어진다
     assert job["aiUsage"][0]["outputTokenCount"] == 120
 

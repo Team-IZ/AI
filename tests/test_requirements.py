@@ -40,7 +40,7 @@ def test_results_map_one_to_one(monkeypatch):
     out = requirements.judge(REQS, FILES, model_code="m")
 
     assert [r["requirement_id"] for r in out.results] == ["r1", "r2", "r3"]
-    assert [r["verdict"] for r in out.results] == ["P", "F", "F"]
+    assert [r["verdict"] for r in out.results] == ["PASS", "FAIL", "FAIL"]
     for r in out.results:
         RequirementResult.model_validate(r)
 
@@ -57,7 +57,7 @@ def test_shuffled_results_are_matched_by_text(monkeypatch):
     out = requirements.judge(REQS, FILES, model_code="m")
 
     assert {r["requirement_id"]: r["verdict"] for r in out.results} == {
-        "r1": "P", "r2": "F", "r3": "F",
+        "r1": "PASS", "r2": "FAIL", "r3": "FAIL",
     }
 
 
@@ -73,8 +73,8 @@ def test_missing_result_does_not_shift_the_rest(monkeypatch):
     out = requirements.judge(REQS, FILES, model_code="m")
 
     verdicts = {r["requirement_id"]: r["verdict"] for r in out.results}
-    assert verdicts["r2"] == "F"          # 밀린 값을 쓰지 않았다
-    assert verdicts["r3"] == "P"          # r3은 제 자리를 찾았다
+    assert verdicts["r2"] == "FAIL"          # 밀린 값을 쓰지 않았다
+    assert verdicts["r3"] == "PASS"          # r3은 제 자리를 찾았다
     assert out.unmatched == ["r2"]
     assert "찾지 못했" in [r for r in out.results if r["requirement_id"] == "r2"][0]["note"]
 
@@ -91,7 +91,7 @@ def test_unlabeled_result_falls_back_to_position(monkeypatch):
 
     out = requirements.judge(REQS, FILES, model_code="m")
 
-    assert {r["requirement_id"]: r["verdict"] for r in out.results}["r2"] == "P"
+    assert {r["requirement_id"]: r["verdict"] for r in out.results}["r2"] == "PASS"
     assert out.unmatched == []
 
 
@@ -105,7 +105,7 @@ def test_non_p_verdicts_become_fail(monkeypatch):
 
     out = requirements.judge(REQS, FILES, model_code="m")
 
-    assert [r["verdict"] for r in out.results] == ["F", "F", "F"]
+    assert [r["verdict"] for r in out.results] == ["FAIL", "FAIL", "FAIL"]
 
 
 def test_evidence_is_flattened_to_one_line(monkeypatch):
@@ -150,7 +150,7 @@ def test_grounded_evidence_keeps_p_and_uses_real_line_numbers(monkeypatch):
 
     out = requirements.judge(REQS[:1], FILES, model_code="m")
 
-    assert out.results[0]["verdict"] == "P"
+    assert out.results[0]["verdict"] == "PASS"
     assert out.results[0]["evidence"] == "app/pay.py:2 — validate(order)"  # 999가 아니라 실제 2행
 
 
@@ -164,7 +164,7 @@ def test_fabricated_quote_downgrades_p_to_f(monkeypatch):
 
     out = requirements.judge(REQS[:1], FILES, model_code="m")
 
-    assert out.results[0]["verdict"] == "F"
+    assert out.results[0]["verdict"] == "FAIL"
     assert "근거 코드를 확인할 수 없어" in out.results[0]["note"]
 
 
@@ -177,25 +177,25 @@ def test_missing_file_downgrades_p_to_f(monkeypatch):
 
     out = requirements.judge(REQS[:1], FILES, model_code="m")
 
-    assert out.results[0]["verdict"] == "F"
+    assert out.results[0]["verdict"] == "FAIL"
 
 
 def test_p_with_no_evidence_at_all_downgrades_to_f(monkeypatch):
-    """evidence 자체가 없는 P(그라운딩 이전의 동작)도 이제는 F로 강등된다."""
+    """evidence 자체가 없는 P(그라운딩 이전의 동작)도 이제는 FAIL로 강등된다."""
     _fake(monkeypatch, {"results": [_result("결제 전에 주문을 검증한다", "P")]})
 
     out = requirements.judge(REQS[:1], FILES, model_code="m")
 
-    assert out.results[0]["verdict"] == "F"
+    assert out.results[0]["verdict"] == "FAIL"
 
 
 def test_f_verdict_is_never_grounded(monkeypatch):
-    """F 판정은 evidence 검증 자체를 거치지 않는다(근거가 없어도 그대로 F, note 보존)."""
+    """F 판정은 evidence 검증 자체를 거치지 않는다(근거가 없어도 그대로 FAIL, note 보존)."""
     _fake(monkeypatch, {"results": [
         _result("결제 전에 주문을 검증한다", "F", evidence=None, note="구현 없음"),
     ]})
 
     out = requirements.judge(REQS[:1], FILES, model_code="m")
 
-    assert out.results[0]["verdict"] == "F"
+    assert out.results[0]["verdict"] == "FAIL"
     assert out.results[0]["note"] == "구현 없음"

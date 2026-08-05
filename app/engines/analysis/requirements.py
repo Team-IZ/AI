@@ -20,7 +20,10 @@ from typing import Any
 from app.engines.analysis import fragments, stages
 
 # 근거를 못 찾았을 때의 판정. 프롬프트 규칙과 같다 — 추정으로 P를 주지 않는다.
-_FAIL = "F"
+# 🔴 DB `project_requirement_assessment.result` CHECK가 PENDING/PASS/FAIL이다
+# (테이블정의서 v06). 옛 축약값 'P'/'F'를 보내면 Spring이 매번 두 글자를 풀어야 했다.
+_PASS = "PASS"
+_FAIL = "FAIL"
 
 
 @dataclass
@@ -84,8 +87,13 @@ def _index_results(raw: Any) -> tuple[dict[str, dict[str, Any]], list[dict[str, 
 
 
 def _verdict(item: dict[str, Any] | None) -> str:
-    """P가 아닌 것은 전부 F다. 모델이 'PASS'·'partial' 같은 값을 줘도 마찬가지."""
-    return "P" if str((item or {}).get("verdict", "")).strip().upper() == "P" else _FAIL
+    """모델이 낸 `P`만 통과다. `PASS`·`partial` 같은 값은 전부 FAIL로 본다.
+
+    프롬프트가 `P`/`F` 한 글자를 요구하므로 다른 값이 오면 모델이 형식을 어긴 것이고,
+    그때의 판정은 믿을 근거가 없다. **바깥으로 나가는 값만 PASS/FAIL로 쓴다**
+    (DB `project_requirement_assessment.result` CHECK) — 모델 어휘와 계약 어휘는 다르다.
+    """
+    return _PASS if str((item or {}).get("verdict", "")).strip() == "P" else _FAIL
 
 
 def judge(requirements: list[dict[str, Any]], files: dict[str, str], *,
@@ -140,7 +148,7 @@ def judge(requirements: list[dict[str, Any]], files: dict[str, str], *,
         # 최종 착지점이 여기였다. P는 evidence.quote가 evidence.file에 실제로 있을 때만
         # 살아남는다; 못 찾으면(지어낸 코드거나 file이 틀렸으면) F로 강등한다. F는 애초에
         # 근거가 필요 없으므로 이 검사를 거치지 않는다.
-        if verdict == "P":
+        if verdict == _PASS:
             ev = evidence_raw if isinstance(evidence_raw, dict) else {}
             located = fragments.locate_symbol(files, ev.get("file"), str(ev.get("quote") or ""))
             if not located.get("valid"):

@@ -111,7 +111,7 @@ def test_ai_usage_is_reported_for_curricula(monkeypatch):
 
     assert len(job["aiUsage"]) == 1
     assert job["aiUsage"][0]["featureCode"] == "CURRICULUM_ANALYSIS"
-    assert job["aiUsage"][0]["contextType"] == "CURRICULUM"
+    assert job["aiUsage"][0]["contextType"] == "CURRICULUM_ANALYSIS"
     assert job["aiUsage"][0]["traceId"] == "trace-8"        # 헤더가 원장으로 이어진다
 
 

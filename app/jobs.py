@@ -91,7 +91,11 @@ def run_analysis(
         raw = engine.analyze(body.model_dump(), zip_bytes)
         # 원장은 결과와 별개다. **검증 실패로 결과를 버려도 태운 토큰은 남긴다** —
         # 그래서 model_validate보다 먼저 떼어낸다.
-        job.ai_usage = to_ai_usage(raw.pop("ai_usage", []), "ANALYSIS", job_id,
+        # contextId는 jobId가 아니라 **submissionId**다 — v06 ai_usage.context_type이
+        # 처리 대상 엔터티(SUBMISSION)를 가리키기 때문이다. jobId를 넣으면 Spring이
+        # 비용을 제출에 귀속시킬 수가 없다. 요청에 없으면 그때만 jobId로 물러난다.
+        job.ai_usage = to_ai_usage(raw.pop("ai_usage", []), "SUBMISSION",
+                                   body.submission_id or job_id,
                                    idempotency_key=idempotency_key, trace_id=trace_id)
         result = AnalysisResult.model_validate(raw)  # 계약 위반은 여기서 예외
 
@@ -127,7 +131,8 @@ def run_analysis(
         # 집계한다. AnalysisFailed가 실패 지점까지의 usage를 들고 온다.
         burned = getattr(exc, "ai_usage", None)
         if burned and not job.ai_usage:
-            job.ai_usage = to_ai_usage(burned, "ANALYSIS", job_id,
+            job.ai_usage = to_ai_usage(burned, "SUBMISSION",
+                                       body.submission_id or job_id,
                                        idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)
