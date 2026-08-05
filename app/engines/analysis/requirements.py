@@ -132,10 +132,30 @@ def judge(requirements: list[dict[str, Any]], files: dict[str, str], *,
             continue
 
         note = str(item.get("note") or "").strip() or None
+        verdict = _verdict(item)
+        evidence_raw = item.get("evidence")
+        # H4-dev (redteam audit, 2026-08-05): decision_points(analysis_doc.py)/topics(topics.py)
+        # 둘 다 fragments.locate_symbol로 실제 소스와 대조하는데 이 판정만 모델의 evidence를
+        # 무검증으로 채택했다 -- 제출 코드에 가짜 근거를 심어 P를 유도하는 프롬프트 인젝션의
+        # 최종 착지점이 여기였다. P는 evidence.quote가 evidence.file에 실제로 있을 때만
+        # 살아남는다; 못 찾으면(지어낸 코드거나 file이 틀렸으면) F로 강등한다. F는 애초에
+        # 근거가 필요 없으므로 이 검사를 거치지 않는다.
+        if verdict == "P":
+            ev = evidence_raw if isinstance(evidence_raw, dict) else {}
+            located = fragments.locate_symbol(files, ev.get("file"), str(ev.get("quote") or ""))
+            if not located.get("valid"):
+                verdict = _FAIL
+                reason = located.get("reason", "")
+                note = f"근거 코드를 확인할 수 없어 F로 강등({reason})" + (f" -- {note}" if note else "")
+            else:
+                # 모델이 스스로 센 lines가 아니라 실제로 산정된 위치로 교체한다(fragments.py의
+                # "산정된 사실 vs LLM의 주장" 분리 원칙 -- analysis_doc.py/topics.py와 동일).
+                evidence_raw = {**ev, "file": located["file"], "lines": [located["line_start"], located["line_end"]]}
+
         results.append({
             "requirement_id": req_id,
-            "verdict": _verdict(item),
-            "evidence": _format_evidence(item.get("evidence")),
+            "verdict": verdict,
+            "evidence": _format_evidence(evidence_raw),
             "note": note,
         })
 
