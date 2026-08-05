@@ -36,7 +36,7 @@ class InterviewBriefItemResult:
     question_text: str
     question_rationale: str
     suggested_order: int
-    interview_source_id: str
+    interview_source_id: str | None
 
 
 @dataclass
@@ -232,10 +232,22 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         if not isinstance(raw, dict):
             raise stages.StageError(f"ib-1: items 원소가 객체가 아닙니다: {raw!r}", result.usages)
 
-        source_id = str(raw.get("interviewSourceId") or "")
-        if source_id not in allowed_ids:
+        # D-ib3 (2026-08-05, 실LLM 호출로 발견): priorInterviews/observationNotes/
+        # briefContext는 명세(§4.1 ⑥⑦)에 애초에 id가 없다. 그런데 §6.2는 그 근거로
+        # 라포 질문을 만들라고 지시한다 -- "근거는 쓰되 id는 반드시 붙여라"가 동시에
+        # 강제되면 그런 질문에서 모델이 없는 id를 지어낼 수밖에 없다(실측: 관찰 메모
+        # 하나만 근거인 질문에서 'src-observer-note'를 지어냄, 요청에 없던 값).
+        #   WHY: "안 지어냄"과 "정직하게 비움"을 구분해야 한다 -- source_id가 아예
+        #   없으면(None) 근거를 안 댄 것뿐이라 위조가 아니다.
+        #   COST: 이제 매 항목이 interviewSourceId를 갖는다는 보장이 사라진다 --
+        #   백엔드가 이 필드를 optional로 받아야 한다(스키마에 이미 반영).
+        #   EXIT: priorInterviews/observationNotes에도 명세가 id를 부여하게 되면
+        #   이 예외를 없애고 다시 전원 필수로 되돌릴 수 있다.
+        raw_source_id = raw.get("interviewSourceId")
+        source_id = str(raw_source_id).strip() if raw_source_id else None
+        if source_id is not None and source_id not in allowed_ids:
             # H4-dev(develop app/engines/analysis/requirements.py)와 같은 원칙: 모델이
-            # 만들어낸 참조를 그대로 믿지 않는다. 요청에 없던 값이면 지어낸 것이다.
+            # 만들어낸 참조를 그대로 믿지 않는다. 값을 댔는데 요청에 없으면 지어낸 것이다.
             raise stages.StageError(
                 f"ib-1: 모델이 요청에 없는 interviewSourceId를 지어냈습니다: {source_id!r}",
                 result.usages,

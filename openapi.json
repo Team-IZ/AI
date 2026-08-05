@@ -2518,17 +2518,23 @@
             "title": "Suggestedorder"
           },
           "interviewSourceId": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Interviewsourceid",
-            "description": "요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다"
+            "description": "요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. priorInterviews/observationNotes/briefContext는 명세상 id 자체가 없어 그 근거만으로 만든 라포 질문은 null이 정상이다(engine이 지어낸 값과 정직한 null을 구분해서 검증한다)"
           }
         },
         "type": "object",
         "required": [
           "questionText",
           "questionRationale",
-          "suggestedOrder",
-          "interviewSourceId"
+          "suggestedOrder"
         ],
         "title": "InterviewBriefItem",
         "description": "체크리스트 항목 하나. §5."

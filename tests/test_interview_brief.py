@@ -137,6 +137,22 @@ def test_fabricated_interview_source_id_is_rejected(monkeypatch):
         engine.generate(InterviewBriefRequest.model_validate(_request()))
 
 
+def test_null_interview_source_id_is_accepted_not_fabrication(monkeypatch):
+    """D-ib3(실LLM 호출로 발견): priorInterviews/observationNotes/briefContext는
+    명세상 id가 없다. 그 근거만으로 만든 라포 질문이 interviewSourceId를 null로
+    두는 건 정직한 미기재이지 위조가 아니다 -- 빈 문자열/None 둘 다 허용해야 한다."""
+    items = _four_items()
+    items[0]["interviewSourceId"] = None
+    del items[1]["interviewSourceId"]  # 아예 필드 자체를 생략한 경우도 허용
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
+
+    result = engine.generate(InterviewBriefRequest.model_validate(_request()))
+
+    assert result.items[0].interview_source_id is None
+    assert result.items[1].interview_source_id is None
+    assert result.items[2].interview_source_id == "src-stage-1"  # 나머지는 정상 그대로
+
+
 def test_too_few_items_is_rejected(monkeypatch):
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()[:1]})
 

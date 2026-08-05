@@ -243,8 +243,12 @@ class InterviewBriefItem(BaseSchema):
         description="매니저만 보는 근거. 어떤 데이터에서 나왔는지 명시",
     )
     suggested_order: int = Field(ge=1)
-    interview_source_id: str = Field(
-        description="요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다",
+    interview_source_id: str | None = Field(
+        default=None,
+        description="요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. "
+                    "priorInterviews/observationNotes/briefContext는 명세상 id 자체가 없어 "
+                    "그 근거만으로 만든 라포 질문은 null이 정상이다(engine이 지어낸 값과 "
+                    "정직한 null을 구분해서 검증한다)",
     )
 
 
