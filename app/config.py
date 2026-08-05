@@ -14,6 +14,10 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # 개발단계 시 0, 계약 안정시 v1
 API_V0_PREFIX = "/api/v0"
 
+# 면담 브리프 전용. 명세서(`IZ-Get_면담브리프_생성API_명세서_v08.md`) §4가 이 경로를
+# 그대로 지정한다 -- 다른 4개 엔드포인트와 버전 축이 분리된 별도 계약이라 접두사도 다르다.
+API_INTERNAL_V1_PREFIX = "/internal/v1"
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -51,6 +55,10 @@ class Settings(BaseSettings):
     model_code_analysis: str = "nvidia/nemotron-3-ultra-550b-a55b"
     model_code_session: str = "deepseek-ai/deepseek-v4-flash"
     model_code_curriculum: str = "minimaxai/minimax-m3"
+    # 면담 브리프: 요청에 providerModelCode 필드 자체가 없다(명세 §4.1 -- 다른 4개
+    # 엔드포인트와 달리 operator가 모델을 못 고른다). 채점과 동일 모델을 기본값으로 --
+    # 자연스러운 한국어 생성으로 12종 실측 중 유일하게 검증된 값(위 model_code_session 주석).
+    model_code_interview_brief: str = "deepseek-ai/deepseek-v4-flash"
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 

@@ -22,6 +22,9 @@ _VENDOR = Path(__file__).parent / "vendor"
 # 합치면 어느 쪽 갱신인지 구분이 사라지고 SOURCE.md의 기준 커밋도 하나만 남는다.
 _MANIFEST = _VENDOR / "prompt_manifest.json"            # p04 · feat/poc_full
 _CURRICULUM_MANIFEST = _VENDOR / "curriculum_manifest.json"   # p01 · feat/pdf_analysis
+# 면담 브리프(ib)는 poc_full에 대응물이 없는 develop 전용 기능이라 vendor/에 안 둔다 --
+# vendor 재동기화(단순 복사) 대상에 섞이면 다음 동기화 때 조용히 지워진다.
+_INTERVIEW_BRIEF_MANIFEST = Path(__file__).parent.parent / "interview_brief_manifest.json"
 
 # ```json ... ``` 울타리. JSON 모드를 켜도 모델이 가끔 감싸서 준다.
 _FENCE = re.compile(r"^```(?:json)?\s*|\s*```$")
@@ -56,7 +59,7 @@ def _stages_by_id() -> dict[str, dict[str, Any]]:
     vendor 사정이지 우리 로직이 아니다.
     """
     found: dict[str, dict[str, Any]] = {}
-    for path in (_MANIFEST, _CURRICULUM_MANIFEST):
+    for path in (_MANIFEST, _CURRICULUM_MANIFEST, _INTERVIEW_BRIEF_MANIFEST):
         if not path.exists():
             continue
         data = json.loads(path.read_text(encoding="utf-8"))

@@ -32,13 +32,15 @@ def test_every_endpoint_is_published():
 
     assert "/api/health" in published
     for path in ("/api/v0/analyses", "/api/v0/sessions/{session_id}/answers",
-                 "/api/v0/reports", "/api/v0/curricula"):
+                 "/api/v0/reports", "/api/v0/curricula",
+                 "/internal/v1/interview-brief:generate"):
         assert path in published, path
 
     # 세션은 무상태다(§T11 B) — 시작·조회·복원 3개가 사라져 8개다.
     assert "/api/v0/sessions" not in published
     assert "/api/v0/sessions/{session_id}/restore" not in published
-    assert len(published) == 8
+    # 면담 브리프(명세서 v08)가 /internal/v1 축으로 하나 늘어 9개다.
+    assert len(published) == 9
 
 
 def test_frozen_contract_is_visible_in_the_spec():

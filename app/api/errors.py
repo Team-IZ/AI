@@ -13,7 +13,7 @@ from fastapi.responses import JSONResponse
 
 class ApiError(Exception):
     """ 우리 코드에서 던지는 에러. 아래 핸들러가 계약 형태로 변환 """
-    
+
     def __init__(
         self, status_code: int, error: str, message: str, retryable: bool = False
     ) -> None:
@@ -21,20 +21,39 @@ class ApiError(Exception):
         self.error = error
         self.message = message
         self.retryable = retryable
-        
+
+
+class InterviewBriefError(Exception):
+    """면담 브리프 전용 에러. 명세서 §5.2 계약이 다른 4개 엔드포인트와 다르다 --
+    {failureCode, message} 평탄 구조이고 retryable 필드가 없다(다른 뜻으로 별도
+    계약이라 ApiError를 재사용하지 않는다)."""
+
+    def __init__(self, status_code: int, failure_code: str, message: str) -> None:
+        self.status_code = status_code
+        self.failure_code = failure_code
+        self.message = message
+
+
 def _body(error: str, message: str, retryable: bool) -> dict:
     return {"error": error, "message": message, "retryable": retryable}
 
 def register_error_handlers(app: FastAPI) -> None:
     """앱에 예외 핸들러 등록, main.py에서 한 번 호출"""
-    
+
     @app.exception_handler(ApiError)
     async def _handle_api_error(request: Request, exc: ApiError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status_code,
             content=_body(exc.error, exc.message, exc.retryable)
         )
-    
+
+    @app.exception_handler(InterviewBriefError)
+    async def _handle_interview_brief_error(request: Request, exc: InterviewBriefError) -> JSONResponse:
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"failureCode": exc.failure_code, "message": exc.message},
+        )
+
     @app.exception_handler(RequestValidationError)
     async def _handle_validation_error(
         request: Request, exc: RequestValidationError
