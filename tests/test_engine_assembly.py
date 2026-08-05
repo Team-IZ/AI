@@ -259,6 +259,32 @@ def test_references_are_filled(fake_llm):
     assert curriculum.path is None                         # 교안 근거는 코드 라인이 없다
 
 
+def test_prefetched_root_skips_materialize(monkeypatch, tmp_path, fake_llm):
+    """analysisInput 경로(D2, jobs._run_via_analysis_input)에서는 엔진이 스스로
+
+    클론/압축해제하지 않고 이미 fetch된 경로를 그대로 스캔해야 한다 -- 안 그러면
+    검증했던 코드와 다른 코드(브랜치가 그 사이 움직인)를 분석하게 된다.
+    """
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "pay.py").write_text(SOURCE)
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("prefetched_root가 있으면 materialize()를 부르면 안 된다")
+
+    monkeypatch.setattr(engine_mod.materialize, "materialize", _boom)
+
+    raw = engine_mod.RealAnalysisEngine().analyze(
+        {**REQUEST, "method": "GITHUB_URL"}, None, prefetched_root=str(tmp_path),
+    )
+    raw.pop("ai_usage")
+    result = AnalysisResult.model_validate(raw)
+
+    assert result.problems[0].source_path == "app/pay.py"
+    # prefetched_root는 git repo가 아닐 수도 있다 -- head_sha()가 조용히 None으로
+    # 물러나야지 여기서 터지면 안 된다(materialize.head_sha의 기존 계약).
+    assert result.commit_sha is None
+
+
 def test_old_reference_types_are_gone():
     """옛 값을 보내면 새 정의서 CHECK 에 걸려 INSERT 가 깨진다."""
     from app.schemas.analysis import ReferenceType

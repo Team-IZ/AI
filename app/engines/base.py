@@ -9,12 +9,17 @@ from typing import Any, Protocol
 
 class AnalysisEngine(Protocol):
     def analyze(
-        self, request: dict[str, Any], zip_bytes: bytes | None = None
+        self, request: dict[str, Any], zip_bytes: bytes | None = None,
+        *, prefetched_root: str | None = None,
     ) -> dict[str, Any]:
         """ 분석 실행. input: dict, output: dict
-        
+
         순수하게 파이썬 dict만 주고 받기
         - request: body.model_dump() 결과 (snake_case 키)
         - zip_bytes: ZIP 업로드 방식일 떄만, GITHUB_URL 이면 None
+        - prefetched_root: analysisInput 경로(D2 재fetch, jobs._run_via_analysis_input)로
+          이미 fetch된 스캔 루트. 있으면 엔진 자신의 materialize() 호출을 건너뛰고
+          이 경로를 그대로 스캔한다 -- D2가 "검증했던 바로 그 코드"를 보장하는 지점이
+          여기다(엔진이 따로 클론하면 브랜치가 그 사이 움직인 새 코드를 볼 수 있다).
         - 반환: AnalysisResult 스키마에 대응하는 snake_case dict
         """

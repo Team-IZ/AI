@@ -152,7 +152,7 @@ def refetch_pinned(descriptor: Mapping[str, Any]) -> Iterator[FetchedInput]:
 
         if expected_hash and result.input_hash != expected_hash:
             raise FetchError(
-                "FETCH_FAILED",
+                "INPUT_HASH_MISMATCH",
                 "재fetch한 코드가 검증했던 입력과 다릅니다(inputHash 불일치) -- "
                 "브랜치가 그 사이 바뀌었을 수 있습니다",
             )

@@ -7,7 +7,9 @@
 import uuid
 
 from datetime import datetime, timezone
+from typing import Any
 
+from app.engines.analysis import fetch as fetch_engine
 from app.engines.base import AnalysisEngine
 from app.schemas.analysis import AnalysisJobStatus, AnalysisRequest, AnalysisResult
 from app.usage import to_ai_usage
@@ -38,6 +40,32 @@ def create_job(body: AnalysisRequest, idempotency_key: str | None) -> AnalysisJo
         _job_id_by_idempotency_key[idempotency_key] = job.job_id
     return job
 
+def _run_via_analysis_input(body: AnalysisRequest, engine: AnalysisEngine) -> dict[str, Any]:
+    """D2 -- analysisInput 서술자로 검증했던 그 코드를 재fetch해서 분석한다.
+
+    `refetch_pinned()`의 `with` 블록 **안에서** `engine.analyze()`를 부른다 -- 블록을
+    빠져나가면 디렉터리가 지워지므로(D2/§3.3 유지), 엔진이 스캔을 끝내기 전에 지워지면
+    안 된다.
+    """
+    ref = body.analysis_input
+    descriptor = {
+        "method": ref.method,
+        "repository_url": ref.repository_url,
+        "resolved_branch": ref.resolved_branch,
+        "head_commit_sha": ref.head_commit_sha,
+        "download_url": ref.download_url,
+        "storage_uri": ref.storage_uri,
+        "input_hash": ref.input_hash,
+        "git_history": [c.model_dump() for c in ref.git_history] if ref.git_history else None,
+    }
+    request = body.model_dump()
+    # analysisInput 경로에선 최상위 method가 비어 있을 수 있다(조건부 필수 완화) --
+    # 엔진의 `request.get("method") == "GITHUB_URL"` 분기(commit_sha 산정)가 그대로
+    # 동작하도록 실제 값을 채워 넣는다.
+    request["method"] = ref.method
+    with fetch_engine.refetch_pinned(descriptor) as fetched:
+        return engine.analyze(request, None, prefetched_root=fetched.root)
+
 def run_analysis(
     job_id: str, body: AnalysisRequest, engine: AnalysisEngine, zip_bytes: bytes | None,
     *, idempotency_key: str | None = None, trace_id: str | None = None,
@@ -54,7 +82,10 @@ def run_analysis(
     job.started_at = datetime.now(timezone.utc)
 
     try:
-        raw = engine.analyze(body.model_dump(), zip_bytes)
+        if body.analysis_input is not None:
+            raw = _run_via_analysis_input(body, engine)
+        else:
+            raw = engine.analyze(body.model_dump(), zip_bytes)
         # 원장은 결과와 별개다. **검증 실패로 결과를 버려도 태운 토큰은 남긴다** —
         # 그래서 model_validate보다 먼저 떼어낸다.
         # contextId는 jobId가 아니라 **submissionId**다 — v06 ai_usage.context_type이
@@ -89,10 +120,22 @@ def run_analysis(
                 f"요구사항 판정 {failed_judgements}건이 실패했습니다. "
                 f"문제·질문·힌트는 정상입니다"
             )
+    except fetch_engine.FetchError as exc:
+        # D2 재fetch 실패(analysisInput 경로 전용) -- FetchError가 이미 정확한
+        # failureCode를 들고 있다(호스트 거부/브랜치 드리프트/inputHash 불일치 등,
+        # fetch.py의 11+2종 어휘 참고). 재분류하지 않고 그대로 옮긴다.
+        job.status = "FAILED"
+        job.failure_code = exc.failure_code
+        job.failure_reason = exc.message
     except Exception as exc:
         # 엔진 터지거나 계약 어기면 job FAILED로. 예외 삼키지 말고 사유 기록
         job.status = "FAILED"
         job.failure_reason = str(exc)
+        # 🔴 잠정(계획 §0.3) -- 엔진 내부 실패를 TIMEOUT/RATE_LIMITED/...로 세분화할
+        # 신호가 없다(LlmError/StageError는 failure_code를 안 들고 있다, usage만 있다).
+        # PROVIDER_ERROR를 catch-all로 쓴다 -- 근거 없이 더 구체적인 값을 추측하는
+        # 것보다, "엔진 실패"라는 사실만 정확히 담는 쪽을 택한다.
+        job.failure_code = "PROVIDER_ERROR"
         # 🔴 **실패해도 원장은 남긴다.** 콜은 이미 나갔고 백엔드가 그걸로 비용을
         # 집계한다. AnalysisFailed가 실패 지점까지의 usage를 들고 온다.
         burned = getattr(exc, "ai_usage", None)

@@ -279,12 +279,12 @@ def _failed_kind(message: str) -> str:
 class RealAnalysisEngine:
     """`engine_mode="real"`일 때 쓰이는 엔진."""
 
-    def analyze(self, request: dict[str, Any],
-                zip_bytes: bytes | None = None) -> dict[str, Any]:
+    def analyze(self, request: dict[str, Any], zip_bytes: bytes | None = None,
+                *, prefetched_root: str | None = None) -> dict[str, Any]:
         """실패해도 원장은 살려 내보낸다. 실제 작업은 `_run`이 한다."""
         usages: list[dict[str, Any]] = []
         try:
-            return self._run(request, zip_bytes, usages)
+            return self._run(request, zip_bytes, usages, prefetched_root=prefetched_root)
         except stages.StageError as exc:
             usages.extend(_stamp(exc.usages, _failed_kind(str(exc))))
             raise AnalysisFailed(str(exc), usages) from exc
@@ -292,7 +292,7 @@ class RealAnalysisEngine:
             raise AnalysisFailed(str(exc), usages) from exc
 
     def _run(self, request: dict[str, Any], zip_bytes: bytes | None,
-             usages: list[dict[str, Any]]) -> dict[str, Any]:
+             usages: list[dict[str, Any]], *, prefetched_root: str | None = None) -> dict[str, Any]:
         settings = get_settings()
         # wire 필드는 providerModelCode다 — 공급자에게 그대로 넘길 문자열이라
         # 화면 선택값(model_code)이 아니라 ai_model.provider_model_code 값이다.
@@ -306,12 +306,21 @@ class RealAnalysisEngine:
         # GITHUB_URL이면 클론, ZIP이면 압축 해제. 두 경로가 같은 스캔으로 합류한다
         # (materialize.py — 팀원 브랜치 feature/code-importance-map에서 이식).
         # 디렉터리는 with를 빠져나가며 지워지므로 파일 내용은 여기서 다 읽어 나온다.
+        #
+        # prefetched_root가 있으면(analysisInput 경로, D2) 이 엔진의 클론을 건너뛰고
+        # 그 경로를 그대로 스캔한다 -- jobs._run_via_analysis_input이 refetch_pinned()의
+        # `with` 블록 **안에서** analyze()를 부르므로 여기서 디렉터리가 아직 살아 있다.
         commit_sha = request.get("commit_sha")
-        with materialize.materialize(request, zip_bytes) as repo_dir:
-            scan = rules.scan_directory(repo_dir)
+        if prefetched_root is not None:
+            scan = rules.scan_directory(prefetched_root)
             if request.get("method") == "GITHUB_URL":
-                # 클론 경로에서만 실제 커밋을 안다. ZIP은 요청 값을 그대로 쓴다.
-                commit_sha = materialize.head_sha(repo_dir) or commit_sha
+                commit_sha = materialize.head_sha(prefetched_root) or commit_sha
+        else:
+            with materialize.materialize(request, zip_bytes) as repo_dir:
+                scan = rules.scan_directory(repo_dir)
+                if request.get("method") == "GITHUB_URL":
+                    # 클론 경로에서만 실제 커밋을 안다. ZIP은 요청 값을 그대로 쓴다.
+                    commit_sha = materialize.head_sha(repo_dir) or commit_sha
         files, candidates = scan["files"], scan["candidates"]
 
         # ── p04-1 분석 문서 ────────────────────────────────────────────────────

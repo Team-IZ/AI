@@ -140,15 +140,47 @@ class AnalysisInputFailure(BaseSchema):
     request_id: str | None = None
 
 
+class AnalysisInputRef(BaseSchema):
+    """`POST /analysis`가 D2 재fetch에 쓰는 서술자 -- `AnalysisInputResponse`를 백엔드가
+
+    그대로 되돌려 보내는 모양이다(§0.1, 이 서비스는 analysisInputId를 캐싱하지 않아
+    재fetch에 필요한 값을 매번 다시 받아야 한다). `fetch.refetch_pinned()`가 그대로
+    소비한다.
+    """
+
+    analysis_input_id: str = Field(description="에코용 -- 재fetch 자체에는 안 쓴다")
+    method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
+    repository_url: str | None = None
+    resolved_branch: str | None = None
+    head_commit_sha: str | None = Field(
+        default=None, description="method=GITHUB_URL이면 필수 -- 이 sha로 정확히 고정 재fetch한다",
+    )
+    download_url: str | None = None
+    storage_uri: str | None = None
+    input_hash: str = Field(
+        description="재fetch 후 이 값과 다르면 하드 실패(FetchError INPUT_HASH_MISMATCH) --"
+                    " 검증했던 것과 다른 코드를 분석하면 안 된다",
+    )
+    git_history: list[GitCommit] | None = None
+
+
 class AnalysisRequest(BaseSchema):
     """ POST /api/v0/analyses 요청 본문 """
-    
+
     attempt_id: str | None = Field(default=None, description="Spring 측 측정수행 키(에코용)")
     submission_id: str | None = None
     # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다 —
     # AI→백엔드 방향 통신이 0이라 그 구간의 인증·방화벽을 새로 정할 일이 없다.
-    method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
+    method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"] | None = Field(
+        default=None, description="analysisInput이 있으면 생략한다(그 안의 method를 쓴다)",
+    )
     source: AnalysisSource = Field(default_factory=AnalysisSource)
+    analysis_input: AnalysisInputRef | None = Field(
+        default=None,
+        description="§제안 API ①②연결(2026-08-06) -- /analysis-inputs 응답을 그대로 되돌려 "
+                    "보내면 이걸로 재fetch한다(D2). method/source와 상호배타 -- 있으면 그 "
+                    "둘은 무시한다(멀티파트 ZIP 업로드 대신 이 경로를 쓴다는 뜻)",
+    )
     extraction_scope: Literal["TOTAL", "OWN_COMMIT"] = "TOTAL"
     commit_email: str | None = Field(default=None, description="OWN_COMMIT일 때 필수")
     question_budget: int = Field(default=3, ge=1, description="계획 문제 수")
@@ -172,13 +204,21 @@ class AnalysisRequest(BaseSchema):
     
     @model_validator(mode="after")
     def _check_conditional_fields(self) -> "AnalysisRequest":
-        """ 다른 필드 값에 따라 필수가 되는 것들을 검사 
-        
+        """ 다른 필드 값에 따라 필수가 되는 것들을 검사
+
         mode="after"는 개별 필드 검증 끝난 후 실행하라는 뜻
         """
-        
-        if self.method == "GITHUB_URL" and not (self.source.repo_url or "").strip():
-            raise ValueError("method=GITHUB_URL에는 source.repoUrl이 필요합니다")
+        # analysisInput이 있으면 그게 method/source를 대신한다 -- 상호배타.
+        if self.analysis_input is None:
+            if not self.method:
+                raise ValueError("method 또는 analysisInput 중 하나가 필요합니다")
+            if self.method == "GITHUB_URL" and not (self.source.repo_url or "").strip():
+                raise ValueError("method=GITHUB_URL에는 source.repoUrl이 필요합니다")
+        elif self.analysis_input.method == "GITHUB_URL" and not (
+            self.analysis_input.head_commit_sha or ""
+        ).strip():
+            raise ValueError("analysisInput.method=GITHUB_URL에는 headCommitSha가 필요합니다")
+
         if self.extraction_scope == "OWN_COMMIT" and not (self.commit_email or "").strip():
             raise ValueError("extractionScope=OWN_COMMIT에는 commitEmail이 필요합니다")
         return self
@@ -520,6 +560,23 @@ class AnalysisResult(BaseSchema):
     )
     question_count_planned: int = Field(description="계획된 질문 수. 유효 문제가 적으면 축소된다")
     
+# GET /analyses/{jobId}의 failureCode. 🔴 잠정(계획 §0.3, 백엔드 확인 전) --
+# `api-request-to-ai-server.md`의 11개는 repository_verification/submission_artifact용이지
+# analysis_job용이 아니다. 세 출처를 그대로 합친 잠정 집합이다:
+#   AiUsage.FailureCode(usage.py) 5종     -- LLM 파이프라인 자체 실패
+#   fetch.py 검증 실패 11종               -- 재fetch가 최초 verify와 같은 이유로 또 실패할 수 있다
+#   fetch.py JOB_ONLY_FAILURE_CODES 2종   -- 재fetch에서만 의미 있는 코드(최초 verify엔 비교 대상이 없다)
+# schemas/는 engines/를 import하지 않는 계층 원칙을 유지한다 -- 대신 값 집합이 실제로 같은지는
+# tests/test_analysis_inputs.py가 fetch.py 상수와 대조해서 drift를 잡는다(feature_code 사례처럼).
+AnalysisJobFailureCode = Literal[
+    "TIMEOUT", "RATE_LIMITED", "PROVIDER_ERROR", "INVALID_JSON", "CONTEXT_OVERFLOW",
+    "INVALID_REPOSITORY_URL", "REPO_NOT_FOUND", "REPOSITORY_ACCESS_DENIED",
+    "BRANCH_NOT_FOUND", "UNSUPPORTED_HOST", "TEMPORARY_ERROR",
+    "FILE_TOO_LARGE", "ARCHIVE_INVALID", "EMPTY_CODE", "PROHIBITED_FILE", "GIT_LOG_MISSING",
+    "INPUT_HASH_MISMATCH", "FETCH_FAILED",
+]
+
+
 class AnalysisJobStatus(BaseSchema):
     """GET /analyses/{jobId} 응답.
 
@@ -532,9 +589,30 @@ class AnalysisJobStatus(BaseSchema):
     submission_id: str | None = None
     status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
     failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
+    failure_code: AnalysisJobFailureCode | None = Field(
+        default=None,
+        description="🔴 잠정 어휘(위 주석, 계획 §0.3). FAILED일 때만 채워진다",
+    )
     started_at: datetime | None = None
     completed_at: datetime | None = None
     result: AnalysisResult | None = Field(default=None, description="SUCCEEDED·PARTIAL일 때만")
     # 스텁 단계에서는 항상 빈 배열이다. P02가 LLM 파이프라인으로 교체되는 중이라
     # (2026-07-29, PLAN §4) 실물 엔진이 붙으면 호출 기록이 채워진다.
     ai_usage: list[AiUsage] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_failure_code(self) -> "AnalysisJobStatus":
+        """AiUsage._check_db_constraints와 같은 패턴 -- FAILED와 failureCode는 항상 같이 다닌다.
+
+        🔴 이 검증은 **생성 시점에만** 돈다. `jobs.py`는 이미 만든 job을 필드별로
+        나중에 mutate한다(`validate_assignment`를 켜지 않았다 -- 다른 스키마 전부에
+        영향이 가는 전역 변경이라 이 작업 범위를 넘는다). 그래서 실제 방어는
+        `jobs.py`가 status="FAILED"를 설정하는 자리마다 failure_code를 같이
+        설정하는 절차적 규율로 한다 -- 이 validator는 그 계약을 문서화하고, 직접
+        생성하는 코드(테스트 등)에서는 실제로 걸러낸다.
+        """
+        if self.status == "FAILED" and self.failure_code is None:
+            raise ValueError("status=FAILED에는 failureCode가 필요합니다")
+        if self.status != "FAILED" and self.failure_code is not None:
+            raise ValueError("status=FAILED가 아니면 failureCode가 없어야 합니다")
+        return self

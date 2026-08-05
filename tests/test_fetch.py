@@ -214,7 +214,7 @@ def test_refetch_pinned_rejects_hash_mismatch(monkeypatch, tmp_path):
     with pytest.raises(fetch.FetchError) as exc:
         with fetch.refetch_pinned(descriptor):
             pass
-    assert exc.value.failure_code == "FETCH_FAILED"
+    assert exc.value.failure_code == "INPUT_HASH_MISMATCH"
 
 
 def test_refetch_pinned_accepts_matching_hash(monkeypatch, tmp_path):

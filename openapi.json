@@ -146,12 +146,20 @@
                     "title": "Submissionid"
                   },
                   "method": {
-                    "enum": [
-                      "GITHUB_URL",
-                      "ZIP_WITH_GITLOG"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "GITHUB_URL",
+                          "ZIP_WITH_GITLOG"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ],
-                    "title": "Method",
-                    "type": "string"
+                    "description": "analysisInput이 있으면 생략한다(그 안의 method를 쓴다)",
+                    "title": "Method"
                   },
                   "source": {
                     "properties": {
@@ -182,6 +190,158 @@
                     },
                     "title": "AnalysisSource",
                     "type": "object"
+                  },
+                  "analysisInput": {
+                    "anyOf": [
+                      {
+                        "description": "`POST /analysis`가 D2 재fetch에 쓰는 서술자 -- `AnalysisInputResponse`를 백엔드가\n\n그대로 되돌려 보내는 모양이다(§0.1, 이 서비스는 analysisInputId를 캐싱하지 않아\n재fetch에 필요한 값을 매번 다시 받아야 한다). `fetch.refetch_pinned()`가 그대로\n소비한다.",
+                        "properties": {
+                          "analysisInputId": {
+                            "description": "에코용 -- 재fetch 자체에는 안 쓴다",
+                            "title": "Analysisinputid",
+                            "type": "string"
+                          },
+                          "method": {
+                            "enum": [
+                              "GITHUB_URL",
+                              "ZIP_WITH_GITLOG"
+                            ],
+                            "title": "Method",
+                            "type": "string"
+                          },
+                          "repositoryUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Repositoryurl"
+                          },
+                          "resolvedBranch": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Resolvedbranch"
+                          },
+                          "headCommitSha": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "method=GITHUB_URL이면 필수 -- 이 sha로 정확히 고정 재fetch한다",
+                            "title": "Headcommitsha"
+                          },
+                          "downloadUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Downloadurl"
+                          },
+                          "storageUri": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Storageuri"
+                          },
+                          "inputHash": {
+                            "description": "재fetch 후 이 값과 다르면 하드 실패(FetchError INPUT_HASH_MISMATCH) -- 검증했던 것과 다른 코드를 분석하면 안 된다",
+                            "title": "Inputhash",
+                            "type": "string"
+                          },
+                          "gitHistory": {
+                            "anyOf": [
+                              {
+                                "items": {
+                                  "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).",
+                                  "properties": {
+                                    "sha": {
+                                      "title": "Sha",
+                                      "type": "string"
+                                    },
+                                    "authorName": {
+                                      "title": "Authorname",
+                                      "type": "string"
+                                    },
+                                    "authorEmail": {
+                                      "title": "Authoremail",
+                                      "type": "string"
+                                    },
+                                    "committedAt": {
+                                      "format": "date-time",
+                                      "title": "Committedat",
+                                      "type": "string"
+                                    },
+                                    "changedFiles": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "title": "Changedfiles",
+                                      "type": "array"
+                                    },
+                                    "additions": {
+                                      "default": 0,
+                                      "title": "Additions",
+                                      "type": "integer"
+                                    },
+                                    "deletions": {
+                                      "default": 0,
+                                      "title": "Deletions",
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "sha",
+                                    "authorName",
+                                    "authorEmail",
+                                    "committedAt"
+                                  ],
+                                  "title": "GitCommit",
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Githistory"
+                          }
+                        },
+                        "required": [
+                          "analysisInputId",
+                          "method",
+                          "inputHash"
+                        ],
+                        "title": "AnalysisInputRef",
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "§제안 API ①②연결(2026-08-06) -- /analysis-inputs 응답을 그대로 되돌려 보내면 이걸로 재fetch한다(D2). method/source와 상호배타 -- 있으면 그 둘은 무시한다(멀티파트 ZIP 업로드 대신 이 경로를 쓴다는 뜻)"
                   },
                   "extractionScope": {
                     "default": "TOTAL",
@@ -277,9 +437,6 @@
                     "title": "Providermodelcode"
                   }
                 },
-                "required": [
-                  "method"
-                ],
                 "title": "AnalysisRequest",
                 "type": "object"
               },
@@ -331,12 +488,20 @@
                           "title": "Submissionid"
                         },
                         "method": {
-                          "enum": [
-                            "GITHUB_URL",
-                            "ZIP_WITH_GITLOG"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "GITHUB_URL",
+                                "ZIP_WITH_GITLOG"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
                           ],
-                          "title": "Method",
-                          "type": "string"
+                          "description": "analysisInput이 있으면 생략한다(그 안의 method를 쓴다)",
+                          "title": "Method"
                         },
                         "source": {
                           "properties": {
@@ -367,6 +532,158 @@
                           },
                           "title": "AnalysisSource",
                           "type": "object"
+                        },
+                        "analysisInput": {
+                          "anyOf": [
+                            {
+                              "description": "`POST /analysis`가 D2 재fetch에 쓰는 서술자 -- `AnalysisInputResponse`를 백엔드가\n\n그대로 되돌려 보내는 모양이다(§0.1, 이 서비스는 analysisInputId를 캐싱하지 않아\n재fetch에 필요한 값을 매번 다시 받아야 한다). `fetch.refetch_pinned()`가 그대로\n소비한다.",
+                              "properties": {
+                                "analysisInputId": {
+                                  "description": "에코용 -- 재fetch 자체에는 안 쓴다",
+                                  "title": "Analysisinputid",
+                                  "type": "string"
+                                },
+                                "method": {
+                                  "enum": [
+                                    "GITHUB_URL",
+                                    "ZIP_WITH_GITLOG"
+                                  ],
+                                  "title": "Method",
+                                  "type": "string"
+                                },
+                                "repositoryUrl": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Repositoryurl"
+                                },
+                                "resolvedBranch": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Resolvedbranch"
+                                },
+                                "headCommitSha": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "method=GITHUB_URL이면 필수 -- 이 sha로 정확히 고정 재fetch한다",
+                                  "title": "Headcommitsha"
+                                },
+                                "downloadUrl": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Downloadurl"
+                                },
+                                "storageUri": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Storageuri"
+                                },
+                                "inputHash": {
+                                  "description": "재fetch 후 이 값과 다르면 하드 실패(FetchError INPUT_HASH_MISMATCH) -- 검증했던 것과 다른 코드를 분석하면 안 된다",
+                                  "title": "Inputhash",
+                                  "type": "string"
+                                },
+                                "gitHistory": {
+                                  "anyOf": [
+                                    {
+                                      "items": {
+                                        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).",
+                                        "properties": {
+                                          "sha": {
+                                            "title": "Sha",
+                                            "type": "string"
+                                          },
+                                          "authorName": {
+                                            "title": "Authorname",
+                                            "type": "string"
+                                          },
+                                          "authorEmail": {
+                                            "title": "Authoremail",
+                                            "type": "string"
+                                          },
+                                          "committedAt": {
+                                            "format": "date-time",
+                                            "title": "Committedat",
+                                            "type": "string"
+                                          },
+                                          "changedFiles": {
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "title": "Changedfiles",
+                                            "type": "array"
+                                          },
+                                          "additions": {
+                                            "default": 0,
+                                            "title": "Additions",
+                                            "type": "integer"
+                                          },
+                                          "deletions": {
+                                            "default": 0,
+                                            "title": "Deletions",
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "sha",
+                                          "authorName",
+                                          "authorEmail",
+                                          "committedAt"
+                                        ],
+                                        "title": "GitCommit",
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Githistory"
+                                }
+                              },
+                              "required": [
+                                "analysisInputId",
+                                "method",
+                                "inputHash"
+                              ],
+                              "title": "AnalysisInputRef",
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "§제안 API ①②연결(2026-08-06) -- /analysis-inputs 응답을 그대로 되돌려 보내면 이걸로 재fetch한다(D2). method/source와 상호배타 -- 있으면 그 둘은 무시한다(멀티파트 ZIP 업로드 대신 이 경로를 쓴다는 뜻)"
                         },
                         "extractionScope": {
                           "default": "TOTAL",
@@ -462,9 +779,6 @@
                           "title": "Providermodelcode"
                         }
                       },
-                      "required": [
-                        "method"
-                      ],
                       "title": "AnalysisRequest",
                       "type": "object"
                     },
@@ -1457,6 +1771,38 @@
             ],
             "title": "Failurereason",
             "description": "FAILED일 때만 채워진다"
+          },
+          "failureCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "TIMEOUT",
+                  "RATE_LIMITED",
+                  "PROVIDER_ERROR",
+                  "INVALID_JSON",
+                  "CONTEXT_OVERFLOW",
+                  "INVALID_REPOSITORY_URL",
+                  "REPO_NOT_FOUND",
+                  "REPOSITORY_ACCESS_DENIED",
+                  "BRANCH_NOT_FOUND",
+                  "UNSUPPORTED_HOST",
+                  "TEMPORARY_ERROR",
+                  "FILE_TOO_LARGE",
+                  "ARCHIVE_INVALID",
+                  "EMPTY_CODE",
+                  "PROHIBITED_FILE",
+                  "GIT_LOG_MISSING",
+                  "INPUT_HASH_MISMATCH",
+                  "FETCH_FAILED"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failurecode",
+            "description": "🔴 잠정 어휘(위 주석, 계획 §0.3). FAILED일 때만 채워진다"
           },
           "startedAt": {
             "anyOf": [
