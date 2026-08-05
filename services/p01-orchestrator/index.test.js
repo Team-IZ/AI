@@ -23,15 +23,34 @@ const scratchDir = mkdtempSync(path.join(tmpdir(), "p01-unitmap-test-"));
 test.after(() => rmSync(scratchDir, { recursive: true, force: true }));
 
 function extractFunction(source, name) {
-  const start = source.indexOf(`function ${name}(`);
+  let start = source.indexOf(`function ${name}(`);
   assert.ok(start >= 0, `function ${name} not found`);
+  // Include a preceding "async " if this is an async function -- extracting from the
+  // `function` keyword alone silently drops it, leaving `await` inside a non-async
+  // function (a real SyntaxError when the extracted text is imported as a module).
+  if (source.slice(Math.max(0, start - 6), start) === "async ") start -= 6;
+
+  // Skip the parameter list with its OWN paren-depth counter before brace-counting the
+  // body -- a default value like `init = {}` is a balanced {}-pair that closes and
+  // reopens depth 0 while still inside the parameter list, which a body-brace counter
+  // starting from `start` would misread as the function body opening AND closing.
+  let i = source.indexOf("(", start);
+  let parenDepth = 0;
+  for (; i < source.length; i++) {
+    if (source[i] === "(") parenDepth++;
+    else if (source[i] === ")") {
+      parenDepth--;
+      if (parenDepth === 0) { i++; break; }
+    }
+  }
+  const bodyStart = source.indexOf("{", i);
   let depth = 0;
-  for (let i = start; i < source.length; i++) {
-    if (source[i] === "{") {
+  for (let j = bodyStart; j < source.length; j++) {
+    if (source[j] === "{") {
       depth++;
-    } else if (source[i] === "}") {
+    } else if (source[j] === "}") {
       depth--;
-      if (depth === 0) return source.slice(start, i + 1);
+      if (depth === 0) return source.slice(start, j + 1);
     }
   }
   throw new Error(`unbalanced braces extracting ${name}`);
@@ -93,6 +112,89 @@ test("isAllowedProxyUrl(): rejects non-https schemes and malformed URLs", async 
   assert.equal(isAllowedProxyUrl("http://team-iz-nvidia-proxy.popixoxipop.workers.dev"), false);
   assert.equal(isAllowedProxyUrl("ext::sh -c 'touch pwned'"), false);
   assert.equal(isAllowedProxyUrl("not a url at all"), false);
+});
+
+// verifyReadAccess() regression test (2026-08-05, redteam audit M1).
+async function loadVerifyReadAccess() {
+  const source = readFileSync(path.join(__dirname, "index.js"), "utf-8");
+  const supabaseUrlMatch = source.match(/const SUPABASE_URL = "[^"]*";/);
+  const supabaseKeyMatch = source.match(/const SUPABASE_ANON_KEY = "[^"]*";/);
+  assert.ok(supabaseUrlMatch && supabaseKeyMatch, "SUPABASE_URL/SUPABASE_ANON_KEY consts not found");
+  const pgFetchSrc = extractFunction(source, "pgFetch");
+  const verifySrc = extractFunction(source, "verifyReadAccess");
+  const moduleFile = path.join(scratchDir, `extracted-verify-${moduleCounter++}.mjs`);
+  writeFileSync(
+    moduleFile,
+    `${supabaseUrlMatch[0]}\n${supabaseKeyMatch[0]}\n${pgFetchSrc}\n${verifySrc}\nexport { verifyReadAccess };\n`
+  );
+  return (await import(pathToFileURL(moduleFile).href)).verifyReadAccess;
+}
+
+test("verifyReadAccess(): rejects a 200-with-empty-array response (RLS-excluded row) instead of trusting it", async () => {
+  const verifyReadAccess = await loadVerifyReadAccess();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify([]), { status: 200 });
+  try {
+    await assert.rejects(() => verifyReadAccess("some-token", "run-not-mine"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("verifyReadAccess(): accepts a 200-with-one-row response", async () => {
+  const verifyReadAccess = await loadVerifyReadAccess();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(JSON.stringify([{ id: "run-mine" }]), { status: 200 });
+  try {
+    await assert.doesNotReject(() => verifyReadAccess("some-token", "run-mine"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+test("verifyReadAccess(): still rejects a genuine non-2xx response", async () => {
+  const verifyReadAccess = await loadVerifyReadAccess();
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("nope", { status: 401 });
+  try {
+    await assert.rejects(() => verifyReadAccess("bad-token", "run-x"));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
+// M2/M3 regression tests (2026-08-05). Both live inside the P01AnalysisJob Durable
+// Object (POST /analyses handler + alarm()) -- exercising them behaviorally would mean
+// mocking DO storage, patchRun/upsertArtifact/callChunkAnalysis's network calls, and the
+// class's `extends DurableObject` (cloudflare:workers, unavailable in plain Node) all at
+// once. Disproportionate to how simple these two fixes are (bounds-check a request body;
+// add cleanup calls on three known exit paths) -- static checks against the real source
+// text catch an accidental revert without that machinery.
+test("M2: /analyses request handler bounds chunks.length and per-chunk text length", () => {
+  const source = readFileSync(path.join(__dirname, "index.js"), "utf-8");
+  assert.match(source, /const MAX_CHUNKS = \d+;/);
+  assert.match(source, /const MAX_CHUNK_TEXT_CHARS = \d+;/);
+  assert.match(source, /chunks\.length > MAX_CHUNKS/);
+  assert.match(source, /c\.text\.length > MAX_CHUNK_TEXT_CHARS/);
+});
+
+test("M3: apiKey/accessToken are deleted from DO storage on all three terminal alarm() paths", () => {
+  const source = readFileSync(path.join(__dirname, "index.js"), "utf-8");
+  const alarmStart = source.indexOf("async alarm() {");
+  assert.ok(alarmStart >= 0, "alarm() method not found");
+  let depth = 0;
+  let alarmEnd = -1;
+  for (let i = source.indexOf("{", alarmStart); i < source.length; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") {
+      depth--;
+      if (depth === 0) { alarmEnd = i; break; }
+    }
+  }
+  assert.ok(alarmEnd > alarmStart, "unbalanced braces in alarm()");
+  const alarmSrc = source.slice(alarmStart, alarmEnd + 1);
+  const cleanupCalls = alarmSrc.match(/storage\.delete\(\["apiKey", "accessToken"\]\)/g) || [];
+  assert.equal(cleanupCalls.length, 3, "expected cleanup on cancelled/done/error paths (3 total)");
 });
 
 for (const [label, sourceFilePath] of Object.entries(TARGETS)) {

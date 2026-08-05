@@ -23,6 +23,17 @@ const MAX_RETRY_ROUNDS = 3; // p01-runner.js:79
 const ROUND_RETRY_DELAY_MS = 60_000; // p01-runner.js:80
 const MAX_LENGTH_DOUBLINGS = 2; // p01-runner.js:470
 
+// D-fix (redteam audit M2, 2026-08-05): /analyses accepted any chunks.length and any
+// per-chunk text length -- p01-runner.js's own max_chunks cap was "의도적으로 제거"
+// (comment there), and nothing replaced it server-side. Each chunk is its own NVIDIA
+// call (CHUNK_CONCURRENCY-wide waves x MAX_RETRY_ROUNDS), so an unbounded chunk count
+// is an unbounded cost/time multiplier, and an unbounded chunk.text is stored in DO
+// storage (chunkState) and transmitted over the wire even though only the first
+// MAX_CHUNK_TEXT_CHARS of it ever reaches a prompt (see callChunkAnalysis's own
+// chunk_text truncation, same constant reused rather than a second magic number).
+const MAX_CHUNKS = 200;
+const MAX_CHUNK_TEXT_CHARS = 18000;
+
 // ---- ported from llm.js ----
 const POLL_INTERVAL_MS = 3000; // llm.js:27
 const MAX_POLL_MS = 35 * 60 * 1000; // llm.js:31
@@ -201,7 +212,7 @@ async function chatJSON({ proxyUrl, apiKey, model, messages, maxTokens, temperat
 // ("p01-2") curriculum-manager ever calls, plus the json-repair fallback it can invoke ----
 async function callChunkAnalysis({ proxyUrl, apiKey, model, courseLabel, chunk, maxAttempts }) {
   const stage = P01_2_STAGE;
-  const values = { course_label: courseLabel, chunk_range: chunk.range, chunk_start: chunk.start, chunk_end: chunk.end, chunk_text: chunk.text.slice(0, 18000) };
+  const values = { course_label: courseLabel, chunk_range: chunk.range, chunk_start: chunk.start, chunk_end: chunk.end, chunk_text: chunk.text.slice(0, MAX_CHUNK_TEXT_CHARS) };
   const system = stage.system;
   const userMsg = fillTemplate(stage.user_template, values);
   const messages = [{ role: "system", content: system }, { role: "user", content: userMsg }];
@@ -428,8 +439,15 @@ async function patchRun(accessToken, runId, patch, extraFilter = "") {
 // run by reusing the same "runs read all" RLS any authenticated team member already gets
 // via the normal Supabase client -- rejects (throws) only for a token that isn't even a
 // valid authenticated session, not owner-only (matching the DB's own visibility model).
+// D-fix (redteam audit M1, 2026-08-05): PostgREST doesn't 403 a row a caller's RLS
+// policy excludes -- it 200s with an empty array. pgFetch only throws on !res.ok, so
+// the public anon key (embedded client-side, config.js) passed this check for ANY
+// runId, valid session or not, because a 200-with-[] never looked like a failure here.
 async function verifyReadAccess(accessToken, runId) {
-  await pgFetch(accessToken, `runs?id=eq.${encodeURIComponent(runId)}&select=id`, { method: "GET" });
+  const rows = await pgFetch(accessToken, `runs?id=eq.${encodeURIComponent(runId)}&select=id`, { method: "GET" });
+  if (!Array.isArray(rows) || rows.length === 0) {
+    throw new Error("접근 권한이 없거나 존재하지 않는 run입니다");
+  }
 }
 
 // mirrors db.js:133-138's artifacts insert, but upsert (onConflict run_id,kind) so
@@ -535,6 +553,11 @@ export class P01AnalysisJob extends DurableObject {
     if (cancelled) {
       await this.ctx.storage.put("status", "cancelled");
       await patchRun(accessToken, runId, { status: "cancelled", finished_at: new Date().toISOString() }).catch(() => {});
+      // D-fix (redteam audit M3, 2026-08-05): apiKey/accessToken (NVIDIA key, Supabase
+      // session token) used to linger in DO storage indefinitely -- no terminal path
+      // ever cleared them. handleStatus() only reads status/chunkState/round/error/model,
+      // so deleting these here doesn't affect anything a caller can still query.
+      await this.ctx.storage.delete(["apiKey", "accessToken"]);
       return;
     }
 
@@ -623,9 +646,12 @@ export class P01AnalysisJob extends DurableObject {
         },
       });
       await this.ctx.storage.put("status", "done");
+      // D-fix (redteam audit M3, 2026-08-05): see the cancelled path's own comment above.
+      await this.ctx.storage.delete(["apiKey", "accessToken"]);
     } catch (err) {
       await this.ctx.storage.put({ status: "error", error: String(err.message || err) });
       await patchRun(accessToken, runId, { status: "error", error: String(err.message || err), finished_at: new Date().toISOString() }).catch(() => {});
+      await this.ctx.storage.delete(["apiKey", "accessToken"]);
     }
   }
 }
@@ -653,6 +679,16 @@ export default {
       const { model, courseLabel, chunks, nvidiaApiKey, proxyUrl, supabaseAccessToken, sourceFilename } = body;
       if (!nvidiaApiKey || !proxyUrl || !supabaseAccessToken || !Array.isArray(chunks) || !chunks.length) {
         return new Response(JSON.stringify({ error: "INVALID_REQUEST", message: "model/courseLabel/chunks/nvidiaApiKey/proxyUrl/supabaseAccessToken 필요" }), {
+          status: 422, headers: { ...headers, "content-type": "application/json" },
+        });
+      }
+      if (chunks.length > MAX_CHUNKS) {
+        return new Response(JSON.stringify({ error: "INVALID_REQUEST", message: `chunks 개수가 상한(${MAX_CHUNKS})을 넘습니다: ${chunks.length}` }), {
+          status: 422, headers: { ...headers, "content-type": "application/json" },
+        });
+      }
+      if (chunks.some((c) => typeof c.text === "string" && c.text.length > MAX_CHUNK_TEXT_CHARS)) {
+        return new Response(JSON.stringify({ error: "INVALID_REQUEST", message: `chunk.text 길이가 상한(${MAX_CHUNK_TEXT_CHARS}자)을 넘는 청크가 있습니다` }), {
           status: 422, headers: { ...headers, "content-type": "application/json" },
         });
       }
