@@ -1072,10 +1072,10 @@
             "type": "string",
             "enum": [
               "CODE_ANALYSIS",
-              "QUESTION_GENERATION",
+              "CODE_SESSION",
               "ANSWER_EVALUATION",
               "CURRICULUM_ANALYSIS",
-              "SUMMARY_DRAFT"
+              "REPORT_GENERATION"
             ],
             "title": "Featurecode"
           },
