@@ -163,6 +163,19 @@ def test_same_idempotency_key_returns_same_job_id():
                        ).json()["jobId"] != first.json()["jobId"]
 
 
+def test_reused_idempotency_key_with_different_problem_id_is_rejected():
+    """멱등키 재사용인데 problemId가 다르면 409 (H12 companion)."""
+    headers = {**HEADERS, "Idempotency-Key": "shared-key:1"}
+    first = client.post("/api/v0/reports", json=BODY, headers=headers)
+    assert first.status_code == 202
+
+    other_body = {**BODY, "problemId": "prob-someone-elses"}
+    r = client.post("/api/v0/reports", json=other_body, headers=headers)
+
+    assert r.status_code == 409
+    assert r.json()["error"] == "IDEMPOTENCY_CONFLICT"
+
+
 def test_ai_usage_is_reported_for_reports(monkeypatch):
     """🔴 보고서 토큰이 원장에 실려야 한다 (§T11 F1). 엔진이 주는데 버리고 있었다."""
     from datetime import datetime, timezone
@@ -224,3 +237,46 @@ def test_camelcase_transcript_reaches_the_engine(monkeypatch):
     assert result["problem"]["reachedStage"] == 1        # 0이면 턴을 못 읽은 것
     assert result["problem"]["stages"][0]["questionScore"] == 4
     assert result["retest"] is True                      # L2 미도달이라 재시험은 맞다
+
+
+# ── M9 (redteam audit, 2026-08-05): _jobs 상한/eviction ──────────────────────────
+# jobs.py와 같은 패턴(주석 참고) -- 무제한 dict가 장기가동 시 계속 큰다.
+# HTTP 왕복은 이 검증에 비해 무거우므로(2000회) tests/test_jobs.py처럼 모듈 함수를
+# 직접 불러 상한을 낮춰서 검증한다.
+
+def test_old_jobs_are_evicted_past_the_cap(monkeypatch):
+    """상한을 넘기면 가장 먼저 만든 job부터 밀려난다."""
+    from app import reports as reports_module
+    from app.schemas.report import ReportRequest
+
+    monkeypatch.setattr(reports_module, "_jobs", type(reports_module._jobs)())
+    monkeypatch.setattr(reports_module, "_job_id_by_idempotency_key",
+                        type(reports_module._job_id_by_idempotency_key)())
+    monkeypatch.setattr(reports_module, "_JOBS_MAX", 3)
+
+    body = ReportRequest.model_validate({"problemId": "prob-stub-1"})
+    first = reports_module.create_job(body, idempotency_key=None)
+    for _ in range(3):
+        reports_module.create_job(body, idempotency_key=None)
+
+    assert reports_module.get_job(first.job_id) is None
+    assert len(reports_module._jobs) == 3
+
+
+def test_evicted_jobs_idempotency_key_is_treated_as_fresh(monkeypatch):
+    """멱등키가 가리키던 job이 상한으로 밀려났으면 신원불일치(409)가 아니라
+    '처음 보는 키'로 취급해야 한다."""
+    from app import reports as reports_module
+    from app.schemas.report import ReportRequest
+
+    monkeypatch.setattr(reports_module, "_jobs", type(reports_module._jobs)())
+    monkeypatch.setattr(reports_module, "_job_id_by_idempotency_key",
+                        type(reports_module._job_id_by_idempotency_key)())
+    monkeypatch.setattr(reports_module, "_JOBS_MAX", 3)
+
+    body = ReportRequest.model_validate({"problemId": "prob-stub-1"})
+    reports_module.create_job(body, idempotency_key="evict-me")
+    for _ in range(3):
+        reports_module.create_job(body, idempotency_key=None)
+
+    assert reports_module.job_id_for_key("evict-me", body.problem_id) is None

@@ -17,6 +17,13 @@ VALID_BODY = {
     "source": {"repoUrl": "https://github.com/owner/repo"},
     "extractionScope": "TOTAL",
     "questionBudget": 4,
+    # D-fix (redteam audit H12, 2026-08-04): job_id_for_key()가 이제 재사용 요청의
+    # submissionId/attemptId를 최초 요청과 대조한다(둘 다 없으면 거부) -- 실제 Spring
+    # 호출은 이 값들을 항상 보낸다는 전제이므로, 그걸 안 흉내내던 이 fixture가 현실과
+    # 어긋나 있었다. 값 자체는 임의값이고, 같은 dict를 재사용하는 테스트는 두 호출 다
+    # 같은 값이라 여전히 일치한다.
+    "submissionId": "sub-1",
+    "attemptId": "1",
 }
 
 def test_accepts_valid_request():
@@ -56,6 +63,31 @@ def test_same_idempotency_key_returns_same_job_id():
 
     assert first.json()["jobId"] == second.json()["jobId"]    
     
+def test_reused_idempotency_key_with_mismatched_identity_is_rejected():
+    """멱등키 추측/재사용 -- submissionId/attemptId가 최초 요청과 다르면 409 (H12)."""
+    headers = {**HEADERS, "Idempotency-Key": "sub-guessed:1"}
+    client.post("/api/v0/analyses", json=VALID_BODY, headers=headers)
+
+    guess = {**VALID_BODY, "submissionId": "someone-elses-sub", "attemptId": "9"}
+    response = client.post("/api/v0/analyses", json=guess, headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "IDEMPOTENCY_CONFLICT"
+
+
+def test_reused_idempotency_key_without_any_identity_is_rejected():
+    """submissionId/attemptId를 둘 다 생략한 재사용도 거부된다 --
+    None==None으로 통과하던 구멍(H12)."""
+    headers = {**HEADERS, "Idempotency-Key": "sub-noident:1"}
+    client.post("/api/v0/analyses", json=VALID_BODY, headers=headers)
+
+    no_identity = {k: v for k, v in VALID_BODY.items() if k not in ("submissionId", "attemptId")}
+    response = client.post("/api/v0/analyses", json=no_identity, headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "IDEMPOTENCY_CONFLICT"
+
+
 def test_different_idempotency_key_returns_new_job_id():
     """키가 다르면 별개 요청 → 새 jobId. 재제출이 정상적으로 새 분석이 되는지."""
     a = client.post(

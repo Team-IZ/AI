@@ -138,7 +138,7 @@ def test_pass_climbs_to_the_next_axis(score):
     """통과하면 다음 단계로. 계단은 건너뛰지 않는다."""
     body = Backend().answer()
 
-    assert body["cursor"] == {"problemId": "prob-1", "axisCode": "L2", "hintsUsed": 0}
+    assert body["cursor"] == {"problemId": "prob-1", "axisCode": "L2", "hintsUsed": 0, "mac": None}
     assert body["current"]["axisCode"] == "L2"
 
 
@@ -151,7 +151,7 @@ def test_fail_opens_a_hint_and_keeps_the_question(score):
 
     body = Backend().answer()
 
-    assert body["cursor"] == {"problemId": "prob-1", "axisCode": "L1", "hintsUsed": 1}
+    assert body["cursor"] == {"problemId": "prob-1", "axisCode": "L1", "hintsUsed": 1, "mac": None}
     assert body["current"]["questionText"] == "L1 질문"   # 같은 질문
     assert body["current"]["hintText"] == "L1 힌트 1"
 
@@ -201,7 +201,7 @@ def test_completing_all_axes_moves_to_the_next_problem(score):
     for _ in range(4):
         body = session.answer()
 
-    assert body["cursor"] == {"problemId": "prob-2", "axisCode": "L1", "hintsUsed": 0}
+    assert body["cursor"] == {"problemId": "prob-2", "axisCode": "L1", "hintsUsed": 0, "mac": None}
 
 
 def test_session_completes_after_the_last_problem(score):

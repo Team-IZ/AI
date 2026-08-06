@@ -75,7 +75,11 @@ async def create_curriculum(
         raise _invalid(f"교안은 PDF여야 합니다: {file.content_type}")
 
     if idempotency_key:
-        existing = curricula.job_id_for_key(idempotency_key)
+        # D-fix (redteam audit H12 companion): version_id 불일치는 409로 옮긴다.
+        try:
+            existing = curricula.job_id_for_key(idempotency_key, body.version_id)
+        except ValueError as exc:
+            raise ApiError(status_code=409, error="IDEMPOTENCY_CONFLICT", message=str(exc)) from exc
         if existing:
             return CurriculumAccepted(job_id=existing, status="QUEUED")
 

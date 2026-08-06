@@ -43,12 +43,35 @@ GIT_CLONE_TIMEOUT_S = 300
 _ALLOWED_URL_SCHEMES = {"http", "https"}
 
 
+# D-fix (redteam audit H9, revisited 2026-08-04): repoUrl은 스킴/netloc 존재만 검사했지
+# 호스트가 어디를 가리키는지는 전혀 보지 않았다 -- http://169.254.169.254/... 같은
+# 사설·링크로컬 대역으로 이 서버(App Runner) 내부망을 겨냥한 SSRF가 그대로 통과했다.
+#   WHY: 호스트를 github.com으로 정확매치 제한한다(계약상 "공개 GitHub repo만 지원"이니
+#   기능 손실 없음, AnalysisSource.repo_url 문서화). IP 사전검사(socket.getaddrinfo)도
+#   1차로 시도했으나 되돌렸다 -- github.com의 DNS는 GitHub가 소유·운영해 공격자가
+#   리바인딩시킬 수 없으므로(GitHub 인프라 자체가 뚫리는 수준이 아닌 한) 호스트 고정만으로
+#   이미 SSRF와 DNS rebinding 둘 다 사실상 닫히고, IP 사전검사가 추가로 막는 대상은
+#   "github.com 자체가 그 순간 사설 IP로 리바인딩된 경우"뿐이라 한계효용이 낮다. 반면
+#   비용은 실재한다 -- test_materialize.py 자신의 원칙("네트워크를 타지 않는다 -- 검증에서
+#   걸러지는 값만 넣는다")과 정면으로 부딪혀, 매 검증마다 실제 DNS 조회가 걸리고 테스트가
+#   네트워크에 의존하게 됐다. 호스트 고정 하나로 충분한 상황에서 그 비용을 감수할 이유가
+#   없었다.
+#   COST: github.com 외 호스트(GitHub Enterprise 자체 호스팅, GitLab 등)는 이 계약 밖이라
+#   거부된다 -- 오늘 지원 범위에 없던 것이므로 기능 손실 아님.
+#   EXIT: 다른 공개 호스트를 지원해야 하면 _ALLOWED_REPO_HOSTS에 추가.
+_ALLOWED_REPO_HOSTS = {"github.com"}
+
+
 def _validate_repo_url(repo_url: str) -> None:
     parsed = urlparse(repo_url)
     if parsed.scheme not in _ALLOWED_URL_SCHEMES or not parsed.netloc:
         raise ValueError(
             f"repoUrl은 http(s) URL만 허용합니다(ext::/file:: 등 서브프로토콜을 통한 "
             f"명령 실행 방지): {repo_url!r}"
+        )
+    if parsed.hostname not in _ALLOWED_REPO_HOSTS:
+        raise ValueError(
+            f"repoUrl은 공개 GitHub repo만 지원합니다(호스트: {', '.join(sorted(_ALLOWED_REPO_HOSTS))}): {repo_url!r}"
         )
 
 
