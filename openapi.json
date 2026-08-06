@@ -1830,7 +1830,11 @@
                   "TERMINATED_AT_L3",
                   "TERMINATED_AT_L4",
                   "POLICY_TIME_LIMIT_EXCEEDED",
-                  "ASSESSMENT_WINDOW_EXPIRED"
+                  "ASSESSMENT_WINDOW_EXPIRED",
+                  "REVIEW_DUE_AT_EXPIRED",
+                  "DATA_INTEGRITY_INVALID",
+                  "ADMIN_INVALIDATED",
+                  "TECHNICAL_FAILURE"
                 ]
               },
               {
@@ -1839,6 +1843,23 @@
             ],
             "title": "Sessionendreasoncode",
             "description": "세션이 실제로 열리지 않았으면(NOT_ATTENDED 등) 없다"
+          },
+          "attemptInterviewSourceId": {
+            "type": "string",
+            "title": "Attemptinterviewsourceid",
+            "description": "★ 이 시도 전체(예: 미응시 사실 자체)를 근거로 질문을 만들면 이 값을 그대로 실어야 한다"
+          },
+          "sessionInterviewSourceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessioninterviewsourceid",
+            "description": "★ sessionEndReasonCode를 근거로 질문을 만들면 이 값을 그대로 실어야 한다. 세션이 열리지 않았으면(NOT_ATTENDED 등) 없다"
           },
           "problems": {
             "items": {
@@ -1853,7 +1874,8 @@
         "required": [
           "attemptType",
           "attemptStatus",
-          "terminalReasonCode"
+          "terminalReasonCode",
+          "attemptInterviewSourceId"
         ],
         "title": "Comprehension",
         "description": "코드 이해도 검증 결과. 질문의 1차 재료. §4.1 ⑤."
@@ -2527,7 +2549,7 @@
               }
             ],
             "title": "Interviewsourceid",
-            "description": "요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. priorInterviews/observationNotes/briefContext는 명세상 id 자체가 없어 그 근거만으로 만든 라포 질문은 null이 정상이다(engine이 지어낸 값과 정직한 null을 구분해서 검증한다)"
+            "description": "요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. priorInterviews/briefContext는 명세상 id 자체가 없어(D-ib4: observationNotes는 이제 자기 id가 있다 -- 아래 참고) 그 둘만 근거인 라포 질문은 null이 정상이다(engine이 지어낸 값과 정직한 null을 구분해서 검증한다)"
           }
         },
         "type": "object",
@@ -2633,12 +2655,30 @@
             "type": "string",
             "title": "Content",
             "description": "학생 발화가 원문 그대로 인용될 수 있다(예: 쉬는 시간 발언). 학생 답변 텍스트와 같은 급의 신뢰 불가 데이터 -- engine이 감싼다"
+          },
+          "interviewSourceId": {
+            "type": "string",
+            "title": "Interviewsourceid",
+            "description": "★ 이 관찰 메모를 근거로 질문을 만들면 이 값을 그대로 실어야 한다"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility",
+            "description": "공개범위 코드(값 집합 미확정, 아직 미사용 -- 배선만 해둠)"
           }
         },
         "type": "object",
         "required": [
           "occurredAt",
-          "content"
+          "content",
+          "interviewSourceId"
         ],
         "title": "ObservationNote",
         "description": "면담과 무관하게 매니저가 남긴 일반 관찰 메모. §4.1 ⑦."
@@ -2929,6 +2969,28 @@
             ],
             "description": "NOT_GENERATED 문제는 없다"
           },
+          "conceptNameSource": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "VERIFICATION_CONCEPT",
+                  "CURRICULUM_EVIDENCE",
+                  "PROBLEM_TITLE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conceptnamesource",
+            "description": "conceptName이 어느 경로에서 나왔는지. PROBLEM_TITLE이면 검증된 개념명이 아니라 문제 제목으로 대체된 값이므로 단정적으로 서술하지 않는다"
+          },
+          "interviewSourceId": {
+            "type": "string",
+            "title": "Interviewsourceid",
+            "description": "★ 이 문제를 (단계 단위가 아니라 문제 단위로) 근거로 질문을 만들면 이 값을 그대로 실어야 한다. NOT_GENERATED처럼 stages가 빈 문제에서 특히 필요하다"
+          },
           "stages": {
             "items": {
               "$ref": "#/components/schemas/ComprehensionStage"
@@ -2943,7 +3005,8 @@
           "problemNo",
           "conceptName",
           "problemScope",
-          "generationStatus"
+          "generationStatus",
+          "interviewSourceId"
         ],
         "title": "ProblemComprehension",
         "description": "`comprehension.problems[]` 원소 하나. assessment_problem 한 건에 대응."
@@ -4214,6 +4277,18 @@
               "RESTORED_VALID"
             ],
             "title": "Status"
+          },
+          "triggerReasonCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggerreasoncode",
+            "description": "무효 확인이 시작된 사유(자유 코드, 값 집합 미확정). briefType=INVALID_ATTEMPT일 때 특히 중요한 근거"
           },
           "decisionReasonCode": {
             "anyOf": [

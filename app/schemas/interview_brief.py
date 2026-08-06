@@ -38,10 +38,16 @@ TerminalReasonCode = Literal[
     "INSUFFICIENT_PROBLEM_EVIDENCE", "INSUFFICIENT_OWN_COMMIT_EVIDENCE",
     "NOT_ATTENDED", "SESSION_INCOMPLETE", "REVIEW_NOT_COMPLETED", "INVALID",
 ]
+# D-ib4 (2026-08-06): 백엔드가 실제 DDL(테이블정의서_v07_교육생홈_DDL.sql,
+# ck_assessment_session_end_reason_code)로 감사한 결과 원래 9종이 아니라 13종이었다
+# -- 뒤 4개(REVIEW_DUE_AT_EXPIRED 등)가 오면 여기 Literal이 422로 거부하고 있었다.
+# DDL 원문에서 직접 대조한 값이라 추측이 아니다.
 SessionEndReasonCode = Literal[
     "ALL_PROBLEMS_TERMINAL", "ALL_REVIEW_TARGETS_TERMINAL", "COMPLETED_L4",
     "TERMINATED_AT_L1", "TERMINATED_AT_L2", "TERMINATED_AT_L3", "TERMINATED_AT_L4",
     "POLICY_TIME_LIMIT_EXCEEDED", "ASSESSMENT_WINDOW_EXPIRED",
+    "REVIEW_DUE_AT_EXPIRED", "DATA_INTEGRITY_INVALID", "ADMIN_INVALIDATED",
+    "TECHNICAL_FAILURE",
 ]
 ProblemScope = Literal["TEAM_SHARED_PROBLEM", "INDIVIDUAL_OWN_COMMIT"]
 GenerationStatus = Literal["GENERATED", "NOT_GENERATED"]
@@ -105,6 +111,15 @@ class ValidityReview(BaseSchema):
     """응시 자체를 인정할 것인가. §4.1 ④."""
 
     status: ValidityReviewStatus
+    # D-ib4: measurement_attempt.validity_trigger_reason_code -- 무효 확인이
+    # "왜 시작됐는가"(trigger)이고, decision_reason_code는 "그래서 어떻게 판정했는가"
+    # (decision)다. DDL 둘 다 VARCHAR(100)에 CHECK 제약이 없어(값 집합 미확정)
+    # Literal로 좁히지 않고 str로 연다 -- 값 집합이 정해지면 그때 좁힌다.
+    trigger_reason_code: str | None = Field(
+        default=None,
+        description="무효 확인이 시작된 사유(자유 코드, 값 집합 미확정). "
+                    "briefType=INVALID_ATTEMPT일 때 특히 중요한 근거",
+    )
     decision_reason_code: str | None = None
     decision_note: str | None = Field(
         default=None, description="매니저가 남긴 판정 메모",
@@ -166,6 +181,28 @@ class ProblemComprehension(BaseSchema):
     code_context: ComprehensionCodeContext | None = Field(
         default=None, description="NOT_GENERATED 문제는 없다",
     )
+    # D-ib4 (백엔드 D-2 대응): concept_name이 실제로는 problem_scope에 따라 조인
+    # 경로가 갈리고(팀 공유=project_verification_concept, 개인 커밋=
+    # assessment_problem_reference), 후자는 0건일 수 있어 title로 폴백한다는 게
+    # 백엔드 감사 결과다. 그 폴백 여부를 AI가 구분해서 확신도를 조절할 수 있게
+    # 백엔드가 제안한 필드. 아직 백엔드가 안 보내도 되게 선택 필드로 둔다(하위호환).
+    concept_name_source: Literal[
+        "VERIFICATION_CONCEPT", "CURRICULUM_EVIDENCE", "PROBLEM_TITLE",
+    ] | None = Field(
+        default=None,
+        description="conceptName이 어느 경로에서 나왔는지. PROBLEM_TITLE이면 "
+                    "검증된 개념명이 아니라 문제 제목으로 대체된 값이므로 단정적으로 "
+                    "서술하지 않는다",
+    )
+    # D-ib4 (백엔드 D-1 대응): NOT_GENERATED 문제는 stages가 비어 이 문제를 근거로
+    # 삼을 interviewSourceId가 없었다(interview_source 테이블의 problem_id 슬롯이
+    # DDL엔 있는데 요청이 안 실었다는 게 백엔드 진단). ComprehensionStage.
+    # interview_source_id와 같은 패턴 -- 문제 하나당 자기 근거 ID 하나.
+    interview_source_id: str = Field(
+        description="★ 이 문제를 (단계 단위가 아니라 문제 단위로) 근거로 질문을 "
+                    "만들면 이 값을 그대로 실어야 한다. NOT_GENERATED처럼 stages가 "
+                    "빈 문제에서 특히 필요하다",
+    )
     stages: list[ComprehensionStage] = Field(
         default_factory=list,
         description="NOT_GENERATED 문제는 빈 배열 -- 0점·미달이 아니라 애초에 안 물어봤다",
@@ -183,6 +220,19 @@ class Comprehension(BaseSchema):
     )
     session_end_reason_code: SessionEndReasonCode | None = Field(
         default=None, description="세션이 실제로 열리지 않았으면(NOT_ATTENDED 등) 없다",
+    )
+    # D-ib4 (백엔드 D-1 대응): NOT_ATTENDED면 problems가 통째로 빈 배열이라(위 필드
+    # description 참고) 미응시 질문에 실을 interviewSourceId가 아예 없었다 --
+    # interview_source의 attempt_id 슬롯을 이 값으로 채운다. session_id는 세션
+    # 자체가 안 열렸을 수 있어(NOT_ATTENDED) 선택으로 둔다.
+    attempt_interview_source_id: str = Field(
+        description="★ 이 시도 전체(예: 미응시 사실 자체)를 근거로 질문을 만들면 "
+                    "이 값을 그대로 실어야 한다",
+    )
+    session_interview_source_id: str | None = Field(
+        default=None,
+        description="★ sessionEndReasonCode를 근거로 질문을 만들면 이 값을 그대로 "
+                    "실어야 한다. 세션이 열리지 않았으면(NOT_ATTENDED 등) 없다",
     )
     problems: list[ProblemComprehension] = Field(
         default_factory=list,
@@ -219,6 +269,23 @@ class ObservationNote(BaseSchema):
         description="학생 발화가 원문 그대로 인용될 수 있다(예: 쉬는 시간 발언). "
                     "학생 답변 텍스트와 같은 급의 신뢰 불가 데이터 -- engine이 감싼다",
     )
+    # D-ib4 (백엔드 D-1 대응): 원래 이 클래스엔 id가 전혀 없어서, 관찰 메모만 근거인
+    # 라포 질문은 interviewSourceId를 정직하게 null로 둘 수밖에 없었다(D-ib3).
+    # observation_note 테이블 코멘트 자체가 "InterviewSource.observation_note_id로
+    # 면담 근거에 선택 연결한다"고 이미 이 경로를 전제하고 있어, 요청에 이 값만
+    # 추가하면 null 빈도를 줄일 수 있다는 게 백엔드 진단.
+    interview_source_id: str = Field(
+        description="★ 이 관찰 메모를 근거로 질문을 만들면 이 값을 그대로 실어야 한다",
+    )
+    # D-ib4 (백엔드 A-3): observation_note.visibility는 DDL에 CHECK 제약이 없는
+    # VARCHAR(30) NOT NULL -- 값 집합("OPEN 정책 확정 전 임의 DB CHECK로 고정하지
+    # 않는다"는 DDL 코멘트 원문)이 아직 안 정해졌다. 그래서 지금은 받아만 두고
+    # (Literal 강제 안 함) 프롬프트/필터링에는 아직 안 쓴다 -- 값 집합이 정해지면
+    # 그때 좁히고 공개범위별 필터링 로직을 추가한다.
+    visibility: str | None = Field(
+        default=None,
+        description="공개범위 코드(값 집합 미확정, 아직 미사용 -- 배선만 해둠)",
+    )
 
 
 class InterviewBriefRequest(BaseSchema):
@@ -246,9 +313,10 @@ class InterviewBriefItem(BaseSchema):
     interview_source_id: str | None = Field(
         default=None,
         description="요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. "
-                    "priorInterviews/observationNotes/briefContext는 명세상 id 자체가 없어 "
-                    "그 근거만으로 만든 라포 질문은 null이 정상이다(engine이 지어낸 값과 "
-                    "정직한 null을 구분해서 검증한다)",
+                    "priorInterviews/briefContext는 명세상 id 자체가 없어(D-ib4: "
+                    "observationNotes는 이제 자기 id가 있다 -- 아래 참고) 그 둘만 근거인 "
+                    "라포 질문은 null이 정상이다(engine이 지어낸 값과 정직한 null을 "
+                    "구분해서 검증한다)",
     )
 
 

@@ -34,9 +34,12 @@ def _request(**overrides) -> dict:
         "comprehension": {
             "attemptType": "INITIAL", "attemptStatus": "COMPLETED",
             "terminalReasonCode": "COMPLETED", "sessionEndReasonCode": "TERMINATED_AT_L2",
+            "attemptInterviewSourceId": "src-attempt-1",
+            "sessionInterviewSourceId": "src-session-1",
             "problems": [{
                 "problemNo": 1, "conceptName": "상태 관리",
                 "problemScope": "TEAM_SHARED_PROBLEM", "generationStatus": "GENERATED",
+                "interviewSourceId": "src-problem-1",
                 "stages": [{
                     "problemStageId": "ps-1", "axisCode": "L2", "status": "NOT_PASSED",
                     "questionText": "이 메서드가 호출되는 시점은?",
@@ -186,7 +189,7 @@ def test_not_generated_problem_has_no_stages_and_is_not_treated_as_failure(monke
     req_dict["comprehension"]["problems"][0] = {
         "problemNo": 2, "conceptName": "동시성", "problemScope": "TEAM_SHARED_PROBLEM",
         "generationStatus": "NOT_GENERATED", "notGeneratedReasonCode": "NO_MATCHING_CODE_EVIDENCE",
-        "stages": [],
+        "interviewSourceId": "src-problem-2", "stages": [],
     }
     calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items(source_id="src-risk-1")})
 
@@ -195,6 +198,151 @@ def test_not_generated_problem_has_no_stages_and_is_not_treated_as_failure(monke
     comprehension_block = calls[0]["values"]["comprehension_block"]
     assert "출제되지 않았다" in comprehension_block
     assert "미달로 해석하지" in comprehension_block
+
+
+# ── D-ib4 (백엔드 감사 반영: 미사용 필드 배선 + 신규 interviewSourceId 슬롯) ──────
+
+def test_risk_reason_stage_link_and_not_applicable_code_reach_prompt(monkeypatch):
+    """sourceProblemStageId/notApplicableReasonCode는 스키마엔 있었지만 프롬프트에
+    안 실리고 있었다(백엔드 감사로 발견) -- 배선 확인."""
+    req_dict = _request()
+    req_dict["riskReasons"] = [{
+        "reasonCode": "CONTRIBUTION_UNDERSTANDING_GAP", "evaluationStatus": "NOT_APPLICABLE",
+        "notApplicableReasonCode": "FIRST_MINI_PROJECT",
+        "reasonSummary": "첫 미니프로젝트라 비교 대상 없음",
+        "detectedAt": "2026-08-01T09:12:00Z",
+        "sourceProblemStageId": "ps-linked-1",
+        "sourceInterviewSourceId": "src-risk-1",
+    }]
+    calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
+
+    engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    block = calls[0]["values"]["risk_reasons_block"]
+    assert "ps-linked-1" in block
+    assert "FIRST_MINI_PROJECT" in block
+
+
+def test_validity_trigger_and_decision_reason_code_reach_prompt(monkeypatch):
+    """trigger_reason_code(신규)·decision_reason_code(기존 미사용)가 프롬프트에 실리는지."""
+    req_dict = _request()
+    req_dict["validityReview"] = {
+        "status": "CONFIRMED_INVALID",
+        "triggerReasonCode": "DUPLICATE_SUBMISSION_DETECTED",
+        "decisionReasonCode": "PLAGIARISM_CONFIRMED",
+        "decisionNote": "표절 확인됨",
+    }
+    calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
+
+    engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    block = calls[0]["values"]["validity_review_block"]
+    assert "DUPLICATE_SUBMISSION_DETECTED" in block
+    assert "PLAGIARISM_CONFIRMED" in block
+    assert "표절 확인됨" in block
+
+
+def test_code_context_and_problem_interview_source_id_reach_prompt(monkeypatch):
+    """codeContext(기존 미사용)와 문제 단위 interviewSourceId(신규)가 프롬프트에
+    실리고, 후자가 허용 집합에도 들어가는지."""
+    req_dict = _request()
+    req_dict["comprehension"]["problems"][0]["codeContext"] = {
+        "language": "python", "path": "app/handlers.py", "lineStart": 10, "lineEnd": 20,
+    }
+    calls = _stub_call(monkeypatch, {
+        "openingRemark": "여는 말",
+        "items": _four_items(source_id="src-problem-1"),  # 문제 단위 id로 응답
+    })
+
+    result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    block = calls[0]["values"]["comprehension_block"]
+    assert "app/handlers.py:10-20" in block
+    assert "src-problem-1" in block
+    assert result.items[0].interview_source_id == "src-problem-1"  # 지어냄으로 안 걸림
+
+
+def test_not_generated_problem_interview_source_id_is_allowed_even_with_empty_stages(monkeypatch):
+    """NOT_GENERATED 문제(stages=[])도 problem 단위 id는 허용 집합에 들어가야 한다
+    -- _collect_allowed_source_ids()가 stages 루프 밖에서 넣는지 확인(누락하기 쉬운 지점)."""
+    req_dict = _request()
+    req_dict["comprehension"]["problems"][0] = {
+        "problemNo": 2, "conceptName": "동시성", "problemScope": "TEAM_SHARED_PROBLEM",
+        "generationStatus": "NOT_GENERATED", "notGeneratedReasonCode": "NO_MATCHING_CODE_EVIDENCE",
+        "interviewSourceId": "src-problem-2", "stages": [],
+    }
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items(source_id="src-problem-2")})
+
+    result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    assert result.items[0].interview_source_id == "src-problem-2"
+
+
+def test_attempt_and_session_interview_source_id_are_allowed(monkeypatch):
+    """시도/세션 단위 interviewSourceId(신규, NOT_ATTENDED 등 problems=[] 케이스의
+    유일한 근거)가 프롬프트에 실리고 허용 집합에도 들어가는지."""
+    req_dict = _request()
+    req_dict["comprehension"] = {
+        "attemptType": "INITIAL", "attemptStatus": "FAILED",
+        "terminalReasonCode": "NOT_ATTENDED",
+        "attemptInterviewSourceId": "src-attempt-9",
+        "problems": [],
+    }
+    calls = _stub_call(monkeypatch, {
+        "openingRemark": "여는 말",
+        "items": _four_items(source_id="src-attempt-9"),
+    })
+
+    result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    block = calls[0]["values"]["comprehension_block"]
+    assert "src-attempt-9" in block
+    assert result.items[0].interview_source_id == "src-attempt-9"
+
+
+def test_observation_note_interview_source_id_is_allowed_not_fabrication(monkeypatch):
+    """관찰 메모가 이제 자기 interviewSourceId를 갖는다(D-ib4) -- 그 값으로 응답해도
+    '지어냄'으로 걸리면 안 된다. D-ib3의 null-허용 규칙이 여전히 유효한지도 같이 본다
+    (priorInterviews만 근거인 항목은 계속 null 허용)."""
+    req_dict = _request()
+    req_dict["observationNotes"] = [{
+        "occurredAt": "2026-08-01T09:00:00Z",
+        "content": "쉬는 시간에 페어 프로그래밍이 힘들다고 얘기함",
+        "interviewSourceId": "src-note-1",
+    }]
+    items = _four_items()
+    items[0]["interviewSourceId"] = "src-note-1"  # 관찰 메모 근거 -- 이제 실제 id로 인용 가능
+    items[1]["interviewSourceId"] = None           # priorInterviews만 근거면 여전히 null 허용
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
+
+    result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    assert result.items[0].interview_source_id == "src-note-1"
+    assert result.items[1].interview_source_id is None
+
+
+def test_new_session_end_reason_codes_are_accepted(monkeypatch):
+    """백엔드 DDL 실측(ck_assessment_session_end_reason_code)으로 발견된 4종 --
+    기존 스키마는 9종뿐이라 이 값들이 오면 422였다."""
+    for code in ("REVIEW_DUE_AT_EXPIRED", "DATA_INTEGRITY_INVALID",
+                 "ADMIN_INVALIDATED", "TECHNICAL_FAILURE"):
+        req_dict = _request()
+        req_dict["comprehension"]["sessionEndReasonCode"] = code
+        req = InterviewBriefRequest.model_validate(req_dict)  # 422 없이 통과해야 함
+        assert req.comprehension.session_end_reason_code == code
+
+
+def test_concept_name_source_hedges_language_when_not_verified(monkeypatch):
+    """conceptNameSource(D-2 대응)가 VERIFICATION_CONCEPT가 아니면 확신도를 낮추라는
+    지시가 프롬프트에 붙어야 한다."""
+    req_dict = _request()
+    req_dict["comprehension"]["problems"][0]["conceptNameSource"] = "PROBLEM_TITLE"
+    calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
+
+    engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    block = calls[0]["values"]["comprehension_block"]
+    assert "단정하지 말고" in block
 
 
 def test_student_answer_text_is_fenced_as_untrusted(monkeypatch):
