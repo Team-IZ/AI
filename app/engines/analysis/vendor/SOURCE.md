@@ -28,13 +28,26 @@
 |---|---|---|
 | 출처 | `feat/poc_full` 의 `cognition/`·`judgment/`·`feedback/` + `app/prompt_manifest.json` | `feat/pdf_analysis` 의 `docs/lab/prompt_manifest.json` |
 | 받는 파일 | 위 3개 디렉터리 + `prompt_manifest.json` | `curriculum_manifest.json` (개명해 둔다) |
-| 기준 커밋 | `15b02fb` (2026-07-30) | `5c7f84f` (2026-08-02) |
-| 복사 일자 | 2026-07-31 | 2026-08-02 |
-| 구성 | `.py` 12개 + `.json` 데이터 19개 + 매니페스트(p04-0.2.0) | 매니페스트 1개(p01-1.0.0) |
+| 기준 커밋 | `cognition/judgment/feedback`: `e2700e5`(2026-08-05) · `prompt_manifest.json`: `15b02fb`(2026-07-30, 아래 참고) | `5c7f84f` (2026-08-02) |
+| 복사 일자 | `cognition/judgment/feedback`: 2026-08-05 · `prompt_manifest.json`: 2026-07-31 | 2026-08-02 |
+| 구성 | `.py` 9개(Tier B 3개 삭제 후) + `.json` 데이터 19개 + 매니페스트(p04-0.2.0) | 매니페스트 1개(p01-1.0.0) |
 | 의존성 | 없음 (Python stdlib만) | 없음 (프롬프트 문자열뿐) |
 
-⚠️ **`feat/poc_full`의 상류가 `756c4cb`로 앞서 있다**(Tier B 제거). 동기화는 선별 로직
-교체와 함께 판단한다 — `PLAN_FASTAPI_MIGRATION.md` §T10-B §7-8.
+**2026-08-05 갱신**: `cognition/judgment/feedback`을 `e2700e5`로 동기화 완료 — 아래 ⚠️ 경고(Tier B
+제거)가 그 대상이었다. `two_tier_scan.py`/`judgment/importance_rank.py`/`judgment/score_findings.py`
+교체, `judgment/tier_b_hook.py`·`tier_b_suppression_filter.py`·`tier_b_suppressions/`(상류에서도
+이미 삭제됨) 제거. `../rules.py`의 `_PROBLEM_TYPE_BY_PREFIX`에서 사문화된 `"tier-b-risk"` 항목도
+같이 지웠다(해당 결정의 WHY/COST/EXIT는 `rules.py`의 `D-tierb-sync` 주석 참고).
+
+`prompt_manifest.json`은 **이번엔 같이 갱신하지 않았다** — poc_full과의 diff(p04-1/2/5)를
+전수 대조한 결과 develop이 이미 코드 레벨(미병합 `fix/redteam-security-audit`의 `_wrap_untrusted`·
+`fragments.locate_symbol`)로 동등하거나 더 나은 방어를 갖고 있어, 매니페스트 텍스트를 poc 것으로
+덮어쓸 이유가 없었다. `prompt_manifest.json`의 기준 커밋은 그래서 그대로 둔다. 실제 필요했던
+액션은 매니페스트가 아니라 두 가지였다:
+① `fix/redteam-security-audit` 병합 — **아직 미해결.**
+② `fragments.py:build_code_block()`의 코드펜스 길이 계산 이식(poc `4d9967a`) — **해결됨**
+(`fix/vendor-drift-cleanup` 브랜치 `7e04fbd`, 2026-08-05). `_fence_for()`가 파일 내용의 최장
+백틱 연속보다 긴 펜스를 동적 계산한다.
 
 **`stages.py`가 두 매니페스트를 함께 읽는다.** stage id에 파이프라인 접두사가 있어
 (`p01-2`·`p04-5`) 충돌하지 않으므로 호출부는 어느 파일에 있는지 몰라도 된다.
