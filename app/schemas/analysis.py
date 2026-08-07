@@ -603,18 +603,25 @@ class AnalysisResult(BaseSchema):
     git_history_source: GitHistorySource = "NONE"
     history_truncated: bool = False
 
-# GET /analyses/{jobId}의 failureCode. 백엔드 실측 DDL(ck_analysis_job_failure_code_2,
-# 2026-08-06 감사 회신)로 확정된 값 -- 이 11종이 전부이고 그 외 문자열은 Spring INSERT가
-# 거부한다. schemas/는 engines/를 import하지 않는 계층 원칙을 유지한다 -- fetch.py의 내부
-# 코드(13종, GITHUB 6 + ZIP 5 + JOB_ONLY 2)를 이 11종으로 옮기는 매핑은 `jobs.py`의
-# `_FETCH_FAILURE_CODE_TRANSLATION`에 있고, 그 딕셔너리와의 drift는
-# `tests/test_jobs.py`가 잡는다(fetch_engine.VERIFICATION_FAILURE_CODES|JOB_ONLY_FAILURE_CODES
-# 와 정확히 같은 키 집합인지 대조).
+# GET /analyses/{jobId}의 failureCode. `analysis_job.failure_code`의 DB CHECK 그대로다 --
+# 그 외 문자열은 Spring INSERT가 거부한다.
+#
+# 🔴 백엔드 회신(2026-08-07)으로 11종 -> 15종이 됐고 `EMPTY_CODE_EVIDENCE`는 **삭제**됐다.
+# ZIP 검증 5종(submission_artifact.validation_failure_code, S-15)이 이 컬럼에 합류하면서
+# `EMPTY_CODE`와 이름이 겹쳤고, 백엔드가 `EMPTY_CODE`로 통일했다(재확인 완료). 그 결과
+# fetch.py의 내부 어휘 13종 중 11종이 이 집합의 부분집합이 됐다 -- 이름을 뭉개던 매핑이
+# 사라지고 `jobs.py`의 `_translate_failure_code()`는 JOB_ONLY 2종만 처리한다.
+# schemas/는 engines/를 import하지 않는 계층 원칙은 그대로다(그래서 매핑이 jobs.py에 있다).
 AnalysisJobFailureCode = Literal[
-    "EMPTY_CODE_EVIDENCE", "SOURCE_UNREACHABLE", "UNSUPPORTED_LANGUAGE",
+    # 분석 실행 실패 5종
+    "SOURCE_UNREACHABLE", "UNSUPPORTED_LANGUAGE",
     "ANALYSIS_TIMEOUT", "MODEL_ERROR", "TEMPORARY_ERROR",
+    # 저장소 접근 실패 5종 (= repository_verification.failure_code)
     "INVALID_REPOSITORY_URL", "REPO_NOT_FOUND", "REPOSITORY_ACCESS_DENIED",
     "BRANCH_NOT_FOUND", "UNSUPPORTED_HOST",
+    # ZIP 검증 실패 5종 (= submission_artifact.validation_failure_code, S-15)
+    "FILE_TOO_LARGE", "ARCHIVE_INVALID", "EMPTY_CODE",
+    "PROHIBITED_FILE", "GIT_LOG_MISSING",
 ]
 
 
@@ -632,7 +639,7 @@ class AnalysisJobStatus(BaseSchema):
     failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
     failure_code: AnalysisJobFailureCode | None = Field(
         default=None,
-        description="백엔드 DDL(ck_analysis_job_failure_code_2)로 확정된 11종. FAILED일 때만 채워진다",
+        description="analysis_job.failure_code의 DB CHECK 15종. FAILED일 때만 채워진다",
     )
     started_at: datetime | None = None
     completed_at: datetime | None = None

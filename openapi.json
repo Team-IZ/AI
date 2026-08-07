@@ -1535,7 +1535,7 @@
           "contextType": {
             "type": "string",
             "enum": [
-              "SUBMISSION",
+              "ANALYSIS_JOB",
               "ASSESSMENT_SESSION",
               "REPORT_SNAPSHOT",
               "CURRICULUM_ANALYSIS"
@@ -1545,7 +1545,7 @@
           "contextId": {
             "type": "string",
             "title": "Contextid",
-            "description": "처리한 업무 엔터티의 PK. SUBMISSION이면 submissionId, ASSESSMENT_SESSION이면 sessionId. ⚠️ REPORT_SNAPSHOT· CURRICULUM_ANALYSIS는 AI가 그 PK를 몰라 jobId가 들어간다 — Spring이 저장 시점에 실제 PK로 교체해야 한다"
+            "description": "처리한 업무 엔터티의 PK. ANALYSIS_JOB이면 jobId, ASSESSMENT_SESSION이면 sessionId. ⚠️ REPORT_SNAPSHOT· CURRICULUM_ANALYSIS는 AI가 그 PK를 몰라 jobId가 들어간다 — Spring이 저장 시점에 실제 PK로 교체해야 한다"
           },
           "requestId": {
             "type": "string",
@@ -1874,7 +1874,6 @@
               {
                 "type": "string",
                 "enum": [
-                  "EMPTY_CODE_EVIDENCE",
                   "SOURCE_UNREACHABLE",
                   "UNSUPPORTED_LANGUAGE",
                   "ANALYSIS_TIMEOUT",
@@ -1884,7 +1883,12 @@
                   "REPO_NOT_FOUND",
                   "REPOSITORY_ACCESS_DENIED",
                   "BRANCH_NOT_FOUND",
-                  "UNSUPPORTED_HOST"
+                  "UNSUPPORTED_HOST",
+                  "FILE_TOO_LARGE",
+                  "ARCHIVE_INVALID",
+                  "EMPTY_CODE",
+                  "PROHIBITED_FILE",
+                  "GIT_LOG_MISSING"
                 ]
               },
               {
@@ -1892,7 +1896,7 @@
               }
             ],
             "title": "Failurecode",
-            "description": "백엔드 DDL(ck_analysis_job_failure_code_2)로 확정된 11종. FAILED일 때만 채워진다"
+            "description": "analysis_job.failure_code의 DB CHECK 15종. FAILED일 때만 채워진다"
           },
           "startedAt": {
             "anyOf": [

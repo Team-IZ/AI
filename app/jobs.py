@@ -27,39 +27,21 @@ _jobs: "OrderedDict[str, AnalysisJobStatus]" = OrderedDict()
 # 멱등성 키 -> job_id. 같은 키 재요청 시 새 job 안 만들고 처음 id 반환
 _job_id_by_idempotency_key: "OrderedDict[str, str]" = OrderedDict()
 
-# fetch.py의 내부 13종(VERIFICATION_FAILURE_CODES 11 + JOB_ONLY_FAILURE_CODES 2)을
-# analysis_job.failure_code의 실제 DB CHECK 11종(schemas/analysis.py AnalysisJobFailureCode)
-# 으로 옮긴다. GITHUB 6종은 이미 정확히 일치(identity). ZIP 5종+JOB_ONLY 2종은 1:1 이름이
-# 없어 의미상 최선 매핑이다 -- 🔴 backend 확인 전(2026-08-07). failure_reason(자유 텍스트)에
-# 원본 세부사유가 그대로 남으므로 여러 코드가 같은 DB 버킷으로 뭉쳐도 정보 손실은 없다.
-_FETCH_FAILURE_CODE_TRANSLATION: dict[str, str] = {
-    # GITHUB_FAILURE_CODES -- 이미 정확히 일치, identity
-    "INVALID_REPOSITORY_URL": "INVALID_REPOSITORY_URL",
-    "REPO_NOT_FOUND": "REPO_NOT_FOUND",
-    "REPOSITORY_ACCESS_DENIED": "REPOSITORY_ACCESS_DENIED",
-    "BRANCH_NOT_FOUND": "BRANCH_NOT_FOUND",
-    "UNSUPPORTED_HOST": "UNSUPPORTED_HOST",
-    "TEMPORARY_ERROR": "TEMPORARY_ERROR",
-    # ZIP_FAILURE_CODES -- 🔴 1:1 이름 없음, 의미상 최선 매핑
-    "EMPTY_CODE": "EMPTY_CODE_EVIDENCE",       # 이름만 다르지 사실상 동의어
-    "FILE_TOO_LARGE": "SOURCE_UNREACHABLE",    # 처리 가능한 소스를 못 얻음
-    "ARCHIVE_INVALID": "SOURCE_UNREACHABLE",   # 손상된 ZIP == 못 얻음
-    "PROHIBITED_FILE": "SOURCE_UNREACHABLE",   # 안전정책상 추출 거부 == 못 얻음
-    "GIT_LOG_MISSING": "SOURCE_UNREACHABLE",   # 코드는 있으나 정책상 소스로 불인정
-    # JOB_ONLY_FAILURE_CODES -- 둘 다 "검증했던 소스가 그 형태로 더는 없다"는 동일 계열
-    "INPUT_HASH_MISMATCH": "SOURCE_UNREACHABLE",
-    "FETCH_FAILED": "SOURCE_UNREACHABLE",
-}
-
-
 def _translate_failure_code(code: str) -> str:
-    """fetch.py 내부 코드 -> analysis_job.failure_code DB 11종.
+    """fetch.py 내부 코드 -> analysis_job.failure_code DB 15종.
 
-    매핑에 없는 새 코드가 fetch.py에 추가됐는데 여기를 안 고친 경우, 조용히
-    DB 밖의 값(옛 PROVIDER_ERROR 버그처럼)으로 새지 않도록 안전한 DB값으로 떨어진다.
-    test_jobs.py의 드리프트 핀 테스트가 이 상황을 CI에서 미리 잡는다.
+    백엔드 회신(2026-08-07)으로 ZIP 검증 5종이 DB CHECK에 합류하면서
+    `VERIFICATION_FAILURE_CODES` 11종이 전부 DB 값과 같은 이름이 됐다 -- 그래서
+    이름을 옮기던 딕셔너리가 통째로 사라졌다. 그전에는 ZIP 4종(FILE_TOO_LARGE·
+    ARCHIVE_INVALID·PROHIBITED_FILE·GIT_LOG_MISSING)이 전부 SOURCE_UNREACHABLE
+    하나로 뭉개져서 교육생에게 사유를 구분해 안내할 수 없었다.
+
+    DB에 이름이 없는 것은 `JOB_ONLY_FAILURE_CODES` 2종뿐이고("검증했던 소스가 그
+    형태로 더는 없다"는 계열이라 SOURCE_UNREACHABLE이 맞다), fetch.py에 새 코드가
+    늘었는데 DB CHECK에 없는 경우도 같은 값으로 떨어져 DB 밖의 값이 새지 않는다.
+    test_jobs.py의 드리프트 핀 테스트가 그 상황을 CI에서 미리 잡는다.
     """
-    return _FETCH_FAILURE_CODE_TRANSLATION.get(code, "SOURCE_UNREACHABLE")
+    return code if code in fetch_engine.VERIFICATION_FAILURE_CODES else "SOURCE_UNREACHABLE"
 
 def get_job(job_id: str) -> AnalysisJobStatus | None:
     return _jobs.get(job_id)
@@ -173,11 +155,11 @@ def run_analysis(
             raw = engine.analyze(body.model_dump(), zip_bytes)
         # 원장은 결과와 별개다. **검증 실패로 결과를 버려도 태운 토큰은 남긴다** —
         # 그래서 model_validate보다 먼저 떼어낸다.
-        # contextId는 jobId가 아니라 **submissionId**다 — v06 ai_usage.context_type이
-        # 처리 대상 엔터티(SUBMISSION)를 가리키기 때문이다. jobId를 넣으면 Spring이
-        # 비용을 제출에 귀속시킬 수가 없다. 요청에 없으면 그때만 jobId로 물러난다.
-        job.ai_usage = to_ai_usage(raw.pop("ai_usage", []), "SUBMISSION",
-                                   body.submission_id or job_id,
+        # contextType=ANALYSIS_JOB, contextId=jobId다 — 백엔드가 재분석(execution_no가
+        # 다른 두 번째 실행)의 비용을 실행별로 구분하려고 이 조합을 택했다(2026-08-07
+        # 회신, 제안서 D). ⚠️ 옛 SUBMISSION+submissionId는 폐기다 — 같은 제출을 두 번
+        # 분석하면 두 실행의 토큰이 한 덩어리로 합쳐져 어느 쪽이 비쌌는지 안 보였다.
+        job.ai_usage = to_ai_usage(raw.pop("ai_usage", []), "ANALYSIS_JOB", job_id,
                                    idempotency_key=idempotency_key, trace_id=trace_id)
         result = AnalysisResult.model_validate(raw)  # 계약 위반은 여기서 예외
 
@@ -228,8 +210,7 @@ def run_analysis(
         # 집계한다. AnalysisFailed가 실패 지점까지의 usage를 들고 온다.
         burned = getattr(exc, "ai_usage", None)
         if burned and not job.ai_usage:
-            job.ai_usage = to_ai_usage(burned, "SUBMISSION",
-                                       body.submission_id or job_id,
+            job.ai_usage = to_ai_usage(burned, "ANALYSIS_JOB", job_id,
                                        idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)
