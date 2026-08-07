@@ -154,11 +154,10 @@ def _stage_block(stage) -> str | None:
 
 def _problem_block(problem: ProblemComprehension) -> str:
     header = f"### 문제 {problem.problem_no}: {problem.concept_name} ({problem.problem_scope})"
-    # D-ib4 (백엔드 D-2 대응): concept_name이 검증된 개념명이 아니라 문제 제목으로
-    # 대체된 값이면(PROBLEM_TITLE 폴백) 모델이 그걸 확정된 개념으로 단정하지 않게
-    # 경고를 붙인다. CURRICULUM_EVIDENCE도 팀 공유 경로(VERIFICATION_CONCEPT)보다
-    # 약한 근거라 같이 낮춘다.
-    if problem.concept_name_source in ("CURRICULUM_EVIDENCE", "PROBLEM_TITLE"):
+    # concept_name이 검증된 표시명이 아니면 모델이 확정된 개념처럼 단정하지 않게 경고를
+    # 붙인다. **화이트리스트로 판정한다** -- 값 집합이 또 바뀌어도(옛 3종 → 4종이 이미 한 번
+    # 바뀌었다) 경고가 조용히 안 붙는 쪽으로 무너지지 않는다.
+    if problem.concept_name_source != "TEACHES_CANONICAL_NAME":
         header += "\n  ★이 개념명은 검증된 표시명이 아니라 대체값이다 -- 확정된 개념처럼 단정하지 말고 여지를 둔 표현을 써라."
     # D-ib4 (백엔드 D-1 대응): 문제 단위 interviewSourceId. _stage_block()이
     # 자기 interviewSourceId를 텍스트로 명시하는 것과 같은 이유 -- 허용 집합에만
@@ -283,41 +282,48 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         raise stages.StageError(f"ib-1: items가 배열이 아닙니다: {raw_items!r}", result.usages)
 
     items: list[InterviewBriefItemResult] = []
+    raw_orders: list[int] = []          # 아래 순서 검증용 -- 버린 항목까지 포함한다
     for raw in raw_items:
         if not isinstance(raw, dict):
             raise stages.StageError(f"ib-1: items 원소가 객체가 아닙니다: {raw!r}", result.usages)
-
-        # 🔴 D-ib3의 "null 허용"은 폐기됐다(2026-08-07, 백엔드 DDL v07 대조).
-        # `interview_brief_item.interview_source_id`가 **UUID NOT NULL**이라, null인
-        # 항목은 그 행 하나가 INSERT 자체가 안 된다 -- "부분 성공 없음"으로 전체를
-        # 실패시키는 이 엔진이 정작 백엔드 쪽에 반쪽 저장을 만드는 셈이었다.
-        #
-        # 대신 **시도 단위 id로 떨어뜨린다.** id가 없는 근거는 이제
-        # priorInterviews/briefContext 둘뿐이고(D-ib4로 observationNotes는 자기 id가
-        # 생겼다), 그 둘만 근거인 질문도 결국 "이번 회차 시도"에 딸린 질문이라
-        # attempt_interview_source_id를 대는 게 사실에 어긋나지 않는다. 그 값은
-        # 항상 존재한다(Comprehension.attempt_interview_source_id는 필수 필드).
-        #   WHY: 지어낸 id는 여전히 거부한다 -- 아래 allowed_ids 검사는 그대로다.
-        #   폴백은 "요청에 실제로 있는 값"이라 위조가 아니다.
-        #   EXIT: priorInterviews/briefContext에도 명세가 id를 부여하면 폴백 대신
-        #   그 id를 쓴다.
-        raw_source_id = raw.get("interviewSourceId")
-        source_id = str(raw_source_id).strip() if raw_source_id else None
-        if source_id is None:
-            source_id = req.comprehension.attempt_interview_source_id
-        if source_id not in allowed_ids:
-            # H4-dev(develop app/engines/analysis/requirements.py)와 같은 원칙: 모델이
-            # 만들어낸 참조를 그대로 믿지 않는다. 값을 댔는데 요청에 없으면 지어낸 것이다.
-            raise stages.StageError(
-                f"ib-1: 모델이 요청에 없는 interviewSourceId를 지어냈습니다: {source_id!r}",
-                result.usages,
-            )
 
         try:
             order = int(raw.get("suggestedOrder"))
         except (TypeError, ValueError):
             raise stages.StageError(
                 f"ib-1: suggestedOrder가 정수가 아닙니다: {raw.get('suggestedOrder')!r}",
+                result.usages,
+            )
+        raw_orders.append(order)
+
+        # 🔴 D-ib3의 "null 허용"은 폐기됐다(2026-08-07). `interview_brief_item.
+        # interview_source_id`가 **UUID NOT NULL**이고, 백엔드 회신 §3 D-1②이
+        # *"근거 없는 항목은 저장 경로가 아예 없어 버려지거나 저장 실패합니다"*라고
+        # 확인했다 -- 테이블 COMMENT도 "매니저 수동 추가 항목을 지원하지 않는다"다.
+        #
+        # 근거가 없는 항목을 두 갈래로 나눠 처리한다.
+        #
+        #   observationNotes 비어 있음 → **항목을 버린다.** §3 D-1②의 지시 그대로다
+        #     ("빈 배열이면 라포 질문 항목 자체를 응답에 넣지 마십시오"). 프롬프트에도
+        #     같은 지시를 넣었지만 모델이 어길 수 있어 코드가 최종 방어다.
+        #   observationNotes 있음      → **시도 단위 id로 떨어뜨린다.** 이때 id 없는
+        #     항목이 나오는 건 모델이 관찰 메모를 근거로 삼지 않았다는 뜻인데, 그 질문도
+        #     결국 "이번 회차 시도"에 딸린 것이라 attempt id를 대는 게 사실에 어긋나지
+        #     않는다(Comprehension.attempt_interview_source_id는 필수 필드라 항상 있다).
+        #
+        # 어느 쪽이든 **모델에게 id를 강제하지 않는다** -- 강제하면 정직한 공백 대신
+        # 그럴듯한 id를 지어낼 유인이 생긴다(§3 D-1②이 이 판단에 동의했다).
+        raw_source_id = raw.get("interviewSourceId")
+        source_id = str(raw_source_id).strip() if raw_source_id else None
+        if source_id is None:
+            if not req.observation_notes:
+                continue
+            source_id = req.comprehension.attempt_interview_source_id
+        if source_id not in allowed_ids:
+            # H4-dev(develop app/engines/analysis/requirements.py)와 같은 원칙: 모델이
+            # 만들어낸 참조를 그대로 믿지 않는다. 값을 댔는데 요청에 없으면 지어낸 것이다.
+            raise stages.StageError(
+                f"ib-1: 모델이 요청에 없는 interviewSourceId를 지어냈습니다: {source_id!r}",
                 result.usages,
             )
 
@@ -328,16 +334,28 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
             interview_source_id=source_id,
         ))
 
-    if not (min_items <= len(items) <= max_items):
-        raise stages.StageError(
-            f"ib-1: items 개수가 {min_items}~{max_items}개를 벗어났습니다: {len(items)}개",
-            result.usages,
-        )
-
-    orders = sorted(i.suggested_order for i in items)
-    if orders != list(range(1, len(items) + 1)):
+    # 순서 검증은 **버리기 전 원본 기준**이다. 근거 없는 항목을 위에서 버렸다면 남은
+    # 것만으로는 1..N이 성립하지 않는데(예: 2번을 버리면 1,3,4), 그건 모델 잘못이
+    # 아니라 우리가 뺀 결과다. 모델이 실제로 어긴 경우(중복·구멍·0 시작)만 잡으려면
+    # 버리기 전 목록을 봐야 한다.
+    # 정렬해서 비교한다 -- 배열에 실려 온 순서가 곧 suggestedOrder 순서일 필요는 없다.
+    orders = sorted(raw_orders)
+    if orders != list(range(1, len(orders) + 1)):
         raise stages.StageError(
             f"ib-1: suggestedOrder가 1..N 연속 정수가 아닙니다: {orders}", result.usages,
+        )
+
+    # 버린 자리를 메워 1..N을 다시 만든다 -- 백엔드는 `display_order`를 여기서 파생하고,
+    # 구멍이 있으면 화면 번호가 튄다.
+    items.sort(key=lambda i: i.suggested_order)
+    for position, item in enumerate(items, start=1):
+        item.suggested_order = position
+
+    if not (min_items <= len(items) <= max_items):
+        raise stages.StageError(
+            f"ib-1: items 개수가 {min_items}~{max_items}개를 벗어났습니다: {len(items)}개"
+            f"(근거 없는 항목 {len(raw_orders) - len(items)}개 제외 후)",
+            result.usages,
         )
 
     return InterviewBriefResult(opening_remark=opening_remark, items=items, usages=result.usages)

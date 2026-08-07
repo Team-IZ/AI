@@ -38,6 +38,7 @@ def _request(**overrides) -> dict:
             "sessionInterviewSourceId": "src-session-1",
             "problems": [{
                 "problemNo": 1, "conceptName": "상태 관리",
+                "conceptNameSource": "TEACHES_CANONICAL_NAME",
                 "problemScope": "TEAM_SHARED_PROBLEM", "generationStatus": "GENERATED",
                 "interviewSourceId": "src-problem-1",
                 "stages": [{
@@ -143,23 +144,65 @@ def test_fabricated_interview_source_id_is_rejected(monkeypatch):
         engine.generate(InterviewBriefRequest.model_validate(_request()))
 
 
-def test_missing_interview_source_id_falls_back_to_the_attempt(monkeypatch):
-    """🔴 null은 저장 불가다 -- interview_brief_item.interview_source_id가 UUID NOT NULL.
+def test_evidenceless_item_is_dropped_when_there_are_no_observation_notes(monkeypatch):
+    """🔴 백엔드 회신 §3 D-1②: observationNotes가 비면 근거 없는 항목을 아예 넣지 않는다.
 
-    id가 없는 근거(priorInterviews·briefContext)만으로 만든 라포 질문은 시도 단위
-    id로 떨어진다. 요청에 실제로 있는 값이라 위조가 아니고, 백엔드가 그 행을
-    저장할 수 있다(옛 D-ib3의 null 허용은 폐기).
+    `interview_brief_item.interview_source_id`가 UUID NOT NULL이고 테이블 COMMENT가
+    "매니저 수동 추가 항목을 지원하지 않는다"라, 근거 없는 항목은 **저장 경로가 없다.**
+    프롬프트에도 같은 지시를 넣었지만 모델이 어길 수 있어 코드가 최종 방어다.
     """
-    items = _four_items()
+    items = [
+        {"questionText": f"질문 {i}?", "questionRationale": "근거", "suggestedOrder": i,
+         "interviewSourceId": "src-stage-1"}
+        for i in range(1, 7)               # 6개 -- 2개를 버려도 하한 4를 지킨다
+    ]
     items[0]["interviewSourceId"] = None
-    del items[1]["interviewSourceId"]  # 아예 필드 자체를 생략한 경우도 같은 폴백
+    del items[1]["interviewSourceId"]      # 필드 자체를 생략한 경우도 같은 처리
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
 
     result = engine.generate(InterviewBriefRequest.model_validate(_request()))
 
+    assert len(result.items) == 4
+    assert all(i.interview_source_id == "src-stage-1" for i in result.items)
+    # 버린 자리를 메워 1..N이 다시 연속이어야 한다(백엔드가 display_order를 여기서 판다)
+    assert [i.suggested_order for i in result.items] == [1, 2, 3, 4]
+
+
+def test_dropping_evidenceless_items_below_the_minimum_fails_loudly(monkeypatch):
+    """버린 결과가 하한(4개)을 못 채우면 조용히 짧은 브리프를 내보내지 않는다.
+
+    부분 성공 없음(§5.2)과 같은 원칙 -- 3개짜리 체크리스트를 성공으로 돌려주면
+    매니저가 그게 정상인 줄 안다.
+    """
+    items = _four_items()
+    items[0]["interviewSourceId"] = None
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
+
+    with pytest.raises(stages.StageError, match=r"근거 없는 항목 1개 제외 후"):
+        engine.generate(InterviewBriefRequest.model_validate(_request()))
+
+
+def test_evidenceless_item_falls_back_when_observation_notes_exist(monkeypatch):
+    """관찰 메모가 있는데도 모델이 id를 안 달았으면 시도 단위 id로 떨어뜨린다.
+
+    이때는 "근거가 아예 없는 요청"이 아니라 모델이 관찰 메모를 안 쓴 것뿐이라,
+    항목을 버리는 대신 실재하는 id(attempt)를 붙여 살린다 -- 요청에 실제로 있는
+    값이라 위조가 아니고 백엔드가 그 행을 저장할 수 있다.
+    """
+    req_dict = _request()
+    req_dict["observationNotes"] = [{
+        "occurredAt": "2026-08-01T09:00:00Z", "content": "메모",
+        "interviewSourceId": "src-note-1", "visibility": "MANAGER_ONLY",
+    }]
+    items = _four_items()
+    items[0]["interviewSourceId"] = None
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
+
+    result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    assert len(result.items) == 4
     assert result.items[0].interview_source_id == "src-attempt-1"
-    assert result.items[1].interview_source_id == "src-attempt-1"
-    assert result.items[2].interview_source_id == "src-stage-1"  # 나머지는 정상 그대로
+    assert result.items[1].interview_source_id == "src-stage-1"
 
 
 def test_too_few_items_is_rejected(monkeypatch):
@@ -194,6 +237,8 @@ def test_not_generated_problem_has_no_stages_and_is_not_treated_as_failure(monke
     req_dict = _request()
     req_dict["comprehension"]["problems"][0] = {
         "problemNo": 2, "conceptName": "동시성", "problemScope": "TEAM_SHARED_PROBLEM",
+        # NOT_GENERATED는 title조차 CHECK로 NULL이라 개념명 출처가 UNAVAILABLE이다.
+        "conceptNameSource": "UNAVAILABLE",
         "generationStatus": "NOT_GENERATED", "notGeneratedReasonCode": "NO_MATCHING_CODE_EVIDENCE",
         "interviewSourceId": "src-problem-2", "stages": [],
     }
@@ -254,6 +299,8 @@ def test_code_context_and_problem_interview_source_id_reach_prompt(monkeypatch):
     req_dict = _request()
     req_dict["comprehension"]["problems"][0]["codeContext"] = {
         "language": "python", "path": "app/handlers.py", "lineStart": 10, "lineEnd": 20,
+        # A-2의 6필드. 원문 대신 좌표+키+해시만 온다.
+        "snippetKey": "snip-1", "snippetHash": "sha256:abc",
     }
     calls = _stub_call(monkeypatch, {
         "openingRemark": "여는 말",
@@ -274,6 +321,8 @@ def test_not_generated_problem_interview_source_id_is_allowed_even_with_empty_st
     req_dict = _request()
     req_dict["comprehension"]["problems"][0] = {
         "problemNo": 2, "conceptName": "동시성", "problemScope": "TEAM_SHARED_PROBLEM",
+        # NOT_GENERATED는 title조차 CHECK로 NULL이라 개념명 출처가 UNAVAILABLE이다.
+        "conceptNameSource": "UNAVAILABLE",
         "generationStatus": "NOT_GENERATED", "notGeneratedReasonCode": "NO_MATCHING_CODE_EVIDENCE",
         "interviewSourceId": "src-problem-2", "stages": [],
     }
@@ -313,7 +362,7 @@ def test_observation_note_interview_source_id_is_allowed_not_fabrication(monkeyp
     req_dict["observationNotes"] = [{
         "occurredAt": "2026-08-01T09:00:00Z",
         "content": "쉬는 시간에 페어 프로그래밍이 힘들다고 얘기함",
-        "interviewSourceId": "src-note-1",
+        "interviewSourceId": "src-note-1", "visibility": "MANAGER_ONLY",
     }]
     items = _four_items()
     items[0]["interviewSourceId"] = "src-note-1"  # 관찰 메모 근거 -- 이제 실제 id로 인용 가능
@@ -414,6 +463,41 @@ def test_router_returns_503_with_failure_code_on_stage_error(monkeypatch):
     assert r.status_code == 503
     assert r.json()["failureCode"] == "INVALID_JSON"
     assert "message" in r.json()
+
+
+def test_failure_envelope_carries_the_burned_usage(monkeypatch):
+    """🔴 백엔드 회신 §3 A-5: 성공·실패 **모든** 봉투에 사용량을 싣는다.
+
+    `ai_usage.latency_ms`가 NOT NULL이고 status에 FAILED가 있어서 실패 호출도 원장에
+    남아야 한다. 실패 응답에 자리가 없으면 태운 토큰이 통째로 사라진다 -- 무료 티어
+    529 실패율이 64%라 사라지는 양이 적지 않다.
+    """
+    # LLM 호출은 성공했고(토큰을 태웠고) 그 뒤 계약 검증에서 걸린 경우
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()[:1]})
+
+    r = client.post(BRIEF_PATH, json=_request(),
+                    headers={**KEY_HEADERS, "Idempotency-Key": "interview-1:usage-on-fail"})
+
+    assert r.status_code == 503
+    usage = r.json()["aiUsage"]
+    assert len(usage) == 1
+    assert usage[0]["featureCode"] == "INTERVIEW_BRIEF_GENERATION"
+    assert usage[0]["inputTokenCount"] == 500
+    assert usage[0]["idempotencyKey"] == "interview-1:usage-on-fail:INTERVIEW_BRIEF:1"
+
+
+def test_failure_envelope_has_an_empty_usage_list_when_nothing_was_burned(monkeypatch):
+    """LLM을 부르기도 전에 죽었으면 빈 배열이다 -- 없는 호출을 지어내지 않는다."""
+    def _call(stage_id, values, *, model_code, timeout_s=None, max_attempts=None, extra_user=""):
+        raise stages.StageError("ib-1: 프롬프트 조립 실패", usages=[])
+
+    monkeypatch.setattr(engine.stages, "call", _call)
+
+    r = client.post(BRIEF_PATH, json=_request(),
+                    headers={**KEY_HEADERS, "Idempotency-Key": "interview-1:no-usage"})
+
+    assert r.status_code == 503
+    assert r.json()["aiUsage"] == []
 
 
 def test_router_maps_llm_transport_failure_code_through(monkeypatch):
