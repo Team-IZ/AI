@@ -38,6 +38,13 @@ DEFAULT_TIMEOUT_S = 600.0
 # 실패 모드가 "정체"에서 "즉시 529"로 바뀐 것이 핵심이다. 옛날에는 상한이 정체를
 # 빨리 버리는 장치라 짧을수록 이득이었지만, 지금 실패는 공짜로 빨리 오므로 상한은
 # **성공할 호출을 죽이지 않는 것**만 신경 쓰면 된다.
+#
+# ⚠️ D-model1(2026-08-07): model_code_session이 deepseek-v4-flash -> minimax-m3로,
+# model_code_interview_brief가 -> openai/gpt-oss-120b로 바뀌었다(config.py 참고).
+# 위 6.9~11.7초 분포는 deepseek-v4-flash 기준이라 이제 근거가 낡았다 -- 20초를
+# 그대로 둔 건 데이터가 있어서가 아니라 **아직 두 새 모델의 단일 호출(재시도 제외)
+# 지연분포를 재실측 안 해서**다(벤치마크의 mean_elapsed_s는 재시도 포함 합산값이라
+# 이 상수의 근거로 못 쓴다 -- CLAUDE.md §13 Data-First Numerics).
 SESSION_TIMEOUT_S = 20.0
 
 # 세션 경로 재시도 횟수.

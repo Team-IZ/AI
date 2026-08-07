@@ -64,7 +64,7 @@ def _stub_problem(problem_no: int, focus_item_id: str | None = None,
 class StubAnalysisEngine:
 
     def analyze(
-        self, request: dict[str, Any], zip_bytes: bytes | None = None
+        self, request: dict[str, Any], zip_bytes: bytes | None = None,
     ) -> dict[str, Any]:
         # 요청 값을 결과에 반영해 연결되었는지 확인
         # 스텁이 요청 무시하고 고정값만 주면 실제값 확인 불가

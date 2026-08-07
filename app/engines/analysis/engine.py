@@ -40,6 +40,7 @@ from typing import Any
 from app.config import get_settings
 from app.engines.analysis import (
     analysis_doc,
+    fetch,
     fragments,
     hints,
     imports,
@@ -265,8 +266,8 @@ class AnalysisFailed(Exception):
 # 실패한 스테이지를 원장의 어느 종류로 적을지. 스테이지마다 다르다.
 _STAGE_KIND = {
     "p04-1": "CODE_ANALYSIS", "p04-2": "CODE_ANALYSIS",
-    "p04-3": "QUESTION_GENERATION", "p04-4": "QUESTION_GENERATION",
-    "p04-7": "QUESTION_GENERATION",
+    "p04-3": "CODE_SESSION", "p04-4": "CODE_SESSION",
+    "p04-7": "CODE_SESSION",
     "p04-5": "GRADING", "p04-6": "REPORT",
 }
 
@@ -279,12 +280,21 @@ def _failed_kind(message: str) -> str:
 class RealAnalysisEngine:
     """`engine_mode="real"`일 때 쓰이는 엔진."""
 
-    def analyze(self, request: dict[str, Any],
-                zip_bytes: bytes | None = None) -> dict[str, Any]:
-        """실패해도 원장은 살려 내보낸다. 실제 작업은 `_run`이 한다."""
+    def analyze(self, request: dict[str, Any], zip_bytes: bytes | None = None,
+) -> dict[str, Any]:
+        """실패해도 원장은 살려 내보낸다. 실제 작업은 `_run`이 한다.
+
+        `fetch.FetchError`(M4 -- 이 엔진 자신이 fetch할 때도 이제 fetch.py를 쓴다)는
+        여기서 `AnalysisFailed`로 감싸지 않고 그대로 흘려보낸다 -- fetch 실패 시점엔
+        아직 LLM 콜이 하나도 없어 `usages`가 항상 빈 배열이라 원장을 잃을 게 없고,
+        `jobs.py`가 이미 `FetchError`를 따로 받아 `failure_code`로 정확히 옮긴다
+        (M3). 여기서 감싸면 그 분류가 무너진다.
+        """
         usages: list[dict[str, Any]] = []
         try:
             return self._run(request, zip_bytes, usages)
+        except fetch.FetchError:
+            raise
         except stages.StageError as exc:
             usages.extend(_stamp(exc.usages, _failed_kind(str(exc))))
             raise AnalysisFailed(str(exc), usages) from exc
@@ -303,15 +313,37 @@ class RealAnalysisEngine:
         budget = int(request.get("question_budget") or scoring.QUESTIONS_PER_SUBMISSION)
 
         # ── 룰 스캔 ────────────────────────────────────────────────────────────
-        # GITHUB_URL이면 클론, ZIP이면 압축 해제. 두 경로가 같은 스캔으로 합류한다
-        # (materialize.py — 팀원 브랜치 feature/code-importance-map에서 이식).
+        # GITHUB_URL이면 클론, ZIP이면 압축 해제. 두 경로가 같은 스캔으로 합류한다.
         # 디렉터리는 with를 빠져나가며 지워지므로 파일 내용은 여기서 다 읽어 나온다.
+        #
+        # (M4) fetch는 fetch.py가 한다(예전엔 materialize.py였다) --
+        # 구현체를 하나로 통합하면 실패 시 failureCode 분류(fetch.FetchError)를
+        # 이 경로도 그대로 받는다. request의 소스 모양(`source.repo_url`/`source.branch`)을
+        # fetch.py가 기대하는 스펙 키(`repository_url`/`requested_branch`)로 바꿔 넘긴다.
         commit_sha = request.get("commit_sha")
-        with materialize.materialize(request, zip_bytes) as repo_dir:
-            scan = rules.scan_directory(repo_dir)
-            if request.get("method") == "GITHUB_URL":
+        # D-analysis-b1(2026-08-07): resolved_branch/head_commit/git_history는 두 경로 다
+        # 채워야 AnalysisResult에 실린다(기존엔 아예 안 실렸다 -- 배선 누락).
+        resolved_branch: str | None = None
+        head_commit: dict[str, Any] | None = None
+        git_history: list[dict[str, Any]] = []
+        git_history_source = "NONE"
+        history_truncated = False
+        source = request.get("source") or {}
+        spec = {
+            "method": request.get("method"),
+            "repository_url": source.get("repo_url"),
+            "requested_branch": source.get("branch"),
+        }
+        with fetch.fetch(spec, zip_bytes) as fetched:
+            scan = rules.scan_directory(fetched.root)
+            if fetched.head_commit:
                 # 클론 경로에서만 실제 커밋을 안다. ZIP은 요청 값을 그대로 쓴다.
-                commit_sha = materialize.head_sha(repo_dir) or commit_sha
+                commit_sha = fetched.head_commit["commit_hash"]
+            resolved_branch = fetched.resolved_branch
+            head_commit = fetched.head_commit
+            git_history = fetched.git_history
+            git_history_source = fetched.git_history_source
+            history_truncated = fetched.history_truncated
         files, candidates = scan["files"], scan["candidates"]
 
         # ── p04-1 분석 문서 ────────────────────────────────────────────────────
@@ -341,7 +373,7 @@ class RealAnalysisEngine:
         # ── p04-3 문제 선정 ───────────────────────────────────────────────────
         selection = topics.select(files, teaches, doc.document, candidates,
                                   model_code=model_code, question_budget=budget)
-        usages.extend(_stamp(selection.usages, "QUESTION_GENERATION"))
+        usages.extend(_stamp(selection.usages, "CODE_SESSION"))
 
         # ── p04-4 질문 + p04-7 힌트 ───────────────────────────────────────────
         teach_map = _teach_by_id(teaches)
@@ -360,7 +392,7 @@ class RealAnalysisEngine:
         for no, topic in enumerate(selection.topics, start=1):
             teach = teach_map.get(topic.get("teach_id"))
             qset = questions.freeze(topic, files, teach, model_code=model_code)
-            usages.extend(_stamp(qset.usages, "QUESTION_GENERATION"))
+            usages.extend(_stamp(qset.usages, "CODE_SESSION"))
 
             ref = topic.get("code_ref") or {}
             code_ref_str = fragments.format_ref(
@@ -390,7 +422,7 @@ class RealAnalysisEngine:
         hint_sets = hints.freeze_many(hint_specs, model_code=model_code)
         for hint_list in hint_sets:
             for h in hint_list:
-                usages.extend(_stamp(h.usages, "QUESTION_GENERATION"))
+                usages.extend(_stamp(h.usages, "CODE_SESSION"))
 
         for plan in planned:
             no, topic, ref = plan["no"], plan["topic"], plan["ref"]
@@ -458,6 +490,11 @@ class RealAnalysisEngine:
             "unmatched_teaches": selection.unmatched,
             "question_count_planned": budget,
             "ai_usage": usages,
+            "resolved_branch": resolved_branch,
+            "head_commit": head_commit,
+            "git_history": git_history,
+            "git_history_source": git_history_source,
+            "history_truncated": history_truncated,
         }
 
 

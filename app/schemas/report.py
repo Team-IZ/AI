@@ -9,7 +9,7 @@ from typing import Any, Literal, get_args
 
 from pydantic import Field, model_validator
 
-from app.schemas.common import BaseSchema
+from app.schemas.common import BaseSchema, UuidStr
 from app.schemas.usage import AiUsage
 
 # 4축. 축이 곧 문답 레벨이다(L1 통과해야 L2로 간다).
@@ -35,14 +35,14 @@ class ReportRequest(BaseSchema):
     학생 체감 대기가 0이다 — 세션 끝에 몰아 만들면 그만큼 기다리게 된다.
     """
 
-    problem_id: str = Field(description="이 보고서가 다루는 문제. 문제 단위의 키")
+    problem_id: UuidStr = Field(description="이 보고서가 다루는 문제. 문제 단위의 키")
     problem_no: int | None = Field(
         default=None, ge=1,
         description="세션 안에서 이 문제가 몇 번째인가(1~3). 응답 problem.problemNo로 "
                     "그대로 돌아온다. 생략하면 1이 나가는데, 2·3번 문제의 보고서에도 "
                     "1이 찍혀 화면 표기와 어긋난다",
     )
-    session_id: str | None = None
+    session_id: UuidStr | None = None
     score_run_id: str | None = Field(default=None, description="Spring ScoreRun 키(에코용)")
     provider_model_code: str | None = Field(
         default=None,
@@ -134,7 +134,7 @@ class ProblemResult(BaseSchema):
         description="요청의 problemNo를 그대로 돌려준다. 안 보내면 1이다 — "
                     "**보내지 않으면 화면의 '문제 2 / 3'과 어긋난다**",
     )
-    problem_id: str
+    problem_id: UuidStr
     reached_stage: int = Field(
         ge=0, le=4,
         description="통과한 최고 단계. 0=L1 미달 · 1=L1까지 · 2=L2까지 · 3=L3까지 · 4=완주. "
@@ -188,7 +188,7 @@ class ReportNote(BaseSchema):
 
     axis: str = Field(description="모델이 붙인 이름표. 축 코드(L1~L4)가 아니라 교안 개념명이 온다")
     detail: str = Field(description="실제 답변을 근거로 한 서술")
-    teach_id: str | None = Field(
+    teach_id: UuidStr | None = Field(
         default=None,
         description="gaps에만 있다. **요청 teaches에 없는 id는 버리고 null로 만든다** — "
                     "모델이 지어낸 교안을 가리키면 학생이 없는 페이지를 뒤진다",
@@ -264,8 +264,8 @@ class ReportJobStatus(BaseSchema):
     """
 
     job_id: str
-    problem_id: str | None = Field(default=None, description="이 job이 다루는 문제")
-    session_id: str | None = None
+    problem_id: UuidStr | None = Field(default=None, description="이 job이 다루는 문제")
+    session_id: UuidStr | None = None
     status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
     failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
     started_at: datetime | None = None

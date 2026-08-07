@@ -35,16 +35,27 @@ run:
       value: "production"
     - name: ENGINE_MODE
       value: "real"
+    # 🔴 여기 값이 app/config.py의 기본값을 **덮어쓴다.** 코드에서 모델을 바꿔도 이 파일을
+    # 같이 안 고치면 배포본만 옛 모델을 계속 쓴다 — D-model1(2026-08-07) 때 실제로
+    # MODEL_CODE_SESSION이 이 파일에만 남아 있었다. 모델을 바꾸면 여기부터 확인한다.
+    #
+    # ⚠️ ai_model.model_code는 백엔드 DB의 FK다. 등록 안 된 코드가 응답에 실리면
+    # ai_usage INSERT가 통째로 실패한다 — **모델 변경은 백엔드에 사전 통보가 필수다.**
     - name: MODEL_CODE_ANALYSIS
       value: "nvidia/nemotron-3-ultra-550b-a55b"
-    # 🔴 채점 모델은 이것 하나뿐이다. 12종 실측(2026-08-03)에서 루브릭을 적용해 JSON까지
-    # 내는 모델이 이것뿐이었다. 옛 값 mistral-medium-3.5는 **죽어 있다**("1+1은?"도 3/3
-    # 타임아웃). 소형 모델은 빠르지만 우수·보통·애매를 전부 2점으로 줘 전원 낙제시킨다 —
-    # 속도로 고르면 안 된다.
+    # D-model1(2026-08-07): deepseek-v4-flash deprecate 예정 통보로 전면 교체했다.
+    # 후보 20종 × 3역할 × 3반복 실측 + Claude Sonnet 응답을 품질 기준점으로 재채점한 결과다.
+    # 🔴 채점 모델을 속도로 고르면 안 된다 — 소형 모델은 빠르지만 우수·보통·애매를 전부
+    # 2점으로 줘 전원 낙제시킨다(12종 실측, 2026-08-03).
     - name: MODEL_CODE_SESSION
-      value: "deepseek-ai/deepseek-v4-flash"
+      value: "minimaxai/minimax-m3"
     - name: MODEL_CODE_CURRICULUM
       value: "minimaxai/minimax-m3"
+    # 면담 브리프만 다른 모델이다. ib-1 프롬프트가 7블록으로 세 역할 중 가장 무거워
+    # minimax-m3가 여기서만 구조검사 67%(3회 중 1회 타임아웃)였다. gpt-oss-120b는
+    # 구조검사 100%에 세 역할 다 최속(9.4초).
+    - name: MODEL_CODE_INTERVIEW_BRIEF
+      value: "openai/gpt-oss-120b"
   secrets:
     - name: INTERNAL_API_KEY
       value-from: "arn:aws:secretsmanager:ap-northeast-1:357457230521:secret:teamiz-ai/apprunner-env-0weS1b:INTERNAL_API_KEY::"

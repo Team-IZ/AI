@@ -13,7 +13,7 @@ from typing import Any, Literal
 from pydantic import Field
 
 from app.schemas.analysis import Problem
-from app.schemas.common import BaseSchema
+from app.schemas.common import BaseSchema, UuidStr
 from app.schemas.report import AutonomyCode, AxisCode  # 축 = 문답 레벨. 정의는 report.py 한 곳뿐
 from app.schemas.usage import AiUsage
 
@@ -31,7 +31,7 @@ class Question(BaseSchema):
     같은 단계를 다시 물을 때도 `questionText`는 그대로고 `hintText`만 붙는다 —
     힌트는 재진술이라 원 질문을 대체하지 않는다(scoring.HINT_LADDER).
     """
-    problem_id: str               # DB assessment_problem 키
+    problem_id: UuidStr           # DB assessment_problem 키
     axis_code: AxisCode           # 문답 깊이(축) L1~L4
     sequence_no: int
     question_text: str
@@ -56,10 +56,20 @@ class Cursor(BaseSchema):
     생략하면 AI가 `transcript`를 되짚어 복원한다(첫 답변이면 첫 문제의 L1).
     """
 
-    problem_id: str
+    problem_id: UuidStr
     axis_code: AxisCode
     hints_used: int = Field(
         default=0, ge=0, le=2, description="이 단계에서 이미 연 힌트 수. 점수 상한(5/4/3)의 근거",
+    )
+    mac: str | None = Field(
+        default=None,
+        description="🔴 D-fix(redteam audit H10, 2026-08-04). 응답이 이 커서와 함께 실어 "
+                    "보낸 problems/transcript 상태에 대한 HMAC-SHA256 서명(별도 설정값 "
+                    "session_cursor_hmac_secret로 계산, x-internal-key와 다른 비밀). "
+                    "다음 요청에 그대로 되돌려 보내면 서버가 재계산해 대조한다 -- 셋 중 "
+                    "무엇이든 바뀌면 불일치로 거부된다. 생략하면(하위호환 단계, 또는 "
+                    "session_cursor_hmac_secret 미설정) 오늘처럼 무검증으로 신뢰된다 -- "
+                    "완전한 방어가 아니라 점진적 도입 단계라는 뜻이다.",
     )
 
 
@@ -72,7 +82,7 @@ class TranscriptTurn(BaseSchema):
     1이면 첫 번째 힌트 슬롯, 2면 두 번째 힌트 슬롯이다(2026-08-03, 새 MEAS 정의서).
     옛 `stage_answer_attempt` 테이블은 사라졌다.
     """
-    problem_id: str
+    problem_id: UuidStr
     axis_code: AxisCode
     question_text: str
     answer_text: str
@@ -139,7 +149,7 @@ class AnswerResult(BaseSchema):
     붙여 저장하면 된다.
     """
 
-    session_id: str
+    session_id: UuidStr
     # DB assessment_session.status CHECK와 같은 집합 (새 MEAS 정의서, 2026-08-03).
     # READY = 분석 직후 미리 만들어 둔 상태(문제보다 세션이 먼저 있어야 한다).
     #

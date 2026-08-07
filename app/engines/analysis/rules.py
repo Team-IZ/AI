@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import os
 import shutil
 import sys
 import tempfile
@@ -31,11 +32,32 @@ MAX_TOTAL_BYTES = 500 * 1024 * 1024
 # 놓치는 것들이 여기서 걸린다).
 MAX_SOURCE_BYTES = 200 * 1024
 
+# D-fix (redteam audit H13, 2026-08-04): vendor/cognition/two_tier_scan.py의
+# extract_java_same_package_targets()는 형제 Java 클래스마다 파일 전체 텍스트에
+# 정규식 검색을 돌려 O(J²×filesize)다. MAX_SOURCE_BYTES는 스캔이 끝난 뒤(_read_sources)
+# 에만 적용되어 스캔 자체(two_tier_scan.scan())는 못 막는다. 상한은 실측이 아니라
+# 추정치다(D122 주석의 예시인 "4클래스 학생 과제"보다 수십~수백 배 여유) -- 실제
+# 제출물 규모 데이터가 쌓이면 그걸로 보정.
+MAX_SCAN_FILE_COUNT = 300
+MAX_SCAN_TOTAL_BYTES = 5 * 1024 * 1024
+
 # finding id 접두사 → assessment_problem.problem_type (이슈 #31 D-5의 5종)
 # REQUIREMENT_IMPL·EXTERNAL_INTEGRATION은 룰이 만들지 않는다. LLM 선정 단계의 몫이다.
+#
+# D-tierb-sync (2026-08-05): "tier-b-risk" 접두사 항목을 지웠다. vendor의 D-tierb1
+# (2026-07-31, `two_tier_scan.py`)이 이 접두사를 내는 스캔 자체를 폐기해서 영구
+# 미도달이었다 -- vendor를 최신으로 동기화하며 여기도 같이 정리한다.
+#   WHY: 학생 제출물의 하드코딩 시크릿/eval 결정론적 탐지는 이 서비스에 불필요하다고
+#   확인됐다(사용자 확인, 2026-08-05). vendor 원본도 같은 결론 -- 정규식 기반이라
+#   matched_text가 짧아 위치 특정이 안 되고 새 패턴을 못 잡아 "위험 목록"으로도
+#   "질문 근거"로도 어중간했다(D-tierb1 커밋 메시지).
+#   COST: 결정론적 시크릿/eval 탐지 수단을 잃는다. RISK_POINT 문제 유형은 이제 이
+#   경로로는 영구히 안 나온다(schemas의 유효값 자체는 유지 -- 다른 경로가 낼 수도
+#   있어 스키마는 안 좁힌다).
+#   EXIT: 이 능력이 다시 필요해지면 정규식 재도입이 아니라 semgrep 같은 전용 SAST를
+#   붙인다(vendor 원본 커밋이 명시한 방향). 그때 이 dict에 접두사를 다시 추가한다.
 _PROBLEM_TYPE_BY_PREFIX = {
     "architecture-diffusion": "DESIGN_CHOICE",
-    "tier-b-risk": "RISK_POINT",
     "cognition-isolation": "COMPLEXITY_HOTSPOT",
     "repeated-pattern": "COMPLEXITY_HOTSPOT",
 }
@@ -212,6 +234,58 @@ def find_candidates(zip_bytes: bytes) -> dict[str, Any]:
         return scan_directory(str(_repo_root(Path(tmp))))
 
 
+def _strip_symlinks(root: str) -> None:
+    """스캔 전 심볼릭 링크를 전부 지운다(2026-08-04 redteam 감사 발견).
+
+    ZIP 경로(`_safe_extract`)는 심볼릭 링크 항목을 애초에 안 풀어서 안전하지만,
+    GITHUB_URL 클론 경로(`materialize.py`)는 git이 만든 심볼릭 링크가 그대로 남는다.
+    vendor/ 스캐너가 내부적으로 링크를 따라가는지 우리가 보장할 수 없으므로(팀원
+    소유 코드, vendor/SOURCE.md), 두 경로가 같은 결과를 내려면(위 docstring) vendor를
+    부르기 전에 여기서 링크 자체를 제거하는 것이 유일하게 양쪽을 동시에 막는 지점이다.
+
+    top-down + `followlinks=False`로 걷고 `dirnames`를 그 자리에서 가지치기한다 —
+    중간 경로가 링크인 채로 `os.path.join`을 하면 `unlink`가 링크를 타고 나가버려
+    루트 밖의 실제 파일을 지울 위험이 있다. 발견 즉시 가지치기하면 그 경로 자체가
+    생기지 않는다.
+    """
+    for dirpath, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        keep = []
+        for name in dirnames:
+            full = os.path.join(dirpath, name)
+            if os.path.islink(full):
+                os.unlink(full)
+            else:
+                keep.append(name)
+        dirnames[:] = keep
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            if os.path.islink(full):
+                os.unlink(full)
+
+
+def _enforce_scan_limits(root: str) -> None:
+    """vendor 스캐너(우리 소유 아님)를 부르기 전에 입력 규모를 캡핑한다(H13).
+
+    파일 개수만 캡하면 "적은 개수의 거대한 파일"에는 여전히 뚫리므로 합산 바이트도
+    같이 본다. 스캐너가 실제로 읽는 파일(소스 확장자)만이 아니라 전체 파일을 센다 —
+    find_src_files() 자신의 os.walk 비용과, 향후 vendor가 다른 파일도 처리하게 될
+    가능성까지 같이 막아 두는 쪽이 더 안전하다.
+    """
+    file_count = 0
+    total_bytes = 0
+    for dirpath, _dirnames, filenames in os.walk(root):
+        for name in filenames:
+            file_count += 1
+            if file_count > MAX_SCAN_FILE_COUNT:
+                raise ValueError(f"제출물 파일 수가 상한({MAX_SCAN_FILE_COUNT}개)을 넘습니다")
+            try:
+                total_bytes += os.path.getsize(os.path.join(dirpath, name))
+            except OSError:
+                continue
+            if total_bytes > MAX_SCAN_TOTAL_BYTES:
+                raise ValueError(f"제출물 총 용량이 상한({MAX_SCAN_TOTAL_BYTES} bytes)을 넘습니다")
+
+
 def scan_directory(root: str) -> dict[str, Any]:
     """이미 풀려 있는(또는 클론된) 디렉터리를 스캔한다.
 
@@ -219,6 +293,8 @@ def scan_directory(root: str) -> dict[str, Any]:
     `materialize.py`가 클론한 디렉터리를 준다. 두 경로가 같은 스캔을 타야
     "링크로 낸 제출물"과 "ZIP으로 낸 제출물"의 결과가 갈리지 않는다.
     """
+    _enforce_scan_limits(root)
+    _strip_symlinks(root)
     two_tier_scan, score_findings = _load_vendor()
 
     scan = two_tier_scan.scan(root)

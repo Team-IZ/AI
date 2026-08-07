@@ -1,0 +1,86 @@
+{
+  "grading": {
+    "score": 4,
+    "reached": true,
+    "matched_level": "4: 이유를 대지만 제약과 실제 구조 사이의 연결이 한 단계 비어 있다",
+    "evidence": "회원 등급별 할인 정책을 하나의 서비스 메서드에 모아두면 주문 처리 로직 여기저기에 할인 조건이 흩어지는 걸 막을 수 있어서 이렇게 설계했습니다. 할인율이 바뀌어도 이 메서드 하나만 고치면 되게 하려는 목적이에요.",
+    "missing": "왜 '여기저기 흩어질 위험'이 실제로 이 시스템에 존재했는지(예: 할인 계산이 필요한 다른 호출 지점이 실제로 있었다는 구체적 상황), 혹은 왜 이 정책이 하필 OrderService라는 위치·이 메서드 형태(if 한 줄)로 귀결되어야 했는지를 설명해야 5점에 도달한다. 지금은 '모아두면 좋다'는 일반 원칙과 결론만 있고, 그 원칙이 이 코드의 구체적 제약에서 어떻게 도출됐는지의 중간 연결이 비어 있다."
+  },
+  "report": {
+    "summary": "이 학생은 apply_discount 메서드에 대해 L1(설명)부터 L4(설계가 깨지는 조건)까지 전 레벨에서 힌트 없이 모두 만점(5점)을 받았다. 코드가 무엇을 하는지 정확히 기술했고, 서비스 계층에 정책을 모으는 설계 근거와 대안(모델 메서드 방식) 대비 장단점을 스스로 비교했으며, 동시성 레이스 컨디션과 부동소수점 누적 오차라는 구체적인 실패 조건까지 짚어냈다. 요구사항 r1도 PASS로 확인되어 코드 소유권 검증 전반에서 특이한 취약점이 드러나지 않았다. 전 구간에서 자기주도적 이해를 보여 재학습이 필요한 영역이 없다.",
+    "strengths": [
+      {
+        "axis": "L1_description",
+        "detail": "힌트 없이 'user.is_member가 True이고 order.total이 50000을 넘으면 0.9를 곱해 10% 할인'한다고 조건과 동작을 정확히 서술함"
+      },
+      {
+        "axis": "L2_rationale",
+        "detail": "힌트 없이 '할인 조건이 여기저기 흩어지는 걸 막기 위해', '할인율이 바뀌어도 메서드 하나만 고치면 되게' 설계했다는 명확한 설계 근거를 제시함"
+      },
+      {
+        "axis": "L3_justification",
+        "detail": "힌트 없이 order 모델에 메서드를 넣는 대안과 비교하여 '정책과 데이터가 섞이면 정책만 따로 테스트하기 어려워진다'는 구체적 트레이드오프를 들어 현재 구조를 정당화함"
+      },
+      {
+        "axis": "L4_failure_conditions",
+        "detail": "힌트 없이 '동시에 여러 스레드가 같은 order를 호출하면 레이스 컨디션으로 중복 할인'되는 경우와 '부동소수점 누적 오차'라는 두 가지 실패 조건을 스스로 도출함"
+      }
+    ],
+    "gaps": [],
+    "retest": [],
+    "autonomy_note": "4개 레벨(L1~L4) 전 문항을 힌트 0개로 통과했다. 즉 '보조를 받아 도달'한 항목이 전혀 없이 순수 자기주도적 이해로 설명·근거·비교·실패조건 도출까지 완결했다는 뜻이며, 이는 표면적 암기가 아니라 설계 트레이드오프와 동시성 리스크까지 내재화했음을 시사한다."
+  },
+  "interview_brief": {
+    "openingRemark": "김OO님, 오늘도 시간 내주셔서 감사해요. 지난번에 이어서 오늘도 편하게 이야기 나눠보려고 해요. 미니프로젝트 3차 진행하시면서 어떠셨는지 같이 짚어볼까요?",
+    "items": [
+      {
+        "questionText": "미니프로젝트 3차 진행하시면서 요즘 어떻게 지내셨어요?",
+        "questionRationale": "관찰 메모와 이전 상담 내역이 모두 없어 특정 자료를 근거로 삼을 수 없음. 라포 형성을 위한 일반 도입 질문.",
+        "suggestedOrder": 1,
+        "interviewSourceId": null
+      },
+      {
+        "questionText": "지난 면담 이후로 마음에 걸렸던 부분이 있으셨나요?",
+        "questionRationale": "면담 성격이 재면담임을 참고해 톤을 맞추는 질문. 이전 상담 내역에 구체적 질문 기록이 없어 반복 방지 목적 외 근거 자료 없음.",
+        "suggestedOrder": 2,
+        "interviewSourceId": null
+      },
+      {
+        "questionText": "이 상태 관리 관련 코드 부분은 누가 작성했는지 기억나세요?",
+        "questionRationale": "문제1(상태 관리)의 problemScope=TEAM_SHARED_PROBLEM이므로 본인 코드로 단정하지 않고 여지를 두는 질문.",
+        "suggestedOrder": 3,
+        "interviewSourceId": "src-problem-1"
+      },
+      {
+        "questionText": "지난 회차 때보다 이번에 조금 더 어려움을 느끼신 것 같은데, 그 사이에 준비 과정에서 달라진 부분이 있었을까요?",
+        "questionRationale": "위험 사유 STAGE_DECLINE(2회차 대비 3회차 하락)을 근거로 하되 단계 코드와 점수는 언급하지 않고 상황 확인 질문으로 전환.",
+        "suggestedOrder": 4,
+        "interviewSourceId": "src-risk-1"
+      },
+      {
+        "questionText": "이 메서드가 실제로 언제 호출되는지 지금 다시 한번 설명해주실 수 있을까요?",
+        "questionRationale": "문제1 단계 질문(\"이 메서드가 호출되는 시점은?\")에 '잘 모르겠습니다'로 답하며 통과하지 못한 부분을 후속 질문으로 재확인.",
+        "suggestedOrder": 5,
+        "interviewSourceId": "src-stage-1"
+      },
+      {
+        "questionText": "이 상태 관리 문제를 풀다가 어느 지점에서 막히는 느낌이 드셨어요?",
+        "questionRationale": "세션 종료 사유(TERMINATED_AT_L2)를 단계 코드 언급 없이 구어체로 풀어 어느 지점에서 막혔는지 확인하는 질문.",
+        "suggestedOrder": 6,
+        "interviewSourceId": "src-session-1"
+      },
+      {
+        "questionText": "이번 시도 전체적으로 봤을 때 스스로는 어떻게 준비하고 접근하셨다고 생각하세요?",
+        "questionRationale": "시도 단위(INITIAL, COMPLETED) 기록을 근거로 전체 접근 방식을 확인하는 이해도 심화 질문.",
+        "suggestedOrder": 7,
+        "interviewSourceId": "src-attempt-1"
+      },
+      {
+        "questionText": "오늘 이야기 나눠보니 스스로 제일 보완이 필요하다고 느껴지는 부분은 뭔가요?",
+        "questionRationale": "자기 인식 확인을 위한 마무리 질문. 특정 단일 자료가 아닌 면담 전체 흐름을 종합하는 질문이라 특정 interviewSourceId 없음.",
+        "suggestedOrder": 8,
+        "interviewSourceId": null
+      }
+    ]
+  }
+}

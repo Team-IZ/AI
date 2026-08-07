@@ -6,7 +6,7 @@ from app.schemas.usage import AiUsage
 
 from pydantic import Field, model_validator
 
-from app.schemas.common import BaseSchema
+from app.schemas.common import BaseSchema, UuidStr
 
 class AnalysisSource(BaseSchema):
     repo_url: str | None = Field(
@@ -23,12 +23,85 @@ class FocusItem(BaseSchema):
 
     id: str
     name: str
-    
+
+
+# ── 코드 fetch 결과 (GET /analyses/{jobId} 응답에 실린다) ──────────────────
+#
+# `app/engines/analysis/fetch.py`의 `FetchedInput`이 실제 데이터 원천이다.
+# 커밋 귀속·기여도 산정에 백엔드가 쓴다(제안서 B, 2026-08-06).
+
+
+class HeadCommit(BaseSchema):
+    """GITHUB_URL fetch의 HEAD 커밋. ZIP은 커밋 개념이 없을 수 있어 이 필드 자체가 null이다.
+
+    🔴 2026-08-07 이름 통일(백엔드 협의): `sha` -> `commitHash`, `message` -> `commitMessage`.
+    `gitHistory[]` 원소와 같은 이름을 쓴다 -- 같은 응답 안에서 커밋 해시가 두 이름이면
+    소비하는 쪽이 매번 어느 쪽인지 확인해야 한다.
+    """
+
+    commit_hash: str
+    commit_message: str
+    committed_at: datetime
+
+
+class GitCommit(BaseSchema):
+    """`gitHistory[]` 항목 하나.
+
+    D-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 감사 반영):
+    parentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·
+    changedLineCount를 추가했다. 판정 기준은 `app/engines/analysis/fetch.py`의
+    `_parse_git_log_output`/`_tag_branch_name` 참고.
+
+    🔴 2026-08-07 이름 확정(백엔드 협의): `sha` -> `commitHash`, `commitMessage` 신설.
+    프론트 "최근 커밋 이력" 화면이 `commitHash`·`commitMessage`·`branchName`·`committedAt`
+    4개로 조회한다 -- **이 넷은 커밋마다 반드시 채운다.** ⚠️ 옛 이름 `sha`를 쓰지 않는다.
+    `HeadCommit.sha`는 별개 필드라 그대로다(같은 응답에 두 이름이 있는 건 의도된 것).
+    """
+
+    commit_hash: str
+    commit_message: str = Field(
+        description="커밋 제목(git log %s). 예전엔 파싱만 하고 버렸다 -- 프론트 화면이 "
+                    "이 값을 쓴다는 게 2026-08-07에 확인돼 커밋마다 싣는다",
+    )
+    author_name: str
+    author_email: str
+    committed_at: datetime
+    changed_files: list[str] = Field(default_factory=list)
+    additions: int = 0
+    deletions: int = 0
+    parent_sha: str | None = Field(
+        default=None,
+        description="첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 "
+                    "**null**이다 -- 백엔드가 `commit_attribution.parent_commit_hash`의 "
+                    "NOT NULL을 해제해서(2026-08-07) 옛 \"0\"*40 sentinel을 폐기했다",
+    )
+    authored_at: datetime = Field(description="author date. committedAt(커밋 date)과 다른 값")
+    branch_name: str = Field(
+        description="이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- "
+                    "git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 "
+                    "소속은 아니다. 미상이면 빈 문자열",
+    )
+    is_merge_commit: bool = Field(description="부모가 2개 이상인지(기계적 판정, %P 부모 개수)")
+    is_revert_commit: bool = Field(
+        description="커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 "
+                    "자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다",
+    )
+    is_bot_commit: bool = Field(
+        description="GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` "
+                    "또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- "
+                    "그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다",
+    )
+    changed_line_count: int = 0
+
+
+GitHistorySource = Literal["BACKEND_SUPPLIED", "EMBEDDED_GIT", "REMOTE_DEEPEN", "NONE"]
+
+
 class AnalysisRequest(BaseSchema):
     """ POST /api/v0/analyses 요청 본문 """
-    
-    attempt_id: str | None = Field(default=None, description="Spring 측 측정수행 키(에코용)")
-    submission_id: str | None = None
+
+    attempt_id: UuidStr | None = Field(default=None, description="Spring 측 측정수행 키(에코용)")
+    submission_id: UuidStr | None = None
     # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다 —
     # AI→백엔드 방향 통신이 0이라 그 구간의 인증·방화벽을 새로 정할 일이 없다.
     method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
@@ -45,7 +118,13 @@ class AnalysisRequest(BaseSchema):
     teaches: list[dict[str, Any]] = Field(
         default_factory=list, description="[{id, label, unitId, sourcePages}] 교안 참조용"
     )
-    curriculum_id: str | None = None
+    curriculum_version_id: UuidStr | None = Field(
+        default=None,
+        description="teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. "
+                    "🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산"
+                    "(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 "
+                    "이름만으로 구분되지 않았다",
+    )
     provider_model_code: str | None = Field(
         default=None,
         description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` "
@@ -56,13 +135,13 @@ class AnalysisRequest(BaseSchema):
     
     @model_validator(mode="after")
     def _check_conditional_fields(self) -> "AnalysisRequest":
-        """ 다른 필드 값에 따라 필수가 되는 것들을 검사 
-        
+        """ 다른 필드 값에 따라 필수가 되는 것들을 검사
+
         mode="after"는 개별 필드 검증 끝난 후 실행하라는 뜻
         """
-        
         if self.method == "GITHUB_URL" and not (self.source.repo_url or "").strip():
             raise ValueError("method=GITHUB_URL에는 source.repoUrl이 필요합니다")
+
         if self.extraction_scope == "OWN_COMMIT" and not (self.commit_email or "").strip():
             raise ValueError("extractionScope=OWN_COMMIT에는 commitEmail이 필요합니다")
         return self
@@ -118,7 +197,7 @@ class ProblemReference(BaseSchema):
     axis_code: AxisCode | None = Field(
         default=None, description="QUESTION_HIGHLIGHT일 때 필수. 어느 축의 강조 구간인가",
     )
-    teach_id: str | None = Field(
+    teach_id: UuidStr | None = Field(
         default=None, description="CURRICULUM_EVIDENCE일 때 필수. 요청 teaches[].id",
     )
     evidence_hash: str = Field(description="sha256 hex 64자")
@@ -207,7 +286,7 @@ ProblemType = Literal[
 class Problem(BaseSchema):
     """출제 대상 코드 지점. DB assessment_problem 대응."""
 
-    problem_id: str
+    problem_id: UuidStr
     problem_no: int = Field(ge=1, description="문제 순번 1~3. 화면·보고서가 이것으로 가리킨다")
     # 문답 진행 상태다. 분석이 만드는 것은 전부 READY.
     # (후보 선별 상태 CANDIDATE/USED/SKIPPED는 DB CHECK에 없어 보내면 INSERT가 깨진다)
@@ -273,7 +352,7 @@ class Problem(BaseSchema):
                     "룰이 바뀐 건지 코드가 바뀐 건지를 이 값 하나로 가른다 — "
                     "컬럼을 두시거나 버리시거나 백엔드 판단이다",
     )
-    teach_id: str | None = Field(
+    teach_id: UuidStr | None = Field(
         default=None,
         description="이 문제가 검증하는 교안 개념(요청 teaches[].id). **항상 채워진다** — "
                     "문제는 오퍼레이터가 고른 개념에만 붙는다(2026-08-03 PM 결정). "
@@ -298,7 +377,7 @@ class Problem(BaseSchema):
 class RequirementResult(BaseSchema):
     """요구사항 하나의 P/F 판정. 요청 requirements와 1:1로 대응한다."""
 
-    requirement_id: str
+    requirement_id: UuidStr
     verdict: Literal["PASS", "FAIL"] = Field(
         description="DB `project_requirement_assessment.result` CHECK와 같은 값이다. "
                     "🔴 옛 축약값 'P'/'F'는 폐기했다(2026-08-04) — CHECK가 "
@@ -331,7 +410,7 @@ class DecisionPoint(BaseSchema):
     line_start: int | None = Field(default=None, ge=1)
     line_end: int | None = Field(default=None, ge=1)
     why_it_matters: str
-    related_teach_id: str | None = None
+    related_teach_id: UuidStr | None = None
     evidence_valid: bool = Field(description="symbol을 실제 소스에서 찾았는지")
     
     @model_validator(mode="after")
@@ -373,7 +452,7 @@ class UnmatchedTeach(BaseSchema):
     AI는 이 개념을 **두 번** 찾는다(p04-3 + 실패분 재시도 1회). 그래도 못 찾으면 여기 담긴다.
     """
 
-    teach_id: str = Field(description="요청 teaches[].id 그대로")
+    teach_id: UuidStr = Field(description="요청 teaches[].id 그대로")
     reason: str = Field(description="왜 못 만들었는지. 화면에 그대로 띄워도 되는 한 문장")
 
 
@@ -403,7 +482,39 @@ class AnalysisResult(BaseSchema):
                     "화면의 개념별 도달 격자에서 `―`(문항 없음)로 그릴 값이다",
     )
     question_count_planned: int = Field(description="계획된 질문 수. 유효 문제가 적으면 축소된다")
-    
+    # D-analysis-b1(2026-08-07): 백엔드 감사 전까지 이 5개가 아예 없었다 -- fetch.py가 이미
+    # 계산해서 FetchedInput에 담는데도 AnalysisResult에 배선이 안 돼 있어 응답에 한 번도
+    # 안 실렸다("계산 못 함"이 아니라 "배선 누락"). git_history_source/history_truncated는
+    # 백엔드가 명시 요청하진 않았지만 운영상 유용해서 같이 낸다(히스토리를 어디서
+    # 얻었는지 · 시간 예산 안에서 다 못 걷었는지).
+    resolved_branch: str | None = None
+    head_commit: HeadCommit | None = None
+    git_history: list[GitCommit] = Field(default_factory=list)
+    git_history_source: GitHistorySource = "NONE"
+    history_truncated: bool = False
+
+# GET /analyses/{jobId}의 failureCode. `analysis_job.failure_code`의 DB CHECK 그대로다 --
+# 그 외 문자열은 Spring INSERT가 거부한다.
+#
+# 🔴 백엔드 회신(2026-08-07)으로 11종 -> 15종이 됐고 `EMPTY_CODE_EVIDENCE`는 **삭제**됐다.
+# ZIP 검증 5종(submission_artifact.validation_failure_code, S-15)이 이 컬럼에 합류하면서
+# `EMPTY_CODE`와 이름이 겹쳤고, 백엔드가 `EMPTY_CODE`로 통일했다(재확인 완료). 그 결과
+# fetch.py의 내부 어휘 13종 중 11종이 이 집합의 부분집합이 됐다 -- 이름을 뭉개던 매핑이
+# 사라지고 `jobs.py`의 `_translate_failure_code()`는 JOB_ONLY 2종만 처리한다.
+# schemas/는 engines/를 import하지 않는 계층 원칙은 그대로다(그래서 매핑이 jobs.py에 있다).
+AnalysisJobFailureCode = Literal[
+    # 분석 실행 실패 5종
+    "SOURCE_UNREACHABLE", "UNSUPPORTED_LANGUAGE",
+    "ANALYSIS_TIMEOUT", "MODEL_ERROR", "TEMPORARY_ERROR",
+    # 저장소 접근 실패 5종 (= repository_verification.failure_code)
+    "INVALID_REPOSITORY_URL", "REPO_NOT_FOUND", "REPOSITORY_ACCESS_DENIED",
+    "BRANCH_NOT_FOUND", "UNSUPPORTED_HOST",
+    # ZIP 검증 실패 5종 (= submission_artifact.validation_failure_code, S-15)
+    "FILE_TOO_LARGE", "ARCHIVE_INVALID", "EMPTY_CODE",
+    "PROHIBITED_FILE", "GIT_LOG_MISSING",
+]
+
+
 class AnalysisJobStatus(BaseSchema):
     """GET /analyses/{jobId} 응답.
 
@@ -412,13 +523,34 @@ class AnalysisJobStatus(BaseSchema):
     """
 
     job_id: str
-    attempt_id: str | None = None
-    submission_id: str | None = None
+    attempt_id: UuidStr | None = None
+    submission_id: UuidStr | None = None
     status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
     failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
+    failure_code: AnalysisJobFailureCode | None = Field(
+        default=None,
+        description="analysis_job.failure_code의 DB CHECK 15종. FAILED일 때만 채워진다",
+    )
     started_at: datetime | None = None
     completed_at: datetime | None = None
     result: AnalysisResult | None = Field(default=None, description="SUCCEEDED·PARTIAL일 때만")
     # 스텁 단계에서는 항상 빈 배열이다. P02가 LLM 파이프라인으로 교체되는 중이라
     # (2026-07-29, PLAN §4) 실물 엔진이 붙으면 호출 기록이 채워진다.
     ai_usage: list[AiUsage] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_failure_code(self) -> "AnalysisJobStatus":
+        """AiUsage._check_db_constraints와 같은 패턴 -- FAILED와 failureCode는 항상 같이 다닌다.
+
+        🔴 이 검증은 **생성 시점에만** 돈다. `jobs.py`는 이미 만든 job을 필드별로
+        나중에 mutate한다(`validate_assignment`를 켜지 않았다 -- 다른 스키마 전부에
+        영향이 가는 전역 변경이라 이 작업 범위를 넘는다). 그래서 실제 방어는
+        `jobs.py`가 status="FAILED"를 설정하는 자리마다 failure_code를 같이
+        설정하는 절차적 규율로 한다 -- 이 validator는 그 계약을 문서화하고, 직접
+        생성하는 코드(테스트 등)에서는 실제로 걸러낸다.
+        """
+        if self.status == "FAILED" and self.failure_code is None:
+            raise ValueError("status=FAILED에는 failureCode가 필요합니다")
+        if self.status != "FAILED" and self.failure_code is not None:
+            raise ValueError("status=FAILED가 아니면 failureCode가 없어야 합니다")
+        return self

@@ -8,6 +8,7 @@ LMS 업로드 시점에 도는 것이 전제다 — 그래서 멱등키로 중�
 """
 
 import uuid
+from collections import OrderedDict
 from datetime import datetime, timezone
 
 from app.config import get_settings
@@ -19,18 +20,36 @@ from app.schemas.curriculum import (
 from app.usage import to_ai_usage
 
 # job_id -> 교안 분석 job 상태·결과
-_jobs: dict[str, CurriculumJobStatus] = {}
+# M9 (redteam audit, 2026-08-05): jobs.py와 같은 문제 -- 무제한 dict라 장기가동 시
+# 메모리가 계속 는다. sessions.py의 _answered와 같은 OrderedDict+상한 패턴.
+_JOBS_MAX = 2000
+_jobs: "OrderedDict[str, CurriculumJobStatus]" = OrderedDict()
 
 # 멱등키 -> job_id. 같은 키 재요청 시 새 job 안 만들고 처음 id 반환
-_job_id_by_idempotency_key: dict[str, str] = {}
+_job_id_by_idempotency_key: "OrderedDict[str, str]" = OrderedDict()
 
 
 def get_job(job_id: str) -> CurriculumJobStatus | None:
     return _jobs.get(job_id)
 
 
-def job_id_for_key(idempotency_key: str) -> str | None:
-    return _job_id_by_idempotency_key.get(idempotency_key)
+# D-fix (redteam audit H12 companion, 2026-08-04): jobs.py(analyses.py)의 같은 패턴을
+# 여기도 대조 없이 갖고 있었다. 여긴 analyses.py보다 유리한 조건이다 -- version_id가
+# optional이 아니라 필수(CurriculumRequest)라 "둘 다 없으면 거부" 구멍이 원천적으로 없다.
+def job_id_for_key(idempotency_key: str, version_id: str) -> str | None:
+    """재사용 시 version_id가 최초 요청과 일치해야 기존 job_id를 돌려준다."""
+    existing_job_id = _job_id_by_idempotency_key.get(idempotency_key)
+    if existing_job_id is None:
+        return None
+    existing_job = _jobs.get(existing_job_id)
+    if existing_job is None:
+        # M9: 신원 불일치가 아니라 원본 job이 상한을 넘겨 밀려난 것 -- "처음 보는 키"와
+        # 동일하게 취급한다.
+        del _job_id_by_idempotency_key[idempotency_key]
+        return None
+    if existing_job.version_id != version_id:
+        raise ValueError("idempotencyKey가 이전 요청의 versionId와 일치하지 않습니다")
+    return existing_job_id
 
 
 def create_job(body: CurriculumRequest, idempotency_key: str | None) -> CurriculumJobStatus:
@@ -41,8 +60,12 @@ def create_job(body: CurriculumRequest, idempotency_key: str | None) -> Curricul
         status="QUEUED",
     )
     _jobs[job.job_id] = job
+    while len(_jobs) > _JOBS_MAX:
+        _jobs.popitem(last=False)
     if idempotency_key:
         _job_id_by_idempotency_key[idempotency_key] = job.job_id
+        while len(_job_id_by_idempotency_key) > _JOBS_MAX:
+            _job_id_by_idempotency_key.popitem(last=False)
     return job
 
 

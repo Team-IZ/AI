@@ -20,11 +20,15 @@
 그래서 `Question.questionText`는 그대로고 `hintText`만 붙는다.
 """
 
+import hashlib
+import hmac
+import json
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, get_args
 
+from app.api.errors import ApiError
 from app.config import get_settings
 from app.engines.analysis import grading, scoring
 from app.schemas.report import AxisCode
@@ -44,6 +48,23 @@ _AXES = list(get_args(AxisCode))
 # ponytail: 상한 있는 dict. 재시작하면 비지만 그때 잃는 것은 "재전송 한 번이
 # 중복 채점이 된다"뿐이다(세션 진행은 요청이 들고 온다). Redis는 그게 실제로
 # 문제가 될 때.
+#
+# M8 (redteam audit, 2026-08-05): 이 키가 안전하려면 **session_id가 프로세스
+# 수명 동안 전역 유일**해야 한다 -- 계약이지 코드가 강제하는 것이 아니다.
+#   WHY: 서로 다른 두 학생 세션이 같은 session_id를 쓰면(Spring이 재사용하거나,
+#   초기화 로직이 이전 세션과 같은 id를 다시 발급하면) 뒤 세션의 client_request_id가
+#   앞 세션의 것과 우연히 같을 때 앞 세션의 채점 응답을 그대로 받아간다 --
+#   tests/test_sessions.py의 Backend 헬퍼가 이미 이 현상을 주석으로 관측하고
+#   `uuid.uuid4()`로 회피하고 있다("멱등 캐시가 프로세스 전역이라 세션 id가
+#   겹치면 앞 테스트의 응답이 돌아온다").
+#   COST: 근본 수정(예: problems/transcript 해시를 키에 같이 접어 넣어 session_id
+#   충돌이 나도 문제 내용까지 같아야 충돌하게 만드는 것)은 여기서 하지 않는다 --
+#   이 서비스는 의도적으로 무상태다(파일 상단 🔴). session_id의 유일성은 그래서
+#   **Spring 쪽 계약 사항**으로 남긴다: session_id는 절대 재사용/재발급하지 않아야
+#   한다.
+#   EXIT: 실제로 session_id 충돌이 관측되면(로그·리포트로), H10의 _compute_cursor_mac
+#   과 같은 해시-접기 패턴을 이 키에도 적용 -- 그 전까지는 이 계약 위반이 실제로
+#   일어나지 않는다는 전제 위에서만 안전하다.
 _ANSWERED_MAX = 2000
 _answered: "OrderedDict[str, AnswerResult]" = OrderedDict()
 
@@ -149,16 +170,59 @@ def _to_question(walk: _Walk) -> Question | None:
     })
 
 
-def _to_cursor(walk: _Walk) -> Cursor | None:
+# D-fix (redteam audit H10, 2026-08-04): 무상태 세션의 무결성 보호.
+#
+# _seek()은 원래 "커서가 오면 그대로 믿는다"였다 -- 클라이언트가 problem_id/axis_code/
+# hints_used를 위조해 정답을 맞춘 적 없이 완주 상태를 만들 수 있었다. 그런데 cursor만
+# 지키는 건 부분적이다 -- AnswerSubmit은 problems(문제·힌트 전체)와 transcript(턴
+# 기록 전체)도 매 요청에 실려오고, 이 둘도 cursor와 똑같이 무검증으로 쓰인다
+# (2026-08-04 교차검증 지적). 그래서 mac은 cursor 필드뿐 아니라 problems/transcript의
+# 해시까지 서명 입력에 포함한다 -- 셋 중 하나만 바뀌어도 불일치가 난다.
+#
+#   WHY: 이건 "완전한 수정"이 아니라 Spring이 이 필드를 받아들이기 시작하기 전까지의
+#   발판이다. session_cursor_hmac_secret이 비어 있으면(로컬 개발, 또는 Spring이 아직
+#   이 필드를 왕복시키지 않는 배포 초기) mac 발급·검증을 통째로 건너뛰어 오늘과 동일하게
+#   동작한다 -- 하위호환.
+#   COST: 클라이언트가 그냥 mac 필드를 아예 안 보내면 여전히 뚫린다(의도된 설계 —
+#   강제가 아니라 마이그레이션 경로). 유일한 호출자가 INTERNAL_API_KEY로 인증된
+#   Spring이라는 전제 위에서만 위험이 제한적이다 -- 그 전제가 깨지면(예: 다른 진입점이
+#   생기거나 Spring이 학생 입력을 그대로 중계) 즉시 재평가 필요.
+#   EXIT: Spring이 mac을 항상 보내는 것이 확인되면, expected is None(secret 미설정)
+#   허용 분기를 지우고 secret 미설정 자체를 기동 거부 조건으로 승격.
+def _canonical_hash(value: Any) -> str:
+    """problems/transcript를 결정론적으로 직렬화해 해시한다 -- 발급·검증 양쪽이 같은
+    입력에 항상 같은 해시를 내야 한다(dict 키 순서에 안 흔들리게 sort_keys)."""
+    return hashlib.sha256(json.dumps(value, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _compute_cursor_mac(
+    session_id: str, problem_id: str, axis_code: str, hints_used: int,
+    problems: list[dict[str, Any]], transcript: list[dict[str, Any]],
+) -> str | None:
+    """secret 미설정이면 None -- 호출부가 "발급 스킵"/"검증 스킵" 신호로 그대로 쓴다."""
+    secret = get_settings().session_cursor_hmac_secret
+    if not secret:
+        return None
+    payload = "|".join([
+        session_id, problem_id, axis_code, str(hints_used),
+        _canonical_hash(problems), _canonical_hash(transcript),
+    ])
+    return hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+
+def _to_cursor(walk: _Walk, session_id: str, transcript_so_far: list[dict[str, Any]]) -> Cursor | None:
     """다음에 물을 자리. 백엔드가 저장했다가 다음 요청에 그대로 실어 보낸다."""
     current = _current_stage(walk)
     if current is None:
         return None
     problem, stage = current
+    problem_id = problem.get("problem_id", "")
+    axis_code = stage.get("axis_code")
     return Cursor(
-        problem_id=problem.get("problem_id", ""),
-        axis_code=stage.get("axis_code"),
+        problem_id=problem_id,
+        axis_code=axis_code,
         hints_used=walk.hints_used,
+        mac=_compute_cursor_mac(session_id, problem_id, axis_code, walk.hints_used, walk.problems, transcript_so_far),
     )
 
 
@@ -195,14 +259,31 @@ def _advance(walk: _Walk, passed: bool) -> tuple[str, str] | None:
     return f"TERMINATED_AT_{axis}", axis
 
 
-def _seek(walk: _Walk, cursor: Cursor | None, transcript: list[TranscriptTurn]) -> None:
+def _seek(walk: _Walk, session_id: str, cursor: Cursor | None,
+          transcript: list[TranscriptTurn], transcript_dicts: list[dict[str, Any]]) -> None:
     """요청이 준 위치로 커서를 옮긴다. **매 요청이 곧 restore다.**
 
-    커서가 오면 그대로 믿는다(백엔드 장부가 원본이다). 없으면 transcript를 되짚는다 —
+    커서가 오면 그대로 믿는다(백엔드 장부가 원본이다) -- 단, mac이 같이 왔고 우리가
+    검증할 수 있으면(secret 설정됨) 먼저 대조한다(H10). 없으면 transcript를 되짚는다 —
     턴 수만 세면 안 된다. 힌트 후 재질의도 한 턴이라 같은 단계에서 세 턴이 나올 수 있고,
     그러면 커서가 세 칸 밀린다.
     """
     if cursor is not None:
+        if cursor.mac is not None:
+            expected = _compute_cursor_mac(
+                session_id, cursor.problem_id, cursor.axis_code, cursor.hints_used,
+                walk.problems, transcript_dicts,
+            )
+            # expected is None => secret 미설정, 검증 자체가 불가능 -- 하위호환으로
+            # 그대로 신뢰(오늘까지의 동작). secret이 있는데 불일치하면 위조로 간주.
+            if expected is not None and not hmac.compare_digest(cursor.mac, expected):
+                raise ApiError(
+                    status_code=400,
+                    error="CURSOR_INTEGRITY_MISMATCH",
+                    message="cursor.mac이 problems/transcript와 일치하지 않습니다 -- "
+                            "커서·문제·기록 중 하나가 응답으로 발급됐을 때와 달라졌습니다.",
+                    retryable=False,
+                )
         ids = [p.get("problem_id") for p in walk.problems]
         if cursor.problem_id in ids:
             walk.problem_index = ids.index(cursor.problem_id)
@@ -217,7 +298,7 @@ def _seek(walk: _Walk, cursor: Cursor | None, transcript: list[TranscriptTurn]) 
 
 
 def _to_result(session_id: str, walk: _Walk, turn: TranscriptTurn | None,
-               trace_id: str | None,
+               trace_id: str | None, transcript_so_far: list[dict[str, Any]],
                ended: tuple[str, str] | None = None,
                request_key: str | None = None) -> AnswerResult:
     completed = _current_stage(walk) is None
@@ -225,7 +306,7 @@ def _to_result(session_id: str, walk: _Walk, turn: TranscriptTurn | None,
         session_id=session_id,
         state="COMPLETED" if completed else "IN_PROGRESS",
         turn=turn,
-        cursor=_to_cursor(walk),
+        cursor=_to_cursor(walk, session_id, transcript_so_far),
         current=_to_question(walk),
         progress=None if completed else Progress(
             problem_index=walk.problem_index + 1, problem_total=len(walk.problems),
@@ -258,12 +339,15 @@ def submit_answer(session_id: str, req: AnswerSubmit,
     # **여기서 문제를 만들지 않는다.** 안 주면 물을 것이 없다 — 지어내면 학생이
     # 분석과 무관한 질문을 받고, 그건 "코드 파편이 곧 근거"라는 전제를 깬다.
     walk = _Walk(problems=[p.model_dump() for p in req.problems])
-    _seek(walk, req.cursor, req.transcript)
+    # H10: mac 발급·검증 양쪽에 쓰는 transcript의 정규화된 사본. 응답에 새 커서를
+    # 실을 때는 이 턴이 끝난 뒤(아래에서) 새 turn을 이 리스트에 덧붙인 버전으로 다시 쓴다.
+    transcript_dicts = [t.model_dump(mode="json") for t in req.transcript]
+    _seek(walk, session_id, req.cursor, req.transcript, transcript_dicts)
 
     current = _current_stage(walk)
     if current is None:
         # 이미 끝난 세션. 조용히 끝난 상태를 돌려준다(채점할 것이 없다).
-        return _to_result(session_id, walk, None, trace_id,
+        return _to_result(session_id, walk, None, trace_id, transcript_dicts,
                           request_key=f"{session_id}:{req.client_request_id}")
     problem, stage = current
 
@@ -299,5 +383,9 @@ def submit_answer(session_id: str, req: AnswerSubmit,
     )
 
     ended = _advance(walk, grade.passed)
-    return _remember(key, _to_result(session_id, walk, turn, trace_id, ended,
+    # H10: 다음 커서의 mac은 "이 턴까지 끝난" transcript를 서명해야 한다 -- 응답이
+    # transcript 전체를 안 돌려주므로(AnswerResult 자체 계약), 다음 요청에서 클라이언트가
+    # 이 turn을 자기 쪽 transcript에 이어붙여 그대로 되돌려 보내는 것이 전제다.
+    next_transcript = transcript_dicts + [turn.model_dump(mode="json")]
+    return _remember(key, _to_result(session_id, walk, turn, trace_id, next_transcript, ended,
                                      request_key=f"{session_id}:{req.client_request_id}"))

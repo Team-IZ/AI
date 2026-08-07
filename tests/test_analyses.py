@@ -17,6 +17,13 @@ VALID_BODY = {
     "source": {"repoUrl": "https://github.com/owner/repo"},
     "extractionScope": "TOTAL",
     "questionBudget": 4,
+    # D-fix (redteam audit H12, 2026-08-04): job_id_for_key()가 이제 재사용 요청의
+    # submissionId/attemptId를 최초 요청과 대조한다(둘 다 없으면 거부) -- 실제 Spring
+    # 호출은 이 값들을 항상 보낸다는 전제이므로, 그걸 안 흉내내던 이 fixture가 현실과
+    # 어긋나 있었다. 값 자체는 임의값이고, 같은 dict를 재사용하는 테스트는 두 호출 다
+    # 같은 값이라 여전히 일치한다.
+    "submissionId": "sub-1",
+    "attemptId": "1",
 }
 
 def test_accepts_valid_request():
@@ -56,6 +63,31 @@ def test_same_idempotency_key_returns_same_job_id():
 
     assert first.json()["jobId"] == second.json()["jobId"]    
     
+def test_reused_idempotency_key_with_mismatched_identity_is_rejected():
+    """멱등키 추측/재사용 -- submissionId/attemptId가 최초 요청과 다르면 409 (H12)."""
+    headers = {**HEADERS, "Idempotency-Key": "sub-guessed:1"}
+    client.post("/api/v0/analyses", json=VALID_BODY, headers=headers)
+
+    guess = {**VALID_BODY, "submissionId": "someone-elses-sub", "attemptId": "9"}
+    response = client.post("/api/v0/analyses", json=guess, headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "IDEMPOTENCY_CONFLICT"
+
+
+def test_reused_idempotency_key_without_any_identity_is_rejected():
+    """submissionId/attemptId를 둘 다 생략한 재사용도 거부된다 --
+    None==None으로 통과하던 구멍(H12)."""
+    headers = {**HEADERS, "Idempotency-Key": "sub-noident:1"}
+    client.post("/api/v0/analyses", json=VALID_BODY, headers=headers)
+
+    no_identity = {k: v for k, v in VALID_BODY.items() if k not in ("submissionId", "attemptId")}
+    response = client.post("/api/v0/analyses", json=no_identity, headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["error"] == "IDEMPOTENCY_CONFLICT"
+
+
 def test_different_idempotency_key_returns_new_job_id():
     """키가 다르면 별개 요청 → 새 jobId. 재제출이 정상적으로 새 분석이 되는지."""
     a = client.post(
@@ -181,6 +213,24 @@ def test_ai_usage_is_empty_for_rule_based_analysis():
     assert body["aiUsage"] == []
 
 
+def test_git_history_fields_reach_the_response_json():
+    """D-analysis-b1(2026-08-07) -- resolvedBranch/headCommit/gitHistory/gitHistorySource/
+
+    historyTruncated가 camelCase로 응답에 실제로 나오는지(엔진이 값을 안 채워도 스키마
+    기본값으로 나와야지 키 자체가 빠지면 안 된다 -- 백엔드가 이 필드에 배선했던 지점이다).
+    """
+    job_id = _create_job()
+
+    body = client.get(f"/api/v0/analyses/{job_id}", headers=HEADERS).json()
+    result = body["result"]
+
+    for key in ("resolvedBranch", "headCommit", "gitHistory", "gitHistorySource", "historyTruncated"):
+        assert key in result
+    assert result["gitHistory"] == []
+    assert result["gitHistorySource"] == "NONE"
+    assert result["historyTruncated"] is False
+
+
 def test_unknown_job_id_returns_404():
     """모르는 jobId → 404 JOB_NOT_FOUND. 재시도해도 소용없으니 retryable=false."""
     response = client.get("/api/v0/analyses/does-not-exist", headers=HEADERS)
@@ -290,6 +340,27 @@ def test_teach_id_is_echoed_on_problems():
 
     assert [p["teachId"] for p in problems] == ["tch-1", "tch-2", None]
     # teach 앵커가 없는 문제는 화면에 "일반 문제"로 표기된다. 둘은 짝이다.
+
+def test_job_status_failure_code_must_match_failed_status():
+    """AiUsage._check_db_constraints와 같은 패턴 -- FAILED와 failureCode는 항상 같이 다닌다."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.analysis import AnalysisJobStatus
+
+    with pytest.raises(ValidationError):  # FAILED인데 코드가 없다
+        AnalysisJobStatus.model_validate({"jobId": "j-1", "status": "FAILED"})
+
+    with pytest.raises(ValidationError):  # FAILED가 아닌데 코드가 있다
+        AnalysisJobStatus.model_validate({
+            "jobId": "j-1", "status": "SUCCEEDED", "failureCode": "MODEL_ERROR",
+        })
+
+    ok = AnalysisJobStatus.model_validate({
+        "jobId": "j-1", "status": "FAILED", "failureCode": "BRANCH_NOT_FOUND",
+    })
+    assert ok.failure_code == "BRANCH_NOT_FOUND"
+
 
 def test_requirement_result_count_mismatch_fails_job():
     """판정이 빠진 채 SUCCEEDED가 되면 미판정 요구사항이 통과로 기록된다."""

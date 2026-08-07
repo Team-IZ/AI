@@ -32,13 +32,18 @@ def test_every_endpoint_is_published():
 
     assert "/api/health" in published
     for path in ("/api/v0/analyses", "/api/v0/sessions/{session_id}/answers",
-                 "/api/v0/reports", "/api/v0/curricula"):
+                 "/api/v0/reports", "/api/v0/curricula",
+                 "/api/v0/interview-brief:generate"):
         assert path in published, path
 
     # 세션은 무상태다(§T11 B) — 시작·조회·복원 3개가 사라져 8개다.
     assert "/api/v0/sessions" not in published
     assert "/api/v0/sessions/{session_id}/restore" not in published
-    assert len(published) == 8
+    # 면담 브리프(명세서 v08)가 하나 늘어 9개다.
+    # ⚠️ /api/v0/analysis-inputs 는 없다 -- POST /analyses 3분할은 백엔드 착오였고
+    # 2026-08-06에 폐기됐다. /analyses 가 검증·fetch·분석을 한 몸으로 한다.
+    assert "/api/v0/analysis-inputs" not in published
+    assert len(published) == 9
 
 
 def test_frozen_contract_is_visible_in_the_spec():
@@ -142,3 +147,60 @@ def test_multipart_request_fields_are_readable():
 
     # 202 + 폴링으로 확정(§T11 D-3) — 콜백 자리를 두면 누군가 구현한다
     assert "callbackUrl" not in analyses and "callbackUrl" not in curricula
+
+
+def test_error_responses_are_the_shared_shape():
+    """🔴 에러 본문은 전부 `{error, message, retryable}`다 -- 딱 하나만 예외다.
+
+    FastAPI는 라우터에 명시하지 않으면 **자기 기본 `HTTPValidationError`**
+    (`{detail:[{loc,msg,type}]}`)를 422 자리에 넣는다. 그런데 실제 응답은
+    `errors.py`의 RequestValidationError 핸들러가 공용 모양으로 바꿔 낸다 --
+    **스펙만 보고 구현하는 백엔드가 파서를 잘못 짠다**(2026-08-07 발견,
+    `POST /reports`·`/sessions/{id}/answers` 등 5경로가 그 상태였다).
+    """
+    spec = _spec()
+
+    assert "HTTPValidationError" not in spec["components"]["schemas"], (
+        "FastAPI 기본 검증 에러가 스펙에 새어 들어왔습니다 -- 라우터 등록에 "
+        "responses={422: {'model': ErrorResponse}}가 빠졌는지 보세요(app/main.py)."
+    )
+
+    # 면담 브리프 503만 다른 계약이다 -- 백엔드 회신 §3 A-5가 실패 봉투에도
+    # 사용량을 실으라고 해서 {failureCode, message, aiUsage}가 됐다.
+    allowed = {
+        ("/api/v0/interview-brief:generate", "503"): "InterviewBriefFailure",
+    }
+
+    for path, operations in spec["paths"].items():
+        for method, operation in operations.items():
+            for code, response in operation["responses"].items():
+                if code.startswith("2"):
+                    continue
+                schema = (response.get("content", {})
+                          .get("application/json", {}).get("schema", {}))
+                ref = schema.get("$ref", "").rsplit("/", 1)[-1]
+                expected = allowed.get((path, code), "ErrorResponse")
+                assert ref == expected, f"{method.upper()} {path} {code} -> {ref!r}"
+
+
+def test_the_documented_error_shape_is_what_actually_comes_back():
+    """스펙과 실물이 같은지. 위 테스트는 스펙끼리만 대조해서 이걸 못 잡는다.
+
+    `POST /reports`를 고른 이유: 자동 검증(FastAPI가 pydantic으로 막는 경로)이라
+    라우터가 직접 만드는 에러가 아니다 -- 바로 이 경로가 2026-08-07에 스펙과
+    실물이 어긋나 있던 자리다.
+    """
+    from fastapi.testclient import TestClient
+
+    from app.config import get_settings
+    from app.main import app
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v0/reports", json={},
+        headers={"X-Internal-Key": get_settings().internal_api_key},
+    )
+
+    assert response.status_code == 422
+    assert set(response.json()) == {"error", "message", "retryable"}
+    assert response.json()["error"] == "INVALID_REQUEST"
