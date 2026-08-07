@@ -129,6 +129,9 @@ def test_git_history_source_reports_backend_supplied(monkeypatch):
         "sha": "b" * 40, "author_name": "Alice", "author_email": "a@x.com",
         "committed_at": "2026-01-01T00:00:00+00:00", "changed_files": ["f.py"],
         "additions": 1, "deletions": 0,
+        "parent_sha": "c" * 40, "authored_at": "2026-01-01T00:00:00+00:00",
+        "branch_name": "main", "is_merge_commit": False, "is_revert_commit": False,
+        "is_bot_commit": False, "changed_line_count": 1,
     }]
     _patch_fetch(monkeypatch, _sample_result(
         git_history=supplied, git_history_source="BACKEND_SUPPLIED",
@@ -138,6 +141,9 @@ def test_git_history_source_reports_backend_supplied(monkeypatch):
         "sha": "b" * 40, "authorName": "Alice", "authorEmail": "a@x.com",
         "committedAt": "2026-01-01T00:00:00+00:00", "changedFiles": ["f.py"],
         "additions": 1, "deletions": 0,
+        "parentSha": "c" * 40, "authoredAt": "2026-01-01T00:00:00+00:00",
+        "branchName": "main", "isMergeCommit": False, "isRevertCommit": False,
+        "isBotCommit": False, "changedLineCount": 1,
     }]}
     response = client.post("/api/v0/analysis-inputs", json=payload, headers=HEADERS)
 

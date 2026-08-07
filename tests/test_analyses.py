@@ -181,6 +181,24 @@ def test_ai_usage_is_empty_for_rule_based_analysis():
     assert body["aiUsage"] == []
 
 
+def test_git_history_fields_reach_the_response_json():
+    """D-analysis-b1(2026-08-07) -- resolvedBranch/headCommit/gitHistory/gitHistorySource/
+
+    historyTruncated가 camelCase로 응답에 실제로 나오는지(엔진이 값을 안 채워도 스키마
+    기본값으로 나와야지 키 자체가 빠지면 안 된다 -- 백엔드가 이 필드에 배선했던 지점이다).
+    """
+    job_id = _create_job()
+
+    body = client.get(f"/api/v0/analyses/{job_id}", headers=HEADERS).json()
+    result = body["result"]
+
+    for key in ("resolvedBranch", "headCommit", "gitHistory", "gitHistorySource", "historyTruncated"):
+        assert key in result
+    assert result["gitHistory"] == []
+    assert result["gitHistorySource"] == "NONE"
+    assert result["historyTruncated"] is False
+
+
 def test_unknown_job_id_returns_404():
     """모르는 jobId → 404 JOB_NOT_FOUND. 재시도해도 소용없으니 retryable=false."""
     response = client.get("/api/v0/analyses/does-not-exist", headers=HEADERS)
@@ -388,13 +406,13 @@ def test_job_status_failure_code_must_match_failed_status():
 
     with pytest.raises(ValidationError):  # FAILED가 아닌데 코드가 있다
         AnalysisJobStatus.model_validate({
-            "jobId": "j-1", "status": "SUCCEEDED", "failureCode": "TIMEOUT",
+            "jobId": "j-1", "status": "SUCCEEDED", "failureCode": "MODEL_ERROR",
         })
 
     ok = AnalysisJobStatus.model_validate({
-        "jobId": "j-1", "status": "FAILED", "failureCode": "FETCH_FAILED",
+        "jobId": "j-1", "status": "FAILED", "failureCode": "BRANCH_NOT_FOUND",
     })
-    assert ok.failure_code == "FETCH_FAILED"
+    assert ok.failure_code == "BRANCH_NOT_FOUND"
 
 
 def test_requirement_result_count_mismatch_fails_job():

@@ -46,6 +46,21 @@ _FS = "\x1f"
 
 _ANALYSIS_INPUT_NAMESPACE = uuid.UUID("6f1b1a9e-6b3a-4a1a-9b0a-2f6d1c9a7e01")
 
+# _parse_git_log/_try_embedded_git_history 공용 git log 포맷. %P(부모 SHA, 공백구분)로
+# isMergeCommit/parentSha를, %aI(author date)로 authoredAt을, %s(subject 1줄)로
+# isRevertCommit 판정을 뽑는다 -- subject 자체는 gitHistory 응답에 안 남긴다("메시지는
+# headCommit에만 있다" 원칙 유지, _parse_git_log_output에서 파싱만 하고 버림).
+_LOG_FORMAT = f"{_RS}%H{_FS}%P{_FS}%an{_FS}%ae{_FS}%aI{_FS}%cI{_FS}%s"
+
+# git revert / GitHub "Revert PR" 버튼이 자동 생성하는 커밋 제목 포맷(정확히 이 접두어).
+# 정밀도 우선 -- 오탐이 기여도를 부당하게 깎는 게 미탐보다 나쁘다(D-analysis-b1).
+_REVERT_SUBJECT_RE = re.compile(r'^Revert "')
+
+# GitHub App형 봇 계정의 noreply 이메일 표기(예: 41898282+github-actions[bot]@users.noreply.github.com).
+# 대괄호 없는 커스텀 서비스 계정(예: 그냥 이름이 "CI")은 의도적으로 범위 밖 -- 유지보수
+# 필요한 이름 목록 없이 GitHub 표준 표기만으로 정밀도를 지킨다.
+_BOT_EMAIL_RE = re.compile(r"^\d+\+[\w-]+\[bot\]@users\.noreply\.github\.com$")
+
 
 @dataclass(frozen=True)
 class FetchedInput:
@@ -79,9 +94,10 @@ ZIP_FAILURE_CODES = frozenset({
 })
 VERIFICATION_FAILURE_CODES = GITHUB_FAILURE_CODES | ZIP_FAILURE_CODES
 
-# `refetch_pinned()`(D2, `/analysis` 잡 처리 중 호출) 전용 추가 코드. 위 11개는
-# `repository_verification`/`submission_artifact`용이고, 이 둘은 아직 정의 안 된
-# `analysis_job.failure_code`용 잠정값이다(계획 §0.3 -- 백엔드 확인 필요).
+# `refetch_pinned()`(D2, `/analysis` 잡 처리 중 호출) 전용 추가 코드. 이 둘과 위
+# VERIFICATION_FAILURE_CODES 11종은 이 모듈만의 내부 어휘다 -- `analysis_job.failure_code`
+# 응답 필드는 별도의 DB CHECK 11종(`AnalysisJobFailureCode`, schemas/analysis.py)을 쓰고,
+# 이 13종에서 그쪽으로의 매핑은 `jobs.py`의 `_FETCH_FAILURE_CODE_TRANSLATION`이 담당한다.
 JOB_ONLY_FAILURE_CODES = frozenset({"INPUT_HASH_MISMATCH", "FETCH_FAILED"})
 
 
@@ -268,11 +284,12 @@ def _iso_days_ago(days: int) -> str:
 
 
 def _parse_git_log(repo_dir: str, max_commits: int) -> list[dict[str, Any]]:
-    """`git log --numstat`을 GitCommit 딕셔너리 목록으로. 커밋 메시지는 안 담는다
+    """`git log --numstat`을 GitCommit 딕셔너리 목록으로. 커밋 메시지(subject)는 안 담는다
 
-    (gitHistory[] 항목엔 메시지가 없다 -- headCommit에만 있다). 필드가 고정 길이
-    (sha/작성자명/이메일/시각)라 값 하나에 구분자가 우연히 섞여도 다른 커밋 파싱까지
-    깨지진 않는다.
+    (gitHistory[] 항목엔 메시지가 없다 -- headCommit에만 있다, subject는 isRevertCommit
+    판정에만 내부적으로 쓰고 버린다). branch_name은 여기서 안 채운다 -- 호출자가
+    resolved_branch를 이미 알고 있어 FetchedInput 생성 직전에 후처리로 주입한다(ZIP
+    경로는 브랜치 개념 자체가 없어 이 저수준 함수 하나가 두 의미를 못 담기 때문).
 
     🔴 merge 커밋은 `-m --first-parent`로 diff를 강제로 만든다 -- 안 하면
     `--numstat`이 merge 커밋에 대해 아무 줄도 안 내서 changedFiles/additions/deletions가
@@ -286,11 +303,10 @@ def _parse_git_log(repo_dir: str, max_commits: int) -> list[dict[str, Any]]:
     클론해 `.git/config`를 우리가 직접 만드므로 이 벡터가 통할 여지가 원래도 적지만,
     비용 없는 방어라 여기서도 건다.
     """
-    fmt = f"{_RS}%H{_FS}%an{_FS}%ae{_FS}%cI"
     try:
         out = subprocess.run(
             ["git", "-C", repo_dir, "log", f"--max-count={max_commits}",
-             "-m", "--first-parent", "--numstat", "--no-textconv", f"--format={fmt}"],
+             "-m", "--first-parent", "--numstat", "--no-textconv", f"--format={_LOG_FORMAT}"],
             check=True, capture_output=True, timeout=10, env=materialize.git_env(),
         )
     except (subprocess.SubprocessError, OSError):
@@ -305,10 +321,13 @@ def _parse_git_log_output(raw: str) -> list[dict[str, Any]]:
         if not block:
             continue
         header, _, rest = block.partition("\n")
-        parts = header.split(_FS)
-        if len(parts) != 4:
+        # maxsplit=6 -- subject(%s)는 git이 개행을 안 담는다고 보장하지만, 구분자 바이트가
+        # 우연히 섞여도(작성자명 등과 같은 기존 위험) 나머지 전부를 subject 쪽으로 몰아
+        # 앞쪽 고정 필드(sha/parents/name/email/dates) 파싱이 안 깨지게 한다.
+        parts = header.split(_FS, 6)
+        if len(parts) != 7:
             continue
-        sha, author_name, author_email, committed_at = parts
+        sha, parents_raw, author_name, author_email, authored_at, committed_at, subject = parts
         changed_files: list[str] = []
         additions = deletions = 0
         for line in rest.splitlines():
@@ -321,12 +340,34 @@ def _parse_git_log_output(raw: str) -> list[dict[str, Any]]:
                 additions += int(add)
             if dele.isdigit():
                 deletions += int(dele)
+        parent_shas = parents_raw.split()
         commits.append({
             "sha": sha, "author_name": author_name, "author_email": author_email,
             "committed_at": committed_at, "changed_files": changed_files,
             "additions": additions, "deletions": deletions,
+            "authored_at": authored_at,
+            # root 커밋(부모 없음)은 DB parent_commit_hash가 NOT NULL이라 all-zero sentinel을
+            # 쓴다(git 생태계 관행 -- pre-receive hook의 "부모 없음" 표기와 동일).
+            "parent_sha": parent_shas[0] if parent_shas else "0" * 40,
+            "is_merge_commit": len(parent_shas) >= 2,
+            "is_revert_commit": bool(_REVERT_SUBJECT_RE.match(subject)),
+            "is_bot_commit": (
+                bool(_BOT_EMAIL_RE.match(author_email)) or author_name.endswith("[bot]")
+            ),
+            "changed_line_count": additions + deletions,
         })
     return commits
+
+
+def _tag_branch_name(history: list[dict[str, Any]], branch_name: str | None) -> list[dict[str, Any]]:
+    """`_parse_git_log_output`은 branch_name을 안 채운다 -- resolved_branch를 이미 아는
+
+    호출자가 `FetchedInput` 생성 직전에 여기서 일괄 주입한다. git엔 "이 커밋이 어느
+    브랜치 소속인가"라는 개념이 없다 -- 이 값은 어디까지나 "이 fetch가 resolve한
+    브랜치를 반환된 히스토리 전체에 균일 적용"한 것이지 커밋별 진짜 소속이 아니다.
+    미상이면 NOT NULL을 만족시키는 빈 문자열.
+    """
+    return [{**c, "branch_name": branch_name or ""} for c in history]
 
 
 def _try_deepen_history(repo_dir: str) -> tuple[list[dict[str, Any]], bool, str]:
@@ -386,6 +427,7 @@ def _fetch_github(spec: Mapping[str, Any], tmp: str) -> FetchedInput:
     resolved_branch = _current_branch(tmp) or branch or None
     head_commit = _head_commit(tmp)
     git_history, truncated, source = _try_deepen_history(tmp)
+    git_history = _tag_branch_name(git_history, resolved_branch)
     meta = _hash_tree(tmp)
 
     return FetchedInput(
@@ -439,6 +481,7 @@ def _fetch_github_pinned(descriptor: Mapping[str, Any], tmp: str, sha: str) -> F
 
     head_commit = _head_commit(tmp)
     git_history, truncated, source = _try_deepen_history(tmp)
+    git_history = _tag_branch_name(git_history, descriptor.get("resolved_branch"))
     meta = _hash_tree(tmp)
     return FetchedInput(
         root=tmp, method="GITHUB_URL", resolved_branch=descriptor.get("resolved_branch"),
@@ -474,6 +517,7 @@ def _fetch_github_pinned_via_branch_verify(
         )
     head_commit = _head_commit(tmp)
     git_history, truncated, source = _try_deepen_history(tmp)
+    git_history = _tag_branch_name(git_history, branch or None)
     meta = _hash_tree(tmp)
     return FetchedInput(
         root=tmp, method="GITHUB_URL", resolved_branch=branch or None,
@@ -630,12 +674,11 @@ def _try_embedded_git_history(root: str) -> tuple[list[dict[str, Any]], str]:
     env = _sandbox_git_env()
     settings = get_settings()
 
-    fmt = f"{_RS}%H{_FS}%an{_FS}%ae{_FS}%cI"
     try:
         out = subprocess.run(
             ["git", *_SANDBOX_GIT_ARGS, "-C", root, "log",
              f"--max-count={settings.git_history_max_commits}",
-             "-m", "--first-parent", "--numstat", "--no-textconv", f"--format={fmt}"],
+             "-m", "--first-parent", "--numstat", "--no-textconv", f"--format={_LOG_FORMAT}"],
             check=True, capture_output=True, timeout=10, env=env,
         )
     except (subprocess.SubprocessError, OSError):
@@ -644,6 +687,9 @@ def _try_embedded_git_history(root: str) -> tuple[list[dict[str, Any]], str]:
     history = _parse_git_log_output(out.stdout.decode(errors="replace"))
     if not history:
         return [], "NONE"
+    # ZIP 경로는 브랜치 개념 자체가 없다(resolved_branch가 늘 None) -- NOT NULL을
+    # 만족시키는 빈 문자열 sentinel.
+    history = [{**c, "branch_name": ""} for c in history]
     return history, "EMBEDDED_GIT"
 
 

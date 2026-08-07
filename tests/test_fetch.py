@@ -285,11 +285,14 @@ def test_history_enrichment_degrades_gracefully_on_failure(monkeypatch, tmp_path
 def test_parse_git_log_output_handles_multiple_commits_and_merges():
     RS, FS = fetch._RS, fetch._FS
     raw = (
-        f"{RS}aaa1{FS}Alice{FS}alice@x.com{FS}2026-01-01T00:00:00+09:00\n"
+        f"{RS}aaa1{FS}p-aaa0{FS}Alice{FS}alice@x.com{FS}2026-01-01T00:00:00+09:00"
+        f"{FS}2026-01-01T09:00:00+09:00{FS}fix bug\n"
         "3\t1\tsrc/main.py\n"
         "0\t0\tREADME.md\n"
-        f"{RS}bbb2{FS}Bob{FS}bob@x.com{FS}2026-01-02T00:00:00+09:00\n"  # merge -- numstat 없음
-        f"{RS}ccc3{FS}Carol With Space{FS}carol@x.com{FS}2026-01-03T00:00:00+09:00\n"
+        f"{RS}bbb2{FS}p1 p2{FS}Bob{FS}bob@x.com{FS}2026-01-02T00:00:00+09:00"
+        f"{FS}2026-01-02T09:00:00+09:00{FS}Merge pull request #1\n"  # merge(부모 2개) -- numstat 없음
+        f"{RS}ccc3{FS}p-ccc2{FS}Carol With Space{FS}carol@x.com{FS}2026-01-03T00:00:00+09:00"
+        f"{FS}2026-01-03T09:00:00+09:00{FS}add feature\n"
         "1\t0\tsrc/a file with space.py\n"
     )
     commits = fetch._parse_git_log_output(raw)
@@ -297,15 +300,64 @@ def test_parse_git_log_output_handles_multiple_commits_and_merges():
     assert len(commits) == 3
     assert commits[0] == {
         "sha": "aaa1", "author_name": "Alice", "author_email": "alice@x.com",
-        "committed_at": "2026-01-01T00:00:00+09:00",
+        "committed_at": "2026-01-01T09:00:00+09:00",
         "changed_files": ["src/main.py", "README.md"],
         "additions": 3, "deletions": 1,
+        "authored_at": "2026-01-01T00:00:00+09:00",
+        "parent_sha": "p-aaa0",
+        "is_merge_commit": False,
+        "is_revert_commit": False,
+        "is_bot_commit": False,
+        "changed_line_count": 4,
     }
     # 🔴 merge 커밋은 changedFiles/additions/deletions가 조용히 빈값이 된다(문서화된 동작).
     assert commits[1]["changed_files"] == []
     assert commits[1]["additions"] == 0
+    assert commits[1]["is_merge_commit"] is True
+    assert commits[1]["parent_sha"] == "p1"  # 첫 부모(mainline) 기준
     assert commits[2]["author_name"] == "Carol With Space"
     assert commits[2]["changed_files"] == ["src/a file with space.py"]
+    assert commits[2]["is_merge_commit"] is False
+
+
+def test_parse_git_log_output_root_commit_has_no_parent():
+    """부모 없는 root 커밋은 parentSha가 all-zero sentinel(NOT NULL 컬럼 대응)."""
+    RS, FS = fetch._RS, fetch._FS
+    raw = f"{RS}root1{FS}{FS}Alice{FS}alice@x.com{FS}2026-01-01T00:00:00+09:00{FS}2026-01-01T00:00:00+09:00{FS}init\n"
+    commits = fetch._parse_git_log_output(raw)
+
+    assert len(commits) == 1
+    assert commits[0]["parent_sha"] == "0" * 40
+    assert commits[0]["is_merge_commit"] is False
+
+
+def test_parse_git_log_output_detects_revert_commit():
+    RS, FS = fetch._RS, fetch._FS
+    raw = (
+        f'{RS}rev1{FS}p1{FS}Alice{FS}alice@x.com{FS}2026-01-01T00:00:00+09:00'
+        f'{FS}2026-01-01T00:00:00+09:00{FS}Revert "add flaky feature"\n'
+    )
+    commits = fetch._parse_git_log_output(raw)
+
+    assert commits[0]["is_revert_commit"] is True
+
+
+def test_parse_git_log_output_detects_bot_commit_by_email_or_name():
+    RS, FS = fetch._RS, fetch._FS
+    raw = (
+        f"{RS}bot1{FS}p1{FS}dependabot[bot]{FS}49699333+dependabot[bot]@users.noreply.github.com"
+        f"{FS}2026-01-01T00:00:00+09:00{FS}2026-01-01T00:00:00+09:00{FS}bump deps\n"
+        f"{RS}bot2{FS}p1{FS}Custom CI Bot{FS}ci-bot@example.com"
+        f"{FS}2026-01-01T00:00:00+09:00{FS}2026-01-01T00:00:00+09:00{FS}deploy\n"
+        f"{RS}human1{FS}p1{FS}Alice{FS}alice@x.com"
+        f"{FS}2026-01-01T00:00:00+09:00{FS}2026-01-01T00:00:00+09:00{FS}fix\n"
+    )
+    commits = fetch._parse_git_log_output(raw)
+
+    assert commits[0]["is_bot_commit"] is True   # GitHub App bot noreply 이메일
+    # 대괄호 없는 커스텀 서비스 계정은 의도적으로 범위 밖(scope-out, D-analysis-b1)
+    assert commits[1]["is_bot_commit"] is False
+    assert commits[2]["is_bot_commit"] is False
 
 
 def test_parse_git_log_output_empty_input():

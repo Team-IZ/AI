@@ -43,7 +43,13 @@ class HeadCommit(BaseSchema):
 class GitCommit(BaseSchema):
     """`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를
 
-    안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다)."""
+    안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).
+
+    D-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):
+    parentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·
+    changedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은
+    `app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고.
+    """
 
     sha: str
     author_name: str
@@ -52,6 +58,27 @@ class GitCommit(BaseSchema):
     changed_files: list[str] = Field(default_factory=list)
     additions: int = 0
     deletions: int = 0
+    parent_sha: str = Field(
+        description="첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 "
+                    "\"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)",
+    )
+    authored_at: datetime = Field(description="author date. committedAt(커밋 date)과 다른 값")
+    branch_name: str = Field(
+        description="이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- "
+                    "git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 "
+                    "소속은 아니다. 미상이면 빈 문자열",
+    )
+    is_merge_commit: bool = Field(description="부모가 2개 이상인지(기계적 판정, %P 부모 개수)")
+    is_revert_commit: bool = Field(
+        description="커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 "
+                    "자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다",
+    )
+    is_bot_commit: bool = Field(
+        description="GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` "
+                    "또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- "
+                    "그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다",
+    )
+    changed_line_count: int = 0
 
 
 GitHistorySource = Literal["BACKEND_SUPPLIED", "EMBEDDED_GIT", "REMOTE_DEEPEN", "NONE"]
@@ -559,21 +586,29 @@ class AnalysisResult(BaseSchema):
                     "화면의 개념별 도달 격자에서 `―`(문항 없음)로 그릴 값이다",
     )
     question_count_planned: int = Field(description="계획된 질문 수. 유효 문제가 적으면 축소된다")
-    
-# GET /analyses/{jobId}의 failureCode. 🔴 잠정(계획 §0.3, 백엔드 확인 전) --
-# `api-request-to-ai-server.md`의 11개는 repository_verification/submission_artifact용이지
-# analysis_job용이 아니다. 세 출처를 그대로 합친 잠정 집합이다:
-#   AiUsage.FailureCode(usage.py) 5종     -- LLM 파이프라인 자체 실패
-#   fetch.py 검증 실패 11종               -- 재fetch가 최초 verify와 같은 이유로 또 실패할 수 있다
-#   fetch.py JOB_ONLY_FAILURE_CODES 2종   -- 재fetch에서만 의미 있는 코드(최초 verify엔 비교 대상이 없다)
-# schemas/는 engines/를 import하지 않는 계층 원칙을 유지한다 -- 대신 값 집합이 실제로 같은지는
-# tests/test_analysis_inputs.py가 fetch.py 상수와 대조해서 drift를 잡는다(feature_code 사례처럼).
+    # D-analysis-b1(2026-08-07): 백엔드 감사 전까지 이 5개가 아예 없었다 -- fetch.py가 이미
+    # 계산해서 FetchedInput에 담는데도 AnalysisResult에 배선이 안 돼 있어 응답에 한 번도
+    # 안 실렸다("계산 못 함"이 아니라 "배선 누락"). git_history_source/history_truncated는
+    # 백엔드가 명시 요청하진 않았지만 AnalysisInputResponse와 대칭 유지 + 운영상 유용해서
+    # 같이 추가한다.
+    resolved_branch: str | None = None
+    head_commit: HeadCommit | None = None
+    git_history: list[GitCommit] = Field(default_factory=list)
+    git_history_source: GitHistorySource = "NONE"
+    history_truncated: bool = False
+
+# GET /analyses/{jobId}의 failureCode. 백엔드 실측 DDL(ck_analysis_job_failure_code_2,
+# 2026-08-06 감사 회신)로 확정된 값 -- 이 11종이 전부이고 그 외 문자열은 Spring INSERT가
+# 거부한다. schemas/는 engines/를 import하지 않는 계층 원칙을 유지한다 -- fetch.py의 내부
+# 코드(13종, GITHUB 6 + ZIP 5 + JOB_ONLY 2)를 이 11종으로 옮기는 매핑은 `jobs.py`의
+# `_FETCH_FAILURE_CODE_TRANSLATION`에 있고, 그 딕셔너리와의 drift는
+# `tests/test_jobs.py`가 잡는다(fetch_engine.VERIFICATION_FAILURE_CODES|JOB_ONLY_FAILURE_CODES
+# 와 정확히 같은 키 집합인지 대조).
 AnalysisJobFailureCode = Literal[
-    "TIMEOUT", "RATE_LIMITED", "PROVIDER_ERROR", "INVALID_JSON", "CONTEXT_OVERFLOW",
+    "EMPTY_CODE_EVIDENCE", "SOURCE_UNREACHABLE", "UNSUPPORTED_LANGUAGE",
+    "ANALYSIS_TIMEOUT", "MODEL_ERROR", "TEMPORARY_ERROR",
     "INVALID_REPOSITORY_URL", "REPO_NOT_FOUND", "REPOSITORY_ACCESS_DENIED",
-    "BRANCH_NOT_FOUND", "UNSUPPORTED_HOST", "TEMPORARY_ERROR",
-    "FILE_TOO_LARGE", "ARCHIVE_INVALID", "EMPTY_CODE", "PROHIBITED_FILE", "GIT_LOG_MISSING",
-    "INPUT_HASH_MISMATCH", "FETCH_FAILED",
+    "BRANCH_NOT_FOUND", "UNSUPPORTED_HOST",
 ]
 
 
@@ -591,7 +626,7 @@ class AnalysisJobStatus(BaseSchema):
     failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
     failure_code: AnalysisJobFailureCode | None = Field(
         default=None,
-        description="🔴 잠정 어휘(위 주석, 계획 §0.3). FAILED일 때만 채워진다",
+        description="백엔드 DDL(ck_analysis_job_failure_code_2)로 확정된 11종. FAILED일 때만 채워진다",
     )
     started_at: datetime | None = None
     completed_at: datetime | None = None

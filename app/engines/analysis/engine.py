@@ -281,7 +281,8 @@ class RealAnalysisEngine:
     """`engine_mode="real"`일 때 쓰이는 엔진."""
 
     def analyze(self, request: dict[str, Any], zip_bytes: bytes | None = None,
-                *, prefetched_root: str | None = None) -> dict[str, Any]:
+                *, prefetched_root: str | None = None,
+                prefetched_git: dict[str, Any] | None = None) -> dict[str, Any]:
         """실패해도 원장은 살려 내보낸다. 실제 작업은 `_run`이 한다.
 
         `fetch.FetchError`(M4 -- 이 엔진 자신이 fetch할 때도 이제 fetch.py를 쓴다)는
@@ -292,7 +293,8 @@ class RealAnalysisEngine:
         """
         usages: list[dict[str, Any]] = []
         try:
-            return self._run(request, zip_bytes, usages, prefetched_root=prefetched_root)
+            return self._run(request, zip_bytes, usages, prefetched_root=prefetched_root,
+                              prefetched_git=prefetched_git)
         except fetch.FetchError:
             raise
         except stages.StageError as exc:
@@ -302,7 +304,8 @@ class RealAnalysisEngine:
             raise AnalysisFailed(str(exc), usages) from exc
 
     def _run(self, request: dict[str, Any], zip_bytes: bytes | None,
-             usages: list[dict[str, Any]], *, prefetched_root: str | None = None) -> dict[str, Any]:
+             usages: list[dict[str, Any]], *, prefetched_root: str | None = None,
+             prefetched_git: dict[str, Any] | None = None) -> dict[str, Any]:
         settings = get_settings()
         # wire 필드는 providerModelCode다 — 공급자에게 그대로 넘길 문자열이라
         # 화면 선택값(model_code)이 아니라 ai_model.provider_model_code 값이다.
@@ -325,10 +328,23 @@ class RealAnalysisEngine:
         # 이 경로도 그대로 받는다. request의 소스 모양(`source.repo_url`/`source.branch`)을
         # fetch.py가 기대하는 스펙 키(`repository_url`/`requested_branch`)로 바꿔 넘긴다.
         commit_sha = request.get("commit_sha")
+        # D-analysis-b1(2026-08-07): resolved_branch/head_commit/git_history는 두 경로 다
+        # 채워야 AnalysisResult에 실린다(기존엔 아예 안 실렸다 -- 배선 누락).
+        resolved_branch: str | None = None
+        head_commit: dict[str, Any] | None = None
+        git_history: list[dict[str, Any]] = []
+        git_history_source = "NONE"
+        history_truncated = False
         if prefetched_root is not None:
             scan = rules.scan_directory(prefetched_root)
             if request.get("method") == "GITHUB_URL":
                 commit_sha = materialize.head_sha(prefetched_root) or commit_sha
+            if prefetched_git:
+                resolved_branch = prefetched_git.get("resolved_branch")
+                head_commit = prefetched_git.get("head_commit")
+                git_history = prefetched_git.get("git_history") or []
+                git_history_source = prefetched_git.get("git_history_source", "NONE")
+                history_truncated = bool(prefetched_git.get("history_truncated", False))
         else:
             source = request.get("source") or {}
             spec = {
@@ -341,6 +357,11 @@ class RealAnalysisEngine:
                 if fetched.head_commit:
                     # 클론 경로에서만 실제 커밋을 안다. ZIP은 요청 값을 그대로 쓴다.
                     commit_sha = fetched.head_commit["sha"]
+                resolved_branch = fetched.resolved_branch
+                head_commit = fetched.head_commit
+                git_history = fetched.git_history
+                git_history_source = fetched.git_history_source
+                history_truncated = fetched.history_truncated
         files, candidates = scan["files"], scan["candidates"]
 
         # ── p04-1 분석 문서 ────────────────────────────────────────────────────
@@ -487,6 +508,11 @@ class RealAnalysisEngine:
             "unmatched_teaches": selection.unmatched,
             "question_count_planned": budget,
             "ai_usage": usages,
+            "resolved_branch": resolved_branch,
+            "head_commit": head_commit,
+            "git_history": git_history,
+            "git_history_source": git_history_source,
+            "history_truncated": history_truncated,
         }
 
 

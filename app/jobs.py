@@ -20,6 +20,40 @@ _jobs: dict[str, AnalysisJobStatus] = {}
 # 멱등성 키 -> job_id. 같은 키 재요청 시 새 job 안 만들고 처음 id 반환
 _job_id_by_idempotency_key: dict[str, str] = {}
 
+# fetch.py의 내부 13종(VERIFICATION_FAILURE_CODES 11 + JOB_ONLY_FAILURE_CODES 2)을
+# analysis_job.failure_code의 실제 DB CHECK 11종(schemas/analysis.py AnalysisJobFailureCode)
+# 으로 옮긴다. GITHUB 6종은 이미 정확히 일치(identity). ZIP 5종+JOB_ONLY 2종은 1:1 이름이
+# 없어 의미상 최선 매핑이다 -- 🔴 backend 확인 전(2026-08-07). failure_reason(자유 텍스트)에
+# 원본 세부사유가 그대로 남으므로 여러 코드가 같은 DB 버킷으로 뭉쳐도 정보 손실은 없다.
+_FETCH_FAILURE_CODE_TRANSLATION: dict[str, str] = {
+    # GITHUB_FAILURE_CODES -- 이미 정확히 일치, identity
+    "INVALID_REPOSITORY_URL": "INVALID_REPOSITORY_URL",
+    "REPO_NOT_FOUND": "REPO_NOT_FOUND",
+    "REPOSITORY_ACCESS_DENIED": "REPOSITORY_ACCESS_DENIED",
+    "BRANCH_NOT_FOUND": "BRANCH_NOT_FOUND",
+    "UNSUPPORTED_HOST": "UNSUPPORTED_HOST",
+    "TEMPORARY_ERROR": "TEMPORARY_ERROR",
+    # ZIP_FAILURE_CODES -- 🔴 1:1 이름 없음, 의미상 최선 매핑
+    "EMPTY_CODE": "EMPTY_CODE_EVIDENCE",       # 이름만 다르지 사실상 동의어
+    "FILE_TOO_LARGE": "SOURCE_UNREACHABLE",    # 처리 가능한 소스를 못 얻음
+    "ARCHIVE_INVALID": "SOURCE_UNREACHABLE",   # 손상된 ZIP == 못 얻음
+    "PROHIBITED_FILE": "SOURCE_UNREACHABLE",   # 안전정책상 추출 거부 == 못 얻음
+    "GIT_LOG_MISSING": "SOURCE_UNREACHABLE",   # 코드는 있으나 정책상 소스로 불인정
+    # JOB_ONLY_FAILURE_CODES -- 둘 다 "검증했던 소스가 그 형태로 더는 없다"는 동일 계열
+    "INPUT_HASH_MISMATCH": "SOURCE_UNREACHABLE",
+    "FETCH_FAILED": "SOURCE_UNREACHABLE",
+}
+
+
+def _translate_failure_code(code: str) -> str:
+    """fetch.py 내부 코드 -> analysis_job.failure_code DB 11종.
+
+    매핑에 없는 새 코드가 fetch.py에 추가됐는데 여기를 안 고친 경우, 조용히
+    DB 밖의 값(옛 PROVIDER_ERROR 버그처럼)으로 새지 않도록 안전한 DB값으로 떨어진다.
+    test_jobs.py의 드리프트 핀 테스트가 이 상황을 CI에서 미리 잡는다.
+    """
+    return _FETCH_FAILURE_CODE_TRANSLATION.get(code, "SOURCE_UNREACHABLE")
+
 def get_job(job_id: str) -> AnalysisJobStatus | None:
     return _jobs.get(job_id)
 
@@ -64,7 +98,24 @@ def _run_via_analysis_input(body: AnalysisRequest, engine: AnalysisEngine) -> di
     # 동작하도록 실제 값을 채워 넣는다.
     request["method"] = ref.method
     with fetch_engine.refetch_pinned(descriptor) as fetched:
-        return engine.analyze(request, None, prefetched_root=fetched.root)
+        # D-analysis-b1(2026-08-07): refetch_pinned()의 GITHUB_URL 경로는 이미
+        # _head_commit()+_try_deepen_history()를 호출해서 메시지 포함 완전한
+        # head_commit/git_history를 갖고 있다 -- 별도 재계산 없이 그대로 넘긴다.
+        prefetched_git: dict[str, Any] = {
+            "resolved_branch": fetched.resolved_branch,
+            "head_commit": fetched.head_commit,
+            "git_history": fetched.git_history,
+            "git_history_source": fetched.git_history_source,
+            "history_truncated": fetched.history_truncated,
+        }
+        # 재fetch한 히스토리가 비면(네트워크 flake 등) 최초 /analysis-inputs 때 백엔드가
+        # 에코해준 request.analysis_input.git_history로 폴백한다 -- 같은 pinned sha의
+        # 이미 검증된 데이터라 "틀릴" 수 없고, 재fetch 실패 시 정보 손실만 막는다.
+        if not prefetched_git["git_history"] and ref.git_history:
+            prefetched_git["git_history"] = [c.model_dump() for c in ref.git_history]
+            prefetched_git["git_history_source"] = "BACKEND_SUPPLIED"
+        return engine.analyze(request, None, prefetched_root=fetched.root,
+                               prefetched_git=prefetched_git)
 
 def run_analysis(
     job_id: str, body: AnalysisRequest, engine: AnalysisEngine, zip_bytes: bytes | None,
@@ -121,21 +172,24 @@ def run_analysis(
                 f"문제·질문·힌트는 정상입니다"
             )
     except fetch_engine.FetchError as exc:
-        # D2 재fetch 실패(analysisInput 경로 전용) -- FetchError가 이미 정확한
-        # failureCode를 들고 있다(호스트 거부/브랜치 드리프트/inputHash 불일치 등,
-        # fetch.py의 11+2종 어휘 참고). 재분류하지 않고 그대로 옮긴다.
+        # D2 재fetch 실패(analysisInput 경로 전용) -- FetchError가 이미 세부 사유를
+        # 들고 있다(호스트 거부/브랜치 드리프트/inputHash 불일치 등, fetch.py의 11+2종
+        # 어휘 참고). 그 어휘는 analysis_job.failure_code의 DB 11종과 다른 네임스페이스라
+        # 그대로 옮기면 안 된다 -- _translate_failure_code로 매핑한다(위 정의 참고).
         job.status = "FAILED"
-        job.failure_code = exc.failure_code
+        job.failure_code = _translate_failure_code(exc.failure_code)
         job.failure_reason = exc.message
     except Exception as exc:
         # 엔진 터지거나 계약 어기면 job FAILED로. 예외 삼키지 말고 사유 기록
         job.status = "FAILED"
         job.failure_reason = str(exc)
-        # 🔴 잠정(계획 §0.3) -- 엔진 내부 실패를 TIMEOUT/RATE_LIMITED/...로 세분화할
-        # 신호가 없다(LlmError/StageError는 failure_code를 안 들고 있다, usage만 있다).
-        # PROVIDER_ERROR를 catch-all로 쓴다 -- 근거 없이 더 구체적인 값을 추측하는
-        # 것보다, "엔진 실패"라는 사실만 정확히 담는 쪽을 택한다.
-        job.failure_code = "PROVIDER_ERROR"
+        # 🔴 잠정(계획 §0.3) -- 엔진 내부 실패를 ANALYSIS_TIMEOUT/UNSUPPORTED_LANGUAGE/...로
+        # 세분화할 신호가 없다(LlmError/StageError는 failure_code를 안 들고 있다, usage만
+        # 있다). MODEL_ERROR를 catch-all로 쓴다 -- 근거 없이 더 구체적인 값을 추측하는
+        # 것보다, "모델/엔진 실패"라는 사실만 정확히 담는 쪽을 택한다. (옛 PROVIDER_ERROR는
+        # ai_usage 네임스페이스 값이라 analysis_job의 DB CHECK 11종엔 없었다 -- 버그였다,
+        # 2026-08-07 수정)
+        job.failure_code = "MODEL_ERROR"
         # 🔴 **실패해도 원장은 남긴다.** 콜은 이미 나갔고 백엔드가 그걸로 비용을
         # 집계한다. AnalysisFailed가 실패 지점까지의 usage를 들고 온다.
         burned = getattr(exc, "ai_usage", None)

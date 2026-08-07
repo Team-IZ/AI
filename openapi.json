@@ -274,7 +274,7 @@
                             "anyOf": [
                               {
                                 "items": {
-                                  "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).",
+                                  "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고.",
                                   "properties": {
                                     "sha": {
                                       "title": "Sha",
@@ -309,13 +309,55 @@
                                       "default": 0,
                                       "title": "Deletions",
                                       "type": "integer"
+                                    },
+                                    "parentSha": {
+                                      "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)",
+                                      "title": "Parentsha",
+                                      "type": "string"
+                                    },
+                                    "authoredAt": {
+                                      "description": "author date. committedAt(커밋 date)과 다른 값",
+                                      "format": "date-time",
+                                      "title": "Authoredat",
+                                      "type": "string"
+                                    },
+                                    "branchName": {
+                                      "description": "이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 소속은 아니다. 미상이면 빈 문자열",
+                                      "title": "Branchname",
+                                      "type": "string"
+                                    },
+                                    "isMergeCommit": {
+                                      "description": "부모가 2개 이상인지(기계적 판정, %P 부모 개수)",
+                                      "title": "Ismergecommit",
+                                      "type": "boolean"
+                                    },
+                                    "isRevertCommit": {
+                                      "description": "커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다",
+                                      "title": "Isrevertcommit",
+                                      "type": "boolean"
+                                    },
+                                    "isBotCommit": {
+                                      "description": "GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` 또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- 그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다",
+                                      "title": "Isbotcommit",
+                                      "type": "boolean"
+                                    },
+                                    "changedLineCount": {
+                                      "default": 0,
+                                      "title": "Changedlinecount",
+                                      "type": "integer"
                                     }
                                   },
                                   "required": [
                                     "sha",
                                     "authorName",
                                     "authorEmail",
-                                    "committedAt"
+                                    "committedAt",
+                                    "parentSha",
+                                    "authoredAt",
+                                    "branchName",
+                                    "isMergeCommit",
+                                    "isRevertCommit",
+                                    "isBotCommit"
                                   ],
                                   "title": "GitCommit",
                                   "type": "object"
@@ -616,7 +658,7 @@
                                   "anyOf": [
                                     {
                                       "items": {
-                                        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).",
+                                        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고.",
                                         "properties": {
                                           "sha": {
                                             "title": "Sha",
@@ -651,13 +693,55 @@
                                             "default": 0,
                                             "title": "Deletions",
                                             "type": "integer"
+                                          },
+                                          "parentSha": {
+                                            "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)",
+                                            "title": "Parentsha",
+                                            "type": "string"
+                                          },
+                                          "authoredAt": {
+                                            "description": "author date. committedAt(커밋 date)과 다른 값",
+                                            "format": "date-time",
+                                            "title": "Authoredat",
+                                            "type": "string"
+                                          },
+                                          "branchName": {
+                                            "description": "이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 소속은 아니다. 미상이면 빈 문자열",
+                                            "title": "Branchname",
+                                            "type": "string"
+                                          },
+                                          "isMergeCommit": {
+                                            "description": "부모가 2개 이상인지(기계적 판정, %P 부모 개수)",
+                                            "title": "Ismergecommit",
+                                            "type": "boolean"
+                                          },
+                                          "isRevertCommit": {
+                                            "description": "커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다",
+                                            "title": "Isrevertcommit",
+                                            "type": "boolean"
+                                          },
+                                          "isBotCommit": {
+                                            "description": "GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` 또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- 그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다",
+                                            "title": "Isbotcommit",
+                                            "type": "boolean"
+                                          },
+                                          "changedLineCount": {
+                                            "default": 0,
+                                            "title": "Changedlinecount",
+                                            "type": "integer"
                                           }
                                         },
                                         "required": [
                                           "sha",
                                           "authorName",
                                           "authorEmail",
-                                          "committedAt"
+                                          "committedAt",
+                                          "parentSha",
+                                          "authoredAt",
+                                          "branchName",
+                                          "isMergeCommit",
+                                          "isRevertCommit",
+                                          "isBotCommit"
                                         ],
                                         "title": "GitCommit",
                                         "type": "object"
@@ -1777,24 +1861,17 @@
               {
                 "type": "string",
                 "enum": [
-                  "TIMEOUT",
-                  "RATE_LIMITED",
-                  "PROVIDER_ERROR",
-                  "INVALID_JSON",
-                  "CONTEXT_OVERFLOW",
+                  "EMPTY_CODE_EVIDENCE",
+                  "SOURCE_UNREACHABLE",
+                  "UNSUPPORTED_LANGUAGE",
+                  "ANALYSIS_TIMEOUT",
+                  "MODEL_ERROR",
+                  "TEMPORARY_ERROR",
                   "INVALID_REPOSITORY_URL",
                   "REPO_NOT_FOUND",
                   "REPOSITORY_ACCESS_DENIED",
                   "BRANCH_NOT_FOUND",
-                  "UNSUPPORTED_HOST",
-                  "TEMPORARY_ERROR",
-                  "FILE_TOO_LARGE",
-                  "ARCHIVE_INVALID",
-                  "EMPTY_CODE",
-                  "PROHIBITED_FILE",
-                  "GIT_LOG_MISSING",
-                  "INPUT_HASH_MISMATCH",
-                  "FETCH_FAILED"
+                  "UNSUPPORTED_HOST"
                 ]
               },
               {
@@ -1802,7 +1879,7 @@
               }
             ],
             "title": "Failurecode",
-            "description": "🔴 잠정 어휘(위 주석, 계획 §0.3). FAILED일 때만 채워진다"
+            "description": "백엔드 DDL(ck_analysis_job_failure_code_2)로 확정된 11종. FAILED일 때만 채워진다"
           },
           "startedAt": {
             "anyOf": [
@@ -1930,6 +2007,50 @@
             "type": "integer",
             "title": "Questioncountplanned",
             "description": "계획된 질문 수. 유효 문제가 적으면 축소된다"
+          },
+          "resolvedBranch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedbranch"
+          },
+          "headCommit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadCommit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gitHistory": {
+            "items": {
+              "$ref": "#/components/schemas/GitCommit"
+            },
+            "type": "array",
+            "title": "Githistory"
+          },
+          "gitHistorySource": {
+            "type": "string",
+            "enum": [
+              "BACKEND_SUPPLIED",
+              "EMBEDDED_GIT",
+              "REMOTE_DEEPEN",
+              "NONE"
+            ],
+            "title": "Githistorysource",
+            "default": "NONE"
+          },
+          "historyTruncated": {
+            "type": "boolean",
+            "title": "Historytruncated",
+            "default": false
           }
         },
         "type": "object",
@@ -2602,6 +2723,42 @@
             "type": "integer",
             "title": "Deletions",
             "default": 0
+          },
+          "parentSha": {
+            "type": "string",
+            "title": "Parentsha",
+            "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)"
+          },
+          "authoredAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Authoredat",
+            "description": "author date. committedAt(커밋 date)과 다른 값"
+          },
+          "branchName": {
+            "type": "string",
+            "title": "Branchname",
+            "description": "이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 소속은 아니다. 미상이면 빈 문자열"
+          },
+          "isMergeCommit": {
+            "type": "boolean",
+            "title": "Ismergecommit",
+            "description": "부모가 2개 이상인지(기계적 판정, %P 부모 개수)"
+          },
+          "isRevertCommit": {
+            "type": "boolean",
+            "title": "Isrevertcommit",
+            "description": "커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다"
+          },
+          "isBotCommit": {
+            "type": "boolean",
+            "title": "Isbotcommit",
+            "description": "GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` 또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- 그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다"
+          },
+          "changedLineCount": {
+            "type": "integer",
+            "title": "Changedlinecount",
+            "default": 0
           }
         },
         "type": "object",
@@ -2609,10 +2766,16 @@
           "sha",
           "authorName",
           "authorEmail",
-          "committedAt"
+          "committedAt",
+          "parentSha",
+          "authoredAt",
+          "branchName",
+          "isMergeCommit",
+          "isRevertCommit",
+          "isBotCommit"
         ],
         "title": "GitCommit",
-        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다)."
+        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고."
       },
       "HTTPValidationError": {
         "properties": {
