@@ -10,7 +10,11 @@ from app import interview_brief
 from app.api.errors import ApiError, InterviewBriefError
 from app.engines.analysis.stages import StageError
 from app.schemas.common import ErrorResponse
-from app.schemas.interview_brief import InterviewBriefRequest, InterviewBriefResponse
+from app.schemas.interview_brief import (
+    InterviewBriefFailure,
+    InterviewBriefRequest,
+    InterviewBriefResponse,
+)
 from app.usage import to_ai_usage
 
 router = APIRouter(tags=["interview-brief"])
@@ -46,7 +50,8 @@ def _failure_code_for(exc: StageError) -> str:
     responses={
         409: {"model": ErrorResponse,
               "description": "같은 idempotency-key로 다른 본문이 왔다. 재시도해도 같다"},
-        503: {"description": "생성 실패. failureCode/message로 사유를 알려준다"},
+        503: {"model": InterviewBriefFailure,
+              "description": "생성 실패. 태운 토큰은 aiUsage에 그대로 남는다"},
     },
 )
 def generate_interview_brief(
@@ -69,18 +74,31 @@ def generate_interview_brief(
     job/폴링 없음 -- 이 응답이 곧 결과다. 부분 성공 없음(§5.2): 검증에 하나라도
     걸리면 503 + failureCode로 전체 실패를 알린다.
     """
+    # contextId는 null이다 -- AI가 interview_brief.brief_id를 받은 적이 없다(요청에
+    # 없고, 동기라 jobId도 없어서 /reports·/curricula가 쓰는 "AI jobId를 넣고 Spring이
+    # 교체" 우회도 안 된다). 백엔드가 요청에 briefId를 실어주면 그때 채운다.
+    def _usage(usages: list) -> list:
+        return to_ai_usage(
+            usages, "INTERVIEW_BRIEF", None,
+            feature_code="INTERVIEW_BRIEF_GENERATION",
+            idempotency_key=idempotency_key, trace_id=x_trace_id,
+        )
+
     try:
         result = interview_brief.generate(body, idempotency_key=idempotency_key)
     except ValueError as exc:
         # 같은 멱등키로 다른 본문이 왔다. /analyses의 H12 대응과 같은 409다 --
         # 생성 실패(503)가 아니라 호출 쪽 실수라 재시도해도 같은 결과다.
+        # LLM을 부르기 전에 걸리므로 태운 토큰이 없다.
         raise ApiError(
             status_code=409, error="IDEMPOTENCY_CONFLICT", message=str(exc),
         ) from exc
     except StageError as exc:
+        # 실패해도 태운 토큰은 원장에 남긴다(백엔드 회신 §3 A-5).
         raise InterviewBriefError(
             status_code=503, failure_code=_failure_code_for(exc),
             message=f"면담 브리프 생성에 실패했습니다: {exc}",
+            ai_usage=_usage(exc.usages),
         ) from exc
 
     return InterviewBriefResponse(
@@ -94,11 +112,5 @@ def generate_interview_brief(
             }
             for item in result.items
         ],
-        # contextId는 null이다 -- AI가 interview_brief.brief_id를 받은 적이 없다.
-        # Spring이 저장 시점에 채우거나, 요청에 briefId를 실어주면 그때 채운다.
-        ai_usage=to_ai_usage(
-            result.usages, "INTERVIEW_BRIEF", None,
-            feature_code="INTERVIEW_BRIEF_GENERATION",
-            idempotency_key=idempotency_key, trace_id=x_trace_id,
-        ),
+        ai_usage=_usage(result.usages),
     )

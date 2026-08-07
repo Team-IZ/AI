@@ -1,7 +1,8 @@
 """ 면담 브리프 생성 API의 요청/응답 스키마. 표기는 camelCase.
 
-명세: `IZ-Get_면담브리프_생성API_명세서_v08.md` (2026-08-05). `POST /internal/v1/
-interview-brief:generate` 하나뿐이고 동기(sync) 계약이다 — job/폴링 없음, 이
+명세: `IZ-Get_면담브리프_생성API_명세서_v08.md` (2026-08-05) + 백엔드 감사 회신
+`면담_브리프_API_감사_회신에대한_회신.md` (2026-08-07 — 값 집합 3건이 이걸로 정정됐다).
+`POST /api/v0/interview-brief:generate` 하나뿐이고 동기(sync) 계약이다 — job/폴링 없음, 이
 요청이 곧 그 응답이다. AI는 DB에 직접 접근하지 않는다 — target/riskReasons/
 comprehension 등은 전부 백엔드가 조립해서 실어 보낸 값이고, AI는 그걸 그대로
 믿지 않고(모델이 되돌려주는 interviewSourceId만 예외 없이 검증한다 -- engine 쪽)
@@ -27,7 +28,29 @@ RiskReasonCode = Literal[
     "CONTRIBUTION_UNDERSTANDING_GAP", "LOW_PARTICIPATION",
 ]
 EvaluationStatus = Literal["MATCHED", "NOT_MATCHED", "NOT_APPLICABLE", "UNAVAILABLE"]
+# 백엔드 회신 §1-4에서 DDL CHECK 2종으로 확정. 3종 이상이면 저장이 거부된다.
 NotApplicableReasonCode = Literal["FIRST_MINI_PROJECT", "INSUFFICIENT_LONGITUDINAL_HISTORY"]
+
+# 백엔드 회신 §1-5(2026-08-07)에서 확정. `MANAGER_ONLY` 단일값이고 플랫폼 어휘
+# (`assessment_round_question_focus.display_scope`)와도 일치한다. `AUTHOR_ONLY`는
+# 정책 확인 중이라 아직 넣지 않는다.
+#
+# ⚠️ **값으로 필터링하지 않는다**(§3 A-6). 어떤 메모를 브리프에 쓸 수 있는지는
+# org/cohort 테넌시와 `manager_assignment` 유효성이 걸린 판단이고 그 맥락은 백엔드에만
+# 있다 -- 백엔드가 요청 시점에 걸러 보낸다. 여기서는 프롬프트 톤 조절용 참고값이다.
+ObservationNoteVisibility = Literal["MANAGER_ONLY"]
+
+# 백엔드 회신 §1-3 + 부록 A의 COALESCE 체인이 그대로 이 4종이다.
+#
+# 🔴 옛 값(`VERIFICATION_CONCEPT`·`CURRICULUM_EVIDENCE`)은 **실재하지 않았다** --
+# DDL만 보고 추측한 이름이었고 백엔드가 조인 쿼리 원문으로 정정했다. 그리고 문제 하나는
+# 반드시 이 넷 중 하나로 귀결되므로(부록 A의 CASE에 ELSE가 있다) **선택이 아니라 필수**다.
+ConceptNameSource = Literal[
+    "TEACHES_CANONICAL_NAME",       # ① 팀 공통 문제 -- 검증 개념 경로. CHECK가 NOT NULL 강제라 항상 성공
+    "CURRICULUM_EVIDENCE_TEACHES",  # ② 개인 커밋 문제 -- 교안 역참조 근거(S-06). ③보다 먼저 탄다
+    "PROBLEM_TITLE",                # ③ 폴백
+    "UNAVAILABLE",                  # ④ NOT_GENERATED -- title조차 CHECK로 NULL이라 개념명이 없다
+]
 ValidityReviewStatus = Literal["NOT_REQUIRED", "PENDING", "CONFIRMED_INVALID", "RESTORED_VALID"]
 AttemptType = Literal["INITIAL", "RETRY", "REVIEW"]
 AttemptStatus = Literal[
@@ -128,12 +151,31 @@ class ValidityReview(BaseSchema):
 
 
 class ComprehensionCodeContext(BaseSchema):
-    """문제 근거 코드의 위치만. **원문은 전달하지 않는다**(§4.1 명시)."""
+    """문제 근거 코드의 **좌표와 식별자만**. 원문은 전달하지 않는다.
+
+    백엔드 회신 §3 A-2가 6필드를 제안했고 그대로 받는다. 원문을 안 보내는 이유가
+    바뀌었다 -- 예전엔 명세 §4.1이 그렇게 적어서였고, 지금은 `assessment_problem`에
+    코드 원문 자체가 없기 때문이다(좌표와 키만 있고 원문은 `submission.code_snippets`
+    JSONB에 있다). 게다가 GitHub 접근 주체가 이미 AI 서버라(S-01/S-10) 백엔드가
+    조립해 되돌려주는 건 중복이면서 코드 외부 전송 범위만 넓힌다.
+
+    ⚠️ `generation_status='NOT_GENERATED'` 문제는 이 6개가 DB CHECK로 전부 NULL이라
+    **객체 자체가 생략된다**(`ProblemComprehension.code_context`가 optional인 이유).
+    """
 
     language: str
     path: str
     line_start: int
     line_end: int
+    snippet_key: str = Field(
+        description="`submission.code_snippets`(JSONB, 최대 3원소) 안에서 이 근거가 "
+                    "가리키는 원소를 찾는 키(= `assessment_problem.source_snippet_key`)",
+    )
+    snippet_hash: str = Field(
+        description="원문 무결성 확인용 해시(= `assessment_problem.code_snippet_hash`). "
+                    "AI가 저장소에서 직접 가져온 내용과 대조하는 용도이고 그 자체를 "
+                    "화면에 표시하지 않는다",
+    )
 
 
 class ComprehensionStage(BaseSchema):
@@ -182,18 +224,18 @@ class ProblemComprehension(BaseSchema):
     code_context: ComprehensionCodeContext | None = Field(
         default=None, description="NOT_GENERATED 문제는 없다",
     )
-    # D-ib4 (백엔드 D-2 대응): concept_name이 실제로는 problem_scope에 따라 조인
-    # 경로가 갈리고(팀 공유=project_verification_concept, 개인 커밋=
-    # assessment_problem_reference), 후자는 0건일 수 있어 title로 폴백한다는 게
-    # 백엔드 감사 결과다. 그 폴백 여부를 AI가 구분해서 확신도를 조절할 수 있게
-    # 백엔드가 제안한 필드. 아직 백엔드가 안 보내도 되게 선택 필드로 둔다(하위호환).
-    concept_name_source: Literal[
-        "VERIFICATION_CONCEPT", "CURRICULUM_EVIDENCE", "PROBLEM_TITLE",
-    ] | None = Field(
-        default=None,
-        description="conceptName이 어느 경로에서 나왔는지. PROBLEM_TITLE이면 "
-                    "검증된 개념명이 아니라 문제 제목으로 대체된 값이므로 단정적으로 "
-                    "서술하지 않는다",
+    # concept_name은 problem_scope에 따라 조인 경로가 갈린다(백엔드 회신 §3 D-2 +
+    # 부록 A). 그 경로를 AI가 알아야 확신도를 조절할 수 있어서 백엔드가 같이 보낸다.
+    # 🔴 옛 선택 필드(3종 추측값)에서 **필수 + 4종**으로 바뀌었다 -- 부록 A의 CASE에
+    # ELSE가 있어 문제 하나는 반드시 넷 중 하나로 귀결된다.
+    #
+    # ⚠️ `UNAVAILABLE`일 때 `concept_name`에 무엇이 오는지는 아직 열린 질문이다.
+    # 부록 A의 COALESCE 체인이 전부 NULL이면 `concept_name`도 NULL인데 이 스키마는
+    # required str이다 -- 빈 문자열로 올지 필드가 빠질지 백엔드 회신 대기 중이다.
+    concept_name_source: ConceptNameSource = Field(
+        description="conceptName이 어느 경로에서 나왔는지(ConceptNameSource 4종). "
+                    "TEACHES_CANONICAL_NAME 외에는 검증된 개념명이 아니므로 "
+                    "단정적으로 서술하지 않는다",
     )
     # D-ib4 (백엔드 D-1 대응): NOT_GENERATED 문제는 stages가 비어 이 문제를 근거로
     # 삼을 interviewSourceId가 없었다(interview_source 테이블의 problem_id 슬롯이
@@ -278,19 +320,17 @@ class ObservationNote(BaseSchema):
     interview_source_id: str = Field(
         description="★ 이 관찰 메모를 근거로 질문을 만들면 이 값을 그대로 실어야 한다",
     )
-    # D-ib4 (백엔드 A-3): observation_note.visibility는 DDL에 CHECK 제약이 없는
-    # VARCHAR(30) NOT NULL -- 값 집합("OPEN 정책 확정 전 임의 DB CHECK로 고정하지
-    # 않는다"는 DDL 코멘트 원문)이 아직 안 정해졌다. 그래서 지금은 받아만 두고
-    # (Literal 강제 안 함) 프롬프트/필터링에는 아직 안 쓴다 -- 값 집합이 정해지면
-    # 그때 좁히고 공개범위별 필터링 로직을 추가한다.
-    visibility: str | None = Field(
-        default=None,
-        description="공개범위 코드(값 집합 미확정, 아직 미사용 -- 배선만 해둠)",
+    # 값 집합이 확정됐다(백엔드 회신 §1-5, 2026-08-07). DDL에 CHECK가 없던 건
+    # "정책 확정 전 임의로 고정하지 않는다"는 이유였고 이제 시드 실사용값으로 닫혔다.
+    # ⚠️ 옛 계획("값 집합이 정해지면 공개범위별 필터링을 붙인다")은 **철회됐다**(§3 A-6).
+    visibility: ObservationNoteVisibility = Field(
+        description="공개범위 코드. 백엔드가 요청 시점에 이미 걸러 보내므로 AI는 "
+                    "필터링에 쓰지 않는다(§3 A-6) -- 프롬프트 톤 조절용 참고값이다",
     )
 
 
 class InterviewBriefRequest(BaseSchema):
-    """POST /internal/v1/interview-brief:generate 요청 본문 전체."""
+    """POST /api/v0/interview-brief:generate 요청 본문 전체."""
 
     target: Target
     brief_context: BriefContext
@@ -341,3 +381,19 @@ class InterviewBriefResponse(BaseSchema):
         default_factory=list,
         description="이 요청이 태운 LLM 호출 기록. 브리프는 호출 1회라 보통 1행이다",
     )
+
+
+class InterviewBriefFailure(BaseSchema):
+    """503 실패 응답 본문. §5.2 -- 공용 `{error, message, retryable}`과 계약이 다르다.
+
+    `aiUsage`가 성공 응답과 같은 자리에 있다(백엔드 회신 §3 A-5: 성공·실패 **모든**
+    봉투에 사용량을 싣는다). LLM을 부르기도 전에 실패했으면 빈 배열이다.
+    """
+
+    failure_code: str = Field(
+        description="명세 §5.2의 8종 중 하나. 전송 계층 실패(TIMEOUT·RATE_LIMITED·"
+                    "PROVIDER_ERROR·CONTEXT_OVERFLOW)는 그대로 전달하고, 모델이 계약을 "
+                    "어긴 경우(개수·순서·지어낸 interviewSourceId)는 INVALID_JSON이다",
+    )
+    message: str
+    ai_usage: list[AiUsage] = Field(default_factory=list)
