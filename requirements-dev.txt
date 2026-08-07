@@ -4,3 +4,7 @@
 
 pytest==8.4.2
 pytest-cov==7.1.0
+
+# apprunner.yaml 파싱용(tests/test_apprunner_config.py). 배포 설정이 코드 기본값과
+# 어긋나는지 대조한다 -- 배포 이미지엔 필요 없어서 dev 쪽에만 둔다.
+PyYAML==6.0.3
