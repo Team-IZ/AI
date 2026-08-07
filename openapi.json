@@ -125,6 +125,7 @@
                   "attemptId": {
                     "anyOf": [
                       {
+                        "format": "uuid",
                         "type": "string"
                       },
                       {
@@ -137,6 +138,7 @@
                   "submissionId": {
                     "anyOf": [
                       {
+                        "format": "uuid",
                         "type": "string"
                       },
                       {
@@ -455,16 +457,18 @@
                     "title": "Teaches",
                     "type": "array"
                   },
-                  "curriculumId": {
+                  "curriculumVersionId": {
                     "anyOf": [
                       {
+                        "format": "uuid",
                         "type": "string"
                       },
                       {
                         "type": "null"
                       }
                     ],
-                    "title": "Curriculumid"
+                    "description": "teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. 🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 이름만으로 구분되지 않았다",
+                    "title": "Curriculumversionid"
                   },
                   "providerModelCode": {
                     "anyOf": [
@@ -509,6 +513,7 @@
                         "attemptId": {
                           "anyOf": [
                             {
+                              "format": "uuid",
                               "type": "string"
                             },
                             {
@@ -521,6 +526,7 @@
                         "submissionId": {
                           "anyOf": [
                             {
+                              "format": "uuid",
                               "type": "string"
                             },
                             {
@@ -839,16 +845,18 @@
                           "title": "Teaches",
                           "type": "array"
                         },
-                        "curriculumId": {
+                        "curriculumVersionId": {
                           "anyOf": [
                             {
+                              "format": "uuid",
                               "type": "string"
                             },
                             {
                               "type": "null"
                             }
                           ],
-                          "title": "Curriculumid"
+                          "description": "teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. 🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 이름만으로 구분되지 않았다",
+                          "title": "Curriculumversionid"
                         },
                         "providerModelCode": {
                           "anyOf": [
@@ -1297,19 +1305,22 @@
                       "description": "POST /api/v0/curricula 요청. PDF는 multipart의 file 파트로 온다.",
                       "properties": {
                         "versionId": {
-                          "description": "Spring curriculum_version 키(에코용)",
+                          "description": "분석 대상 교안 **버전**. `curriculum_version.version_id`다. `/analyses` 요청의 `curriculumVersionId`와 같은 값이다",
+                          "format": "uuid",
                           "title": "Versionid",
                           "type": "string"
                         },
                         "curriculumId": {
                           "anyOf": [
                             {
+                              "format": "uuid",
                               "type": "string"
                             },
                             {
                               "type": "null"
                             }
                           ],
+                          "description": "교안 자산 `curriculum_material.material_id`. **버전이 아니다** — 버전은 위 `versionId`가 가리킨다",
                           "title": "Curriculumid"
                         },
                         "courseLabel": {
@@ -1509,10 +1520,10 @@
             "type": "string",
             "enum": [
               "CODE_ANALYSIS",
-              "QUESTION_GENERATION",
+              "CODE_SESSION",
               "ANSWER_EVALUATION",
               "CURRICULUM_ANALYSIS",
-              "SUMMARY_DRAFT"
+              "REPORT_GENERATION"
             ],
             "title": "Featurecode"
           },
@@ -1814,7 +1825,8 @@
           "attemptId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -1825,7 +1837,8 @@
           "submissionId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2069,6 +2082,7 @@
         "properties": {
           "sessionId": {
             "type": "string",
+            "format": "uuid",
             "title": "Sessionid"
           },
           "state": {
@@ -2320,7 +2334,8 @@
           "versionId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2406,6 +2421,7 @@
         "properties": {
           "versionId": {
             "type": "string",
+            "format": "uuid",
             "title": "Versionid"
           },
           "analysisVersion": {
@@ -2537,6 +2553,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "axisCode": {
@@ -2556,6 +2573,18 @@
             "title": "Hintsused",
             "description": "이 단계에서 이미 연 힌트 수. 점수 상한(5/4/3)의 근거",
             "default": 0
+          },
+          "mac": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mac",
+            "description": "🔴 D-fix(redteam audit H10, 2026-08-04). 응답이 이 커서와 함께 실어 보낸 problems/transcript 상태에 대한 HMAC-SHA256 서명(별도 설정값 session_cursor_hmac_secret로 계산, x-internal-key와 다른 비밀). 다음 요청에 그대로 되돌려 보내면 서버가 재계산해 대조한다 -- 셋 중 무엇이든 바뀌면 불일치로 거부된다. 생략하면(하위호환 단계, 또는 session_cursor_hmac_secret 미설정) 오늘처럼 무검증으로 신뢰된다 -- 완전한 방어가 아니라 점진적 도입 단계라는 뜻이다."
           }
         },
         "type": "object",
@@ -2612,7 +2641,8 @@
           "relatedTeachId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -2840,6 +2870,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "problemNo": {
@@ -2941,7 +2972,8 @@
           "teachId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -3064,7 +3096,8 @@
           "teachId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -3097,6 +3130,7 @@
           },
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "reachedStage": {
@@ -3195,6 +3229,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "axisCode": {
@@ -3285,7 +3320,8 @@
           "problemId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -3297,7 +3333,8 @@
           "sessionId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -3452,7 +3489,8 @@
           "teachId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -3486,6 +3524,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid",
             "description": "이 보고서가 다루는 문제. 문제 단위의 키"
           },
@@ -3505,7 +3544,8 @@
           "sessionId": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "format": "uuid"
               },
               {
                 "type": "null"
@@ -3646,6 +3686,7 @@
         "properties": {
           "requirementId": {
             "type": "string",
+            "format": "uuid",
             "title": "Requirementid"
           },
           "verdict": {
@@ -3927,6 +3968,7 @@
         "properties": {
           "problemId": {
             "type": "string",
+            "format": "uuid",
             "title": "Problemid"
           },
           "axisCode": {
@@ -4001,6 +4043,7 @@
         "properties": {
           "teachId": {
             "type": "string",
+            "format": "uuid",
             "title": "Teachid",
             "description": "요청 teaches[].id 그대로"
           },

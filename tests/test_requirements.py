@@ -31,7 +31,8 @@ def _result(requirement: str, verdict: str, **extra):
 def test_results_map_one_to_one(monkeypatch):
     """요청 requirements와 개수·순서가 정확히 맞아야 한다(jobs.py가 개수를 검사한다)."""
     _fake(monkeypatch, {"results": [
-        _result("결제 전에 주문을 검증한다", "P"),
+        _result("결제 전에 주문을 검증한다", "P",
+                evidence={"file": "app/pay.py", "lines": [2, 2], "quote": "validate(order)"}),
         _result("결제 실패를 로깅한다", "F"),
         _result("환불을 지원한다", "F"),
     ]})
@@ -48,7 +49,8 @@ def test_shuffled_results_are_matched_by_text(monkeypatch):
     """모델이 순서를 흔들어도 텍스트로 붙인다 — 인덱스만 믿으면 판정이 뒤바뀐다."""
     _fake(monkeypatch, {"results": [
         _result("환불을 지원한다", "F"),
-        _result("결제 전에 주문을 검증한다", "P"),
+        _result("결제 전에 주문을 검증한다", "P",
+                evidence={"file": "app/pay.py", "lines": [2, 2], "quote": "validate(order)"}),
         _result("결제 실패를 로깅한다", "F"),
     ]})
 
@@ -62,8 +64,10 @@ def test_shuffled_results_are_matched_by_text(monkeypatch):
 def test_missing_result_does_not_shift_the_rest(monkeypatch):
     """모델이 r2를 빠뜨려도 r3 판정이 r2 자리로 밀리면 안 된다."""
     _fake(monkeypatch, {"results": [
-        _result("결제 전에 주문을 검증한다", "P"),
-        _result("환불을 지원한다", "P"),   # 위치로 붙이면 r2가 P가 돼버린다
+        _result("결제 전에 주문을 검증한다", "P",
+                evidence={"file": "app/pay.py", "lines": [2, 2], "quote": "validate(order)"}),
+        _result("환불을 지원한다", "P",   # 위치로 붙이면 r2가 P가 돼버린다
+                evidence={"file": "app/pay.py", "lines": [1, 1], "quote": "def pay(order):"}),
     ]})
 
     out = requirements.judge(REQS, FILES, model_code="m")
@@ -78,8 +82,10 @@ def test_missing_result_does_not_shift_the_rest(monkeypatch):
 def test_unlabeled_result_falls_back_to_position(monkeypatch):
     """텍스트를 안 달고 온 결과는 같은 자리의 요구사항으로 본다. 밀릴 위험이 없다."""
     _fake(monkeypatch, {"results": [
-        _result("결제 전에 주문을 검증한다", "P"),
-        {"verdict": "P"},                                  # 텍스트 없음
+        _result("결제 전에 주문을 검증한다", "P",
+                evidence={"file": "app/pay.py", "lines": [2, 2], "quote": "validate(order)"}),
+        {"verdict": "P",                                   # 텍스트 없음
+         "evidence": {"file": "app/pay.py", "lines": [3, 3], "quote": "return charge(order)"}},
         _result("환불을 지원한다", "F"),
     ]})
 
@@ -127,3 +133,69 @@ def test_empty_requirements_skips_the_call(monkeypatch):
     out = requirements.judge([], FILES, model_code="m")
 
     assert out.results == [] and out.usages == [] and called == []
+
+
+# ── H4-dev (redteam audit, 2026-08-05): evidence grounding ──────────────────────────
+# decision_points(analysis_doc.py)/topics(topics.py)는 이미 fragments.locate_symbol로
+# 실제 소스와 대조하는데, 이 판정만 모델의 evidence를 무검증으로 채택했었다 — 제출
+# 코드에 가짜 근거를 심어 P를 유도하는 프롬프트 인젝션의 최종 착지점이 여기였다.
+
+def test_grounded_evidence_keeps_p_and_uses_real_line_numbers(monkeypatch):
+    """quote가 실제 파일에 있으면 P가 유지되고, lines는 모델의 자기신고가 아니라
+    fragments.locate_symbol이 실제로 산정한 값으로 교체된다."""
+    _fake(monkeypatch, {"results": [
+        _result("결제 전에 주문을 검증한다", "P",
+                evidence={"file": "app/pay.py", "lines": [999, 999], "quote": "validate(order)"}),
+    ]})
+
+    out = requirements.judge(REQS[:1], FILES, model_code="m")
+
+    assert out.results[0]["verdict"] == "PASS"
+    assert out.results[0]["evidence"] == "app/pay.py:2 — validate(order)"  # 999가 아니라 실제 2행
+
+
+def test_fabricated_quote_downgrades_p_to_f(monkeypatch):
+    """제출 코드에 없는 인용을 근거로 든 P는 F로 강등된다."""
+    _fake(monkeypatch, {"results": [
+        _result("결제 전에 주문을 검증한다", "P",
+                evidence={"file": "app/pay.py", "lines": [2, 2],
+                          "quote": "validate_signature_with_hmac(order)"}),
+    ]})
+
+    out = requirements.judge(REQS[:1], FILES, model_code="m")
+
+    assert out.results[0]["verdict"] == "FAIL"
+    assert "근거 코드를 확인할 수 없어" in out.results[0]["note"]
+
+
+def test_missing_file_downgrades_p_to_f(monkeypatch):
+    """제출되지 않은 파일을 가리키는 P도 F로 강등된다."""
+    _fake(monkeypatch, {"results": [
+        _result("결제 전에 주문을 검증한다", "P",
+                evidence={"file": "app/nonexistent.py", "lines": [1, 1], "quote": "validate(order)"}),
+    ]})
+
+    out = requirements.judge(REQS[:1], FILES, model_code="m")
+
+    assert out.results[0]["verdict"] == "FAIL"
+
+
+def test_p_with_no_evidence_at_all_downgrades_to_f(monkeypatch):
+    """evidence 자체가 없는 P(그라운딩 이전의 동작)도 이제는 FAIL로 강등된다."""
+    _fake(monkeypatch, {"results": [_result("결제 전에 주문을 검증한다", "P")]})
+
+    out = requirements.judge(REQS[:1], FILES, model_code="m")
+
+    assert out.results[0]["verdict"] == "FAIL"
+
+
+def test_f_verdict_is_never_grounded(monkeypatch):
+    """F 판정은 evidence 검증 자체를 거치지 않는다(근거가 없어도 그대로 FAIL, note 보존)."""
+    _fake(monkeypatch, {"results": [
+        _result("결제 전에 주문을 검증한다", "F", evidence=None, note="구현 없음"),
+    ]})
+
+    out = requirements.judge(REQS[:1], FILES, model_code="m")
+
+    assert out.results[0]["verdict"] == "FAIL"
+    assert out.results[0]["note"] == "구현 없음"

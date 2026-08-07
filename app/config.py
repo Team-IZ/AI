@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     # Spring이 X-Internal-Key 헤더에 실어 보내는 공유 비밀
     # 값은 .env에만 둠.
     internal_api_key: str = ""
+
+    # D-fix (redteam audit H10, 2026-08-04): 무상태 세션 커서(Cursor.mac)에 서명할 비밀.
+    # internal_api_key와 반드시 분리한다 — 그건 매 요청 헤더로 평문 전송되는 인증
+    # 크리덴셜이라(deps.py) 노출 표면이 훨씬 넓다. 이 값은 절대 전송되지 않고 서버가
+    # HMAC 계산에만 쓴다 — 같은 값을 재사용하면 헤더 유출 사고 하나가 곧바로 서명
+    # 위조 키 유출이 된다. 비어 있으면(로컬 개발 등) mac 발급·검증을 건너뛴다 —
+    # Spring이 이 필드를 새로 받아들이기 전까지의 점진적 도입(하위호환) 단계.
+    session_cursor_hmac_secret: str = ""
     
     # 분석 엔진 선택. 기본은 가짜(stub). 실물은 나중에 이식 후 "real"로
     engine_mode: Literal["stub", "real"] = "stub"

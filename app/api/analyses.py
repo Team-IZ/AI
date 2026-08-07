@@ -115,10 +115,15 @@ async def create_analysis(
         
     if idempotency_key:
         # 같은 요청 다시 온 경우 새로 만들지 않고 처음 것 돌려주기.
-        existing = jobs.job_id_for_key(idempotency_key)
+        # D-fix (redteam audit H12): job_id_for_key가 이제 submission_id/attempt_id
+        # 신원 불일치·부재를 ValueError로 알린다 -- 409로 옮긴다.
+        try:
+            existing = jobs.job_id_for_key(idempotency_key, body.submission_id, body.attempt_id)
+        except ValueError as exc:
+            raise ApiError(status_code=409, error="IDEMPOTENCY_CONFLICT", message=str(exc)) from exc
         if existing:
             return AnalysisAccepted(job_id=existing, status="QUEUED")
-        
+
     job = jobs.create_job(body, idempotency_key)
     
     # 분석 백그라운드로 넘김. 이 줄은 즉시 반환, run_analysis는

@@ -5,7 +5,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from idiom_filter import apply_idiom_filter, resolve_lang, _find_file_content  # noqa: E402
-from tier_b_suppression_filter import apply_tier_b_suppression  # noqa: E402
+# D-tierb1 (2026-07-31): tier_b_suppression_filter import 삭제 -- Tier B finding 자체가
+#   없어졌으므로 (trigger, matched_text) 오탐 억제 루프도 같이 폐기됨. 전문은
+#   cognition/two_tier_scan.py의 D-tierb1 참조.
 from subrubric import apply_subrubric, idiom_evidence, rationale_signal  # noqa: E402
 from importance_rank import apply_rank  # noqa: E402
 
@@ -275,8 +277,9 @@ def find_repeated_pattern_files(repo_root, pattern, min_hits):
 
 
 def score(scan_result, repo_root):
+    # D-tierb1: scan_result["tier_b_risk_triggered"]를 더 이상 읽지 않는다. 예전 형식의
+    #   scan_output.json(그 키가 아직 있는)을 그대로 먹여도 무시될 뿐 깨지지 않는다.
     tier_a = scan_result["tier_a_structural"]
-    tier_b = scan_result["tier_b_risk_triggered"]
     fan_in, edges = tier_a["fan_in"], tier_a["edges"]
 
     findings = []
@@ -352,115 +355,13 @@ def score(scan_result, repo_root):
             )
             findings.append(finding)
 
-    # D14: Tier B raw 히트에서 confirmed 오탐((trigger,matched_text) 단위)을 먼저 걷어낸 뒤 채점
-    tier_b_flagged = apply_tier_b_suppression(tier_b["flagged_files"])
-
-    # D29: Tier B는 판단 축(위험도)의 spread_count가 실제로 의미 있는 유일한 finding
-    #   군이다 — 같은 트리거가 몇 개 파일에서 반복되는지가 "위험의 확산 범위"이기 때문.
-    trigger_file_counts = {}
-    for hits in tier_b_flagged.values():
-        for h in hits:
-            trigger_file_counts[h["trigger"]] = trigger_file_counts.get(h["trigger"], 0) + 1
-
-    for f, hits in tier_b_flagged.items():
-        triggers = {h["trigger"] for h in hits}
-        if "auth_info_leak_via_thrown_error" in triggers:
-            finding = {
-                "id": f"tier-b-risk:{f}",
-                "file": f,
-                "finding": f"{f} — 인증정보(uid/email 등)가 JSON.stringify되어 throw된 Error에 담김",
-                "priority": "Important(🔴)",
-            }
-            apply_subrubric(
-                finding,
-                design_intent_evidence=dict(
-                    repetition=trigger_file_counts["auth_info_leak_via_thrown_error"] - 1,
-                    idiom_status="none",
-                    rationale=rationale_signal(f, repo_root),
-                    mitigation_present=True,  # throw로 에러 컨텍스트를 남기려는 의도 자체는 존재
-                ),
-                question_value_evidence=dict(
-                    tradeoff_signal=True,
-                    repo_specificity=True,
-                    idiom_downgrade_votes=0,
-                    ladder_richness=len(hits),
-                ),
-                risk_evidence=dict(
-                    trigger_confirmed=True,  # 오탐 억제 필터 통과 + auth/stringify/throw 3조건 AND 매치라 신뢰도 높음
-                    exposure_client="server" not in f.lower(),
-                    scenario_specific=True,
-                    spread_count=trigger_file_counts["auth_info_leak_via_thrown_error"] - 1,
-                ),
-            )
-            findings.append(finding)
-        if "hardcoded_secret_pattern" in triggers:
-            matched = next(h["matched_text"] for h in hits if h["trigger"] == "hardcoded_secret_pattern")
-            finding = {
-                "id": f"tier-b-risk:{f}:secret",
-                "file": f,
-                "finding": f"{f} — 시크릿 패턴 매치(오탐 가능성 있음, 육안 확인 필요) matched_text={matched!r}",
-                "priority": "검토 대상(자동 신뢰 금지)",
-            }
-            apply_subrubric(
-                finding,
-                design_intent_evidence=dict(
-                    repetition=0,
-                    idiom_status="none",
-                    rationale=rationale_signal(f, repo_root),
-                    mitigation_present=None,  # 하드코딩 시크릿에 "의도된 완화책"이란 개념 자체가 성립 안 함
-                ),
-                question_value_evidence=dict(
-                    tradeoff_signal=False,  # 시크릿 하드코딩엔 정당화 가능한 대안이 없음 — 질문해도 트레이드오프 논의로 안 이어짐
-                    repo_specificity=True,
-                    idiom_downgrade_votes=0,
-                    ladder_richness=1,
-                ),
-                risk_evidence=dict(
-                    trigger_confirmed=None,  # D12-secret 이후에도 정규식 매치 자체는 오탐 이력이 있어 확정 불가
-                    exposure_client=None,
-                    scenario_specific=matched.lower().startswith(("sk-", "akia")),
-                    spread_count=trigger_file_counts["hardcoded_secret_pattern"] - 1,
-                ),
-            )
-            findings.append(finding)
-        # D20: eval_or_dangerous_html 트리거를 finding으로 승격하는 규칙이 누락돼 있었음
-        #   WHY: jxxnixx/LMS 실측 — 인지 블록은 Bookshelf.jsx의 dangerouslySetInnerHTML을 정확히
-        #        잡았는데 판단 블록에 이 트리거를 finding화하는 규칙 자체가 없어서 조용히 버려짐
-        #        (auth_info_leak/hardcoded_secret 두 트리거만 처리하고 있었음)
-        #   COST: 없음 — 순수 누락 버그였음
-        #   EXIT: 새 Tier B 트리거를 추가할 때마다 이 블록에도 대응 규칙을 반드시 추가해야 함
-        #        (트리거 추가와 finding화 규칙 추가가 분리돼 있어 또 누락될 수 있음 — 근본 해법은
-        #        트리거 이름→finding 템플릿을 딕셔너리로 묶어 한 곳에서 관리하는 리팩터링)
-        if "eval_or_dangerous_html" in triggers:
-            matched = next(h["matched_text"] for h in hits if h["trigger"] == "eval_or_dangerous_html")
-            finding = {
-                "id": f"tier-b-risk:{f}:dangerous-html",
-                "file": f,
-                "finding": f"{f} — 위험한 동적 실행/HTML 삽입 패턴 matched_text={matched!r} (XSS 등 위험 가능, 입력 출처 확인 필요)",
-                "priority": "Important(🔴)",
-            }
-            apply_subrubric(
-                finding,
-                design_intent_evidence=dict(
-                    repetition=trigger_file_counts["eval_or_dangerous_html"] - 1,
-                    idiom_status="none",
-                    rationale=rationale_signal(f, repo_root),
-                    mitigation_present=False,  # 정규식 매치 시점에 sanitize 흔적이 안 보임(부정 신호로 취급)
-                ),
-                question_value_evidence=dict(
-                    tradeoff_signal=True,  # 항상 sanitize 라이브러리/JSX 텍스트 렌더링 같은 대안이 존재
-                    repo_specificity=True,
-                    idiom_downgrade_votes=0,
-                    ladder_richness=2,
-                ),
-                risk_evidence=dict(
-                    trigger_confirmed=True,  # D17로 메서드 호출(.eval()) 오탐은 이미 정규식에서 배제됨
-                    exposure_client=True,  # eval/dangerouslySetInnerHTML은 정의상 실행·렌더 컨텍스트에 직접 노출
-                    scenario_specific=True,
-                    spread_count=trigger_file_counts["eval_or_dangerous_html"] - 1,
-                ),
-            )
-            findings.append(finding)
+    # D-tierb1 (2026-07-31): Tier B finding 생성 블록 3종(auth_info_leak_via_thrown_error /
+    #   hardcoded_secret_pattern / eval_or_dangerous_html, 각각 D14/D12-secret/D20)이 여기
+    #   있었다. 전부 삭제됨 -- 전문은 cognition/two_tier_scan.py의 D-tierb1 참조.
+    #   이 블록이 유일하게 trigger_confirmed=True / exposure_client / scenario_specific=True /
+    #   spread_count>0을 subrubric.score_risk()에 넘기던 곳이었다. 그래서 삭제 후 남는
+    #   finding은 전부 risk 축 입력이 (None, None, False, 0)으로 동일해진다 -- 그 결과가
+    #   랭킹에 미치는 영향은 judgment/importance_rank.py의 D-tierb2에 측정치와 함께 적어뒀다.
 
     for pattern, min_files in {"onSnapshot": REPEATED_PATTERN_MIN_FILES}.items():
         repeated = find_repeated_pattern_files(repo_root, pattern, REPEATED_PATTERN_MIN_HITS)

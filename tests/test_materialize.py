@@ -24,8 +24,29 @@ def test_dangerous_repo_url_is_rejected(repo_url):
         _materialize({"repo_url": repo_url})
 
 
+# D-fix (redteam audit H9, 2026-08-04): repoUrl의 스킴/netloc만 보고 호스트는 전혀 안 봐서
+# 사설/링크로컬 대역으로의 SSRF가 통과했었다. github.com 정확매치로 제한.
+@pytest.mark.parametrize("repo_url", [
+    "http://169.254.169.254/latest/meta-data/",   # 클라우드 메타데이터 서비스
+    "https://169.254.169.254/latest/meta-data/",
+    "http://localhost/",
+    "http://127.0.0.1/",
+    "http://10.0.0.5/",
+    "https://evil.example.com/owner/repo",
+    "https://github.com.evil.com/owner/repo",     # 서픽스 위장 시도
+    "https://raw.githubusercontent.com/owner/repo/main/x.py",  # git clone 대상 아님
+])
+def test_ssrf_repo_url_hosts_are_rejected(repo_url):
+    with pytest.raises(ValueError, match="공개 GitHub repo만 지원"):
+        _materialize({"repo_url": repo_url})
+
+
 def test_branch_that_looks_like_an_option_is_rejected():
-    """`--upload-pack=...`이 git 옵션으로 해석되면 임의 명령이 돈다."""
+    """`--upload-pack=...`이 git 옵션으로 해석되면 임의 명령이 돈다.
+
+    repo_url이 github.com이라 호스트 검사(H9)를 통과하고 branch 검증까지 도달하는지도
+    같이 확인한다.
+    """
     with pytest.raises(ValueError, match="branch"):
         _materialize({
             "repo_url": "https://github.com/owner/repo",

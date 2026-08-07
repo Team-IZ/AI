@@ -12,20 +12,41 @@ from pydantic import Field, model_validator
 from app.schemas.common import BaseSchema
 
 # 어느 기능이 호출했나. **DB ai_usage.feature_code CHECK와 글자까지 같은 집합이다**
-# (테이블정의서 v06 기준, 2026-08-04 정렬).
+# (테이블정의서 v08 기준, 2026-08-05 정렬).
 #
 # 🔴 옛 `GRADING`은 폐기했다 — v06 CHECK에 없는 값이라 채점 호출의 원장 행이
 # 전부 INSERT에서 거부됐을 자리다. 정식 이름은 `ANSWER_EVALUATION`이다.
+#
+# 🔴 v08(2026-08-05, 면담브리프 API 명세서 §2.4): `SUMMARY_DRAFT`는 CHECK에서
+# 제거되고 `REPORT_GENERATION`이 신설됐다 — `SUMMARY_DRAFT`를 그대로 두면 이전의
+# GRADING과 같은 사고(INSERT 거부)가 `/reports` 원장 행에서 반복된다. 여기서는
+# 반영했다(app/reports.py도 같이 고침).
+#
+# 🔴 QUESTION_GENERATION → CODE_SESSION 개명 확정(2026-08-05, Team-IZ/Backend
+# `origin/feat/DangerTrainee` 대조): 이전엔 "CODE_SESSION에만 걸리는 티어 제약"과
+# 채팅 표현이 서로 어긋나 보여 ANSWER_EVALUATION 쪽 아닌가 의심했었다(EXIT: 백엔드
+# 확인 필요로 보류). 실제로 백엔드 소스를 열어 확인한 결과:
+#   - `AiUsage.java` javadoc: "QUESTION_GENERATION·SUMMARY_DRAFT가 CODE_SESSION
+#     하나로 통합" (SUMMARY_DRAFT는 여기서 질문생성 파이프라인 내부의 옛 요약
+#     서브스텝 명칭이라 /reports의 SUMMARY_DRAFT와는 다른 계보 — REPORT_GENERATION
+#     매핑과 충돌하지 않는다. `OrganizationUsageResponse.java`가 최종 확인.)
+#   - `OrganizationPolicy.java`: "질문 생성·요약이 CODE_SESSION 기능 하나로
+#     통합되면서 티어도 한 값(code_session_tier_code)으로 합쳐졌다" — 의심했던
+#     티어 제약이 오히려 이 매핑을 뒷받침한다(합쳐지기 전엔 question_generation_
+#     tier_code/summary_tier_code 두 컬럼이었다).
+#   - `OrganizationUsageResponse.java`(API 문서, 결정적): "CODE_SESSION(코드 세션
+#     질문 생성)" — ANSWER_EVALUATION은 별도로 "(답변 채점)"이라 명시돼 겹치지 않는다.
+# 세 소스가 전부 같은 결론이라 engine.py의 5개 stamp도 함께 바꾼다.
 FeatureCode = Literal[
     "CODE_ANALYSIS",        # 코드 분석 문서
-    "QUESTION_GENERATION",  # 문제·질문·힌트 동결 생성
+    "CODE_SESSION",         # 문제·질문·힌트 동결 생성 (v08, 옛 QUESTION_GENERATION)
     "ANSWER_EVALUATION",    # 답변 채점 (세션 중 유일한 호출)
     "CURRICULUM_ANALYSIS",  # 교안 분석
-    "SUMMARY_DRAFT",        # 보고서 서술
+    "REPORT_GENERATION",    # 보고서 서술 (v08, 옛 SUMMARY_DRAFT)
 ]
 
 # 어느 **업무 엔터티**를 처리한 호출인가. featureCode보다 굵은 단위다 — 한 ContextType
-# 안에서 featureCode가 여럿 나온다(SUBMISSION 하나에 CODE_ANALYSIS + QUESTION_GENERATION).
+# 안에서 featureCode가 여럿 나온다(SUBMISSION 하나에 CODE_ANALYSIS + CODE_SESSION).
 #
 # 🔴 옛 값 4개(`ANALYSIS`·`GRADING`·`REPORT`·`CURRICULUM`)는 **전부 v06 CHECK 밖이었다**
 # (2026-08-04 대조). 그대로 두면 네 API의 원장 행이 하나도 안 들어간다. 아래는 v06

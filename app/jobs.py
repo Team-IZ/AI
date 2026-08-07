@@ -6,6 +6,7 @@
 
 import uuid
 
+from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
@@ -15,10 +16,16 @@ from app.schemas.analysis import AnalysisJobStatus, AnalysisRequest, AnalysisRes
 from app.usage import to_ai_usage
 
 # job_id
-_jobs: dict[str, AnalysisJobStatus] = {}
+# M9 (redteam audit, 2026-08-05): 무제한 dict였다 -- 업로드 상한(H13)과 별개로 job
+# 자체가 영원히 안 지워져 장기가동 시 메모리가 계속 는다. sessions.py의 _answered와
+# 같은 OrderedDict+상한 패턴. COST: 상한을 넘긴 시점에 아직 QUEUED/RUNNING인 job이
+# 있으면(동시 in-flight job이 상한 개수만큼 쌓여야 함) 밀려날 수 있다 -- run_analysis는
+# 지역 참조로 계속 도니 실행 자체는 안 끊기지만, 그 job의 GET 조회는 404가 된다.
+_JOBS_MAX = 2000
+_jobs: "OrderedDict[str, AnalysisJobStatus]" = OrderedDict()
 
 # 멱등성 키 -> job_id. 같은 키 재요청 시 새 job 안 만들고 처음 id 반환
-_job_id_by_idempotency_key: dict[str, str] = {}
+_job_id_by_idempotency_key: "OrderedDict[str, str]" = OrderedDict()
 
 # fetch.py의 내부 13종(VERIFICATION_FAILURE_CODES 11 + JOB_ONLY_FAILURE_CODES 2)을
 # analysis_job.failure_code의 실제 DB CHECK 11종(schemas/analysis.py AnalysisJobFailureCode)
@@ -57,8 +64,31 @@ def _translate_failure_code(code: str) -> str:
 def get_job(job_id: str) -> AnalysisJobStatus | None:
     return _jobs.get(job_id)
 
-def job_id_for_key(idempotency_key: str) -> str | None:
-    return _job_id_by_idempotency_key.get(idempotency_key)
+# D-fix (redteam audit H12, 2026-08-04): job_id_for_key()가 idempotency_key만 보고 신원
+# 대조 없이 기존 job_id를 그대로 돌려줬다 -- 저엔트로피 멱등키(submissionId:attemptNo)를
+# 추측/재사용하면 남의 job_id(그리고 그 결과인 제출 코드 전문)를 받아갈 수 있었다.
+#   WHY: 원래 감사가 제안한 "(caller, key) 복합키"는 이 서비스에 caller 개념이 없어서
+#   (deps.py: 단일 공유 시크릿, Spring이 유일 호출자) 적용 불가 -- 대신 재사용 요청의
+#   submission_id/attempt_id가 최초 요청 때와 같은지 대조한다.
+#   COST: 둘 다 optional(AnalysisRequest)이라 "둘 다 없으면 무조건 거부"를 명시적으로
+#   넣어야 한다 -- 안 그러면 그냥 둘 다 생략한 재사용 요청이 None==None으로 통과해버려
+#   방어가 무력화된다.
+def job_id_for_key(idempotency_key: str, submission_id: str | None, attempt_id: str | None) -> str | None:
+    """재사용 시 신원이 최초 요청과 일치해야 기존 job_id를 돌려준다. 불일치/신원부재는 예외."""
+    existing_job_id = _job_id_by_idempotency_key.get(idempotency_key)
+    if existing_job_id is None:
+        return None
+    existing_job = _jobs.get(existing_job_id)
+    if existing_job is None:
+        # M9: 신원 불일치가 아니라 원본 job이 상한을 넘겨 밀려난 것 -- "처음 보는 키"와
+        # 동일하게 취급해 새 job을 만들게 한다(안 그러면 정상 재시도가 409로 막힌다).
+        del _job_id_by_idempotency_key[idempotency_key]
+        return None
+    if not submission_id and not attempt_id:
+        raise ValueError("idempotencyKey 재사용에는 submissionId/attemptId 중 최소 하나가 필요합니다")
+    if existing_job.submission_id != submission_id or existing_job.attempt_id != attempt_id:
+        raise ValueError("idempotencyKey가 이전 요청의 submissionId/attemptId와 일치하지 않습니다")
+    return existing_job_id
 
 def create_job(body: AnalysisRequest, idempotency_key: str | None) -> AnalysisJobStatus:
     """ QUEUED 상태 job을 만들어 저장. 아직 분석 X -> result 없음 """
@@ -68,10 +98,14 @@ def create_job(body: AnalysisRequest, idempotency_key: str | None) -> AnalysisJo
         submission_id=body.submission_id,
         status="QUEUED",
     )
-    
+
     _jobs[job.job_id] = job
+    while len(_jobs) > _JOBS_MAX:
+        _jobs.popitem(last=False)
     if idempotency_key:
         _job_id_by_idempotency_key[idempotency_key] = job.job_id
+        while len(_job_id_by_idempotency_key) > _JOBS_MAX:
+            _job_id_by_idempotency_key.popitem(last=False)
     return job
 
 def _run_via_analysis_input(body: AnalysisRequest, engine: AnalysisEngine) -> dict[str, Any]:

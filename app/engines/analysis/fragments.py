@@ -233,6 +233,26 @@ def repair_code_quotes(text: str, code: str) -> str:
     return "".join(out)
 
 
+# D-fence (2026-08-05): 고정 3-백틱 펜스는 제출 파일 안에 자체 ``` 줄이 있으면
+# 조기 종료된다 — 그 뒤 내용이 코드블록 밖으로 빠져나와 프롬프트 지시문 레벨에서
+# 파싱된다(가짜 "## 규칙" 섹션 주입 가능). poc_full 4d9967a가 JS 쪽 동명함수
+# (buildCodeBlock())에서 먼저 고친 것을 그대로 이식한다.
+#   WHY: CommonMark 규칙상 닫는 펜스는 여는 펜스보다 짧으면 안 닫는다 — 파일 내용
+#   안 최장 백틱 연속보다 펜스를 하나 더 길게 쓰면 그 파일 안 어떤 백틱도 조기
+#   종료를 못 일으킨다.
+#   COST: 백틱이 많은 파일(마크다운 등)일수록 펜스가 길어져 프롬프트가 몇 바이트
+#   늘어난다 — 무시할 수준.
+#   EXIT: 다른 펜스 전략(예: 들여쓰기 코드블록)으로 바꾸려면 이 함수와
+#   build_code_block() 호출부만 고치면 된다.
+def _fence_for(text: str) -> str:
+    """text 안 최장 백틱 연속보다 긴 펜스를 반환한다."""
+    longest = current = 0
+    for ch in text:
+        current = current + 1 if ch == "`" else 0
+        longest = max(longest, current)
+    return "`" * max(longest + 1, 3)
+
+
 def build_code_block(files: dict[str, str], max_chars: int = 12000) -> str:
     """코드베이스를 프롬프트용 블록 하나로. 예산을 넘으면 파일명만 남긴다.
 
@@ -241,7 +261,8 @@ def build_code_block(files: dict[str, str], max_chars: int = 12000) -> str:
     """
     used, included, omitted = 0, [], []
     for path in sorted(files):
-        chunk = f"### {path}\n```\n{files[path]}\n```\n\n"
+        fence = _fence_for(files[path])
+        chunk = f"### {path}\n{fence}\n{files[path]}\n{fence}\n\n"
         if used + len(chunk) > max_chars:
             omitted.append(path)
             continue

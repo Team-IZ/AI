@@ -12,8 +12,11 @@
   D3  ZIP의 git 히스토리는 ①백엔드가 요청에 실어 보내면 그것 우선 ②ZIP 안에 `.git`이 있으면
       직접 파싱 ③둘 다 없으면 실패시키지 않고 빈 값으로 진행(`ZIP_REQUIRE_GIT_LOG`로 정책 전환 가능).
 
-`materialize.py`의 D12 방어(`validate_repo_url`/`validate_branch`/`git_env`)를 그대로 재사용한다
+`materialize.py`의 D12 방어(`_validate_scheme`/`validate_branch`/`git_env`)를 그대로 재사용한다
 — 복사하면 한쪽만 패치되고 다른 쪽이 낡는다(이 세션에서 vendor drift로 실제 겪은 사고와 같은 클래스).
+호스트 허용목록만은 예외 -- materialize.py는 클론 경로용으로 github.com 하나에 고정하지만
+이 모듈은 자체 설정값(`_allowed_repo_hosts`)을 따로 쓴다(2026-08-07 develop 병합 시 확정,
+`_validate_host` 참고).
 """
 from __future__ import annotations
 
@@ -228,8 +231,12 @@ def _allowed_repo_hosts() -> set[str]:
 
 
 def _validate_host(repo_url: str) -> None:
+    # scheme만 materialize의 D12 방어를 재사용한다(ext::/file:: 등 서브프로토콜 차단) --
+    # 호스트 허용목록은 이 모듈 자체의 설정 가능한 값(_allowed_repo_hosts)을 쓴다.
+    # materialize.validate_repo_url()을 통째로 쓰면 그쪽의 고정 단일 호스트(github.com만)
+    # 정책이 여기 UNSUPPORTED_HOST 분류를 덮어써버린다(2026-08-07 develop 병합 시 확인).
     try:
-        materialize.validate_repo_url(repo_url)
+        materialize._validate_scheme(repo_url)
     except ValueError as exc:
         raise FetchError("INVALID_REPOSITORY_URL", str(exc)) from exc
     host = urlparse(repo_url).netloc.lower()

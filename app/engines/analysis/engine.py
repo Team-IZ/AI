@@ -266,8 +266,8 @@ class AnalysisFailed(Exception):
 # 실패한 스테이지를 원장의 어느 종류로 적을지. 스테이지마다 다르다.
 _STAGE_KIND = {
     "p04-1": "CODE_ANALYSIS", "p04-2": "CODE_ANALYSIS",
-    "p04-3": "QUESTION_GENERATION", "p04-4": "QUESTION_GENERATION",
-    "p04-7": "QUESTION_GENERATION",
+    "p04-3": "CODE_SESSION", "p04-4": "CODE_SESSION",
+    "p04-7": "CODE_SESSION",
     "p04-5": "GRADING", "p04-6": "REPORT",
 }
 
@@ -391,7 +391,7 @@ class RealAnalysisEngine:
         # ── p04-3 문제 선정 ───────────────────────────────────────────────────
         selection = topics.select(files, teaches, doc.document, candidates,
                                   model_code=model_code, question_budget=budget)
-        usages.extend(_stamp(selection.usages, "QUESTION_GENERATION"))
+        usages.extend(_stamp(selection.usages, "CODE_SESSION"))
 
         # ── p04-4 질문 + p04-7 힌트 ───────────────────────────────────────────
         teach_map = _teach_by_id(teaches)
@@ -410,7 +410,7 @@ class RealAnalysisEngine:
         for no, topic in enumerate(selection.topics, start=1):
             teach = teach_map.get(topic.get("teach_id"))
             qset = questions.freeze(topic, files, teach, model_code=model_code)
-            usages.extend(_stamp(qset.usages, "QUESTION_GENERATION"))
+            usages.extend(_stamp(qset.usages, "CODE_SESSION"))
 
             ref = topic.get("code_ref") or {}
             code_ref_str = fragments.format_ref(
@@ -440,7 +440,7 @@ class RealAnalysisEngine:
         hint_sets = hints.freeze_many(hint_specs, model_code=model_code)
         for hint_list in hint_sets:
             for h in hint_list:
-                usages.extend(_stamp(h.usages, "QUESTION_GENERATION"))
+                usages.extend(_stamp(h.usages, "CODE_SESSION"))
 
         for plan in planned:
             no, topic, ref = plan["no"], plan["topic"], plan["ref"]

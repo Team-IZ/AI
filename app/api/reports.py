@@ -27,7 +27,11 @@ async def create_report(
     보고서는 문제마다 1건이라 중복이 곧 비용이다(2026-08-03, PLAN §T11 D-2).
     """
     if idempotency_key:
-        existing = reports.job_id_for_key(idempotency_key)
+        # D-fix (redteam audit H12 companion): problem_id 불일치는 409로 옮긴다.
+        try:
+            existing = reports.job_id_for_key(idempotency_key, body.problem_id)
+        except ValueError as exc:
+            raise ApiError(status_code=409, error="IDEMPOTENCY_CONFLICT", message=str(exc)) from exc
         if existing:
             return ReportAccepted(job_id=existing, status="QUEUED")
 
