@@ -15,7 +15,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from app.schemas.common import BaseSchema
+from app.schemas.common import BaseSchema, UuidStr
 from app.schemas.usage import AiUsage
 
 # §9 부록 코드값 그대로. Spring이 이미 DB CHECK로 강제하는 값이라 AI가 별도로
@@ -353,6 +353,14 @@ class ObservationNote(BaseSchema):
 class InterviewBriefRequest(BaseSchema):
     """POST /api/v0/interview-brief:generate 요청 본문 전체."""
 
+    brief_id: UuidStr = Field(
+        description="`interview_brief.brief_id`. AI는 이 값을 그대로 `aiUsage.contextId`에 "
+                    "에코한다(`contextType='INTERVIEW_BRIEF'`일 때 고정 대응). "
+                    "🔴 백엔드가 **AI 호출 전에** 브리프 행을 만들고 그 id를 실어 보낸다 "
+                    "(2026-08-07 확정) -- `last_request_id`/`last_request_fingerprint` 쌍이 "
+                    "중복 호출 방지 장치라, 호출 후에 행을 만들면 대조할 대상이 없어 "
+                    "장치가 무의미해진다",
+    )
     target: Target
     brief_context: BriefContext
     risk_reasons: list[RiskReason] = Field(default_factory=list)

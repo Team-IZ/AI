@@ -67,7 +67,7 @@ ContextType = Literal[
     "ASSESSMENT_SESSION",   # POST /sessions/{id}/answers  contextId = sessionId ✅
     "REPORT_SNAPSHOT",      # POST /reports                contextId = 보고서 jobId ⚠️ Spring이 교체
     "CURRICULUM_ANALYSIS",  # POST /curricula              contextId = 교안 jobId ⚠️ Spring이 교체
-    "INTERVIEW_BRIEF",      # POST /interview-brief:generate  contextId = null ⚠️ AI가 brief_id를 모른다
+    "INTERVIEW_BRIEF",      # POST /interview-brief:generate  contextId = briefId ✅ 요청에서 에코
 ]
 
 # 옛 이름. 다른 모듈이 아직 import할 수 있어 남겨둔다.

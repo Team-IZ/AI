@@ -2830,6 +2830,12 @@
       },
       "InterviewBriefRequest": {
         "properties": {
+          "briefId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Briefid",
+            "description": "`interview_brief.brief_id`. AI는 이 값을 그대로 `aiUsage.contextId`에 에코한다(`contextType='INTERVIEW_BRIEF'`일 때 고정 대응). 🔴 백엔드가 **AI 호출 전에** 브리프 행을 만들고 그 id를 실어 보낸다 (2026-08-07 확정) -- `last_request_id`/`last_request_fingerprint` 쌍이 중복 호출 방지 장치라, 호출 후에 행을 만들면 대조할 대상이 없어 장치가 무의미해진다"
+          },
           "target": {
             "$ref": "#/components/schemas/Target"
           },
@@ -2866,6 +2872,7 @@
         },
         "type": "object",
         "required": [
+          "briefId",
           "target",
           "briefContext",
           "validityReview",

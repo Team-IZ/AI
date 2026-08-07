@@ -19,6 +19,7 @@ HEADERS = {"X-Internal-Key": get_settings().internal_api_key}
 def _request(**overrides) -> dict:
     """유효한 최소 요청. overrides로 특정 섹션만 바꿔 쓴다."""
     base = {
+        "briefId": "11111111-2222-3333-4444-555555555555",
         "target": {
             "userName": "김OO", "className": "A반", "projectName": "미니프로젝트 3차",
             "projectCategory": "MINI_PROJECT", "roundName": "3회차",
@@ -412,8 +413,9 @@ def test_student_answer_text_is_fenced_as_untrusted(monkeypatch):
 # ── 라우터 ────────────────────────────────────────────────────────────────
 
 BRIEF_PATH = "/api/v0/interview-brief:generate"
-# 멱등키는 이 경로에서 **필수**다(contextId가 null이라 ai_usage.idempotency_key의
-# 폴백이 여기까지 내려온다). 테스트마다 다른 값을 써야 캐시가 안 겹친다.
+# 멱등키는 이 경로에서 **필수**다 -- ai_usage.idempotency_key가 전역 UNIQUE인데
+# briefId 하나로는 재생성(version_no/SUPERSEDED)을 구분할 수 없다.
+# 테스트마다 다른 값을 써야 캐시가 안 겹친다.
 KEY_HEADERS = {**HEADERS, "Idempotency-Key": "interview-1:default"}
 
 
@@ -431,12 +433,13 @@ def test_router_returns_200_with_ai_usage_in_the_body(monkeypatch):
     usage = body["aiUsage"][0]
     assert usage["featureCode"] == "INTERVIEW_BRIEF_GENERATION"
     assert usage["contextType"] == "INTERVIEW_BRIEF"
-    # contextId는 null이다 -- AI가 brief_id를 받은 적이 없다(DB도 이 컬럼만 NULL 허용).
-    assert usage["contextId"] is None
+    # contextId = 요청의 briefId 를 그대로 에코한다(2026-08-07 확정).
+    assert usage["contextId"] == "11111111-2222-3333-4444-555555555555"
     assert usage["traceId"] == "trace-1"
-    # request_id·idempotency_key는 NOT NULL이라 멱등키로 폴백해야 한다. 특히
-    # idempotency_key는 전역 UNIQUE라 빈 문자열이면 두 번째 호출이 곧바로 깨진다.
-    assert usage["requestId"] == "interview-1:200"
+    # request_id는 contextId(=briefId)로 폴백한다 -- 다른 네 엔드포인트도 같다
+    # (분석은 jobId). 백엔드가 §7에서 "request_id는 이미 아는 값"이라 했으니 저장 시
+    # 자기 값으로 덮는다.
+    assert usage["requestId"] == "11111111-2222-3333-4444-555555555555"
     assert usage["idempotencyKey"] == "interview-1:200:INTERVIEW_BRIEF:1"
     assert usage["status"] == "SUCCEEDED"
     assert usage["modelCode"]

@@ -60,9 +60,10 @@ def generate_interview_brief(
     # `x-trace-id`). 옛 `X-Idempotency-Key`/`X-Request-Id`는 이 엔드포인트만의 변종이라
     # 폐기했다 -- 백엔드 클라이언트가 경로마다 헤더 이름을 갈아끼울 이유가 없다.
     #
-    # 🔴 멱등키는 **필수**다(다른 넷은 선택). 이 경로만 contextId가 null이라
-    # ai_usage.idempotency_key의 폴백이 트레이스까지 내려가는데, 그것도 없으면
-    # `":INTERVIEW_BRIEF:1"`이 되어 **두 번째 호출이 전역 UNIQUE에 걸린다.**
+    # 🔴 멱등키는 **필수**다(다른 넷은 선택). ai_usage.idempotency_key가 전역 UNIQUE인데,
+    # 이 경로는 briefId 하나로 요청을 구분할 수 없다 -- 같은 브리프를 재생성하면
+    # (interview_brief.version_no / SUPERSEDED) contextId가 같아서 키가 충돌한다.
+    # 백엔드도 같은 이유로 last_request_id를 브리프 행에 따로 둔다.
     idempotency_key: str = Header(
         description="재시도 시 동일 값 재사용 -- 같으면 재계산 없이 그대로 반환. "
                     "ai_usage.idempotency_key의 요청 단위 키이기도 하다",
@@ -74,12 +75,13 @@ def generate_interview_brief(
     job/폴링 없음 -- 이 응답이 곧 결과다. 부분 성공 없음(§5.2): 검증에 하나라도
     걸리면 503 + failureCode로 전체 실패를 알린다.
     """
-    # contextId는 null이다 -- AI가 interview_brief.brief_id를 받은 적이 없다(요청에
-    # 없고, 동기라 jobId도 없어서 /reports·/curricula가 쓰는 "AI jobId를 넣고 Spring이
-    # 교체" 우회도 안 된다). 백엔드가 요청에 briefId를 실어주면 그때 채운다.
+    # contextId = briefId 다(2026-08-07 확정). 요청에 실려 오는 값을 그대로 에코한다 --
+    # /reports·/curricula가 쓰는 "AI jobId를 넣고 Spring이 저장 시점에 교체" 우회와 달리
+    # 한 번에 확정된다. 그쪽은 INSERT(가짜 PK) 후 UPDATE 2단계라, 사이에서 실패하면
+    # attribution_status='UNALLOCATED'가 영구히 남아 기관 청구액이 실제보다 작아 보인다.
     def _usage(usages: list) -> list:
         return to_ai_usage(
-            usages, "INTERVIEW_BRIEF", None,
+            usages, "INTERVIEW_BRIEF", body.brief_id,
             feature_code="INTERVIEW_BRIEF_GENERATION",
             idempotency_key=idempotency_key, trace_id=x_trace_id,
         )
