@@ -86,6 +86,19 @@ def test_unsupported_host_is_rejected():
     assert exc.value.failure_code == "UNSUPPORTED_HOST"
 
 
+def test_empty_repo_host_allowlist_is_fail_closed(monkeypatch):
+    """🔴 허용목록이 비면 검사를 건너뛰는 게 아니라 거부해야 한다.
+
+    옛 `if allowed and host not in allowed`는 ALLOWED_REPO_HOSTS가 빈 값이면
+    아무 호스트나 clone했다 -- 설정 실수 하나가 방어를 통째로 지웠다.
+    """
+    monkeypatch.setattr(fetch, "_allowed_repo_hosts", set)
+
+    with pytest.raises(fetch.FetchError) as exc:
+        fetch._fetch_github({"repository_url": "https://evil.example/owner/repo"}, "/tmp/unused")
+    assert exc.value.failure_code == "UNSUPPORTED_HOST"
+
+
 @pytest.mark.parametrize("sha", [
     "not-a-sha",
     "-rm-rf",           # 옵션으로 오인될 수 있는 값 -- D12와 같은 클래스의 방어 대상
@@ -560,3 +573,63 @@ def test_zip_fetch_degrades_to_none_when_neither_source_available(monkeypatch, t
     assert result.git_history_source == "NONE"
     assert result.git_history == []
     assert result.file_count == 1
+
+
+def test_download_aborts_past_the_size_cap(monkeypatch):
+    """🔴 상한 검사는 다 받은 뒤가 아니라 받는 도중이어야 한다.
+
+    옛 코드는 httpx.get()으로 본문 전체를 메모리에 받은 뒤 len()을 쟀다 -- 상한
+    검사 줄에 도달하기 전에 프로세스가 죽는다(App Runner 단일 인스턴스라 다른
+    요청도 같이 죽는다). 여기서는 상한의 3배를 흘려보내되, 실제로 소비된 양이
+    상한 근처에서 멈췄는지까지 본다(끊지 않으면 전량이 소비된다).
+    """
+    chunk = b"x" * 1024
+    total_chunks = (rules.MAX_TOTAL_BYTES // len(chunk)) * 3
+    consumed = {"chunks": 0}
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            for _ in range(total_chunks):
+                consumed["chunks"] += 1
+                yield chunk
+
+    class _FakeStream:
+        def __enter__(self):
+            return _FakeResponse()
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(fetch.httpx, "stream", lambda *a, **kw: _FakeStream())
+    monkeypatch.setattr(
+        fetch, "get_settings",
+        lambda: type("S", (), {"allowed_storage_hosts": "storage.example",
+                               "analysis_input_clone_timeout_s": 10})(),
+    )
+
+    with pytest.raises(fetch.FetchError) as exc:
+        fetch._download("https://storage.example/x.zip")
+
+    assert exc.value.failure_code == "FILE_TOO_LARGE"
+    assert consumed["chunks"] * len(chunk) <= rules.MAX_TOTAL_BYTES + len(chunk)
+
+
+def test_empty_repo_is_reported_as_empty_code(monkeypatch, tmp_path):
+    """빈 클론이 검증을 통과하면 실패가 한참 뒤 분석 단계에서 다른 사유로 나온다.
+
+    ZIP 경로(_fetch_zip)는 이미 EMPTY_CODE를 내고 있었다 -- GITHUB_URL만 빠져 있었다.
+    """
+    empty = tmp_path / "empty-clone"
+    empty.mkdir()
+
+    monkeypatch.setattr(fetch.subprocess, "run", lambda *a, **kw: None)
+    monkeypatch.setattr(fetch, "_current_branch", lambda repo_dir: "main")
+    monkeypatch.setattr(fetch, "_head_commit", lambda repo_dir: None)
+    monkeypatch.setattr(fetch, "_try_deepen_history", lambda repo_dir: ([], False, "NONE"))
+
+    with pytest.raises(fetch.FetchError) as exc:
+        fetch._fetch_github({"repository_url": "https://github.com/owner/repo"}, str(empty))
+    assert exc.value.failure_code == "EMPTY_CODE"

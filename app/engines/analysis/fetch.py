@@ -241,7 +241,16 @@ def _validate_host(repo_url: str) -> None:
         raise FetchError("INVALID_REPOSITORY_URL", str(exc)) from exc
     host = urlparse(repo_url).netloc.lower()
     allowed = _allowed_repo_hosts()
-    if allowed and host not in allowed:
+    # 🔴 fail-closed. 옛 `if allowed and host not in allowed`는 ALLOWED_REPO_HOSTS가
+    # 비어 있으면(오타·주석처리·빈 값) 검사를 통째로 건너뛰어 **아무 호스트나 clone**
+    # 됐다. 같은 파일 _download()는 이미 fail-closed인데 더 위험한 clone 쪽이 더
+    # 느슨했다 -- 설정 실수 하나가 방어를 지우면 안 된다.
+    if not allowed:
+        raise FetchError(
+            "UNSUPPORTED_HOST",
+            "ALLOWED_REPO_HOSTS가 설정되지 않아 클론을 거부합니다(fail-closed 기본값)",
+        )
+    if host not in allowed:
         raise FetchError("UNSUPPORTED_HOST", f"지원하지 않는 호스트입니다: {host}")
 
 
@@ -436,6 +445,11 @@ def _fetch_github(spec: Mapping[str, Any], tmp: str) -> FetchedInput:
     git_history, truncated, source = _try_deepen_history(tmp)
     git_history = _tag_branch_name(git_history, resolved_branch)
     meta = _hash_tree(tmp)
+    # ZIP 경로(_fetch_zip)와 같은 검사. 없으면 빈 레포·코드 없는 레포가 검증을 통과하고,
+    # 실패가 한참 뒤 분석 단계에서 다른 사유로 나온다 -- 백엔드가 EMPTY_CODE를 15종에
+    # 넣어준 게 정확히 이 사유를 구분하려던 것이다.
+    if meta.file_count == 0:
+        raise FetchError("EMPTY_CODE", "레포에 분석할 코드가 없습니다")
 
     return FetchedInput(
         root=tmp, method="GITHUB_URL", resolved_branch=resolved_branch,
@@ -552,17 +566,32 @@ def _download(url: str) -> bytes:
     if parsed.netloc.lower() not in allowed:
         raise FetchError("ARCHIVE_INVALID", f"허용되지 않은 다운로드 호스트입니다: {parsed.netloc}")
 
+    # 🔴 스트리밍으로 받으며 상한을 넘는 순간 끊는다. 옛 httpx.get()은 본문 전체를
+    # 메모리에 받은 **뒤에** len()을 재서, 상한 검사에 도달하기 전에 프로세스가 죽었다
+    # (App Runner 단일 인스턴스라 그 순간 다른 모든 요청도 같이 죽는다). 허용목록이
+    # 있으니 임의 호스트는 아니지만, 허용목록 하나가 방어의 전부여선 안 된다.
+    chunks: list[bytes] = []
+    received = 0
     try:
         # follow_redirects=False -- 리다이렉트를 허용하면 허용목록 검사를 우회해
         # 다른 호스트로 갈 수 있다(SSRF). 원본 URL의 호스트만 신뢰한다.
-        resp = httpx.get(url, timeout=settings.analysis_input_clone_timeout_s, follow_redirects=False)
-        resp.raise_for_status()
+        with httpx.stream(
+            "GET", url, timeout=settings.analysis_input_clone_timeout_s,
+            follow_redirects=False,
+        ) as resp:
+            resp.raise_for_status()
+            for chunk in resp.iter_bytes():
+                received += len(chunk)
+                if received > rules.MAX_TOTAL_BYTES:
+                    raise FetchError(
+                        "FILE_TOO_LARGE",
+                        f"ZIP 크기가 한도({rules.MAX_TOTAL_BYTES} bytes)를 넘습니다",
+                    )
+                chunks.append(chunk)
     except httpx.HTTPError as exc:
         raise FetchError("TEMPORARY_ERROR", f"ZIP 다운로드 실패: {exc}", retryable=True) from exc
 
-    if len(resp.content) > rules.MAX_TOTAL_BYTES:
-        raise FetchError("FILE_TOO_LARGE", f"ZIP 크기가 한도를 넘습니다: {len(resp.content)} bytes")
-    return resp.content
+    return b"".join(chunks)
 
 
 def _fetch_zip(spec: Mapping[str, Any], tmp: str, zip_bytes: bytes | None = None) -> FetchedInput:
