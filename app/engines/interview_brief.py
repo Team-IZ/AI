@@ -154,11 +154,14 @@ def _stage_block(stage) -> str | None:
 
 def _problem_block(problem: ProblemComprehension) -> str:
     header = f"### 문제 {problem.problem_no}: {problem.concept_name} ({problem.problem_scope})"
-    # D-ib4 (백엔드 D-2 대응): concept_name이 검증된 개념명이 아니라 문제 제목으로
-    # 대체된 값이면(PROBLEM_TITLE 폴백) 모델이 그걸 확정된 개념으로 단정하지 않게
-    # 경고를 붙인다. CURRICULUM_EVIDENCE도 팀 공유 경로(VERIFICATION_CONCEPT)보다
-    # 약한 근거라 같이 낮춘다.
-    if problem.concept_name_source in ("CURRICULUM_EVIDENCE", "PROBLEM_TITLE"):
+    # D-ib5(값 이름 정정, ConceptNameSource 옆 주석 참고): concept_name이 검증된
+    # 개념명(TEACHES_CANONICAL_NAME)이 아니면 모델이 그걸 확정된 개념으로 단정하지
+    # 않게 경고를 붙인다. UNAVAILABLE은 title 폴백조차 안 된 경우라 가장 약하다 --
+    # 이때 concept_name 자체에 뭐가 실려오는지는 백엔드 문서에 명시가 없어 열린
+    # 질문으로 남겨둔다(부록A COALESCE 체인이 전부 NULL이면 concept_name도 빈
+    # 값일 가능성 -- 이 스키마는 concept_name을 required str로 두고 있어 어긋날
+    # 수 있다).
+    if problem.concept_name_source != "TEACHES_CANONICAL_NAME":
         header += "\n  ★이 개념명은 검증된 표시명이 아니라 대체값이다 -- 확정된 개념처럼 단정하지 말고 여지를 둔 표현을 써라."
     # D-ib4 (백엔드 D-1 대응): 문제 단위 interviewSourceId. _stage_block()이
     # 자기 interviewSourceId를 텍스트로 명시하는 것과 같은 이유 -- 허용 집합에만

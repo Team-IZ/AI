@@ -38,6 +38,7 @@ def _request(**overrides) -> dict:
             "sessionInterviewSourceId": "src-session-1",
             "problems": [{
                 "problemNo": 1, "conceptName": "상태 관리",
+                "conceptNameSource": "TEACHES_CANONICAL_NAME",
                 "problemScope": "TEAM_SHARED_PROBLEM", "generationStatus": "GENERATED",
                 "interviewSourceId": "src-problem-1",
                 "stages": [{
@@ -187,7 +188,8 @@ def test_not_generated_problem_has_no_stages_and_is_not_treated_as_failure(monke
     """NOT_GENERATED 문제는 stages가 비어 있고, 미달이 아니라 '안 물어봤다'로 취급된다."""
     req_dict = _request()
     req_dict["comprehension"]["problems"][0] = {
-        "problemNo": 2, "conceptName": "동시성", "problemScope": "TEAM_SHARED_PROBLEM",
+        "problemNo": 2, "conceptName": "동시성", "conceptNameSource": "TEACHES_CANONICAL_NAME",
+        "problemScope": "TEAM_SHARED_PROBLEM",
         "generationStatus": "NOT_GENERATED", "notGeneratedReasonCode": "NO_MATCHING_CODE_EVIDENCE",
         "interviewSourceId": "src-problem-2", "stages": [],
     }
@@ -248,6 +250,7 @@ def test_code_context_and_problem_interview_source_id_reach_prompt(monkeypatch):
     req_dict = _request()
     req_dict["comprehension"]["problems"][0]["codeContext"] = {
         "language": "python", "path": "app/handlers.py", "lineStart": 10, "lineEnd": 20,
+        "snippetKey": "submission-1:0", "snippetHash": "sha256:deadbeef",
     }
     calls = _stub_call(monkeypatch, {
         "openingRemark": "여는 말",
@@ -267,7 +270,8 @@ def test_not_generated_problem_interview_source_id_is_allowed_even_with_empty_st
     -- _collect_allowed_source_ids()가 stages 루프 밖에서 넣는지 확인(누락하기 쉬운 지점)."""
     req_dict = _request()
     req_dict["comprehension"]["problems"][0] = {
-        "problemNo": 2, "conceptName": "동시성", "problemScope": "TEAM_SHARED_PROBLEM",
+        "problemNo": 2, "conceptName": "동시성", "conceptNameSource": "TEACHES_CANONICAL_NAME",
+        "problemScope": "TEAM_SHARED_PROBLEM",
         "generationStatus": "NOT_GENERATED", "notGeneratedReasonCode": "NO_MATCHING_CODE_EVIDENCE",
         "interviewSourceId": "src-problem-2", "stages": [],
     }
@@ -309,6 +313,7 @@ def test_observation_note_interview_source_id_is_allowed_not_fabrication(monkeyp
         "occurredAt": "2026-08-01T09:00:00Z",
         "content": "쉬는 시간에 페어 프로그래밍이 힘들다고 얘기함",
         "interviewSourceId": "src-note-1",
+        "visibility": "MANAGER_ONLY",
     }]
     items = _four_items()
     items[0]["interviewSourceId"] = "src-note-1"  # 관찰 메모 근거 -- 이제 실제 id로 인용 가능
@@ -333,7 +338,7 @@ def test_new_session_end_reason_codes_are_accepted(monkeypatch):
 
 
 def test_concept_name_source_hedges_language_when_not_verified(monkeypatch):
-    """conceptNameSource(D-2 대응)가 VERIFICATION_CONCEPT가 아니면 확신도를 낮추라는
+    """conceptNameSource(D-2 대응)가 TEACHES_CANONICAL_NAME가 아니면 확신도를 낮추라는
     지시가 프롬프트에 붙어야 한다."""
     req_dict = _request()
     req_dict["comprehension"]["problems"][0]["conceptNameSource"] = "PROBLEM_TITLE"
@@ -343,6 +348,72 @@ def test_concept_name_source_hedges_language_when_not_verified(monkeypatch):
 
     block = calls[0]["values"]["comprehension_block"]
     assert "단정하지 말고" in block
+
+
+def test_concept_name_source_unavailable_also_hedges(monkeypatch):
+    """UNAVAILABLE(title 폴백조차 불가)도 PROBLEM_TITLE과 마찬가지로 여지를 둔
+    표현을 강제해야 한다 -- TEACHES_CANONICAL_NAME 하나만 확정 경로다."""
+    req_dict = _request()
+    req_dict["comprehension"]["problems"][0]["conceptNameSource"] = "UNAVAILABLE"
+    calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
+
+    engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    assert "단정하지 말고" in calls[0]["values"]["comprehension_block"]
+
+
+# ── D-ib5 (2026-08-07, 백엔드 재회신으로 D-ib4의 추정값 정정) ────────────────────
+
+def test_concept_name_source_is_required():
+    """D-ib4는 optional로 열어뒀는데, D-ib4 자체 커밋 메시지가 이미 '아직 백엔드가
+    안 보내도 되게'라고 임시로 인정한 상태였다. 백엔드가 부록A로 4종을 못박은
+    이상(D-ib5) 생략은 조용히 None으로 새는 게 아니라 막혀야 한다."""
+    from pydantic import ValidationError
+
+    req = _request()
+    del req["comprehension"]["problems"][0]["conceptNameSource"]
+    with pytest.raises(ValidationError):
+        InterviewBriefRequest.model_validate(req)
+
+
+def test_concept_name_source_rejects_d_ib4_stale_value_names():
+    """D-ib4가 썼던 VERIFICATION_CONCEPT/CURRICULUM_EVIDENCE는 D-ib5에서
+    TEACHES_CANONICAL_NAME/CURRICULUM_EVIDENCE_TEACHES로 이름이 바뀌었다 --
+    옛 이름이 실수로 다시 살아나면 여기서 잡혀야 한다."""
+    from pydantic import ValidationError
+
+    req = _request()
+    req["comprehension"]["problems"][0]["conceptNameSource"] = "VERIFICATION_CONCEPT"
+    with pytest.raises(ValidationError):
+        InterviewBriefRequest.model_validate(req)
+
+
+def test_observation_note_visibility_is_required_and_constrained():
+    from pydantic import ValidationError
+
+    from app.schemas.interview_brief import ObservationNote
+
+    with pytest.raises(ValidationError):
+        ObservationNote.model_validate({
+            "occurredAt": "2026-07-20T10:00:00Z", "content": "메모", "interviewSourceId": "src-note-x",
+        })
+    with pytest.raises(ValidationError):
+        ObservationNote.model_validate({
+            "occurredAt": "2026-07-20T10:00:00Z", "content": "메모", "interviewSourceId": "src-note-x",
+            "visibility": "PRIVATE",  # D-ib4 이전에 논의됐던 오판 값 -- 값 집합은 MANAGER_ONLY 하나뿐
+        })
+
+
+def test_code_context_requires_snippet_key_and_hash():
+    """§3 A-2: 원문 대신 좌표+키+해시 6필드 전부. 신설 2필드 생략 시 막혀야 한다."""
+    from pydantic import ValidationError
+
+    req = _request()
+    req["comprehension"]["problems"][0]["codeContext"] = {
+        "language": "python", "path": "app/foo.py", "lineStart": 10, "lineEnd": 20,
+    }
+    with pytest.raises(ValidationError):
+        InterviewBriefRequest.model_validate(req)
 
 
 def test_student_answer_text_is_fenced_as_untrusted(monkeypatch):
@@ -357,40 +428,52 @@ def test_student_answer_text_is_fenced_as_untrusted(monkeypatch):
 
 # ── 라우터 ────────────────────────────────────────────────────────────────
 
-def test_router_returns_200_with_usage_headers(monkeypatch):
+def test_router_returns_200_with_usage_meta_body(monkeypatch):
+    """D-ib2 EXIT(2026-08-07): 백엔드가 본문 단일화로 확정 -- 헤더는 더 이상 없다."""
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
 
     r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
 
     assert r.status_code == 200
     assert r.json()["openingRemark"] == "여는 말"
-    assert r.headers["x-ai-usage-status"] == "SUCCEEDED"
-    assert r.headers["x-ai-usage-model-code"]
+    assert "x-ai-usage-status" not in r.headers
+    assert "x-ai-usage-model-code" not in r.headers
 
 
-def test_router_usage_meta_body_field_matches_headers(monkeypatch):
-    """D-ib2: 헤더/본문 둘 다 채우고, 같은 값이어야 한다(같은 dict에서 뽑으므로)."""
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
+def test_router_usage_meta_body_fields(monkeypatch):
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()}, usages=[{
+        "model_code": "test-model", "input_token_count": 500, "output_token_count": 100,
+        "cached_token_count": 0, "status": "SUCCEEDED", "failure_code": None,
+        "latency_ms": 1200,
+    }])
 
     r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
 
     meta = r.json()["usageMeta"]
-    assert meta["modelCode"] == r.headers["x-ai-usage-model-code"]
-    assert str(meta["inputTokenCount"]) == r.headers["x-ai-usage-input-tokens"]
-    assert str(meta["outputTokenCount"]) == r.headers["x-ai-usage-output-tokens"]
-    assert str(meta["latencyMs"]) == r.headers["x-ai-usage-latency-ms"]
-    assert meta["status"] == r.headers["x-ai-usage-status"] == "SUCCEEDED"
+    assert meta["modelCode"] == "test-model"
+    assert meta["inputTokenCount"] == 500
+    assert meta["outputTokenCount"] == 100
+    assert meta["latencyMs"] == 1200
+    assert meta["status"] == "SUCCEEDED"
     assert meta["failureCode"] is None
 
 
 def test_router_returns_503_with_failure_code_on_stage_error(monkeypatch):
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()[:1]})
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()[:1]}, usages=[{
+        "model_code": "test-model", "input_token_count": 500, "output_token_count": 100,
+        "cached_token_count": 0, "status": "SUCCEEDED", "failure_code": None,
+        "latency_ms": 900,
+    }])
 
     r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
 
     assert r.status_code == 503
-    assert r.json()["failureCode"] == "INVALID_JSON"
-    assert "message" in r.json()
+    body = r.json()
+    assert body["failureCode"] == "INVALID_JSON"
+    assert "message" in body
+    # §3 A-5: 검증 실패도 LLM 호출 자체는 성공했으므로 그 usage를 그대로 싣는다.
+    assert body["usageMeta"]["status"] == "SUCCEEDED"
+    assert body["usageMeta"]["latencyMs"] == 900
 
 
 def test_router_maps_llm_transport_failure_code_through(monkeypatch):
@@ -407,7 +490,28 @@ def test_router_maps_llm_transport_failure_code_through(monkeypatch):
     r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
 
     assert r.status_code == 503
-    assert r.json()["failureCode"] == "RATE_LIMITED"
+    body = r.json()
+    assert body["failureCode"] == "RATE_LIMITED"
+    # §3 A-5: 실패도 latency_ms NOT NULL로 기록돼야 하므로 usageMeta가 실려야 한다.
+    assert body["usageMeta"]["status"] == "FAILED"
+    assert body["usageMeta"]["failureCode"] == "RATE_LIMITED"
+    assert body["usageMeta"]["latencyMs"] == 300
+
+
+def test_router_failure_with_no_usages_has_null_usage_meta(monkeypatch):
+    """LLM 호출 자체가 시도되기 전에 죽으면(usages가 아예 빈 리스트) 보고할 사용량이
+    없다 -- usageMeta 키는 여전히 나가되 값은 null이어야 한다(생략이 아니라 명시적 null)."""
+    def _call(stage_id, values, *, model_code, timeout_s=None, max_attempts=None, extra_user=""):
+        raise stages.StageError("ib-1: 실패", usages=[])
+
+    monkeypatch.setattr(engine.stages, "call", _call)
+
+    r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
+
+    body = r.json()
+    assert r.status_code == 503
+    assert "usageMeta" in body
+    assert body["usageMeta"] is None
 
 
 def test_idempotency_key_reuse_skips_recomputation(monkeypatch):

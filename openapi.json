@@ -1058,7 +1058,7 @@
           "interview-brief"
         ],
         "summary": "면담 브리프 생성 (여는 말 + 질문 체크리스트)",
-        "description": "여는 말 + 질문 체크리스트를 한 번의 LLM 호출로 만들어 즉시 반환한다.\n\njob/폴링 없음 -- 이 응답이 곧 결과다. 부분 성공 없음(§5.2): 검증에 하나라도\n걸리면 503 + failureCode로 전체 실패를 알린다.",
+        "description": "여는 말 + 질문 체크리스트를 한 번의 LLM 호출로 만들어 즉시 반환한다.\n\njob/폴링 없음 -- 이 응답이 곧 결과다. 부분 성공 없음(§5.2): 검증에 하나라도\n걸리면 503 + failureCode로 전체 실패를 알린다. 성공·실패 모두 usageMeta를\n싣는다(§3 A-5) -- 실패도 ai_usage에 latency_ms NOT NULL로 반드시 기록돼야\n하기 때문.",
         "operationId": "generate_interview_brief_internal_v1_interview_brief_generate_post",
         "parameters": [
           {
@@ -1897,6 +1897,16 @@
           "lineEnd": {
             "type": "integer",
             "title": "Lineend"
+          },
+          "snippetKey": {
+            "type": "string",
+            "title": "Snippetkey",
+            "description": "submission.code_snippets(JSONB, 최대 3원소) 안에서 이 근거가 가리키는 원소를 찾는 키(면담_브리프_API_감사_회신에대한_회신.md §3 A-2)"
+          },
+          "snippetHash": {
+            "type": "string",
+            "title": "Snippethash",
+            "description": "원문 무결성/중복 확인용 해시. AI가 GitHub에서 직접 가져온 내용과 대조하는 용도로만 쓰고 그 자체로 표시하지 않는다"
           }
         },
         "type": "object",
@@ -1904,10 +1914,12 @@
           "language",
           "path",
           "lineStart",
-          "lineEnd"
+          "lineEnd",
+          "snippetKey",
+          "snippetHash"
         ],
         "title": "ComprehensionCodeContext",
-        "description": "문제 근거 코드의 위치만. **원문은 전달하지 않는다**(§4.1 명시)."
+        "description": "문제 근거 코드의 위치+식별자만. **원문은 전달하지 않는다**(§4.1 명시) --\nAI가 필요하면 GitHub에서 직접 가져온다(analyses `fetch.py`와 같은 패턴)."
       },
       "ComprehensionStage": {
         "properties": {
@@ -2662,23 +2674,18 @@
             "description": "★ 이 관찰 메모를 근거로 질문을 만들면 이 값을 그대로 실어야 한다"
           },
           "visibility": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
+            "const": "MANAGER_ONLY",
             "title": "Visibility",
-            "description": "공개범위 코드(값 집합 미확정, 아직 미사용 -- 배선만 해둠)"
+            "description": "프롬프트 톤 조절용 참고값. AI가 이 값으로 필터링하지 않는다"
           }
         },
         "type": "object",
         "required": [
           "occurredAt",
           "content",
-          "interviewSourceId"
+          "interviewSourceId",
+          "visibility"
         ],
         "title": "ObservationNote",
         "description": "면담과 무관하게 매니저가 남긴 일반 관찰 메모. §4.1 ⑦."
@@ -2970,21 +2977,15 @@
             "description": "NOT_GENERATED 문제는 없다"
           },
           "conceptNameSource": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "VERIFICATION_CONCEPT",
-                  "CURRICULUM_EVIDENCE",
-                  "PROBLEM_TITLE"
-                ]
-              },
-              {
-                "type": "null"
-              }
+            "type": "string",
+            "enum": [
+              "TEACHES_CANONICAL_NAME",
+              "CURRICULUM_EVIDENCE_TEACHES",
+              "PROBLEM_TITLE",
+              "UNAVAILABLE"
             ],
             "title": "Conceptnamesource",
-            "description": "conceptName이 어느 경로에서 나왔는지. PROBLEM_TITLE이면 검증된 개념명이 아니라 문제 제목으로 대체된 값이므로 단정적으로 서술하지 않는다"
+            "description": "conceptName이 어느 경로에서 나왔는지. TEACHES_CANONICAL_NAME 외엔 검증된 개념명이 아니므로 단정적으로 서술하지 않는다"
           },
           "interviewSourceId": {
             "type": "string",
@@ -3006,6 +3007,7 @@
           "conceptName",
           "problemScope",
           "generationStatus",
+          "conceptNameSource",
           "interviewSourceId"
         ],
         "title": "ProblemComprehension",

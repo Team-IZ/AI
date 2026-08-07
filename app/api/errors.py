@@ -11,6 +11,8 @@ from fastapi.exceptions import RequestValidationError
 # fastapi.responses: 응답 객체들. JSONResponse는 상태코드와 본문 직접 지정
 from fastapi.responses import JSONResponse
 
+from app.schemas.interview_brief import UsageMeta
+
 class ApiError(Exception):
     """ 우리 코드에서 던지는 에러. 아래 핸들러가 계약 형태로 변환 """
 
@@ -26,12 +28,22 @@ class ApiError(Exception):
 class InterviewBriefError(Exception):
     """면담 브리프 전용 에러. 명세서 §5.2 계약이 다른 4개 엔드포인트와 다르다 --
     {failureCode, message} 평탄 구조이고 retryable 필드가 없다(다른 뜻으로 별도
-    계약이라 ApiError를 재사용하지 않는다)."""
+    계약이라 ApiError를 재사용하지 않는다).
 
-    def __init__(self, status_code: int, failure_code: str, message: str) -> None:
+    usage_meta: 실패한 LLM 호출도 latency_ms NOT NULL로 반드시 기록해야 한다는
+    백엔드 요구(면담_브리프_API_감사_회신에대한_회신.md §3 A-5, 2026-08-07)에 따라
+    성공 응답과 같은 모양의 사용량을 실패 응답에도 싣는다. 호출부가 usages가 아예
+    없는 실패(LLM 호출 전 단계에서 죽은 경우)를 넘기면 None -- 그 경우 보고할
+    사용량 자체가 없다는 뜻이라 필드는 null로 나간다."""
+
+    def __init__(
+        self, status_code: int, failure_code: str, message: str,
+        usage_meta: UsageMeta | None = None,
+    ) -> None:
         self.status_code = status_code
         self.failure_code = failure_code
         self.message = message
+        self.usage_meta = usage_meta
 
 
 def _body(error: str, message: str, retryable: bool) -> dict:
@@ -51,7 +63,11 @@ def register_error_handlers(app: FastAPI) -> None:
     async def _handle_interview_brief_error(request: Request, exc: InterviewBriefError) -> JSONResponse:
         return JSONResponse(
             status_code=exc.status_code,
-            content={"failureCode": exc.failure_code, "message": exc.message},
+            content={
+                "failureCode": exc.failure_code,
+                "message": exc.message,
+                "usageMeta": exc.usage_meta.model_dump(by_alias=True) if exc.usage_meta else None,
+            },
         )
 
     @app.exception_handler(RequestValidationError)

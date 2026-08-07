@@ -28,6 +28,9 @@ RiskReasonCode = Literal[
 EvaluationStatus = Literal["MATCHED", "NOT_MATCHED", "NOT_APPLICABLE", "UNAVAILABLE"]
 NotApplicableReasonCode = Literal["FIRST_MINI_PROJECT", "INSUFFICIENT_LONGITUDINAL_HISTORY"]
 ValidityReviewStatus = Literal["NOT_REQUIRED", "PENDING", "CONFIRMED_INVALID", "RESTORED_VALID"]
+# D-ib5: D-ib4는 값 집합 미확정으로 str로 열어뒀는데(2026-08-06), 백엔드가 다음날
+# MANAGER_ONLY 확정을 회신(§1-5) -- AUTHOR_ONLY는 여전히 정책 확인 중이라 안 넣는다.
+ObservationNoteVisibility = Literal["MANAGER_ONLY"]
 AttemptType = Literal["INITIAL", "RETRY", "REVIEW"]
 AttemptStatus = Literal[
     "NOT_STARTED", "SUBMITTED", "ANALYZING", "SESSION_READY",
@@ -50,6 +53,14 @@ SessionEndReasonCode = Literal[
     "TECHNICAL_FAILURE",
 ]
 ProblemScope = Literal["TEAM_SHARED_PROBLEM", "INDIVIDUAL_OWN_COMMIT"]
+# D-ib5(2026-08-07, 면담_브리프_API_감사_회신에대한_회신.md §3 D-2 부록A): D-ib4가
+# 처음 이 필드를 넣었을 때(2026-08-06 21:35)는 값 이름이 확정 전 추정이었다
+# (VERIFICATION_CONCEPT/CURRICULUM_EVIDENCE, UNAVAILABLE 없음, optional). 백엔드가
+# 다음날 부록A 조인 쿼리로 정확한 값 4종을 못박아 회신 -- 여기 그 값 그대로,
+# 그리고 이제 4번째(UNAVAILABLE, title 폴백조차 불가한 경우)가 실제로 있어서 required.
+ConceptNameSource = Literal[
+    "TEACHES_CANONICAL_NAME", "CURRICULUM_EVIDENCE_TEACHES", "PROBLEM_TITLE", "UNAVAILABLE",
+]
 GenerationStatus = Literal["GENERATED", "NOT_GENERATED"]
 NotGeneratedReasonCode = Literal["NO_MATCHING_CODE_EVIDENCE"]
 StageStatus = Literal[
@@ -127,12 +138,22 @@ class ValidityReview(BaseSchema):
 
 
 class ComprehensionCodeContext(BaseSchema):
-    """문제 근거 코드의 위치만. **원문은 전달하지 않는다**(§4.1 명시)."""
+    """문제 근거 코드의 위치+식별자만. **원문은 전달하지 않는다**(§4.1 명시) --
+    AI가 필요하면 GitHub에서 직접 가져온다(analyses `fetch.py`와 같은 패턴).
+    """
 
     language: str
     path: str
     line_start: int
     line_end: int
+    snippet_key: str = Field(
+        description="submission.code_snippets(JSONB, 최대 3원소) 안에서 이 근거가 "
+                    "가리키는 원소를 찾는 키(면담_브리프_API_감사_회신에대한_회신.md §3 A-2)",
+    )
+    snippet_hash: str = Field(
+        description="원문 무결성/중복 확인용 해시. AI가 GitHub에서 직접 가져온 "
+                    "내용과 대조하는 용도로만 쓰고 그 자체로 표시하지 않는다",
+    )
 
 
 class ComprehensionStage(BaseSchema):
@@ -181,18 +202,13 @@ class ProblemComprehension(BaseSchema):
     code_context: ComprehensionCodeContext | None = Field(
         default=None, description="NOT_GENERATED 문제는 없다",
     )
-    # D-ib4 (백엔드 D-2 대응): concept_name이 실제로는 problem_scope에 따라 조인
-    # 경로가 갈리고(팀 공유=project_verification_concept, 개인 커밋=
-    # assessment_problem_reference), 후자는 0건일 수 있어 title로 폴백한다는 게
-    # 백엔드 감사 결과다. 그 폴백 여부를 AI가 구분해서 확신도를 조절할 수 있게
-    # 백엔드가 제안한 필드. 아직 백엔드가 안 보내도 되게 선택 필드로 둔다(하위호환).
-    concept_name_source: Literal[
-        "VERIFICATION_CONCEPT", "CURRICULUM_EVIDENCE", "PROBLEM_TITLE",
-    ] | None = Field(
-        default=None,
-        description="conceptName이 어느 경로에서 나왔는지. PROBLEM_TITLE이면 "
-                    "검증된 개념명이 아니라 문제 제목으로 대체된 값이므로 단정적으로 "
-                    "서술하지 않는다",
+    # D-ib5: concept_name이 실제로는 problem_scope에 따라 조인 경로가 갈리고(팀
+    # 공유=project_verification_concept, 개인 커밋=assessment_problem_reference),
+    # 후자는 0건일 수 있어 title로 폴백, 그마저 없으면 UNAVAILABLE이라는 게 백엔드
+    # 부록A. required로 바뀐 이유는 ConceptNameSource 정의 옆 주석 참고.
+    concept_name_source: ConceptNameSource = Field(
+        description="conceptName이 어느 경로에서 나왔는지. TEACHES_CANONICAL_NAME 외엔 "
+                    "검증된 개념명이 아니므로 단정적으로 서술하지 않는다",
     )
     # D-ib4 (백엔드 D-1 대응): NOT_GENERATED 문제는 stages가 비어 이 문제를 근거로
     # 삼을 interviewSourceId가 없었다(interview_source 테이블의 problem_id 슬롯이
@@ -277,14 +293,11 @@ class ObservationNote(BaseSchema):
     interview_source_id: str = Field(
         description="★ 이 관찰 메모를 근거로 질문을 만들면 이 값을 그대로 실어야 한다",
     )
-    # D-ib4 (백엔드 A-3): observation_note.visibility는 DDL에 CHECK 제약이 없는
-    # VARCHAR(30) NOT NULL -- 값 집합("OPEN 정책 확정 전 임의 DB CHECK로 고정하지
-    # 않는다"는 DDL 코멘트 원문)이 아직 안 정해졌다. 그래서 지금은 받아만 두고
-    # (Literal 강제 안 함) 프롬프트/필터링에는 아직 안 쓴다 -- 값 집합이 정해지면
-    # 그때 좁히고 공개범위별 필터링 로직을 추가한다.
-    visibility: str | None = Field(
-        default=None,
-        description="공개범위 코드(값 집합 미확정, 아직 미사용 -- 배선만 해둠)",
+    # D-ib5: 값 집합은 확정됐다(MANAGER_ONLY, ObservationNoteVisibility 옆 주석
+    # 참고). 필터링은 여전히 AI 쪽에 안 만든다 -- 백엔드가 요청 시점에 이미 걸러서
+    # 보낸다(§3 A-3②, tenancy/manager_assignment 컨텍스트는 백엔드에만 있다).
+    visibility: ObservationNoteVisibility = Field(
+        description="프롬프트 톤 조절용 참고값. AI가 이 값으로 필터링하지 않는다",
     )
 
 
