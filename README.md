@@ -1,6 +1,6 @@
 # AI 서비스 (FastAPI)
 
-> 갱신: **2026-08-04** · **이 문서는 지금 코드가 실제로 하는 일을 적는다.**
+> 갱신: **2026-08-07** · **이 문서는 지금 코드가 실제로 하는 일을 적는다.**
 > 백엔드와의 계약 현황은 이슈 `Team-IZ/Backend#42`, 작업 계획은 `PLAN_FASTAPI_MIGRATION.md`.
 
 교육생이 제출한 코드를 분석해 **문답 문제를 뽑고**, 학생과 **문답을 진행하며 채점**하고, 끝나면 **보고서**를 내는 서비스. Spring Boot가 호출하는 내부 서비스다.
@@ -141,7 +141,7 @@ https://cpiysizen3.ap-northeast-1.awsapprunner.com     고정 HTTPS. 주소가 �
 | 헤더 | 값 | 용도 |
 |---|---|---|
 | `X-Internal-Key` | 공유 비밀 | 서비스 간 인증. `GET /api/health`만 면제 |
-| `Idempotency-Key` | 경로마다 다르다(아래) | 중복 요청 판별. 같은 키면 처음 만든 `jobId`를 그대로 반환하고 LLM을 다시 부르지 않는다 |
+| `Idempotency-Key` | 경로마다 다르다(아래) | 중복 요청 판별. 같은 키면 처음 만든 `jobId`를 그대로 반환하고 LLM을 다시 부르지 않는다. **면담 브리프에서만 필수**이고 나머지는 선택 |
 | `X-Trace-Id` | 추적 ID | Spring이 `analysis_job.trace_id`로 저장 |
 
 **에러 형식** — 평탄 구조. `timestamp`·`path`는 쓰지 않는다.
@@ -175,14 +175,17 @@ https://cpiysizen3.ap-northeast-1.awsapprunner.com     고정 HTTPS. 주소가 �
 | 그룹 | 메서드·경로 | 역할 | 방식 |
 |---|---|---|---|
 | 공통 | `GET /api/health` | 서비스 상태 | 동기 |
+| 분석 | `POST /api/v0/analysis-inputs` | 저장소 검증 + fetch → 분석 입력 확정 | 동기 200 |
 | 분석 | `POST /api/v0/analyses` | 코드 분석 요청 | 202 + 폴링 |
 | 분석 | `GET /api/v0/analyses/{jobId}` | 분석 상태·결과 | 동기 |
 | 세션 | `POST /api/v0/sessions/{id}/answers` | 답변 제출 → 채점 + 다음 질문 (**세션 API는 이것 하나뿐**) | 동기 |
 | 보고서 | `POST /api/v0/reports` | 보고서 생성 요청 | 202 + 폴링 |
 | 보고서 | `GET /api/v0/reports/{jobId}` | 보고서 결과 | 동기 |
-
 | 교안 | `POST /api/v0/curricula` | 교안 PDF(multipart) 분석 요청 | 202 + 폴링 |
 | 교안 | `GET /api/v0/curricula/{jobId}` | 교안 구조·개념 결과 | 동기 |
+| 면담 | `POST /api/v0/interview-brief:generate` | 매니저 면담용 여는 말 + 질문 체크리스트 | 동기 200 |
+
+**신규 2개는 둘 다 동기 200이다** (2026-08-07). 202+폴링이 아닌 이유가 서로 다르다 — `analysis-inputs`는 LLM 호출이 아예 없어 지연이 짧고(목표 p95 5초), 폴링을 도입하면 멀티 인스턴스에서 못 버티는 인메모리 job store가 하나 더 생긴다. 면담 브리프는 **매니저가 화면 앞에서 기다린다.**
 
 **세션은 무상태다** (2026-08-03 확정). `POST /sessions` · `GET /sessions/{id}` · `POST /sessions/{id}/restore` **3개는 삭제됐다.** AI는 세션을 들고 있지 않으므로 문제·기록·커서가 매 요청에 실려 오고 — **매 요청이 곧 restore**다. 배포·재시작·인스턴스 중지가 진행 중인 세션을 깨지 않고, 백엔드는 갈래 하나만 구현하면 된다.
 
@@ -357,7 +360,7 @@ CALLER · CALLEE · DEFINITION · TEST · CONFIG · SIMILAR
   "problems": [ /* 분석이 동결한 문제 3개. 질문 4개 + 힌트 8개가 문제마다 실려 있다 */ ],
   "transcript": [ /* 지금까지 확정된 턴 전부 */ ],
   "cursor": { "problemId": "prob-1", "axisCode": "L3", "hintsUsed": 0 },
-  "providerModelCode": "deepseek-ai/deepseek-v4-flash",       // 생략 시 서버 기본값
+  "providerModelCode": "minimaxai/minimax-m3",                // 생략 시 서버 기본값
   "analysisContext": {                       // 선택. 분석 문서에서 두 필드만
     "overview": "주문을 받아 결제로 넘기는 …",
     "structure": [ { "area": "컨트롤러", "files": ["app/api.py"], "role": "요청 수신" } ]
@@ -433,11 +436,12 @@ DB `ai_usage`(기관별 AI 호출·토큰·비용 원장)에 대응한다. **LLM
 ```jsonc
 "aiUsage": [
   {
-    "idempotencyKey": "sub-1:1:ANALYSIS:3",        // {요청 멱등키|sourceId}:{sourceType}:{호출순번}
-    "sourceType": "ANALYSIS",                      // ANALYSIS|GRADING|REPORT|CURRICULUM
-    "sourceId": "01H8XABC…",                       // 작업 PK
-    "featureCode": "QUESTION_GENERATION",
-    "modelCode": "glm-5.2",           // Spring이 ai_model 조회해 model_id 확보
+    "idempotencyKey": "sub-1:1:ANALYSIS_JOB:3",    // {요청 멱등키|contextId}:{contextType}:{호출순번}
+    "contextType": "ANALYSIS_JOB",                 // 아래 5종
+    "contextId": "01H8XABC…",                      // 업무 엔터티 PK. null일 수 있다(아래)
+    "requestId": "sub-1:1", "traceId": "…",
+    "featureCode": "CODE_SESSION",
+    "modelCode": "minimax-m3",        // Spring이 ai_model 조회해 model_id 확보
     "inputTokenCount": 3200, "outputTokenCount": 180, "cachedTokenCount": 0,
     "status": "SUCCEEDED",            // SUCCEEDED | FAILED | PARTIAL
     "failureCode": null,              // FAILED·PARTIAL이면 필수
@@ -447,11 +451,17 @@ DB `ai_usage`(기관별 AI 호출·토큰·비용 원장)에 대응한다. **LLM
 ]
 ```
 
-`featureCode` — `CODE_ANALYSIS`(분석 문서·요구사항 판정) · `QUESTION_GENERATION`(문제 선정, 질문·힌트 동결) · `GRADING`(채점) · `SUMMARY_DRAFT`(보고서) · `CURRICULUM_ANALYSIS`(교안). 힌트는 질문과 함께 동결되므로 별도 값이 필요 없다.
+`featureCode` 6종 — `CODE_ANALYSIS`(분석 문서·요구사항 판정) · `CODE_SESSION`(문제 선정, 질문·힌트 동결) · `ANSWER_EVALUATION`(채점) · `REPORT_GENERATION`(보고서) · `CURRICULUM_ANALYSIS`(교안) · `INTERVIEW_BRIEF_GENERATION`(면담 브리프). 힌트는 질문과 함께 동결되므로 별도 값이 필요 없다.
 
-`sourceType` 4종 — `ANALYSIS`(분석 jobId) · `GRADING`(sessionId) · `REPORT`(보고서 jobId) · `CURRICULUM`(교안 jobId). `featureCode`보다 굵은 단위라 한 `sourceType` 안에 `featureCode`가 여럿 나온다(분석 하나에 `CODE_ANALYSIS` + `QUESTION_GENERATION`).
+`contextType` 5종 — `ANALYSIS_JOB`(분석 jobId) · `ASSESSMENT_SESSION`(sessionId) · `REPORT_SNAPSHOT`(보고서 jobId) · `CURRICULUM_ANALYSIS`(교안 jobId) · `INTERVIEW_BRIEF`(null). `featureCode`보다 굵은 단위라 한 `contextType` 안에 `featureCode`가 여럿 나온다(분석 하나에 `CODE_ANALYSIS` + `CODE_SESSION`).
 
-`failureCode` 5종 — `TIMEOUT` · `RATE_LIMITED` · `PROVIDER_ERROR` · `INVALID_JSON` · `CONTEXT_OVERFLOW`.
+⚠️ **옛 이름을 쓰지 않는다.** `sourceType`/`sourceId`(필드명)와 `ANALYSIS`·`GRADING`·`REPORT`·`CURRICULUM`·`SUBMISSION`(값), `QUESTION_GENERATION`·`GRADING`·`SUMMARY_DRAFT`(featureCode)는 전부 DB CHECK 밖이라 INSERT가 깨진다.
+
+**`contextId`는 null일 수 있다.** DB에서 이 컬럼만 NULL 허용이다. `REPORT_SNAPSHOT`·`CURRICULUM_ANALYSIS`는 AI가 그 PK를 몰라 자기 jobId를 넣고 **Spring이 저장 시점에 교체**한다. 면담 브리프는 대신할 값조차 없어(brief_id를 안 받는다) 그냥 null이다.
+
+`failureCode` — AI가 내는 것은 5종(`TIMEOUT`·`RATE_LIMITED`·`PROVIDER_ERROR`·`INVALID_JSON`·`CONTEXT_OVERFLOW`). DB CHECK는 8종이고 나머지 3종(`NO_AVAILABLE_MODEL_INSTANCE`·`MODEL_INSTANCE_QUOTA_EXHAUSTED`·`MODEL_CREDENTIAL_INVALID`)은 다중 모델 인스턴스·자격증명 폴백 체계가 이 저장소에 없어 도달 불가능하다.
+
+🔴 **`idempotencyKey`는 DB에서 전역 UNIQUE다.** 요청 단위 키가 요청마다 달라야 한다. 폴백 사슬은 `contextId → idempotency-key 헤더 → x-trace-id`이고, 셋 다 없으면 `":INTERVIEW_BRIEF:1"` 같은 값이 되어 두 번째 호출이 곧바로 충돌한다 — 그래서 **면담 브리프만 멱등키 헤더가 필수다.**
 
 **필드 이름이 DB 컬럼명과 1:1이다.** Spring은 매핑 고민 없이 그대로 INSERT하면 된다.
 
@@ -469,7 +479,7 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 // POST /api/v0/reports          → 202
 { "problemId": "prob-1", "problemNo": 2,                      // 🔴 안 보내면 3건 다 1이 찍힌다
   "sessionId": "sess-abc",
-  "providerModelCode": "deepseek-ai/deepseek-v4-flash",       // 생략 시 서버 기본값
+  "providerModelCode": "minimaxai/minimax-m3",                // 생략 시 서버 기본값
   "transcript": [ /* 이 문제의 턴만 */ ],
   "analysisDocuments": [ { "kind": "CODE_ANALYSIS", "content": { /* AnalysisDocument */ } } ],
   "teaches": [ … ] }
@@ -581,6 +591,77 @@ DB 3계층(`curriculum_analysis` → `curriculum_section` → `teaches`)을 그�
 
 교안 분석은 LLM을 무겁게 쓴다(교안 1개에 1~2분 이상). **수업 중이 아니라 LMS 업로드 시점에 도는 것**이 전제이고, 그래서 `Idempotency-Key`로 중복 실행을 막는다.
 
+### 분석 입력 확정 — `POST /api/v0/analysis-inputs`
+
+**저장소를 검증하고 fetch만 한다. LLM 호출이 0이다.** 백엔드 제안서 A·B에 대한 응답으로
+2026-08-07에 신설했다. 분석 실행은 여전히 `POST /analyses`가 받는다.
+
+```jsonc
+// 요청
+{ "requestId": "…", "orgId": "…", "method": "GITHUB_URL",
+  "repositoryUrl": "https://github.com/team-iz/mini-project-3", "requestedBranch": null }
+
+// 200
+{ "analysisInputId": "…",          // 같은 입력이면 같은 값(결정론적 UUID5)
+  "resolvedBranch": "main",         // 요청이 브랜치를 안 줬을 때 AI가 고른 값
+  "headCommit": { "sha": "…", "message": "…", "committedAt": "…" },
+  "gitHistory": [ /* 커밋당 14필드 */ ],
+  "gitHistorySource": "REMOTE_DEEPEN",   // BACKEND_SUPPLIED|EMBEDDED_GIT|REMOTE_DEEPEN|NONE
+  "historyTruncated": false,
+  "fileCount": 42, "byteCount": 183204, "inputHash": "…", "capturedAt": "…" }
+```
+
+**실패 응답 모양이 다른 유일한 엔드포인트다** — 공용 `{error, message, retryable}`이 아니라
+**422 `{failureCode, message, requestId}`**이고, `failureCode`는 `analysis_job.failure_code`의
+DB CHECK 15종을 그대로 쓴다(분석 실행 5 + 저장소 접근 5 + ZIP 검증 5).
+
+세 가지 설계 전제:
+
+```
+D1  히스토리 수집은 커밋 개수가 아니라 벽시계 시간으로 상한을 둔다.
+    코드를 가져오는 것(Phase A, 필수)과 히스토리 풍부화(Phase B, best-effort)를 나눠,
+    Phase B가 느리거나 실패해도 Phase A 결과는 절대 버리지 않는다
+D2  fetch한 코드를 서버가 캐싱하지 않는다. POST /analyses가 재fetch한다 —
+    GITHUB_URL은 정확한 커밋 sha로, ZIP은 같은 다운로드 URL로.
+    재fetch 후 inputHash가 다르면 하드 실패한다(그 사이 브랜치가 움직였다는 뜻)
+D3  ZIP의 git 이력은 ①백엔드가 실어 보내면 그것 ②ZIP 안 .git 파싱 ③둘 다 없으면
+    실패시키지 않고 빈 값으로 진행(ZIP_REQUIRE_GIT_LOG로 정책 전환)
+```
+
+🔴 **외부 URL을 받는 자리라 방어가 코드에 박혀 있다.** 호스트 허용목록은 clone·다운로드
+양쪽 다 **fail-closed**(설정이 비면 거부), 리다이렉트 미추적(SSRF), 다운로드는 스트리밍하며
+상한 초과 시 즉시 중단, stderr의 자격증명·토큰 마스킹. ZIP 안의 `.git`은 그대로 파싱하지
+않는다 — `core.fsmonitor`·`core.hooksPath`·`include.path`가 전부 임의 명령 실행 훅이라
+config·hooks를 지우고 샌드박스 환경에서만 `log`/`rev-parse`를 부른다.
+
+### 면담 브리프 — `POST /api/v0/interview-brief:generate`
+
+**매니저가 화면 앞에서 기다린다.** job/폴링이 없고 이 응답이 곧 결과다. LLM 1회.
+
+```jsonc
+// 요청 — AI는 DB에 접근하지 않는다. 백엔드가 조립해서 실어 보낸다
+{ "target": {…}, "briefContext": {…}, "riskReasons": […], "validityReview": {…},
+  "comprehension": {…}, "priorInterviews": […], "observationNotes": […] }
+
+// 200
+{ "openingRemark": "1~3문장, 구어체",
+  "items": [ { "questionText": "…?", "questionRationale": "…",
+               "suggestedOrder": 1, "interviewSourceId": "…" } ],
+  "aiUsage": [ … ] }
+```
+
+- **항목 4~8개, 첫 면담이면 6~8개.** `suggestedOrder`는 1부터 중복 없는 연속 정수다.
+- 🔴 **`interviewSourceId`는 필수다.** 모델이 지어낸 값은 요청에 실제로 있던 id 집합과
+  대조해 거부한다(6슬롯: 위험사유·시도·세션·문제·단계·관찰메모). 근거에 id가 없는 질문
+  (라포 질문 등)은 **시도 단위 id로 떨어진다** — `interview_brief_item.interview_source_id`가
+  UUID NOT NULL이라 null이면 그 행이 통째로 저장 불가다.
+- **부분 성공이 없다.** 여는 말만 되고 항목 검증이 하나라도 걸리면 전체를 503으로 실패시킨다.
+  절반을 반환하면 호출부가 성공으로 오인해 반쪽 브리프가 저장된다.
+- `isFlagged=true`인 단계는 **코드에서** 프롬프트에서 제외한다(모델에게 "근거로 삼지 마라"고
+  지시하지 않는다). 학생 발화·답변 텍스트는 구분자로 감싸 인젝션을 막는다.
+- **`idempotency-key` 헤더가 필수다.** 같은 키에 다른 본문이 오면 **409** — 지문(sha256)을
+  대조한다. 안 하면 키를 재사용한 순간 다른 교육생의 브리프가 나간다.
+
 ---
 
 ## 4. 코드 구조
@@ -592,21 +673,32 @@ app/
 ├─ jobs.py          분석 job 인메모리 저장소 + 수명주기(상태 전이)
 ├─ sessions.py      문답 세션 진행 규칙 + 채점. **무상태** — 상태는 요청이 들고 온다
 ├─ reports.py       보고서 job 인메모리 저장소 (jobs.py와 형제)
-├─ usage.py         ai_usage 원장 행 만들기. 네 경로가 함께 쓴다
+├─ curricula.py     교안 job 저장소 (jobs.py와 형제)
+├─ interview_brief.py  면담 브리프 멱등 캐시 (jobs.py와 형제). job이 없어 결과만 캐싱
+├─ usage.py         ai_usage 원장 행 만들기. 여섯 경로가 함께 쓴다
 ├─ api/             HTTP 계층 — 백엔드가 보는 면
 │  ├─ deps.py         인증
-│  ├─ errors.py       예외 핸들러
-│  ├─ health.py · analyses.py · sessions.py · reports.py
+│  ├─ errors.py       예외 핸들러 (ApiError · AnalysisInputError · InterviewBriefError)
+│  ├─ health.py · analyses.py · analysis_inputs.py · sessions.py
+│  └─ reports.py · curricula.py · interview_brief.py
 ├─ schemas/         계약의 실체 — 요청·응답 모델
-│  └─ common.py · analysis.py · session.py · report.py
+│  └─ common.py · analysis.py · session.py · report.py · curriculum.py
+│     usage.py · interview_brief.py
 └─ engines/         팀원 PoC 코드가 들어오는 자리
    ├─ __init__.py     get_analysis_engine() 팩토리 — 설정 보고 구현 선택
    ├─ base.py         계약(Protocol)
-   └─ stub.py         엔진 없을 때 고정 응답
+   ├─ stub.py         엔진 없을 때 고정 응답
+   ├─ interview_brief.py           면담 브리프 생성 + 검증 (LLM 1회)
+   ├─ interview_brief_manifest.json  ib-1 프롬프트. **vendor/ 밖이다** —
+   │                                 vendor 재동기화(복사)에 안 쓸려 나가게
+   └─ analysis/
+      ├─ fetch.py     저장소 검증 + fetch (analysis-inputs). 외부 URL 방어가 여기 있다
+      ├─ stages.py    프롬프트 매니페스트 로딩 + LLM 호출 + 신뢰 불가 입력 감싸기
+      └─ vendor/      팀원 PoC 규칙부. PATCHES.md에 우리 수정을 남긴다
 tests/
 ```
 
-**파일명 규칙**: `schemas/`는 단수(`analysis.py`), `api/`·저장소 모듈은 복수(`analyses.py`·`jobs.py`).
+**파일명 규칙**: `schemas/`는 단수(`analysis.py`), `api/`·저장소 모듈은 복수(`analyses.py`·`jobs.py`). 단수/복수 짝이 없는 신규 두 경로(`analysis_inputs.py`·`interview_brief.py`)는 엔드포인트 이름을 그대로 따른다.
 
 층은 셋뿐이다.
 
@@ -646,9 +738,9 @@ engine_mode: Literal["stub", "real"] = "stub"
 |---|---|
 | 기능 | **6/6 완성.** 교안 · 코드 분석 · 문제 선정 · 질문·힌트 동결 · 채점 · 보고서 |
 | 검증 | **전 구간 실호출 완주**(2026-08-04). 교안 → 분석 → 문답 11턴 → 보고서 2건 |
-| 엔드포인트 | **8/8 동작** (세션 무상태 전환으로 11 → 8) |
-| 테스트 | **254 passed** |
-| 계약 | **미결 0건.** DDL · `contextType` 값 집합 · `problemId` 사본 여부까지 확정 |
+| 엔드포인트 | **10/10 동작** (무상태 전환으로 11 → 8, `analysis-inputs`·면담 브리프로 8 → 10) |
+| 테스트 | **393 passed** |
+| 계약 | **미결 1건** — 실패한 LLM 호출의 토큰을 원장에 못 보낸다(아래). 나머지는 확정 |
 | 배포 | App Runner 자동(`main` 푸시 = 배포). 팀원 소유 |
 
 ### 실측 (무료 티어)
@@ -670,10 +762,18 @@ engine_mode: Literal["stub", "real"] = "stub"
 
 ```
 백엔드 연동          백엔드가 AI 연동 도메인을 아직 안 만들었다
+실패 콜 원장 누락     동기 경로 2개가 503을 던지며 태운 토큰을 버린다(아래)
 RELATED_CONTEXT 참조  심볼 테이블이 없어 못 만든다
 교안 대형 PDF 상한    34쪽 310초. 200쪽을 외삽할 수 없다
 선별 로직 교체        교안 사전 기반(PM 설계 v2 §7). 재료는 확보, 교체는 미착수
+ZIP 제출 전달 방식     presigned URL / multipart 중 백엔드 회신 대기(제안서 C)
+새 모델 지연 재실측    SESSION_TIMEOUT_S=20.0이 옛 deepseek-v4-flash 기준이다
 ```
+
+🔴 **실패한 LLM 호출의 토큰이 원장에 안 남는다.** `StageError`가 그때까지의 `usages`를
+들고 오는데, 동기 경로 2개(`/sessions/{id}/answers` · 면담 브리프)가 503을 던지며 버린다.
+비동기(`jobs.py`)만 `burned`로 살린다. 529 실패율 64%라 버려지는 양이 적지 않다 —
+고치려면 에러 응답에 `aiUsage[]` 자리를 만드는 계약 변경이라 백엔드 합의가 필요하다.
 
 세부 순서는 `PLAN_FASTAPI_MIGRATION.md`.
 
