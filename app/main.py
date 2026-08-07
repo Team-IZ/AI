@@ -2,7 +2,15 @@
 
 from fastapi import Depends, FastAPI
 
-from app.api import analyses, curricula, health, reports, sessions
+from app.api import (
+    analyses,
+    analysis_inputs,
+    curricula,
+    health,
+    interview_brief,
+    reports,
+    sessions,
+)
 from app.api.deps import require_internal_key
 from app.api.errors import register_error_handlers
 from app.config import API_V0_PREFIX, get_settings
@@ -45,6 +53,18 @@ app.include_router(
 
 app.include_router(
     curricula.router,
+    prefix=API_V0_PREFIX,
+    dependencies=[Depends(require_internal_key)],
+)
+
+app.include_router(
+    analysis_inputs.router,
+    prefix=API_V0_PREFIX,
+    dependencies=[Depends(require_internal_key)],
+)
+
+app.include_router(
+    interview_brief.router,
     prefix=API_V0_PREFIX,
     dependencies=[Depends(require_internal_key)],
 )

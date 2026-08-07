@@ -8,7 +8,9 @@ import uuid
 
 from collections import OrderedDict
 from datetime import datetime, timezone
+from typing import Any
 
+from app.engines.analysis import fetch as fetch_engine
 from app.engines.base import AnalysisEngine
 from app.schemas.analysis import AnalysisJobStatus, AnalysisRequest, AnalysisResult
 from app.usage import to_ai_usage
@@ -24,6 +26,22 @@ _jobs: "OrderedDict[str, AnalysisJobStatus]" = OrderedDict()
 
 # 멱등성 키 -> job_id. 같은 키 재요청 시 새 job 안 만들고 처음 id 반환
 _job_id_by_idempotency_key: "OrderedDict[str, str]" = OrderedDict()
+
+def _translate_failure_code(code: str) -> str:
+    """fetch.py 내부 코드 -> analysis_job.failure_code DB 15종.
+
+    백엔드 회신(2026-08-07)으로 ZIP 검증 5종이 DB CHECK에 합류하면서
+    `VERIFICATION_FAILURE_CODES` 11종이 전부 DB 값과 같은 이름이 됐다 -- 그래서
+    이름을 옮기던 딕셔너리가 통째로 사라졌다. 그전에는 ZIP 4종(FILE_TOO_LARGE·
+    ARCHIVE_INVALID·PROHIBITED_FILE·GIT_LOG_MISSING)이 전부 SOURCE_UNREACHABLE
+    하나로 뭉개져서 교육생에게 사유를 구분해 안내할 수 없었다.
+
+    DB에 이름이 없는 것은 `JOB_ONLY_FAILURE_CODES` 2종뿐이고("검증했던 소스가 그
+    형태로 더는 없다"는 계열이라 SOURCE_UNREACHABLE이 맞다), fetch.py에 새 코드가
+    늘었는데 DB CHECK에 없는 경우도 같은 값으로 떨어져 DB 밖의 값이 새지 않는다.
+    test_jobs.py의 드리프트 핀 테스트가 그 상황을 CI에서 미리 잡는다.
+    """
+    return code if code in fetch_engine.VERIFICATION_FAILURE_CODES else "SOURCE_UNREACHABLE"
 
 def get_job(job_id: str) -> AnalysisJobStatus | None:
     return _jobs.get(job_id)
@@ -72,6 +90,49 @@ def create_job(body: AnalysisRequest, idempotency_key: str | None) -> AnalysisJo
             _job_id_by_idempotency_key.popitem(last=False)
     return job
 
+def _run_via_analysis_input(body: AnalysisRequest, engine: AnalysisEngine) -> dict[str, Any]:
+    """D2 -- analysisInput 서술자로 검증했던 그 코드를 재fetch해서 분석한다.
+
+    `refetch_pinned()`의 `with` 블록 **안에서** `engine.analyze()`를 부른다 -- 블록을
+    빠져나가면 디렉터리가 지워지므로(D2/§3.3 유지), 엔진이 스캔을 끝내기 전에 지워지면
+    안 된다.
+    """
+    ref = body.analysis_input
+    descriptor = {
+        "method": ref.method,
+        "repository_url": ref.repository_url,
+        "resolved_branch": ref.resolved_branch,
+        "head_commit_sha": ref.head_commit_sha,
+        "download_url": ref.download_url,
+        "storage_uri": ref.storage_uri,
+        "input_hash": ref.input_hash,
+        "git_history": [c.model_dump() for c in ref.git_history] if ref.git_history else None,
+    }
+    request = body.model_dump()
+    # analysisInput 경로에선 최상위 method가 비어 있을 수 있다(조건부 필수 완화) --
+    # 엔진의 `request.get("method") == "GITHUB_URL"` 분기(commit_sha 산정)가 그대로
+    # 동작하도록 실제 값을 채워 넣는다.
+    request["method"] = ref.method
+    with fetch_engine.refetch_pinned(descriptor) as fetched:
+        # D-analysis-b1(2026-08-07): refetch_pinned()의 GITHUB_URL 경로는 이미
+        # _head_commit()+_try_deepen_history()를 호출해서 메시지 포함 완전한
+        # head_commit/git_history를 갖고 있다 -- 별도 재계산 없이 그대로 넘긴다.
+        prefetched_git: dict[str, Any] = {
+            "resolved_branch": fetched.resolved_branch,
+            "head_commit": fetched.head_commit,
+            "git_history": fetched.git_history,
+            "git_history_source": fetched.git_history_source,
+            "history_truncated": fetched.history_truncated,
+        }
+        # 재fetch한 히스토리가 비면(네트워크 flake 등) 최초 /analysis-inputs 때 백엔드가
+        # 에코해준 request.analysis_input.git_history로 폴백한다 -- 같은 pinned sha의
+        # 이미 검증된 데이터라 "틀릴" 수 없고, 재fetch 실패 시 정보 손실만 막는다.
+        if not prefetched_git["git_history"] and ref.git_history:
+            prefetched_git["git_history"] = [c.model_dump() for c in ref.git_history]
+            prefetched_git["git_history_source"] = "BACKEND_SUPPLIED"
+        return engine.analyze(request, None, prefetched_root=fetched.root,
+                               prefetched_git=prefetched_git)
+
 def run_analysis(
     job_id: str, body: AnalysisRequest, engine: AnalysisEngine, zip_bytes: bytes | None,
     *, idempotency_key: str | None = None, trace_id: str | None = None,
@@ -88,14 +149,17 @@ def run_analysis(
     job.started_at = datetime.now(timezone.utc)
 
     try:
-        raw = engine.analyze(body.model_dump(), zip_bytes)
+        if body.analysis_input is not None:
+            raw = _run_via_analysis_input(body, engine)
+        else:
+            raw = engine.analyze(body.model_dump(), zip_bytes)
         # 원장은 결과와 별개다. **검증 실패로 결과를 버려도 태운 토큰은 남긴다** —
         # 그래서 model_validate보다 먼저 떼어낸다.
-        # contextId는 jobId가 아니라 **submissionId**다 — v06 ai_usage.context_type이
-        # 처리 대상 엔터티(SUBMISSION)를 가리키기 때문이다. jobId를 넣으면 Spring이
-        # 비용을 제출에 귀속시킬 수가 없다. 요청에 없으면 그때만 jobId로 물러난다.
-        job.ai_usage = to_ai_usage(raw.pop("ai_usage", []), "SUBMISSION",
-                                   body.submission_id or job_id,
+        # contextType=ANALYSIS_JOB, contextId=jobId다 — 백엔드가 재분석(execution_no가
+        # 다른 두 번째 실행)의 비용을 실행별로 구분하려고 이 조합을 택했다(2026-08-07
+        # 회신, 제안서 D). ⚠️ 옛 SUBMISSION+submissionId는 폐기다 — 같은 제출을 두 번
+        # 분석하면 두 실행의 토큰이 한 덩어리로 합쳐져 어느 쪽이 비쌌는지 안 보였다.
+        job.ai_usage = to_ai_usage(raw.pop("ai_usage", []), "ANALYSIS_JOB", job_id,
                                    idempotency_key=idempotency_key, trace_id=trace_id)
         result = AnalysisResult.model_validate(raw)  # 계약 위반은 여기서 예외
 
@@ -123,16 +187,30 @@ def run_analysis(
                 f"요구사항 판정 {failed_judgements}건이 실패했습니다. "
                 f"문제·질문·힌트는 정상입니다"
             )
+    except fetch_engine.FetchError as exc:
+        # D2 재fetch 실패(analysisInput 경로 전용) -- FetchError가 이미 세부 사유를
+        # 들고 있다(호스트 거부/브랜치 드리프트/inputHash 불일치 등, fetch.py의 11+2종
+        # 어휘 참고). 그 어휘는 analysis_job.failure_code의 DB 11종과 다른 네임스페이스라
+        # 그대로 옮기면 안 된다 -- _translate_failure_code로 매핑한다(위 정의 참고).
+        job.status = "FAILED"
+        job.failure_code = _translate_failure_code(exc.failure_code)
+        job.failure_reason = exc.message
     except Exception as exc:
         # 엔진 터지거나 계약 어기면 job FAILED로. 예외 삼키지 말고 사유 기록
         job.status = "FAILED"
         job.failure_reason = str(exc)
+        # 🔴 잠정(계획 §0.3) -- 엔진 내부 실패를 ANALYSIS_TIMEOUT/UNSUPPORTED_LANGUAGE/...로
+        # 세분화할 신호가 없다(LlmError/StageError는 failure_code를 안 들고 있다, usage만
+        # 있다). MODEL_ERROR를 catch-all로 쓴다 -- 근거 없이 더 구체적인 값을 추측하는
+        # 것보다, "모델/엔진 실패"라는 사실만 정확히 담는 쪽을 택한다. (옛 PROVIDER_ERROR는
+        # ai_usage 네임스페이스 값이라 analysis_job의 DB CHECK 11종엔 없었다 -- 버그였다,
+        # 2026-08-07 수정)
+        job.failure_code = "MODEL_ERROR"
         # 🔴 **실패해도 원장은 남긴다.** 콜은 이미 나갔고 백엔드가 그걸로 비용을
         # 집계한다. AnalysisFailed가 실패 지점까지의 usage를 들고 온다.
         burned = getattr(exc, "ai_usage", None)
         if burned and not job.ai_usage:
-            job.ai_usage = to_ai_usage(burned, "SUBMISSION",
-                                       body.submission_id or job_id,
+            job.ai_usage = to_ai_usage(burned, "ANALYSIS_JOB", job_id,
                                        idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)

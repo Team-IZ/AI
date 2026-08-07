@@ -213,6 +213,24 @@ def test_ai_usage_is_empty_for_rule_based_analysis():
     assert body["aiUsage"] == []
 
 
+def test_git_history_fields_reach_the_response_json():
+    """D-analysis-b1(2026-08-07) -- resolvedBranch/headCommit/gitHistory/gitHistorySource/
+
+    historyTruncated가 camelCase로 응답에 실제로 나오는지(엔진이 값을 안 채워도 스키마
+    기본값으로 나와야지 키 자체가 빠지면 안 된다 -- 백엔드가 이 필드에 배선했던 지점이다).
+    """
+    job_id = _create_job()
+
+    body = client.get(f"/api/v0/analyses/{job_id}", headers=HEADERS).json()
+    result = body["result"]
+
+    for key in ("resolvedBranch", "headCommit", "gitHistory", "gitHistorySource", "historyTruncated"):
+        assert key in result
+    assert result["gitHistory"] == []
+    assert result["gitHistorySource"] == "NONE"
+    assert result["historyTruncated"] is False
+
+
 def test_unknown_job_id_returns_404():
     """모르는 jobId → 404 JOB_NOT_FOUND. 재시도해도 소용없으니 retryable=false."""
     response = client.get("/api/v0/analyses/does-not-exist", headers=HEADERS)
@@ -322,6 +340,112 @@ def test_teach_id_is_echoed_on_problems():
 
     assert [p["teachId"] for p in problems] == ["tch-1", "tch-2", None]
     # teach 앵커가 없는 문제는 화면에 "일반 문제"로 표기된다. 둘은 짝이다.
+
+def test_accepts_analysis_input_without_zip_bytes(monkeypatch, tmp_path):
+    """analysisInput이 있으면 이 요청 자체엔 ZIP이 없어도 된다(재fetch로 새로 받으므로) --
+
+    method=ZIP_WITH_GITLOG의 '멀티파트로 ZIP을 보내라' 가드는 이 경로에서 스킵돼야 한다
+    (M3, `app/api/analyses.py`의 `body.analysis_input is None` 분기).
+    """
+    from contextlib import contextmanager
+
+    from app.engines.analysis import fetch as fetch_engine
+
+    fake_root = tmp_path / "refetched"
+    fake_root.mkdir()
+    (fake_root / "main.py").write_text("print('hi')")
+
+    @contextmanager
+    def fake_refetch(descriptor):
+        yield fetch_engine.FetchedInput(
+            root=str(fake_root), method="ZIP_WITH_GITLOG", resolved_branch=None,
+            head_commit=None, input_hash="0" * 64, file_count=1, byte_count=10,
+        )
+
+    monkeypatch.setattr(fetch_engine, "refetch_pinned", fake_refetch)
+
+    payload = {
+        "method": "ZIP_WITH_GITLOG",
+        "extractionScope": "TOTAL",
+        "analysisInput": {
+            "analysisInputId": "22222222-2222-2222-2222-222222222222",
+            "method": "ZIP_WITH_GITLOG",
+            "downloadUrl": "https://example.com/submission.zip",
+            "inputHash": "0" * 64,
+        },
+    }
+    response = client.post("/api/v0/analyses", json=payload, headers=HEADERS)
+
+    assert response.status_code == 202  # zip_bytes 가드에 안 걸림
+    body = client.get(f"/api/v0/analyses/{response.json()['jobId']}", headers=HEADERS).json()
+    assert body["status"] == "SUCCEEDED"
+
+
+def test_requires_either_method_or_analysis_input():
+    """method도 analysisInput도 없으면 어디서 fetch할지 알 수 없다 -- 명시적으로 거부한다."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.analysis import AnalysisRequest
+
+    with pytest.raises(ValidationError):
+        AnalysisRequest.model_validate({"extractionScope": "TOTAL"})
+
+
+def test_analysis_input_github_url_requires_head_commit_sha():
+    """D2 재fetch는 브랜치가 아니라 정확한 sha로 고정한다 -- sha가 없으면 애초에 못 한다."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.analysis import AnalysisRequest
+
+    with pytest.raises(ValidationError):
+        AnalysisRequest.model_validate({
+            "extractionScope": "TOTAL",
+            "analysisInput": {
+                "analysisInputId": "id-1", "method": "GITHUB_URL",
+                "repositoryUrl": "https://github.com/owner/repo",
+                "inputHash": "0" * 64,
+            },
+        })
+
+
+def test_analysis_input_makes_top_level_method_optional():
+    """analysisInput이 있으면 method/source 없이도 통과해야 한다(상호배타)."""
+    from app.schemas.analysis import AnalysisRequest
+
+    body = AnalysisRequest.model_validate({
+        "extractionScope": "TOTAL",
+        "analysisInput": {
+            "analysisInputId": "id-1", "method": "GITHUB_URL",
+            "repositoryUrl": "https://github.com/owner/repo",
+            "headCommitSha": "a" * 40, "inputHash": "0" * 64,
+        },
+    })
+    assert body.method is None
+    assert body.analysis_input.method == "GITHUB_URL"
+
+
+def test_job_status_failure_code_must_match_failed_status():
+    """AiUsage._check_db_constraints와 같은 패턴 -- FAILED와 failureCode는 항상 같이 다닌다."""
+    import pytest
+    from pydantic import ValidationError
+
+    from app.schemas.analysis import AnalysisJobStatus
+
+    with pytest.raises(ValidationError):  # FAILED인데 코드가 없다
+        AnalysisJobStatus.model_validate({"jobId": "j-1", "status": "FAILED"})
+
+    with pytest.raises(ValidationError):  # FAILED가 아닌데 코드가 있다
+        AnalysisJobStatus.model_validate({
+            "jobId": "j-1", "status": "SUCCEEDED", "failureCode": "MODEL_ERROR",
+        })
+
+    ok = AnalysisJobStatus.model_validate({
+        "jobId": "j-1", "status": "FAILED", "failureCode": "BRANCH_NOT_FOUND",
+    })
+    assert ok.failure_code == "BRANCH_NOT_FOUND"
+
 
 def test_requirement_result_count_mismatch_fails_job():
     """판정이 빠진 채 SUCCEEDED가 되면 미판정 요구사항이 통과로 기록된다."""

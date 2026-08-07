@@ -45,10 +45,21 @@ def test_cached_cannot_exceed_input():
 def test_context_type_is_a_closed_set():
     """2026-08-03 확정(§T11 D-1). 자유 문자열이면 Spring이 원장을 못 묶는다."""
     assert set(AiUsage.model_json_schema()["properties"]["contextType"]["enum"]) == {
-        "SUBMISSION", "ASSESSMENT_SESSION", "REPORT_SNAPSHOT", "CURRICULUM_ANALYSIS"
+        "ANALYSIS_JOB", "ASSESSMENT_SESSION", "REPORT_SNAPSHOT", "CURRICULUM_ANALYSIS",
+        "INTERVIEW_BRIEF",
     }
     with pytest.raises(ValidationError):
         AiUsage.model_validate({**BASE, "contextType": "SESSION_ANSWER"})
+
+
+def test_context_id_may_be_null_for_the_interview_brief():
+    """DB에서 ai_usage.context_id만 NULL 허용이다 -- AI가 brief_id를 받은 적이 없어
+    면담 브리프는 채울 값이 아예 없다. 가짜 값을 넣는 것보다 null이 정직하다."""
+    row = AiUsage.model_validate({
+        **BASE, "featureCode": "INTERVIEW_BRIEF_GENERATION",
+        "contextType": "INTERVIEW_BRIEF", "contextId": None,
+    })
+    assert row.context_id is None
 
 
 def test_no_cost_fields():

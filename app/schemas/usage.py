@@ -43,24 +43,31 @@ FeatureCode = Literal[
     "ANSWER_EVALUATION",    # 답변 채점 (세션 중 유일한 호출)
     "CURRICULUM_ANALYSIS",  # 교안 분석
     "REPORT_GENERATION",    # 보고서 서술 (v08, 옛 SUMMARY_DRAFT)
+    "INTERVIEW_BRIEF_GENERATION",  # 면담 브리프 (2026-08-07)
 ]
 
 # 어느 **업무 엔터티**를 처리한 호출인가. featureCode보다 굵은 단위다 — 한 ContextType
-# 안에서 featureCode가 여럿 나온다(SUBMISSION 하나에 CODE_ANALYSIS + CODE_SESSION).
+# 안에서 featureCode가 여럿 나온다(ANALYSIS_JOB 하나에 CODE_ANALYSIS + CODE_SESSION).
 #
-# 🔴 옛 값 4개(`ANALYSIS`·`GRADING`·`REPORT`·`CURRICULUM`)는 **전부 v06 CHECK 밖이었다**
-# (2026-08-04 대조). 그대로 두면 네 API의 원장 행이 하나도 안 들어간다. 아래는 v06
-# CHECK 8종 중 AI가 쓰는 4개다 — 값은 테이블 이름이지 기능 이름이 아니다.
+# 🔴 옛 값 4개(`ANALYSIS`·`GRADING`·`REPORT`·`CURRICULUM`)는 **전부 CHECK 밖이었다**
+# (2026-08-04 대조). 그대로 두면 네 API의 원장 행이 하나도 안 들어간다. 아래는 실제
+# CHECK 12종 중 AI가 쓰는 값이다 — 값은 테이블 이름이지 기능 이름이 아니다.
+#
+# 🔴 `SUBMISSION`은 폐기다(2026-08-07 백엔드 회신, 제안서 D). /analyses는 이제
+# `ANALYSIS_JOB` + jobId를 쓴다 — 같은 제출을 재분석하면 실행별 비용이 구분돼야 한다.
+# 안 쓰는 값을 남겨두면 누군가 다시 쓰므로 아예 뺀다.
 #
 # ⚠️ **contextId의 주인이 둘로 갈린다.**
-#   SUBMISSION·ASSESSMENT_SESSION — AI가 요청에서 받은 실제 PK를 넣는다. 그대로 쓰면 된다.
+#   ANALYSIS_JOB·ASSESSMENT_SESSION — AI가 아는 값(자기 jobId / 요청의 sessionId)이라
+#     그대로 쓰면 된다.
 #   REPORT_SNAPSHOT·CURRICULUM_ANALYSIS — **AI는 그 PK를 받은 적이 없다.** 지금은 AI
 #     내부 jobId가 들어간다. 저장할 때 Spring이 자기가 아는 PK로 교체해야 한다.
 ContextType = Literal[
-    "SUBMISSION",           # POST /analyses               contextId = submissionId ✅
+    "ANALYSIS_JOB",         # POST /analyses               contextId = jobId ✅
     "ASSESSMENT_SESSION",   # POST /sessions/{id}/answers  contextId = sessionId ✅
     "REPORT_SNAPSHOT",      # POST /reports                contextId = 보고서 jobId ⚠️ Spring이 교체
     "CURRICULUM_ANALYSIS",  # POST /curricula              contextId = 교안 jobId ⚠️ Spring이 교체
+    "INTERVIEW_BRIEF",      # POST /interview-brief:generate  contextId = null ⚠️ AI가 brief_id를 모른다
 ]
 
 # 옛 이름. 다른 모듈이 아직 import할 수 있어 남겨둔다.
@@ -89,11 +96,14 @@ class AiUsage(BaseSchema):
 
     # 어느 작업에 딸린 호출인가. 다형 참조라 FK가 없다.
     context_type: ContextType
-    context_id: str = Field(
-        description="처리한 업무 엔터티의 PK. SUBMISSION이면 submissionId, "
+    context_id: str | None = Field(
+        default=None,
+        description="처리한 업무 엔터티의 PK. ANALYSIS_JOB이면 jobId, "
                     "ASSESSMENT_SESSION이면 sessionId. ⚠️ REPORT_SNAPSHOT· "
                     "CURRICULUM_ANALYSIS는 AI가 그 PK를 몰라 jobId가 들어간다 — "
-                    "Spring이 저장 시점에 실제 PK로 교체해야 한다",
+                    "Spring이 저장 시점에 실제 PK로 교체해야 한다. "
+                    "INTERVIEW_BRIEF는 대신할 값조차 없어 null이다(DB도 이 컬럼만 "
+                    "NULL 허용) — 채우려면 요청에 briefId가 필요하다",
     )
     request_id: str
     trace_id: str = Field(description="요청 헤더 X-Trace-Id를 그대로 잇는다")

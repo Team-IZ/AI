@@ -148,12 +148,20 @@
                     "title": "Submissionid"
                   },
                   "method": {
-                    "enum": [
-                      "GITHUB_URL",
-                      "ZIP_WITH_GITLOG"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "GITHUB_URL",
+                          "ZIP_WITH_GITLOG"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ],
-                    "title": "Method",
-                    "type": "string"
+                    "description": "analysisInput이 있으면 생략한다(그 안의 method를 쓴다)",
+                    "title": "Method"
                   },
                   "source": {
                     "properties": {
@@ -184,6 +192,200 @@
                     },
                     "title": "AnalysisSource",
                     "type": "object"
+                  },
+                  "analysisInput": {
+                    "anyOf": [
+                      {
+                        "description": "`POST /analysis`가 D2 재fetch에 쓰는 서술자 -- `AnalysisInputResponse`를 백엔드가\n\n그대로 되돌려 보내는 모양이다(§0.1, 이 서비스는 analysisInputId를 캐싱하지 않아\n재fetch에 필요한 값을 매번 다시 받아야 한다). `fetch.refetch_pinned()`가 그대로\n소비한다.",
+                        "properties": {
+                          "analysisInputId": {
+                            "description": "에코용 -- 재fetch 자체에는 안 쓴다",
+                            "title": "Analysisinputid",
+                            "type": "string"
+                          },
+                          "method": {
+                            "enum": [
+                              "GITHUB_URL",
+                              "ZIP_WITH_GITLOG"
+                            ],
+                            "title": "Method",
+                            "type": "string"
+                          },
+                          "repositoryUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Repositoryurl"
+                          },
+                          "resolvedBranch": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Resolvedbranch"
+                          },
+                          "headCommitSha": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "method=GITHUB_URL이면 필수 -- 이 sha로 정확히 고정 재fetch한다",
+                            "title": "Headcommitsha"
+                          },
+                          "downloadUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Downloadurl"
+                          },
+                          "storageUri": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Storageuri"
+                          },
+                          "inputHash": {
+                            "description": "재fetch 후 이 값과 다르면 하드 실패(FetchError INPUT_HASH_MISMATCH) -- 검증했던 것과 다른 코드를 분석하면 안 된다",
+                            "title": "Inputhash",
+                            "type": "string"
+                          },
+                          "gitHistory": {
+                            "anyOf": [
+                              {
+                                "items": {
+                                  "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고.",
+                                  "properties": {
+                                    "sha": {
+                                      "title": "Sha",
+                                      "type": "string"
+                                    },
+                                    "authorName": {
+                                      "title": "Authorname",
+                                      "type": "string"
+                                    },
+                                    "authorEmail": {
+                                      "title": "Authoremail",
+                                      "type": "string"
+                                    },
+                                    "committedAt": {
+                                      "format": "date-time",
+                                      "title": "Committedat",
+                                      "type": "string"
+                                    },
+                                    "changedFiles": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "title": "Changedfiles",
+                                      "type": "array"
+                                    },
+                                    "additions": {
+                                      "default": 0,
+                                      "title": "Additions",
+                                      "type": "integer"
+                                    },
+                                    "deletions": {
+                                      "default": 0,
+                                      "title": "Deletions",
+                                      "type": "integer"
+                                    },
+                                    "parentSha": {
+                                      "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)",
+                                      "title": "Parentsha",
+                                      "type": "string"
+                                    },
+                                    "authoredAt": {
+                                      "description": "author date. committedAt(커밋 date)과 다른 값",
+                                      "format": "date-time",
+                                      "title": "Authoredat",
+                                      "type": "string"
+                                    },
+                                    "branchName": {
+                                      "description": "이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 소속은 아니다. 미상이면 빈 문자열",
+                                      "title": "Branchname",
+                                      "type": "string"
+                                    },
+                                    "isMergeCommit": {
+                                      "description": "부모가 2개 이상인지(기계적 판정, %P 부모 개수)",
+                                      "title": "Ismergecommit",
+                                      "type": "boolean"
+                                    },
+                                    "isRevertCommit": {
+                                      "description": "커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다",
+                                      "title": "Isrevertcommit",
+                                      "type": "boolean"
+                                    },
+                                    "isBotCommit": {
+                                      "description": "GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` 또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- 그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다",
+                                      "title": "Isbotcommit",
+                                      "type": "boolean"
+                                    },
+                                    "changedLineCount": {
+                                      "default": 0,
+                                      "title": "Changedlinecount",
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "sha",
+                                    "authorName",
+                                    "authorEmail",
+                                    "committedAt",
+                                    "parentSha",
+                                    "authoredAt",
+                                    "branchName",
+                                    "isMergeCommit",
+                                    "isRevertCommit",
+                                    "isBotCommit"
+                                  ],
+                                  "title": "GitCommit",
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Githistory"
+                          }
+                        },
+                        "required": [
+                          "analysisInputId",
+                          "method",
+                          "inputHash"
+                        ],
+                        "title": "AnalysisInputRef",
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "§제안 API ①②연결(2026-08-06) -- /analysis-inputs 응답을 그대로 되돌려 보내면 이걸로 재fetch한다(D2). method/source와 상호배타 -- 있으면 그 둘은 무시한다(멀티파트 ZIP 업로드 대신 이 경로를 쓴다는 뜻)"
                   },
                   "extractionScope": {
                     "default": "TOTAL",
@@ -281,9 +483,6 @@
                     "title": "Providermodelcode"
                   }
                 },
-                "required": [
-                  "method"
-                ],
                 "title": "AnalysisRequest",
                 "type": "object"
               },
@@ -337,12 +536,20 @@
                           "title": "Submissionid"
                         },
                         "method": {
-                          "enum": [
-                            "GITHUB_URL",
-                            "ZIP_WITH_GITLOG"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "GITHUB_URL",
+                                "ZIP_WITH_GITLOG"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
                           ],
-                          "title": "Method",
-                          "type": "string"
+                          "description": "analysisInput이 있으면 생략한다(그 안의 method를 쓴다)",
+                          "title": "Method"
                         },
                         "source": {
                           "properties": {
@@ -373,6 +580,200 @@
                           },
                           "title": "AnalysisSource",
                           "type": "object"
+                        },
+                        "analysisInput": {
+                          "anyOf": [
+                            {
+                              "description": "`POST /analysis`가 D2 재fetch에 쓰는 서술자 -- `AnalysisInputResponse`를 백엔드가\n\n그대로 되돌려 보내는 모양이다(§0.1, 이 서비스는 analysisInputId를 캐싱하지 않아\n재fetch에 필요한 값을 매번 다시 받아야 한다). `fetch.refetch_pinned()`가 그대로\n소비한다.",
+                              "properties": {
+                                "analysisInputId": {
+                                  "description": "에코용 -- 재fetch 자체에는 안 쓴다",
+                                  "title": "Analysisinputid",
+                                  "type": "string"
+                                },
+                                "method": {
+                                  "enum": [
+                                    "GITHUB_URL",
+                                    "ZIP_WITH_GITLOG"
+                                  ],
+                                  "title": "Method",
+                                  "type": "string"
+                                },
+                                "repositoryUrl": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Repositoryurl"
+                                },
+                                "resolvedBranch": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Resolvedbranch"
+                                },
+                                "headCommitSha": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "method=GITHUB_URL이면 필수 -- 이 sha로 정확히 고정 재fetch한다",
+                                  "title": "Headcommitsha"
+                                },
+                                "downloadUrl": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Downloadurl"
+                                },
+                                "storageUri": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Storageuri"
+                                },
+                                "inputHash": {
+                                  "description": "재fetch 후 이 값과 다르면 하드 실패(FetchError INPUT_HASH_MISMATCH) -- 검증했던 것과 다른 코드를 분석하면 안 된다",
+                                  "title": "Inputhash",
+                                  "type": "string"
+                                },
+                                "gitHistory": {
+                                  "anyOf": [
+                                    {
+                                      "items": {
+                                        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고.",
+                                        "properties": {
+                                          "sha": {
+                                            "title": "Sha",
+                                            "type": "string"
+                                          },
+                                          "authorName": {
+                                            "title": "Authorname",
+                                            "type": "string"
+                                          },
+                                          "authorEmail": {
+                                            "title": "Authoremail",
+                                            "type": "string"
+                                          },
+                                          "committedAt": {
+                                            "format": "date-time",
+                                            "title": "Committedat",
+                                            "type": "string"
+                                          },
+                                          "changedFiles": {
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "title": "Changedfiles",
+                                            "type": "array"
+                                          },
+                                          "additions": {
+                                            "default": 0,
+                                            "title": "Additions",
+                                            "type": "integer"
+                                          },
+                                          "deletions": {
+                                            "default": 0,
+                                            "title": "Deletions",
+                                            "type": "integer"
+                                          },
+                                          "parentSha": {
+                                            "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)",
+                                            "title": "Parentsha",
+                                            "type": "string"
+                                          },
+                                          "authoredAt": {
+                                            "description": "author date. committedAt(커밋 date)과 다른 값",
+                                            "format": "date-time",
+                                            "title": "Authoredat",
+                                            "type": "string"
+                                          },
+                                          "branchName": {
+                                            "description": "이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 소속은 아니다. 미상이면 빈 문자열",
+                                            "title": "Branchname",
+                                            "type": "string"
+                                          },
+                                          "isMergeCommit": {
+                                            "description": "부모가 2개 이상인지(기계적 판정, %P 부모 개수)",
+                                            "title": "Ismergecommit",
+                                            "type": "boolean"
+                                          },
+                                          "isRevertCommit": {
+                                            "description": "커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다",
+                                            "title": "Isrevertcommit",
+                                            "type": "boolean"
+                                          },
+                                          "isBotCommit": {
+                                            "description": "GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` 또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- 그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다",
+                                            "title": "Isbotcommit",
+                                            "type": "boolean"
+                                          },
+                                          "changedLineCount": {
+                                            "default": 0,
+                                            "title": "Changedlinecount",
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "sha",
+                                          "authorName",
+                                          "authorEmail",
+                                          "committedAt",
+                                          "parentSha",
+                                          "authoredAt",
+                                          "branchName",
+                                          "isMergeCommit",
+                                          "isRevertCommit",
+                                          "isBotCommit"
+                                        ],
+                                        "title": "GitCommit",
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Githistory"
+                                }
+                              },
+                              "required": [
+                                "analysisInputId",
+                                "method",
+                                "inputHash"
+                              ],
+                              "title": "AnalysisInputRef",
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "§제안 API ①②연결(2026-08-06) -- /analysis-inputs 응답을 그대로 되돌려 보내면 이걸로 재fetch한다(D2). method/source와 상호배타 -- 있으면 그 둘은 무시한다(멀티파트 ZIP 업로드 대신 이 경로를 쓴다는 뜻)"
                         },
                         "extractionScope": {
                           "default": "TOTAL",
@@ -470,9 +871,6 @@
                           "title": "Providermodelcode"
                         }
                       },
-                      "required": [
-                        "method"
-                      ],
                       "title": "AnalysisRequest",
                       "type": "object"
                     },
@@ -1062,6 +1460,158 @@
           }
         }
       }
+    },
+    "/api/v0/analysis-inputs": {
+      "post": {
+        "tags": [
+          "analysis-inputs"
+        ],
+        "summary": "분석 입력 확정 -- 검증+fetch (백엔드 제안 신설 API, §제안 API ①)",
+        "description": "저장소를 검증하고 fetch해 분석 입력을 확정한다. 동기 200 -- 202+폴링이 아니다.\n\nLLM 호출이 없어(fetch만) 지연이 짧고, 폴링을 도입하면 App Runner 멀티인스턴스에서\n또 깨지는 인메모리 job store가 하나 더 생긴다(D2가 피하려는 것과 같은 클래스의 문제).\n\n🔴 `async def`이지만 `sessions.py`의 \"블로킹 호출은 `def`로\" 원칙과 어긋나지 않는다 --\n실제 블로킹 작업(`_do_fetch`, git subprocess)은 `asyncio.to_thread`로 스레드에\n돌리고, 이 함수 자체는 그 결과를 기다리는 것 말고 하는 일이 없다. `async def`인\n이유는 오직 하나: 이 엔드포인트만 실패 응답 모양이 달라서(`AnalysisInputError`\n{failureCode,message,requestId} vs 공용 {error,message,retryable}) 자동 바인딩\n대신 직접 파싱해야 하고, 직접 파싱(`request.json()`)이 코루틴이라서다.",
+        "operationId": "create_analysis_input_api_v0_analysis_inputs_post",
+        "parameters": [
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisInputResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "검증/fetch 실패",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisInputFailure"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v0/interview-brief:generate": {
+      "post": {
+        "tags": [
+          "interview-brief"
+        ],
+        "summary": "면담 브리프 생성 (여는 말 + 질문 체크리스트)",
+        "description": "여는 말 + 질문 체크리스트를 한 번의 LLM 호출로 만들어 즉시 반환한다.\n\njob/폴링 없음 -- 이 응답이 곧 결과다. 부분 성공 없음(§5.2): 검증에 하나라도\n걸리면 503 + failureCode로 전체 실패를 알린다.",
+        "operationId": "generate_interview_brief_api_v0_interview_brief_generate_post",
+        "parameters": [
+          {
+            "name": "idempotency-key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "재시도 시 동일 값 재사용 -- 같으면 재계산 없이 그대로 반환. ai_usage.idempotency_key의 요청 단위 키이기도 하다",
+              "title": "Idempotency-Key"
+            },
+            "description": "재시도 시 동일 값 재사용 -- 같으면 재계산 없이 그대로 반환. ai_usage.idempotency_key의 요청 단위 키이기도 하다"
+          },
+          {
+            "name": "x-trace-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "분산 추적 ID",
+              "title": "X-Trace-Id"
+            },
+            "description": "분산 추적 ID"
+          },
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InterviewBriefRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InterviewBriefResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "같은 idempotency-key로 다른 본문이 왔다. 재시도해도 같다",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "생성 실패. failureCode/message로 사유를 알려준다"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1075,7 +1625,8 @@
               "CODE_SESSION",
               "ANSWER_EVALUATION",
               "CURRICULUM_ANALYSIS",
-              "REPORT_GENERATION"
+              "REPORT_GENERATION",
+              "INTERVIEW_BRIEF_GENERATION"
             ],
             "title": "Featurecode"
           },
@@ -1087,17 +1638,25 @@
           "contextType": {
             "type": "string",
             "enum": [
-              "SUBMISSION",
+              "ANALYSIS_JOB",
               "ASSESSMENT_SESSION",
               "REPORT_SNAPSHOT",
-              "CURRICULUM_ANALYSIS"
+              "CURRICULUM_ANALYSIS",
+              "INTERVIEW_BRIEF"
             ],
             "title": "Contexttype"
           },
           "contextId": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Contextid",
-            "description": "처리한 업무 엔터티의 PK. SUBMISSION이면 submissionId, ASSESSMENT_SESSION이면 sessionId. ⚠️ REPORT_SNAPSHOT· CURRICULUM_ANALYSIS는 AI가 그 PK를 몰라 jobId가 들어간다 — Spring이 저장 시점에 실제 PK로 교체해야 한다"
+            "description": "처리한 업무 엔터티의 PK. ANALYSIS_JOB이면 jobId, ASSESSMENT_SESSION이면 sessionId. ⚠️ REPORT_SNAPSHOT· CURRICULUM_ANALYSIS는 AI가 그 PK를 몰라 jobId가 들어간다 — Spring이 저장 시점에 실제 PK로 교체해야 한다. INTERVIEW_BRIEF는 대신할 값조차 없어 null이다(DB도 이 컬럼만 NULL 허용) — 채우려면 요청에 briefId가 필요하다"
           },
           "requestId": {
             "type": "string",
@@ -1172,7 +1731,6 @@
           "featureCode",
           "modelCode",
           "contextType",
-          "contextId",
           "requestId",
           "traceId",
           "idempotencyKey",
@@ -1247,6 +1805,127 @@
         "title": "AnalysisDocument",
         "description": "코드 분석 문서. Markdown이 아니라 구조화 JSON이 원본이다.\n\n문제 선정(p04-3)과 보고서(p04-6)가 이 JSON을 그대로 프롬프트에 다시 넣는다.\nMarkdown으로 저장하면 넣을 때 JSON→MD, 꺼낼 때 MD→JSON으로 두 번 변환해야 하고\n두 번째는 파싱이라 깨진다. 사람이 읽는 화면은 이걸 렌더한 결과다."
       },
+      "AnalysisInputFailure": {
+        "properties": {
+          "failureCode": {
+            "type": "string",
+            "title": "Failurecode"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requestid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "failureCode",
+          "message"
+        ],
+        "title": "AnalysisInputFailure",
+        "description": "POST /analysis-inputs 422 응답. 공용 ErrorResponse({error,message,retryable})와\n\n다른 별도 모양이다 -- 백엔드 프로포절이 {failureCode,message,requestId}를 명시했고,\nfailureCode 11종은 백엔드 DB CHECK 제약의 문자열 그대로여야 한다."
+      },
+      "AnalysisInputResponse": {
+        "properties": {
+          "analysisInputId": {
+            "type": "string",
+            "title": "Analysisinputid",
+            "description": "D2 -- 서버가 상태 없이 결정론적으로 만든 값(같은 입력이면 항상 같은 id). POST /analysis 요청 시 이 값과 함께 아래 필드들을 그대로 다시 실어 보내야 한다(재fetch에 필요 -- §0.1, 이 서비스는 캐싱하지 않는다)"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GITHUB_URL",
+              "ZIP_WITH_GITLOG"
+            ],
+            "title": "Method"
+          },
+          "resolvedBranch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedbranch"
+          },
+          "headCommit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadCommit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gitHistory": {
+            "items": {
+              "$ref": "#/components/schemas/GitCommit"
+            },
+            "type": "array",
+            "title": "Githistory"
+          },
+          "gitHistorySource": {
+            "type": "string",
+            "enum": [
+              "BACKEND_SUPPLIED",
+              "EMBEDDED_GIT",
+              "REMOTE_DEEPEN",
+              "NONE"
+            ],
+            "title": "Githistorysource",
+            "default": "NONE"
+          },
+          "historyTruncated": {
+            "type": "boolean",
+            "title": "Historytruncated",
+            "description": "벽시계 시간 예산 안에서 히스토리를 다 못 걷었는지(D1). true여도 요청은 실패하지 않는다 -- 코드 fetch 자체는 이 값과 무관하게 항상 완료된다",
+            "default": false
+          },
+          "fileCount": {
+            "type": "integer",
+            "title": "Filecount"
+          },
+          "byteCount": {
+            "type": "integer",
+            "title": "Bytecount"
+          },
+          "inputHash": {
+            "type": "string",
+            "title": "Inputhash",
+            "description": "sha256 hex 64자. .git/** 제외 전 파일 기준(기존 snapshotMeta.contentHash와 다른 정의 -- 그건 vendor 스캐너 변경마다 흔들려서 재fetch 무결성 검증에 못 쓴다). 같은 트리면 ZIP으로 받든 클론으로 받든 동일하다"
+          },
+          "capturedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Capturedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "analysisInputId",
+          "method",
+          "fileCount",
+          "byteCount",
+          "inputHash",
+          "capturedAt"
+        ],
+        "title": "AnalysisInputResponse",
+        "description": "POST /analysis-inputs 200 응답 "
+      },
       "AnalysisJobStatus": {
         "properties": {
           "jobId": {
@@ -1299,6 +1978,35 @@
             ],
             "title": "Failurereason",
             "description": "FAILED일 때만 채워진다"
+          },
+          "failureCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "SOURCE_UNREACHABLE",
+                  "UNSUPPORTED_LANGUAGE",
+                  "ANALYSIS_TIMEOUT",
+                  "MODEL_ERROR",
+                  "TEMPORARY_ERROR",
+                  "INVALID_REPOSITORY_URL",
+                  "REPO_NOT_FOUND",
+                  "REPOSITORY_ACCESS_DENIED",
+                  "BRANCH_NOT_FOUND",
+                  "UNSUPPORTED_HOST",
+                  "FILE_TOO_LARGE",
+                  "ARCHIVE_INVALID",
+                  "EMPTY_CODE",
+                  "PROHIBITED_FILE",
+                  "GIT_LOG_MISSING"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failurecode",
+            "description": "analysis_job.failure_code의 DB CHECK 15종. FAILED일 때만 채워진다"
           },
           "startedAt": {
             "anyOf": [
@@ -1426,6 +2134,50 @@
             "type": "integer",
             "title": "Questioncountplanned",
             "description": "계획된 질문 수. 유효 문제가 적으면 축소된다"
+          },
+          "resolvedBranch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedbranch"
+          },
+          "headCommit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadCommit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gitHistory": {
+            "items": {
+              "$ref": "#/components/schemas/GitCommit"
+            },
+            "type": "array",
+            "title": "Githistory"
+          },
+          "gitHistorySource": {
+            "type": "string",
+            "enum": [
+              "BACKEND_SUPPLIED",
+              "EMBEDDED_GIT",
+              "REMOTE_DEEPEN",
+              "NONE"
+            ],
+            "title": "Githistorysource",
+            "default": "NONE"
+          },
+          "historyTruncated": {
+            "type": "boolean",
+            "title": "Historytruncated",
+            "default": false
           }
         },
         "type": "object",
@@ -1643,6 +2395,30 @@
         ],
         "title": "Body_create_curriculum_api_v0_curricula_post"
       },
+      "BriefContext": {
+        "properties": {
+          "briefType": {
+            "type": "string",
+            "enum": [
+              "STANDARD",
+              "INVALID_ATTEMPT"
+            ],
+            "title": "Brieftype"
+          },
+          "isFirstInterview": {
+            "type": "boolean",
+            "title": "Isfirstinterview",
+            "description": "true면 라포 형성용 도입 질문을 반드시 1개 이상 포함해야 한다 (§6.2). priorInterviews/observationNotes가 비어 있다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "briefType",
+          "isFirstInterview"
+        ],
+        "title": "BriefContext",
+        "description": "여는 말 톤과 질문 수를 가르는 스위치. §4.1 ②."
+      },
       "CodeContext": {
         "properties": {
           "path": {
@@ -1666,6 +2442,321 @@
         ],
         "title": "CodeContext",
         "description": "질문이 가르키는 코드 발췌 "
+      },
+      "Comprehension": {
+        "properties": {
+          "attemptType": {
+            "type": "string",
+            "enum": [
+              "INITIAL",
+              "RETRY",
+              "REVIEW"
+            ],
+            "title": "Attempttype"
+          },
+          "attemptStatus": {
+            "type": "string",
+            "enum": [
+              "NOT_STARTED",
+              "SUBMITTED",
+              "ANALYZING",
+              "SESSION_READY",
+              "SESSION_IN_PROGRESS",
+              "COMPLETED",
+              "FAILED",
+              "EXPIRED"
+            ],
+            "title": "Attemptstatus"
+          },
+          "terminalReasonCode": {
+            "type": "string",
+            "enum": [
+              "COMPLETED",
+              "NOT_SUBMITTED",
+              "ANALYSIS_FAILED",
+              "INSUFFICIENT_PROBLEM_EVIDENCE",
+              "INSUFFICIENT_OWN_COMMIT_EVIDENCE",
+              "NOT_ATTENDED",
+              "SESSION_INCOMPLETE",
+              "REVIEW_NOT_COMPLETED",
+              "INVALID"
+            ],
+            "title": "Terminalreasoncode",
+            "description": "NOT_ATTENDED면 이해도 질문 자체를 만들 수 없다 -- 미응시 사유를 묻는 질문으로 전환해야 한다(engine이 problems 공백과 함께 감지)"
+          },
+          "sessionEndReasonCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "ALL_PROBLEMS_TERMINAL",
+                  "ALL_REVIEW_TARGETS_TERMINAL",
+                  "COMPLETED_L4",
+                  "TERMINATED_AT_L1",
+                  "TERMINATED_AT_L2",
+                  "TERMINATED_AT_L3",
+                  "TERMINATED_AT_L4",
+                  "POLICY_TIME_LIMIT_EXCEEDED",
+                  "ASSESSMENT_WINDOW_EXPIRED",
+                  "REVIEW_DUE_AT_EXPIRED",
+                  "DATA_INTEGRITY_INVALID",
+                  "ADMIN_INVALIDATED",
+                  "TECHNICAL_FAILURE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessionendreasoncode",
+            "description": "세션이 실제로 열리지 않았으면(NOT_ATTENDED 등) 없다"
+          },
+          "attemptInterviewSourceId": {
+            "type": "string",
+            "title": "Attemptinterviewsourceid",
+            "description": "★ 이 시도 전체(예: 미응시 사실 자체)를 근거로 질문을 만들면 이 값을 그대로 실어야 한다"
+          },
+          "sessionInterviewSourceId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessioninterviewsourceid",
+            "description": "★ sessionEndReasonCode를 근거로 질문을 만들면 이 값을 그대로 실어야 한다. 세션이 열리지 않았으면(NOT_ATTENDED 등) 없다"
+          },
+          "problems": {
+            "items": {
+              "$ref": "#/components/schemas/ProblemComprehension"
+            },
+            "type": "array",
+            "title": "Problems",
+            "description": "미응시(terminalReasonCode='NOT_ATTENDED')면 빈 배열"
+          }
+        },
+        "type": "object",
+        "required": [
+          "attemptType",
+          "attemptStatus",
+          "terminalReasonCode",
+          "attemptInterviewSourceId"
+        ],
+        "title": "Comprehension",
+        "description": "코드 이해도 검증 결과. 질문의 1차 재료. §4.1 ⑤."
+      },
+      "ComprehensionCodeContext": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "lineStart": {
+            "type": "integer",
+            "title": "Linestart"
+          },
+          "lineEnd": {
+            "type": "integer",
+            "title": "Lineend"
+          }
+        },
+        "type": "object",
+        "required": [
+          "language",
+          "path",
+          "lineStart",
+          "lineEnd"
+        ],
+        "title": "ComprehensionCodeContext",
+        "description": "문제 근거 코드의 위치만. **원문은 전달하지 않는다**(§4.1 명시)."
+      },
+      "ComprehensionStage": {
+        "properties": {
+          "problemStageId": {
+            "type": "string",
+            "title": "Problemstageid"
+          },
+          "axisCode": {
+            "type": "string",
+            "enum": [
+              "L1",
+              "L2",
+              "L3",
+              "L4"
+            ],
+            "title": "Axiscode"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "PREPARED",
+              "IN_PROGRESS",
+              "PASSED",
+              "NOT_PASSED",
+              "NOT_REACHED",
+              "NOT_ANSWERED"
+            ],
+            "title": "Status"
+          },
+          "questionText": {
+            "type": "string",
+            "title": "Questiontext"
+          },
+          "questionAnswerText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Questionanswertext"
+          },
+          "questionScore": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Questionscore"
+          },
+          "questionPassed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Questionpassed"
+          },
+          "firstHintText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firsthinttext"
+          },
+          "firstHintAnswerText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firsthintanswertext"
+          },
+          "firstHintScore": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firsthintscore"
+          },
+          "firstHintPassed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Firsthintpassed"
+          },
+          "secondHintText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondhinttext"
+          },
+          "secondHintAnswerText": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondhintanswertext"
+          },
+          "secondHintScore": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondhintscore"
+          },
+          "secondHintPassed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Secondhintpassed"
+          },
+          "isFlagged": {
+            "type": "boolean",
+            "title": "Isflagged",
+            "description": "질문 자체가 이상해 재생성에도 실패한 단계. true면 근거로 삼지 않는다(engine이 강제 제외)",
+            "default": false
+          },
+          "interviewSourceId": {
+            "type": "string",
+            "title": "Interviewsourceid",
+            "description": "★ 이 단계를 근거로 질문을 만들면 이 값을 그대로 실어야 한다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemStageId",
+          "axisCode",
+          "status",
+          "questionText",
+          "interviewSourceId"
+        ],
+        "title": "ComprehensionStage",
+        "description": "`comprehension.problems[].stages[]` 원소 하나. problem_stage 한 행에 대응.\n\n질문·힌트1·힌트2 세 슬롯 중 답한 만큼만 채워진다 -- 세션(develop 쪽 app/sessions.py)\n과 동일한 \"슬롯은 hintsUsed가 정한다\" 구조."
       },
       "CurriculumAccepted": {
         "properties": {
@@ -2080,6 +3171,95 @@
         ],
         "title": "ErrorResponse"
       },
+      "GitCommit": {
+        "properties": {
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "authorName": {
+            "type": "string",
+            "title": "Authorname"
+          },
+          "authorEmail": {
+            "type": "string",
+            "title": "Authoremail"
+          },
+          "committedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Committedat"
+          },
+          "changedFiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changedfiles"
+          },
+          "additions": {
+            "type": "integer",
+            "title": "Additions",
+            "default": 0
+          },
+          "deletions": {
+            "type": "integer",
+            "title": "Deletions",
+            "default": 0
+          },
+          "parentSha": {
+            "type": "string",
+            "title": "Parentsha",
+            "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)"
+          },
+          "authoredAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Authoredat",
+            "description": "author date. committedAt(커밋 date)과 다른 값"
+          },
+          "branchName": {
+            "type": "string",
+            "title": "Branchname",
+            "description": "이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 소속은 아니다. 미상이면 빈 문자열"
+          },
+          "isMergeCommit": {
+            "type": "boolean",
+            "title": "Ismergecommit",
+            "description": "부모가 2개 이상인지(기계적 판정, %P 부모 개수)"
+          },
+          "isRevertCommit": {
+            "type": "boolean",
+            "title": "Isrevertcommit",
+            "description": "커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다"
+          },
+          "isBotCommit": {
+            "type": "boolean",
+            "title": "Isbotcommit",
+            "description": "GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` 또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- 그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다"
+          },
+          "changedLineCount": {
+            "type": "integer",
+            "title": "Changedlinecount",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "sha",
+          "authorName",
+          "authorEmail",
+          "committedAt",
+          "parentSha",
+          "authoredAt",
+          "branchName",
+          "isMergeCommit",
+          "isRevertCommit",
+          "isBotCommit"
+        ],
+        "title": "GitCommit",
+        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2092,6 +3272,31 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HeadCommit": {
+        "properties": {
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "committedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Committedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sha",
+          "message",
+          "committedAt"
+        ],
+        "title": "HeadCommit",
+        "description": "GITHUB_URL fetch의 HEAD 커밋. ZIP은 커밋 개념이 없을 수 있어 이 필드 자체가 null이다."
       },
       "Hint": {
         "properties": {
@@ -2113,6 +3318,224 @@
         ],
         "title": "Hint",
         "description": "단계 하나에 딸린 힌트(= 재질의 문장). L1·L2만 분석 때 미리 만든다."
+      },
+      "InterviewBriefItem": {
+        "properties": {
+          "questionText": {
+            "type": "string",
+            "title": "Questiontext",
+            "description": "매니저가 그대로 읽을 구어체 질문 한 문장. 물음표로 끝난다"
+          },
+          "questionRationale": {
+            "type": "string",
+            "title": "Questionrationale",
+            "description": "매니저만 보는 근거. 어떤 데이터에서 나왔는지 명시"
+          },
+          "suggestedOrder": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Suggestedorder"
+          },
+          "interviewSourceId": {
+            "type": "string",
+            "title": "Interviewsourceid",
+            "description": "요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. 🔴 null이 될 수 없다: interview_brief_item.interview_source_id가 UUID NOT NULL이라 null인 항목은 그 행 하나가 통째로 저장 불가다. id 없는 근거(priorInterviews·briefContext)만으로 만든 라포 질문은 시도 단위 id(comprehension.attemptInterviewSourceId)로 떨어진다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "questionText",
+          "questionRationale",
+          "suggestedOrder",
+          "interviewSourceId"
+        ],
+        "title": "InterviewBriefItem",
+        "description": "체크리스트 항목 하나. §5."
+      },
+      "InterviewBriefRequest": {
+        "properties": {
+          "target": {
+            "$ref": "#/components/schemas/Target"
+          },
+          "briefContext": {
+            "$ref": "#/components/schemas/BriefContext"
+          },
+          "riskReasons": {
+            "items": {
+              "$ref": "#/components/schemas/RiskReason"
+            },
+            "type": "array",
+            "title": "Riskreasons"
+          },
+          "validityReview": {
+            "$ref": "#/components/schemas/ValidityReview"
+          },
+          "comprehension": {
+            "$ref": "#/components/schemas/Comprehension"
+          },
+          "priorInterviews": {
+            "items": {
+              "$ref": "#/components/schemas/PriorInterview"
+            },
+            "type": "array",
+            "title": "Priorinterviews"
+          },
+          "observationNotes": {
+            "items": {
+              "$ref": "#/components/schemas/ObservationNote"
+            },
+            "type": "array",
+            "title": "Observationnotes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target",
+          "briefContext",
+          "validityReview",
+          "comprehension"
+        ],
+        "title": "InterviewBriefRequest",
+        "description": "POST /internal/v1/interview-brief:generate 요청 본문 전체."
+      },
+      "InterviewBriefResponse": {
+        "properties": {
+          "openingRemark": {
+            "type": "string",
+            "title": "Openingremark",
+            "description": "1~3문장, 구어체. 교육생 이름은 부르되 점수·단계·위험 유형은 직접 언급하지 않는다"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/InterviewBriefItem"
+            },
+            "type": "array",
+            "maxItems": 8,
+            "minItems": 4,
+            "title": "Items",
+            "description": "4~8개(첫 면담이면 6~8개 -- engine이 강제). suggestedOrder는 1부터 중복 없는 연속 정수여야 한다"
+          },
+          "aiUsage": {
+            "items": {
+              "$ref": "#/components/schemas/AiUsage"
+            },
+            "type": "array",
+            "title": "Aiusage",
+            "description": "이 요청이 태운 LLM 호출 기록. 브리프는 호출 1회라 보통 1행이다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "openingRemark",
+          "items"
+        ],
+        "title": "InterviewBriefResponse",
+        "description": "성공 응답 본문. §5. jobId 없음 -- 이 응답이 곧 결과다.\n\n🔴 옛 전용 `UsageMeta`는 삭제됐다(2026-08-07). 다른 네 엔드포인트와 같은 공용\n`AiUsage`를 쓴다 -- UsageMeta에는 featureCode·contextType·requestId·traceId·\nidempotencyKey가 없어서 백엔드가 ai_usage 행을 만들려면 전부 스스로 합성해야 했다."
+      },
+      "ObservationNote": {
+        "properties": {
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurredat"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "학생 발화가 원문 그대로 인용될 수 있다(예: 쉬는 시간 발언). 학생 답변 텍스트와 같은 급의 신뢰 불가 데이터 -- engine이 감싼다"
+          },
+          "interviewSourceId": {
+            "type": "string",
+            "title": "Interviewsourceid",
+            "description": "★ 이 관찰 메모를 근거로 질문을 만들면 이 값을 그대로 실어야 한다"
+          },
+          "visibility": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visibility",
+            "description": "공개범위 코드(값 집합 미확정, 아직 미사용 -- 배선만 해둠)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "occurredAt",
+          "content",
+          "interviewSourceId"
+        ],
+        "title": "ObservationNote",
+        "description": "면담과 무관하게 매니저가 남긴 일반 관찰 메모. §4.1 ⑦."
+      },
+      "PriorInterview": {
+        "properties": {
+          "completedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Completedat"
+          },
+          "resultSummary": {
+            "type": "string",
+            "title": "Resultsummary"
+          },
+          "activities": {
+            "items": {
+              "$ref": "#/components/schemas/PriorInterviewActivity"
+            },
+            "type": "array",
+            "title": "Activities"
+          },
+          "askedQuestions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Askedquestions",
+            "description": "지난 회차에 실제로 던진 질문 원문. ★ 같은 질문을 반복하지 말고 후속 질문으로 발전시켜야 한다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "completedAt",
+          "resultSummary"
+        ],
+        "title": "PriorInterview",
+        "description": "이전 면담 기록 한 건. `isFirstInterview=true`면 빈 배열."
+      },
+      "PriorInterviewActivity": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "nextAction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nextaction"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurredat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content",
+          "occurredAt"
+        ],
+        "title": "PriorInterviewActivity",
+        "description": "이전 면담 중 관찰·확인 사항 한 건."
       },
       "Problem": {
         "properties": {
@@ -2267,6 +3690,116 @@
         ],
         "title": "Problem",
         "description": "출제 대상 코드 지점. DB assessment_problem 대응."
+      },
+      "ProblemComprehension": {
+        "properties": {
+          "problemNo": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Problemno"
+          },
+          "conceptName": {
+            "type": "string",
+            "title": "Conceptname",
+            "description": "검증 개념 표시명. ★ 질문에서 L2 같은 내부 코드 대신 이 이름을 쓴다"
+          },
+          "problemScope": {
+            "type": "string",
+            "enum": [
+              "TEAM_SHARED_PROBLEM",
+              "INDIVIDUAL_OWN_COMMIT"
+            ],
+            "title": "Problemscope"
+          },
+          "generationStatus": {
+            "type": "string",
+            "enum": [
+              "GENERATED",
+              "NOT_GENERATED"
+            ],
+            "title": "Generationstatus"
+          },
+          "notGeneratedReasonCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "const": "NO_MATCHING_CODE_EVIDENCE"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notgeneratedreasoncode"
+          },
+          "bestSuccessStage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "L1",
+                  "L2",
+                  "L3",
+                  "L4"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bestsuccessstage"
+          },
+          "codeContext": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ComprehensionCodeContext"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "NOT_GENERATED 문제는 없다"
+          },
+          "conceptNameSource": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "VERIFICATION_CONCEPT",
+                  "CURRICULUM_EVIDENCE",
+                  "PROBLEM_TITLE"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conceptnamesource",
+            "description": "conceptName이 어느 경로에서 나왔는지. PROBLEM_TITLE이면 검증된 개념명이 아니라 문제 제목으로 대체된 값이므로 단정적으로 서술하지 않는다"
+          },
+          "interviewSourceId": {
+            "type": "string",
+            "title": "Interviewsourceid",
+            "description": "★ 이 문제를 (단계 단위가 아니라 문제 단위로) 근거로 질문을 만들면 이 값을 그대로 실어야 한다. NOT_GENERATED처럼 stages가 빈 문제에서 특히 필요하다"
+          },
+          "stages": {
+            "items": {
+              "$ref": "#/components/schemas/ComprehensionStage"
+            },
+            "type": "array",
+            "title": "Stages",
+            "description": "NOT_GENERATED 문제는 빈 배열 -- 0점·미달이 아니라 애초에 안 물어봤다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "problemNo",
+          "conceptName",
+          "problemScope",
+          "generationStatus",
+          "interviewSourceId"
+        ],
+        "title": "ProblemComprehension",
+        "description": "`comprehension.problems[]` 원소 하나. assessment_problem 한 건에 대응."
       },
       "ProblemReference": {
         "properties": {
@@ -2979,6 +4512,82 @@
         "title": "RequirementResult",
         "description": "요구사항 하나의 P/F 판정. 요청 requirements와 1:1로 대응한다."
       },
+      "RiskReason": {
+        "properties": {
+          "reasonCode": {
+            "type": "string",
+            "enum": [
+              "STAGE_DECLINE",
+              "PERSISTENT_LOW",
+              "INVALID_ATTEMPT",
+              "CONTRIBUTION_UNDERSTANDING_GAP",
+              "LOW_PARTICIPATION"
+            ],
+            "title": "Reasoncode"
+          },
+          "evaluationStatus": {
+            "type": "string",
+            "enum": [
+              "MATCHED",
+              "NOT_MATCHED",
+              "NOT_APPLICABLE",
+              "UNAVAILABLE"
+            ],
+            "title": "Evaluationstatus"
+          },
+          "notApplicableReasonCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "FIRST_MINI_PROJECT",
+                  "INSUFFICIENT_LONGITUDINAL_HISTORY"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notapplicablereasoncode"
+          },
+          "reasonSummary": {
+            "type": "string",
+            "title": "Reasonsummary"
+          },
+          "detectedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Detectedat"
+          },
+          "sourceProblemStageId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sourceproblemstageid",
+            "description": "이 위험의 근거가 된 정확한 문제 단계. CONTRIBUTION_UNDERSTANDING_GAP·LOW_PARTICIPATION처럼 단일 단계로 못 좁히는 사유는 없을 수 있다"
+          },
+          "sourceInterviewSourceId": {
+            "type": "string",
+            "title": "Sourceinterviewsourceid",
+            "description": "★ 출력에서 이 사유를 근거로 질문을 만들면 이 값을 그대로 실어야 한다(engine이 대조·검증)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "reasonCode",
+          "evaluationStatus",
+          "reasonSummary",
+          "detectedAt",
+          "sourceInterviewSourceId"
+        ],
+        "title": "RiskReason",
+        "description": "왜 이 교육생이 면담 대상이 됐는가. §4.1 ③.\n\n한 교육생에게 복수 사유가 동시에 있을 수 있다(리스트). `evaluationStatus`가\nNOT_APPLICABLE/UNAVAILABLE이면 **\"문제 없음\"이 아니라 \"이번엔 판단 불가\"로\n서술해야 한다** — 이건 데이터가 아니라 프롬프트 지시라 engine 쪽에서 강제한다."
+      },
       "SnapshotMeta": {
         "properties": {
           "contentHash": {
@@ -3113,6 +4722,56 @@
         ],
         "title": "StageScore",
         "description": "문제 하나의 단계 하나. **DB `problem_stage` 한 행과 1:1이다** (2026-08-03).\n\n새 MEAS 정의서에서 `problem_stage`가 **한 행에 질문 1 + 힌트 2 + 답변 3 + 점수 3 +\n통과 3**을 담게 됐다(`stage_answer_attempt` 테이블은 사라졌다). 그래서 응답도 같은\n모양으로 낸다 — **Spring이 변환 없이 그대로 INSERT할 수 있게** 하는 것이 목적이다.\n\n🔴 **`attemptCount`·`hintsUsed`·`autonomy`는 없다.** 셋 다 아래 6개 필드에서\n파생된다(#42 §4-2). 자력 판정은 이렇게 계산한다.\n\n    questionPassed = true    → 스스로 답함      (SELF)\n    firstHintPassed = true   → 힌트 1개로 답함  (SELF_MAINTAINED)\n    secondHintPassed = true  → 힌트 2개로 답함  (PARTIAL)"
+      },
+      "Target": {
+        "properties": {
+          "userName": {
+            "type": "string",
+            "title": "Username"
+          },
+          "className": {
+            "type": "string",
+            "title": "Classname"
+          },
+          "projectName": {
+            "type": "string",
+            "title": "Projectname"
+          },
+          "projectCategory": {
+            "type": "string",
+            "enum": [
+              "MINI_PROJECT",
+              "BIG_PROJECT"
+            ],
+            "title": "Projectcategory"
+          },
+          "roundName": {
+            "type": "string",
+            "title": "Roundname"
+          },
+          "analysisRoleCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Analysisrolecode",
+            "description": "빅프로젝트에서 회차별 분석 역할 구분. 미니프로젝트는 없다"
+          }
+        },
+        "type": "object",
+        "required": [
+          "userName",
+          "className",
+          "projectName",
+          "projectCategory",
+          "roundName"
+        ],
+        "title": "Target",
+        "description": "면담 여는 말의 호칭·상황 설명 재료. §4.1 ①."
       },
       "Teach": {
         "properties": {
@@ -3348,6 +5007,61 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "ValidityReview": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "NOT_REQUIRED",
+              "PENDING",
+              "CONFIRMED_INVALID",
+              "RESTORED_VALID"
+            ],
+            "title": "Status"
+          },
+          "triggerReasonCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Triggerreasoncode",
+            "description": "무효 확인이 시작된 사유(자유 코드, 값 집합 미확정). briefType=INVALID_ATTEMPT일 때 특히 중요한 근거"
+          },
+          "decisionReasonCode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decisionreasoncode"
+          },
+          "decisionNote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decisionnote",
+            "description": "매니저가 남긴 판정 메모"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ValidityReview",
+        "description": "응시 자체를 인정할 것인가. §4.1 ④."
       }
     }
   }

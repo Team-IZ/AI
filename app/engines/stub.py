@@ -64,10 +64,15 @@ def _stub_problem(problem_no: int, focus_item_id: str | None = None,
 class StubAnalysisEngine:
 
     def analyze(
-        self, request: dict[str, Any], zip_bytes: bytes | None = None
+        self, request: dict[str, Any], zip_bytes: bytes | None = None,
+        *, prefetched_root: str | None = None,
+        prefetched_git: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         # 요청 값을 결과에 반영해 연결되었는지 확인
         # 스텁이 요청 무시하고 고정값만 주면 실제값 확인 불가
+        # prefetched_root/prefetched_git: 실제로 아무것도 fetch하지 않는 스텁이라 받기만
+        # 하고 안 쓴다(RealAnalysisEngine과 같은 시그니처를 유지해 get_analysis_engine()
+        # 호출부가 어느 구현체를 받든 동일하게 부를 수 있게 한다).
         applied_scope = request["extraction_scope"]
         byte_count = len(zip_bytes) if zip_bytes is not None else 1024
 

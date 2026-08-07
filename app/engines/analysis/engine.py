@@ -40,6 +40,7 @@ from typing import Any
 from app.config import get_settings
 from app.engines.analysis import (
     analysis_doc,
+    fetch,
     fragments,
     hints,
     imports,
@@ -279,12 +280,23 @@ def _failed_kind(message: str) -> str:
 class RealAnalysisEngine:
     """`engine_mode="real"`일 때 쓰이는 엔진."""
 
-    def analyze(self, request: dict[str, Any],
-                zip_bytes: bytes | None = None) -> dict[str, Any]:
-        """실패해도 원장은 살려 내보낸다. 실제 작업은 `_run`이 한다."""
+    def analyze(self, request: dict[str, Any], zip_bytes: bytes | None = None,
+                *, prefetched_root: str | None = None,
+                prefetched_git: dict[str, Any] | None = None) -> dict[str, Any]:
+        """실패해도 원장은 살려 내보낸다. 실제 작업은 `_run`이 한다.
+
+        `fetch.FetchError`(M4 -- 이 엔진 자신이 fetch할 때도 이제 fetch.py를 쓴다)는
+        여기서 `AnalysisFailed`로 감싸지 않고 그대로 흘려보낸다 -- fetch 실패 시점엔
+        아직 LLM 콜이 하나도 없어 `usages`가 항상 빈 배열이라 원장을 잃을 게 없고,
+        `jobs.py`가 이미 `FetchError`를 따로 받아 `failure_code`로 정확히 옮긴다
+        (M3). 여기서 감싸면 그 분류가 무너진다.
+        """
         usages: list[dict[str, Any]] = []
         try:
-            return self._run(request, zip_bytes, usages)
+            return self._run(request, zip_bytes, usages, prefetched_root=prefetched_root,
+                              prefetched_git=prefetched_git)
+        except fetch.FetchError:
+            raise
         except stages.StageError as exc:
             usages.extend(_stamp(exc.usages, _failed_kind(str(exc))))
             raise AnalysisFailed(str(exc), usages) from exc
@@ -292,7 +304,8 @@ class RealAnalysisEngine:
             raise AnalysisFailed(str(exc), usages) from exc
 
     def _run(self, request: dict[str, Any], zip_bytes: bytes | None,
-             usages: list[dict[str, Any]]) -> dict[str, Any]:
+             usages: list[dict[str, Any]], *, prefetched_root: str | None = None,
+             prefetched_git: dict[str, Any] | None = None) -> dict[str, Any]:
         settings = get_settings()
         # wire 필드는 providerModelCode다 — 공급자에게 그대로 넘길 문자열이라
         # 화면 선택값(model_code)이 아니라 ai_model.provider_model_code 값이다.
@@ -303,15 +316,52 @@ class RealAnalysisEngine:
         budget = int(request.get("question_budget") or scoring.QUESTIONS_PER_SUBMISSION)
 
         # ── 룰 스캔 ────────────────────────────────────────────────────────────
-        # GITHUB_URL이면 클론, ZIP이면 압축 해제. 두 경로가 같은 스캔으로 합류한다
-        # (materialize.py — 팀원 브랜치 feature/code-importance-map에서 이식).
+        # GITHUB_URL이면 클론, ZIP이면 압축 해제. 두 경로가 같은 스캔으로 합류한다.
         # 디렉터리는 with를 빠져나가며 지워지므로 파일 내용은 여기서 다 읽어 나온다.
+        #
+        # prefetched_root가 있으면(analysisInput 경로, D2) 이 엔진의 fetch를 건너뛰고
+        # 그 경로를 그대로 스캔한다 -- jobs._run_via_analysis_input이 refetch_pinned()의
+        # `with` 블록 **안에서** analyze()를 부르므로 여기서 디렉터리가 아직 살아 있다.
+        #
+        # (M4) 자기 fetch가 필요한 경우도 fetch.py를 쓴다(예전엔 materialize.py였다) --
+        # 구현체를 하나로 통합하면 실패 시 failureCode 분류(fetch.FetchError)를
+        # 이 경로도 그대로 받는다. request의 소스 모양(`source.repo_url`/`source.branch`)을
+        # fetch.py가 기대하는 스펙 키(`repository_url`/`requested_branch`)로 바꿔 넘긴다.
         commit_sha = request.get("commit_sha")
-        with materialize.materialize(request, zip_bytes) as repo_dir:
-            scan = rules.scan_directory(repo_dir)
+        # D-analysis-b1(2026-08-07): resolved_branch/head_commit/git_history는 두 경로 다
+        # 채워야 AnalysisResult에 실린다(기존엔 아예 안 실렸다 -- 배선 누락).
+        resolved_branch: str | None = None
+        head_commit: dict[str, Any] | None = None
+        git_history: list[dict[str, Any]] = []
+        git_history_source = "NONE"
+        history_truncated = False
+        if prefetched_root is not None:
+            scan = rules.scan_directory(prefetched_root)
             if request.get("method") == "GITHUB_URL":
-                # 클론 경로에서만 실제 커밋을 안다. ZIP은 요청 값을 그대로 쓴다.
-                commit_sha = materialize.head_sha(repo_dir) or commit_sha
+                commit_sha = materialize.head_sha(prefetched_root) or commit_sha
+            if prefetched_git:
+                resolved_branch = prefetched_git.get("resolved_branch")
+                head_commit = prefetched_git.get("head_commit")
+                git_history = prefetched_git.get("git_history") or []
+                git_history_source = prefetched_git.get("git_history_source", "NONE")
+                history_truncated = bool(prefetched_git.get("history_truncated", False))
+        else:
+            source = request.get("source") or {}
+            spec = {
+                "method": request.get("method"),
+                "repository_url": source.get("repo_url"),
+                "requested_branch": source.get("branch"),
+            }
+            with fetch.fetch(spec, zip_bytes) as fetched:
+                scan = rules.scan_directory(fetched.root)
+                if fetched.head_commit:
+                    # 클론 경로에서만 실제 커밋을 안다. ZIP은 요청 값을 그대로 쓴다.
+                    commit_sha = fetched.head_commit["sha"]
+                resolved_branch = fetched.resolved_branch
+                head_commit = fetched.head_commit
+                git_history = fetched.git_history
+                git_history_source = fetched.git_history_source
+                history_truncated = fetched.history_truncated
         files, candidates = scan["files"], scan["candidates"]
 
         # ── p04-1 분석 문서 ────────────────────────────────────────────────────
@@ -458,6 +508,11 @@ class RealAnalysisEngine:
             "unmatched_teaches": selection.unmatched,
             "question_count_planned": budget,
             "ai_usage": usages,
+            "resolved_branch": resolved_branch,
+            "head_commit": head_commit,
+            "git_history": git_history,
+            "git_history_source": git_history_source,
+            "history_truncated": history_truncated,
         }
 
 
