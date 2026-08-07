@@ -79,7 +79,7 @@ _ALLOWED_REPO_HOSTS = {"github.com"}
 # 서브프로토콜 차단, D12)만 public으로 유지해 fetch.py가 재사용한다(`_validate_host()`가
 # `_validate_scheme()`를 호출) -- **호스트 허용목록은 여기서 분리한다.**
 #   WHY: 이 파일(GITHUB_URL 클론 경로)은 host를 github.com 하나로 고정하는 게 맞지만
-#   (develop의 H9 SSRF 수정, 위 주석), fetch.py(`/analysis-inputs`)는 애초에 설정
+#   (develop의 H9 SSRF 수정, 위 주석), fetch.py는 애초에 설정
 #   가능한 더 넓은 허용목록(`ALLOWED_REPO_HOSTS`, 기본 github.com+www.github.com)을
 #   쓰도록 설계돼 있었다 -- 이 함수를 그대로 호출하면 그 설계를 덮어써서 www.github.com이
 #   거부되고, 더 심각하게는 fetch.py 자신의 `UNSUPPORTED_HOST` 분류(백엔드 DDL이

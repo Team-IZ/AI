@@ -264,32 +264,6 @@ def test_references_are_filled(fake_llm):
     assert curriculum.path is None                         # 교안 근거는 코드 라인이 없다
 
 
-def test_prefetched_root_skips_materialize(monkeypatch, tmp_path, fake_llm):
-    """analysisInput 경로(D2, jobs._run_via_analysis_input)에서는 엔진이 스스로
-
-    클론/압축해제하지 않고 이미 fetch된 경로를 그대로 스캔해야 한다 -- 안 그러면
-    검증했던 코드와 다른 코드(브랜치가 그 사이 움직인)를 분석하게 된다.
-    """
-    (tmp_path / "app").mkdir()
-    (tmp_path / "app" / "pay.py").write_text(SOURCE)
-
-    def _boom(*args, **kwargs):
-        raise AssertionError("prefetched_root가 있으면 materialize()를 부르면 안 된다")
-
-    monkeypatch.setattr(engine_mod.materialize, "materialize", _boom)
-
-    raw = engine_mod.RealAnalysisEngine().analyze(
-        {**REQUEST, "method": "GITHUB_URL"}, None, prefetched_root=str(tmp_path),
-    )
-    raw.pop("ai_usage")
-    result = AnalysisResult.model_validate(raw)
-
-    assert result.problems[0].source_path == "app/pay.py"
-    # prefetched_root는 git repo가 아닐 수도 있다 -- head_sha()가 조용히 None으로
-    # 물러나야지 여기서 터지면 안 된다(materialize.head_sha의 기존 계약).
-    assert result.commit_sha is None
-
-
 def test_direct_fetch_path_wires_git_history_into_result(monkeypatch, fake_llm):
     """D-analysis-b1(2026-08-07) -- 직접 fetch 경로에서도 resolved_branch/head_commit/
 
@@ -334,40 +308,6 @@ def test_direct_fetch_path_wires_git_history_into_result(monkeypatch, fake_llm):
     assert len(result.git_history) == 1
     assert result.git_history[0].sha == "d" * 40
     assert result.git_history[0].is_bot_commit is False
-
-
-def test_prefetched_git_reaches_the_result(fake_llm, tmp_path):
-    """D2 경로(prefetched_root)에서도 prefetched_git이 그대로 AnalysisResult에 실린다."""
-    (tmp_path / "app").mkdir()
-    (tmp_path / "app" / "pay.py").write_text(SOURCE)
-
-    prefetched_git = {
-        "resolved_branch": "main",
-        "head_commit": {"sha": "e" * 40, "message": "fix", "committed_at": "2026-01-01T00:00:00Z"},
-        "git_history": [{
-            "sha": "e" * 40, "author_name": "Bob", "author_email": "b@x.com",
-            "committed_at": "2026-01-01T00:00:00Z", "changed_files": [],
-            "additions": 0, "deletions": 0, "parent_sha": "0" * 40,
-            "authored_at": "2026-01-01T00:00:00Z", "branch_name": "main",
-            "is_merge_commit": False, "is_revert_commit": False,
-            "is_bot_commit": False, "changed_line_count": 0,
-        }],
-        "git_history_source": "REMOTE_DEEPEN",
-        "history_truncated": True,
-    }
-
-    raw = engine_mod.RealAnalysisEngine().analyze(
-        {**REQUEST, "method": "GITHUB_URL"}, None, prefetched_root=str(tmp_path),
-        prefetched_git=prefetched_git,
-    )
-    raw.pop("ai_usage")
-    result = AnalysisResult.model_validate(raw)
-
-    assert result.resolved_branch == "main"
-    assert result.head_commit.sha == "e" * 40
-    assert result.git_history_source == "REMOTE_DEEPEN"
-    assert result.history_truncated is True
-    assert result.git_history[0].author_name == "Bob"
 
 
 def test_old_reference_types_are_gone():

@@ -4,7 +4,6 @@ from fastapi import Depends, FastAPI
 
 from app.api import (
     analyses,
-    analysis_inputs,
     curricula,
     health,
     interview_brief,
@@ -53,12 +52,6 @@ app.include_router(
 
 app.include_router(
     curricula.router,
-    prefix=API_V0_PREFIX,
-    dependencies=[Depends(require_internal_key)],
-)
-
-app.include_router(
-    analysis_inputs.router,
     prefix=API_V0_PREFIX,
     dependencies=[Depends(require_internal_key)],
 )

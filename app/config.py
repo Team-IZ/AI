@@ -88,11 +88,12 @@ class Settings(BaseSettings):
     # 한다(예전엔 하나 바꾸면 둘 다 바뀌었다). EXIT: 위 D-model1과 동일.
     model_code_interview_brief: str = "openai/gpt-oss-120b"
 
-    # analysis-inputs 분리(D1/D2/D3, 2026-08-06) 관련 설정.
+    # 코드 fetch(app/engines/analysis/fetch.py) 설정.
     #
-    # 🔴 기존 GIT_CLONE_TIMEOUT_S(materialize.py, 300초)는 그대로 둔다 -- 그건 비동기
-    # /analyses 잡 경로용이고, 이건 백엔드 동기 호출(목표 p95 5초, 타임아웃 15초)용이라
-    # 훨씬 짧아야 한다.
+    # ⚠️ 이름의 `analysis_input`은 폐기된 `/analysis-inputs` 분리 API의 흔적이다.
+    # 키를 바꾸면 배포된 .env(팀원 App Runner)가 조용히 기본값으로 떨어지므로 그대로 둔다.
+    # 🔴 기존 GIT_CLONE_TIMEOUT_S(materialize.py, 300초)와 별개다 -- 이건 fetch 경로용이라
+    # 훨씬 짧다.
     analysis_input_clone_timeout_s: int = 10
     # Phase B(히스토리 수집)는 별도의 더 짧은 예산 -- 넘겨도 Phase A(코드 자체) 결과는
     # 절대 안 버린다. 커밋 개수가 아니라 시간으로 상한을 둔다는 D1 결정 그대로.
@@ -108,9 +109,6 @@ class Settings(BaseSettings):
     # true면 422 GIT_LOG_MISSING으로 전환 -- 이건 코드가 아니라 정책 결정이라
     # 설정값으로 백엔드에 맡긴다.
     zip_require_git_log: bool = False
-    # 같은 입력이면 같은 id(derived, 기본) vs 매번 새 id(random). 백엔드의
-    # analysisInputId 컬럼이 팀 단위로 UNIQUE면 derived가 충돌할 수 있어 대비해 둔다.
-    analysis_input_id_mode: Literal["derived", "random"] = "derived"
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 

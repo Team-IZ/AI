@@ -1,22 +1,24 @@
-""" 분석 입력 fetch — `POST /analysis-inputs` 전용. `materialize.py`의 형제 모듈.
+""" `POST /api/v0/analyses`의 코드 fetch — `materialize.py`의 형제 모듈.
 
-백엔드 제안(`api-request-to-ai-server.md`, 2026-08-05)에 따라 "검증+fetch"를 "분석 실행"에서
-떼어내는 신규 경로다. 세 가지 결정을 전제로 한다(이 세션에서 이미 확정, 여기서 재검토하지 않음):
+저장소를 검증하고 가져와 스캔 루트를 만든다. `engine.analyze()`가 이걸 쓴다.
 
   D1  git 히스토리 수집은 커밋 개수가 아니라 **벽시계 시간**으로 상한. 코드 자체를 가져오는
       것(Phase A, 필수)과 히스토리로 풍부화하는 것(Phase B, best-effort)을 분리한다 —
       Phase B가 느리거나 실패해도 Phase A 결과는 절대 버리지 않는다.
-  D2  fetch한 코드를 서버가 캐싱하지 않는다. `POST /analysis`는 이 모듈의 `refetch_pinned()`로
-      **재fetch**한다(GITHUB_URL은 정확한 커밋 sha로, ZIP은 같은 다운로드 URL로) — `/sessions`를
-      무상태로 다시 설계했던 것과 같은 이유(재배포·멀티인스턴스에서 인메모리 상태가 못 버틴다).
   D3  ZIP의 git 히스토리는 ①백엔드가 요청에 실어 보내면 그것 우선 ②ZIP 안에 `.git`이 있으면
       직접 파싱 ③둘 다 없으면 실패시키지 않고 빈 값으로 진행(`ZIP_REQUIRE_GIT_LOG`로 정책 전환 가능).
 
+🔴 **옛 `/analysis-inputs` 분리 API는 폐기됐다**(2026-08-06 팀원 확인, 2026-08-07 재삭제).
+`POST /analyses`를 검증·fetch·분석 3개로 쪼개자는 건 백엔드 쪽 착오였고 근거 문서
+`api-request-to-ai-server.md`도 함께 무효다. **`/analyses`가 한 몸으로 처리한다.**
+그때 딸려 있던 D2(재fetch로 무결성 재확인)와 `refetch_pinned()`·`INPUT_HASH_MISMATCH`도
+같이 사라졌다 — 한 번에 fetch하므로 재현할 대상이 없다. 이 모듈에 남은 것은 검증·fetch·
+히스토리 수집·해시 계산이고, 그건 분리와 무관하게 필요한 일이다.
+
 `materialize.py`의 D12 방어(`_validate_scheme`/`validate_branch`/`git_env`)를 그대로 재사용한다
-— 복사하면 한쪽만 패치되고 다른 쪽이 낡는다(이 세션에서 vendor drift로 실제 겪은 사고와 같은 클래스).
+— 복사하면 한쪽만 패치되고 다른 쪽이 낡는다(vendor drift로 실제 겪은 사고와 같은 클래스).
 호스트 허용목록만은 예외 -- materialize.py는 클론 경로용으로 github.com 하나에 고정하지만
-이 모듈은 자체 설정값(`_allowed_repo_hosts`)을 따로 쓴다(2026-08-07 develop 병합 시 확정,
-`_validate_host` 참고).
+이 모듈은 자체 설정값(`_allowed_repo_hosts`)을 따로 쓴다(`_validate_host` 참고).
 """
 from __future__ import annotations
 
@@ -26,7 +28,6 @@ import re
 import shutil
 import subprocess
 import tempfile
-import uuid
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -47,8 +48,6 @@ from app.engines.analysis import materialize, rules
 _RS = "\x1e"
 _FS = "\x1f"
 
-_ANALYSIS_INPUT_NAMESPACE = uuid.UUID("6f1b1a9e-6b3a-4a1a-9b0a-2f6d1c9a7e01")
-
 # _parse_git_log/_try_embedded_git_history 공용 git log 포맷. %P(부모 SHA, 공백구분)로
 # isMergeCommit/parentSha를, %aI(author date)로 authoredAt을, %s(subject 1줄)로
 # isRevertCommit 판정을 뽑는다 -- subject 자체는 gitHistory 응답에 안 남긴다("메시지는
@@ -67,7 +66,7 @@ _BOT_EMAIL_RE = re.compile(r"^\d+\+[\w-]+\[bot\]@users\.noreply\.github\.com$")
 
 @dataclass(frozen=True)
 class FetchedInput:
-    """fetch() 한 번의 결과. `/analysis-inputs` 응답과 `/analysis` 재fetch 검증 둘 다의 기반."""
+    """fetch() 한 번의 결과. `engine.analyze()`가 스캔 루트와 git 메타를 여기서 가져간다."""
 
     root: str
     method: str
@@ -84,8 +83,9 @@ class FetchedInput:
         return self.root
 
 
-# `api-request-to-ai-server.md`가 요청한 11개 failureCode. `/analysis-inputs`(fetch())가
+# fetch()가 내는 11개 failureCode. 이 모듈이
 # 내는 값은 항상 이 집합 안에 있어야 한다 -- 백엔드 DB CHECK 제약이 이 문자열 그대로다.
+# 11종 전부 `analysis_job.failure_code`의 15종 안에 같은 이름으로 들어 있다(2026-08-07 회신).
 # 한 곳에 모아두는 이유: 이번 세션에서 겪은 feature_code 사례처럼, 실제 배포본과
 # 대조해서 하나라도 바뀌면 여기 값-집합 하나만 고치면 되게 하기 위해서다.
 GITHUB_FAILURE_CODES = frozenset({
@@ -97,18 +97,10 @@ ZIP_FAILURE_CODES = frozenset({
 })
 VERIFICATION_FAILURE_CODES = GITHUB_FAILURE_CODES | ZIP_FAILURE_CODES
 
-# `refetch_pinned()`(D2, `/analysis` 잡 처리 중 호출) 전용 추가 코드. 이 둘과 위
-# VERIFICATION_FAILURE_CODES 11종은 이 모듈만의 내부 어휘다 -- `analysis_job.failure_code`
-# 응답 필드는 별도의 DB CHECK 11종(`AnalysisJobFailureCode`, schemas/analysis.py)을 쓰고,
-# 이 13종에서 그쪽으로의 매핑은 `jobs.py`의 `_FETCH_FAILURE_CODE_TRANSLATION`이 담당한다.
-JOB_ONLY_FAILURE_CODES = frozenset({"INPUT_HASH_MISMATCH", "FETCH_FAILED"})
 
 
 class FetchError(Exception):
-    """failureCode 하나로 분류된 fetch 실패. `/analysis-inputs`는 그대로 422가 되고,
-
-    `refetch_pinned()`가 내는 것은 job의 `failure_code`가 된다(위 두 벌 중 하나에서 옴).
-    """
+    """failureCode 하나로 분류된 fetch 실패. `jobs.py`가 job의 `failure_code`로 옮긴다."""
 
     def __init__(self, failure_code: str, message: str, *, retryable: bool = False):
         super().__init__(message)
@@ -132,9 +124,7 @@ def fetch(spec: Mapping[str, Any], zip_bytes: bytes | None = None) -> Iterator[F
     """method에 따라 fetch하고 스캔 루트를 담은 `FetchedInput`을 내어준다.
 
     `materialize.materialize()`와 동일하게 `with` 블록을 빠져나가면 임시 디렉터리를
-    지운다 -- `/analysis-inputs`도 fetch한 코드 원문을 디스크에 남기지 않는다(D2는
-    "두 번째 fetch(`/analysis`)가 캐시를 재사용하지 않는다"는 뜻이지, 이 첫 fetch가
-    원칙을 벗어나도 된다는 뜻이 아니다).
+    지운다 -- fetch한 코드 원문을 디스크에 남기지 않는다.
 
     `zip_bytes`(M4, engine.py의 기존 경로 통합용) -- `/analyses`의 멀티파트 업로드는
     downloadUrl 없이 바이트를 직접 들고 있다. 있으면 `_download()`를 건너뛴다.
@@ -148,51 +138,6 @@ def fetch(spec: Mapping[str, Any], zip_bytes: bytes | None = None) -> Iterator[F
             yield _fetch_zip(spec, tmp, zip_bytes)
             return
         raise FetchError("INVALID_REPOSITORY_URL", f"알 수 없는 method입니다: {method!r}")
-
-
-@contextmanager
-def refetch_pinned(descriptor: Mapping[str, Any]) -> Iterator[FetchedInput]:
-    """D2 — `POST /analysis`가 `/analysis-inputs`의 결과를 캐시 없이 재현한다.
-
-    GITHUB_URL은 브랜치가 아니라 `headCommit.sha`로 정확히 고정해 재클론한다(그 사이
-    브랜치가 움직였어도 검증했던 바로 그 코드를 받는다). ZIP은 같은 다운로드 URL로
-    재다운로드한다. 재fetch 후 `input_hash`가 descriptor의 값과 같은지 반드시 확인하고,
-    다르면 하드 실패시킨다 -- "검증했던 것과 다른 코드"를 그대로 분석하면 안 된다.
-    """
-    method = descriptor.get("method")
-    expected_hash = (descriptor.get("input_hash") or "").strip()
-    with tempfile.TemporaryDirectory(prefix="analysis-refetch-") as tmp:
-        if method == "GITHUB_URL":
-            sha = (descriptor.get("head_commit_sha") or "").strip()
-            if not sha:
-                raise FetchError("INVALID_REPOSITORY_URL", "재fetch에 headCommit.sha가 필요합니다")
-            result = _fetch_github_pinned(descriptor, tmp, sha)
-        elif method == "ZIP_WITH_GITLOG":
-            result = _fetch_zip(descriptor, tmp)
-        else:
-            raise FetchError("INVALID_REPOSITORY_URL", f"알 수 없는 method입니다: {method!r}")
-
-        if expected_hash and result.input_hash != expected_hash:
-            raise FetchError(
-                "INPUT_HASH_MISMATCH",
-                "재fetch한 코드가 검증했던 입력과 다릅니다(inputHash 불일치) -- "
-                "브랜치가 그 사이 바뀌었을 수 있습니다",
-            )
-        yield result
-
-
-def derive_analysis_input_id(*, org_id: str, method: str, source: str, pin: str) -> str:
-    """D2 — 서버 상태 없이 requestId 멱등성을 만족시키는 결정론적 id.
-
-    같은 (기관, method, 소스, 고정값) 조합이면 인스턴스·재배포와 무관하게 항상 같은
-    UUID가 나온다. `analysis_input_id_mode="random"`이면 매번 새 UUID(팀 레포를 여러
-    팀원이 제출할 때 같은 id가 나오는 게 백엔드 컬럼 제약과 안 맞을 경우의 대비책).
-    """
-    settings = get_settings()
-    if settings.analysis_input_id_mode == "random":
-        return str(uuid.uuid4())
-    name = f"{org_id}|{method}|{source}|{pin}"
-    return str(uuid.uuid5(_ANALYSIS_INPUT_NAMESPACE, name))
 
 
 # ── GITHUB_URL ───────────────────────────────────────────────────────────
@@ -459,98 +404,6 @@ def _fetch_github(spec: Mapping[str, Any], tmp: str) -> FetchedInput:
     )
 
 
-_SHA_RE = re.compile(r"[0-9a-f]{40}$|[0-9a-f]{64}$")
-
-
-def _fetch_github_pinned(descriptor: Mapping[str, Any], tmp: str, sha: str) -> FetchedInput:
-    """D2 재fetch — 브랜치가 아니라 정확한 커밋에 고정한다.
-
-    `git clone --branch <sha>`는 안 된다(--branch는 ref만 받고 임의 sha는 거부한다).
-    대신 remote를 만들고 그 sha 하나만 fetch한다. 호스트가 SHA-in-want를 거부하면
-    브랜치 클론 후 HEAD가 기대한 sha와 같은지 검증하는 것으로 대체한다 -- 거기서
-    불일치가 나면 그게 바로 D2가 잡으려는 "그 사이 브랜치가 움직였다" 상황이라
-    실패가 맞는 동작이다.
-    """
-    if not _SHA_RE.fullmatch(sha):
-        raise FetchError("INVALID_REPOSITORY_URL", f"headCommit.sha 형식이 아닙니다: {sha!r}")
-
-    repo_url = (descriptor.get("repository_url") or "").strip()
-    if not repo_url:
-        raise FetchError("INVALID_REPOSITORY_URL", "repositoryUrl이 없습니다")
-    _validate_host(repo_url)
-
-    settings = get_settings()
-    env = materialize.git_env()
-    timeout = settings.analysis_input_clone_timeout_s
-
-    try:
-        subprocess.run(["git", "init", "-q", tmp], check=True, capture_output=True,
-                       timeout=10, env=env)
-        subprocess.run(["git", "-C", tmp, "remote", "add", "origin", "--", repo_url],
-                       check=True, capture_output=True, timeout=10, env=env)
-        subprocess.run(["git", "-C", tmp, "fetch", "--depth", "1", "origin", "--", sha],
-                       check=True, capture_output=True, timeout=timeout, env=env)
-        subprocess.run(["git", "-C", tmp, "checkout", "-q", "FETCH_HEAD"],
-                       check=True, capture_output=True, timeout=10, env=env)
-    except subprocess.TimeoutExpired as exc:
-        raise FetchError("TEMPORARY_ERROR", f"재fetch가 {timeout}초를 넘겼습니다", retryable=True) from exc
-    except subprocess.CalledProcessError as exc:
-        # 호스트가 SHA-in-want를 거부했을 수 있다 -- 브랜치를 클론해서 sha 일치를 검증하는
-        # 폴백으로 넘어간다.
-        branch = (descriptor.get("resolved_branch") or "").strip()
-        return _fetch_github_pinned_via_branch_verify(repo_url, branch, sha, tmp)
-
-    head_commit = _head_commit(tmp)
-    git_history, truncated, source = _try_deepen_history(tmp)
-    git_history = _tag_branch_name(git_history, descriptor.get("resolved_branch"))
-    meta = _hash_tree(tmp)
-    return FetchedInput(
-        root=tmp, method="GITHUB_URL", resolved_branch=descriptor.get("resolved_branch"),
-        head_commit=head_commit, git_history=git_history, git_history_source=source,
-        history_truncated=truncated, input_hash=meta.hash,
-        file_count=meta.file_count, byte_count=meta.byte_count,
-    )
-
-
-def _fetch_github_pinned_via_branch_verify(
-    repo_url: str, branch: str, expected_sha: str, tmp: str
-) -> FetchedInput:
-    settings = get_settings()
-    cmd = ["git", "clone", "--depth", "1"]
-    if branch:
-        cmd += ["--branch", branch]
-    cmd += ["--", repo_url, tmp]
-    try:
-        subprocess.run(cmd, check=True, capture_output=True,
-                       timeout=settings.analysis_input_clone_timeout_s, env=materialize.git_env())
-    except subprocess.CalledProcessError as exc:
-        raise _classify_github_error(exc.stderr or b"") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise FetchError("TEMPORARY_ERROR", "재fetch(브랜치 폴백)가 타임아웃됐습니다",
-                         retryable=True) from exc
-
-    actual_sha = materialize.head_sha(tmp)
-    if actual_sha != expected_sha:
-        raise FetchError(
-            "FETCH_FAILED",
-            f"브랜치 HEAD가 검증 시점과 다릅니다(기대 {expected_sha}, 실제 {actual_sha}) -- "
-            "그 사이 새 커밋이 푸시된 것으로 보입니다",
-        )
-    head_commit = _head_commit(tmp)
-    git_history, truncated, source = _try_deepen_history(tmp)
-    git_history = _tag_branch_name(git_history, branch or None)
-    meta = _hash_tree(tmp)
-    return FetchedInput(
-        root=tmp, method="GITHUB_URL", resolved_branch=branch or None,
-        head_commit=head_commit, git_history=git_history, git_history_source=source,
-        history_truncated=truncated, input_hash=meta.hash,
-        file_count=meta.file_count, byte_count=meta.byte_count,
-    )
-
-
-# ── ZIP_WITH_GITLOG ───────────────────────────────────────────────────────
-
-
 def _download(url: str) -> bytes:
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
@@ -733,16 +586,15 @@ def _try_embedded_git_history(root: str) -> tuple[list[dict[str, Any]], str]:
 
 
 def _hash_tree(root: str) -> _TreeMeta:
-    """D2 — `input_hash` 재정의. `engine.py`의 기존 스냅샷 해시(ZIP=zip_bytes 자체,
+    """`input_hash` — 트리 내용만으로 정해지는 해시.
 
-    GITHUB_URL=스캐너-필터링된 파일만)와 다른 별도 정의다 -- 그 해시는 vendor 스캐너가
-    바뀔 때마다(흔함, `extractor_version()`이 존재하는 이유) 코드 변경 없이도 값이
-    바뀌어서 D2의 무결성 검증(재fetch 후 hash 일치 확인)을 오발동시킨다.
+    `engine.py`의 기존 스냅샷 해시(ZIP=zip_bytes 자체, GITHUB_URL=스캐너-필터링된
+    파일만)와 다른 별도 정의다 -- 그 해시는 vendor 스캐너가 바뀔 때마다(흔함,
+    `extractor_version()`이 존재하는 이유) 코드 한 줄 안 바뀌어도 값이 달라진다.
 
     여기서는 스캔 루트 아래 `.git/**`를 제외한 전 파일을, 상대경로 정렬 순서로
     `경로바이트 + NUL + 원본바이트`를 이어붙여 SHA-256을 낸다. 같은 트리면 ZIP으로
-    받든 클론으로 받든 동일한 해시가 나온다(백엔드의 "같은 inputHash면 analysisInputId
-    재사용" 요청도 이걸로 공짜로 충족된다).
+    받든 클론으로 받든 동일한 해시가 나온다 -- 재제출 판별에 쓸 수 있다.
     """
     root_path = Path(root)
     digest = hashlib.sha256()

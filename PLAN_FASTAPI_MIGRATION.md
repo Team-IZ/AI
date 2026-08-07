@@ -1,6 +1,6 @@
 # AI 파트 작업 계획
 
-> 갱신 **2026-08-07** · 브랜치 `feature/integration-pr12-pr14` (`develop`에서 분기)
+> 갱신 **2026-08-07** · **`develop`이 최신** (PR#17·#18 머지 완료, 열린 PR 0건)
 > **실행용 문서다.** 무엇을 어떤 순서로 할지만 적는다. 구조·계약 설명은 `README.md`,
 > 기계용 계약은 `openapi.json`. 백엔드 협의는 이슈 `Team-IZ/Backend#42`.
 
@@ -12,11 +12,11 @@
 |---|---|
 | 기능 | **6/6 완성.** 교안 · 코드 분석 · 문제 선정 · 질문·힌트 동결 · 채점 · 보고서 |
 | 검증 | **전 구간 실호출 완주** (2026-08-04). 교안 → 분석 → 문답 11턴 → 보고서 2건 |
-| 엔드포인트 | **10개**. 무상태 전환으로 11 → 8, `analysis-inputs`·면담 브리프로 8 → 10 |
-| 테스트 | **393 passed** |
+| 엔드포인트 | **9개**. 무상태 전환으로 11 → 8, 면담 브리프로 8 → 9 |
+| 테스트 | **373 passed** |
 | 제출 | ZIP · GitHub 링크 둘 다. 링크는 서버에서 `git clone --depth 1` |
 | 배포 | App Runner 자동(`main` 푸시 = 배포). 주소 고정. 팀원 소유 — 우리 작업 아님 |
-| 계약 | **미결 1건** — 실패한 LLM 호출의 토큰을 원장에 못 보낸다(§`ai_usage` 매핑). 나머지는 확정 |
+| 계약 | **미결 3건** — 채점 실패 콜의 원장 누락 · 브리프 `briefId` · `source_type` 슬롯 회신(이슈 `#16`) |
 | 다음 | **§T13 백엔드 연동** — 백엔드가 AI 연동 도메인을 만든 뒤 |
 | 기준 | **§기능 동결 스펙** · **§계약 기준값**. 앞선 절과 충돌하면 이 둘이 이긴다 |
 | 🔴 위험 | **무료 티어 529.** 채점 목표 15초를 못 지키는 원인. 유료 전환이 근본 해결 |
@@ -490,7 +490,7 @@ idempotencyKey {요청키|contextId}:{contextType}:{순번}
 
 ⚠️ 옛 이름(`QUESTION_GENERATION`·`GRADING`·`SUMMARY_DRAFT`·`SESSION_DIALOG`)은 **DB CHECK 밖이다.** 쓰면 Spring INSERT가 깨진다.
 
-🔴 **실패한 호출의 토큰이 원장에 안 남는다 (미결).** 동기 경로 2개(`/sessions/{id}/answers`·면담 브리프)가 503을 던지며 `StageError.usages`를 버린다. 비동기(`jobs.py`)만 `burned`로 살린다. 고치려면 에러 응답에 `aiUsage[]` 자리를 만드는 계약 변경이라 백엔드 합의가 필요하다.
+🟡 **실패한 호출의 토큰이 원장에 안 남는다 — 채점 경로만 남았다.** ✅ 면담 브리프는 2026-08-07 해결(백엔드 회신 §3 A-5: "성공·실패 모든 봉투에 실어라" → 503 응답 `InterviewBriefFailure`에 `aiUsage[]`). ❌ `/sessions/{id}/answers`는 여전히 버린다 — 공용 에러 봉투 `{error,message,retryable}`에 실을 자리가 없어 계약 변경이 필요하다.
 
 ### 속도 제한 — 지금 무료 티어 사정. 설계 근거로 쓰지 않는다
 
@@ -696,6 +696,8 @@ main       배포 브랜치. EC2가 이 브랜치를 체크아웃해 둔다
 
 | 날짜 | 내용 |
 |---|---|
+| 2026-08-07 | **`/analysis-inputs` 삭제**(`feature/remove-analysis-inputs`) — `POST /analyses` 3분할은 2026-08-06에 백엔드 착오로 폐기됐는데 PR#14가 같은 브랜치명으로 되살렸고 PR#17이 그대로 머지했다. 라우터·스키마 4종·`refetch_pinned()`·D2 무결성 검증·`prefetched_*` 죽은 파라미터까지 제거. **fetch.py 본체와 보안 방어 3종, `failureCode` 15종, `gitHistory` 14필드는 남긴다** — 분리와 무관하게 `/analyses`가 쓰는 것들이다. **373 tests** |
+| 2026-08-07 | **PR#18 — 8/7 백엔드 감사 회신 반영**(`feature/ib5-alignment`) — `conceptNameSource` 추측 3종 → 확정 4종·필수 · `visibility` `MANAGER_ONLY` Literal · `codeContext` 6필드 · **503 봉투에도 `aiUsage`**(§3 A-5) · `observationNotes`가 비면 근거 없는 항목 드롭(§3 D-1②) + 순서 재번호. 팀원 PR#12의 D-ib5와 같은 회신을 다뤘으나 그 브랜치는 PR#14 작업을 포함하지 않아 머지 대신 항목만 이식했다. **397 tests** |
 | 2026-08-07 | **PR#12·#14 통합**(`feature/integration-pr12-pr14`) — 엔드포인트 2개 신설(`/analysis-inputs` · `/interview-brief:generate`) · **백엔드 회신 반영**(`failure_code` 15종 · `EMPTY_CODE_EVIDENCE` 삭제 · `contextType` `SUBMISSION`→`ANALYSIS_JOB` · 면담 브리프용 `featureCode`/`contextType` 추가) · **D-model1 모델 전면 교체**(deepseek-v4-flash deprecate) · 면담 브리프 계약 정정 5건(prefix·헤더·`aiUsage`·`interviewSourceId` NOT NULL·멱등 지문) · fetch 방어 3건(호스트 fail-closed·다운로드 스트리밍 중단·GITHUB_URL `EMPTY_CODE`). **393 tests** |
 | 2026-08-03 | **§T11 안정화** — 세션 무상태 전환(엔드포인트 3개 삭제) · `aiUsage` 전 경로 배선(분석 외 전부 빈 배열이던 계약 위반) · `sourceType` 4종(이후 `contextType`으로 개명, 값도 2026-08-07에 교체) · `/reports` 헤더·멱등 · `callbackUrl` 삭제 · `idempotencyKey` 형식 정정. **198 tests** |
 | 2026-08-03 | **§T14b 실호출 안정화**(죽은 채점 모델 교체 · GITHUB_URL 이식 · codeSnippet 파일 전체 · 리포트 problemNo·narrativeFailed) · **§T15 새 MEAS 대응**(점수 상한 폐기 · StageScore 1:1 · 어휘 정렬 · 잡 PARTIAL) · **§T17 백엔드 1차 회신 반영**(contextType 개명 · isGeneral 삭제 · 재시도 1회 · unmatchedTeaches · courseLabel 필수 · 교안 한글 고정). **232 tests** |
