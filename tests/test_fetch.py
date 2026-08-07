@@ -99,20 +99,6 @@ def test_empty_repo_host_allowlist_is_fail_closed(monkeypatch):
     assert exc.value.failure_code == "UNSUPPORTED_HOST"
 
 
-@pytest.mark.parametrize("sha", [
-    "not-a-sha",
-    "-rm-rf",           # 옵션으로 오인될 수 있는 값 -- D12와 같은 클래스의 방어 대상
-    "a" * 39,           # 40자 미만
-    "g" * 40,           # 40자지만 hex 아님
-])
-def test_malformed_pinned_sha_is_rejected(sha):
-    with pytest.raises(fetch.FetchError) as exc:
-        fetch._fetch_github_pinned(
-            {"repository_url": "https://github.com/owner/repo"}, "/tmp/unused", sha,
-        )
-    assert exc.value.failure_code == "INVALID_REPOSITORY_URL"
-
-
 def test_zip_without_download_url_is_rejected():
     with pytest.raises(fetch.FetchError) as exc:
         fetch._fetch_zip({}, "/tmp/unused")
@@ -178,10 +164,10 @@ def test_input_hash_ignores_dot_git_contents(tmp_path):
 
 
 def test_input_hash_same_for_zip_and_directory_with_same_content(tmp_path):
-    """백엔드의 '같은 inputHash면 analysisInputId 재사용' 요청 -- ZIP과 클론이 같은
+    """ZIP으로 받든 클론으로 받든 같은 트리면 같은 해시가 나와야 한다.
 
-    트리면 같은 해시가 나와야 그 재사용이 실제로 성립한다(기존 스냅샷 해시는
-    ZIP=zip_bytes 자체/GITHUB_URL=필터링된 파일이라 서로 달랐던 문제, D2에서 재정의)."""
+    기존 스냅샷 해시는 ZIP=zip_bytes 자체 / GITHUB_URL=스캐너로 필터링된 파일이라
+    같은 코드인데도 값이 달랐다 -- 그래서 재제출 판별에 쓸 수 없었다."""
     files = {"src/main.py": b"print(1)\n", "readme.md": b"hi\n"}
 
     directory = tmp_path / "dir"
@@ -201,60 +187,6 @@ def test_input_hash_same_for_zip_and_directory_with_same_content(tmp_path):
 
 
 # ── D2 -- 재fetch 무결성 검사 ────────────────────────────────────────────
-
-
-def test_refetch_pinned_rejects_hash_mismatch(monkeypatch, tmp_path):
-    """재fetch한 코드가 검증했던 것과 다르면(브랜치가 그 사이 바뀌었으면) 하드 실패해야 한다."""
-    fake_root = tmp_path / "refetched"
-    _write_tree(fake_root, {"x.txt": b"different content\n"})
-    fake_meta = fetch._hash_tree(str(fake_root))
-
-    def fake_fetch_github_pinned(descriptor, tmp, sha):
-        return fetch.FetchedInput(
-            root=str(fake_root), method="GITHUB_URL", resolved_branch="main",
-            head_commit={"sha": sha, "message": "m", "committed_at": "2026-01-01T00:00:00Z"},
-            input_hash=fake_meta.hash, file_count=fake_meta.file_count,
-            byte_count=fake_meta.byte_count,
-        )
-
-    monkeypatch.setattr(fetch, "_fetch_github_pinned", fake_fetch_github_pinned)
-
-    descriptor = {
-        "method": "GITHUB_URL", "repository_url": "https://github.com/owner/repo",
-        "head_commit_sha": "a" * 40,
-        "input_hash": "0" * 64,  # 실제(fake_meta.hash)와 다른 값
-    }
-    with pytest.raises(fetch.FetchError) as exc:
-        with fetch.refetch_pinned(descriptor):
-            pass
-    assert exc.value.failure_code == "INPUT_HASH_MISMATCH"
-
-
-def test_refetch_pinned_accepts_matching_hash(monkeypatch, tmp_path):
-    fake_root = tmp_path / "refetched"
-    _write_tree(fake_root, {"x.txt": b"same content\n"})
-    fake_meta = fetch._hash_tree(str(fake_root))
-
-    def fake_fetch_github_pinned(descriptor, tmp, sha):
-        return fetch.FetchedInput(
-            root=str(fake_root), method="GITHUB_URL", resolved_branch="main",
-            head_commit={"sha": sha, "message": "m", "committed_at": "2026-01-01T00:00:00Z"},
-            input_hash=fake_meta.hash, file_count=fake_meta.file_count,
-            byte_count=fake_meta.byte_count,
-        )
-
-    monkeypatch.setattr(fetch, "_fetch_github_pinned", fake_fetch_github_pinned)
-
-    descriptor = {
-        "method": "GITHUB_URL", "repository_url": "https://github.com/owner/repo",
-        "head_commit_sha": "a" * 40,
-        "input_hash": fake_meta.hash,
-    }
-    with fetch.refetch_pinned(descriptor) as result:
-        assert result.input_hash == fake_meta.hash
-
-
-# ── D1 -- 히스토리 수집 실패가 코드 fetch에 영향 없어야 함 ─────────────────
 
 
 def test_history_enrichment_degrades_gracefully_on_failure(monkeypatch, tmp_path):

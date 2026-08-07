@@ -32,15 +32,18 @@ def test_every_endpoint_is_published():
 
     assert "/api/health" in published
     for path in ("/api/v0/analyses", "/api/v0/sessions/{session_id}/answers",
-                 "/api/v0/reports", "/api/v0/curricula", "/api/v0/analysis-inputs",
+                 "/api/v0/reports", "/api/v0/curricula",
                  "/api/v0/interview-brief:generate"):
         assert path in published, path
 
     # 세션은 무상태다(§T11 B) — 시작·조회·복원 3개가 사라져 8개다.
     assert "/api/v0/sessions" not in published
     assert "/api/v0/sessions/{session_id}/restore" not in published
-    # analysis-inputs 분리(M2, 2026-08-06)와 면담 브리프(명세서 v08)가 하나씩 늘어 10개다.
-    assert len(published) == 10
+    # 면담 브리프(명세서 v08)가 하나 늘어 9개다.
+    # ⚠️ /api/v0/analysis-inputs 는 없다 -- POST /analyses 3분할은 백엔드 착오였고
+    # 2026-08-06에 폐기됐다. /analyses 가 검증·fetch·분석을 한 몸으로 한다.
+    assert "/api/v0/analysis-inputs" not in published
+    assert len(published) == 9
 
 
 def test_frozen_contract_is_visible_in_the_spec():

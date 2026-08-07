@@ -23,20 +23,6 @@ class ApiError(Exception):
         self.retryable = retryable
 
 
-class AnalysisInputError(Exception):
-    """`/analysis-inputs` 전용 에러 -- {failureCode, message, requestId} 모양.
-
-    다른 네 엔드포인트가 쓰는 공용 ApiError({error,message,retryable})와 계약 자체가
-    다르다(백엔드 프로포절이 이 모양·11개 failureCode를 명시했다) -- 그래서 하나로
-    합치지 않고 별도 예외+핸들러를 둔다.
-    """
-
-    def __init__(self, failure_code: str, message: str, request_id: str | None = None) -> None:
-        self.failure_code = failure_code
-        self.message = message
-        self.request_id = request_id
-
-
 class InterviewBriefError(Exception):
     """면담 브리프 전용 에러. 명세서 §5.2 계약이 다른 4개 엔드포인트와 다르다 --
     {failureCode, message} 평탄 구조이고 retryable 필드가 없다(다른 뜻으로 별도
@@ -91,20 +77,6 @@ def register_error_handlers(app: FastAPI) -> None:
             status_code=422,
             content=_body("INVALID_REQUEST", format_validation_message(exc.errors()), False),
         )
-
-    @app.exception_handler(AnalysisInputError)
-    async def _handle_analysis_input_error(
-        request: Request, exc: AnalysisInputError
-    ) -> JSONResponse:
-        return JSONResponse(
-            status_code=422,
-            content={
-                "failureCode": exc.failure_code,
-                "message": exc.message,
-                "requestId": exc.request_id,
-            },
-        )
-
 
 
 def format_validation_message(errors: list) -> str:
