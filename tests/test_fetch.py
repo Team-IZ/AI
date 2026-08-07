@@ -244,7 +244,8 @@ def test_parse_git_log_output_handles_multiple_commits_and_merges():
 
     assert len(commits) == 3
     assert commits[0] == {
-        "sha": "aaa1", "author_name": "Alice", "author_email": "alice@x.com",
+        "commit_hash": "aaa1", "commit_message": "fix bug",
+        "author_name": "Alice", "author_email": "alice@x.com",
         "committed_at": "2026-01-01T09:00:00+09:00",
         "changed_files": ["src/main.py", "README.md"],
         "additions": 3, "deletions": 1,
@@ -266,13 +267,18 @@ def test_parse_git_log_output_handles_multiple_commits_and_merges():
 
 
 def test_parse_git_log_output_root_commit_has_no_parent():
-    """부모 없는 root 커밋은 parentSha가 all-zero sentinel(NOT NULL 컬럼 대응)."""
+    """부모 없는 root 커밋은 parentSha가 **null**이다.
+
+    옛 all-zero sentinel("0"*40)은 폐기됐다 -- 백엔드가 2026-08-07에
+    `commit_attribution.parent_commit_hash`의 NOT NULL을 해제했다. sentinel은
+    "부모가 all-zero 해시"라는 거짓을 원장에 남긴다.
+    """
     RS, FS = fetch._RS, fetch._FS
     raw = f"{RS}root1{FS}{FS}Alice{FS}alice@x.com{FS}2026-01-01T00:00:00+09:00{FS}2026-01-01T00:00:00+09:00{FS}init\n"
     commits = fetch._parse_git_log_output(raw)
 
     assert len(commits) == 1
-    assert commits[0]["parent_sha"] == "0" * 40
+    assert commits[0]["parent_sha"] is None
     assert commits[0]["is_merge_commit"] is False
 
 
@@ -444,7 +450,7 @@ def test_zip_fetch_uses_backend_supplied_history_over_embedded(monkeypatch, tmp_
 
     monkeypatch.setattr(fetch, "_download", lambda url: zip_bytes)
 
-    backend_history = [{"sha": "z9", "author_name": "Backend", "author_email": "b@x.com",
+    backend_history = [{"commit_hash": "z9", "commit_message": "backend supplied", "author_name": "Backend", "author_email": "b@x.com",
                         "committed_at": "2026-01-01T00:00:00Z", "changed_files": [],
                         "additions": 0, "deletions": 0}]
 

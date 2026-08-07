@@ -338,7 +338,7 @@ class RealAnalysisEngine:
             scan = rules.scan_directory(fetched.root)
             if fetched.head_commit:
                 # 클론 경로에서만 실제 커밋을 안다. ZIP은 요청 값을 그대로 쓴다.
-                commit_sha = fetched.head_commit["sha"]
+                commit_sha = fetched.head_commit["commit_hash"]
             resolved_branch = fetched.resolved_branch
             head_commit = fetched.head_commit
             git_history = fetched.git_history

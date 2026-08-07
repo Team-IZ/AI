@@ -50,8 +50,9 @@ _FS = "\x1f"
 
 # _parse_git_log/_try_embedded_git_history 공용 git log 포맷. %P(부모 SHA, 공백구분)로
 # isMergeCommit/parentSha를, %aI(author date)로 authoredAt을, %s(subject 1줄)로
-# isRevertCommit 판정을 뽑는다 -- subject 자체는 gitHistory 응답에 안 남긴다("메시지는
-# headCommit에만 있다" 원칙 유지, _parse_git_log_output에서 파싱만 하고 버림).
+# isRevertCommit 판정과 commitMessage를 뽑는다.
+# ⚠️ 옛 원칙("메시지는 headCommit에만 둔다")은 폐기됐다 -- 프론트 "최근 커밋 이력"
+# 화면이 커밋마다 메시지를 쓴다는 게 2026-08-07에 확인됐다. 그전엔 파싱만 하고 버렸다.
 _LOG_FORMAT = f"{_RS}%H{_FS}%P{_FS}%an{_FS}%ae{_FS}%aI{_FS}%cI{_FS}%s"
 
 # git revert / GitHub "Revert PR" 버튼이 자동 생성하는 커밋 제목 포맷(정확히 이 접두어).
@@ -236,7 +237,8 @@ def _head_commit(repo_dir: str) -> dict[str, Any] | None:
     if len(parts) != 3:
         return None
     sha, committed_at, message = parts
-    return {"sha": sha, "message": message.strip(), "committed_at": committed_at}
+    return {"commit_hash": sha, "commit_message": message.strip(),
+            "committed_at": committed_at}
 
 
 def _iso_days_ago(days: int) -> str:
@@ -245,10 +247,9 @@ def _iso_days_ago(days: int) -> str:
 
 
 def _parse_git_log(repo_dir: str, max_commits: int) -> list[dict[str, Any]]:
-    """`git log --numstat`을 GitCommit 딕셔너리 목록으로. 커밋 메시지(subject)는 안 담는다
+    """`git log --numstat`을 GitCommit 딕셔너리 목록으로.
 
-    (gitHistory[] 항목엔 메시지가 없다 -- headCommit에만 있다, subject는 isRevertCommit
-    판정에만 내부적으로 쓰고 버린다). branch_name은 여기서 안 채운다 -- 호출자가
+    branch_name은 여기서 안 채운다 -- 호출자가
     resolved_branch를 이미 알고 있어 FetchedInput 생성 직전에 후처리로 주입한다(ZIP
     경로는 브랜치 개념 자체가 없어 이 저수준 함수 하나가 두 의미를 못 담기 때문).
 
@@ -303,13 +304,16 @@ def _parse_git_log_output(raw: str) -> list[dict[str, Any]]:
                 deletions += int(dele)
         parent_shas = parents_raw.split()
         commits.append({
-            "sha": sha, "author_name": author_name, "author_email": author_email,
+            "commit_hash": sha, "commit_message": subject,
+            "author_name": author_name, "author_email": author_email,
             "committed_at": committed_at, "changed_files": changed_files,
             "additions": additions, "deletions": deletions,
             "authored_at": authored_at,
-            # root 커밋(부모 없음)은 DB parent_commit_hash가 NOT NULL이라 all-zero sentinel을
-            # 쓴다(git 생태계 관행 -- pre-receive hook의 "부모 없음" 표기와 동일).
-            "parent_sha": parent_shas[0] if parent_shas else "0" * 40,
+            # root 커밋(부모 없음)은 **null**이다. 백엔드가 2026-08-07에
+            # commit_attribution.parent_commit_hash의 NOT NULL을 해제해서, 옛 all-zero
+            # sentinel("0"*40, git pre-receive hook 관행)을 쓸 이유가 사라졌다 --
+            # sentinel은 "부모가 all-zero 해시"라는 거짓 사실을 원장에 남긴다.
+            "parent_sha": parent_shas[0] if parent_shas else None,
             "is_merge_commit": len(parent_shas) >= 2,
             "is_revert_commit": bool(_REVERT_SUBJECT_RE.match(subject)),
             "is_bot_commit": (

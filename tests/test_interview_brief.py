@@ -279,8 +279,8 @@ def test_validity_trigger_and_decision_reason_code_reach_prompt(monkeypatch):
     req_dict = _request()
     req_dict["validityReview"] = {
         "status": "CONFIRMED_INVALID",
-        "triggerReasonCode": "DUPLICATE_SUBMISSION_DETECTED",
-        "decisionReasonCode": "PLAGIARISM_CONFIRMED",
+        "triggerReasonCode": "EXCESSIVE_CONNECTION_LOSS",
+        "decisionReasonCode": "REVIEWED_VIOLATION_CONFIRMED",
         "decisionNote": "표절 확인됨",
     }
     calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
@@ -288,8 +288,8 @@ def test_validity_trigger_and_decision_reason_code_reach_prompt(monkeypatch):
     engine.generate(InterviewBriefRequest.model_validate(req_dict))
 
     block = calls[0]["values"]["validity_review_block"]
-    assert "DUPLICATE_SUBMISSION_DETECTED" in block
-    assert "PLAGIARISM_CONFIRMED" in block
+    assert "EXCESSIVE_CONNECTION_LOSS" in block
+    assert "REVIEWED_VIOLATION_CONFIRMED" in block
     assert "표절 확인됨" in block
 
 
