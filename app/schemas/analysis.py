@@ -32,34 +32,48 @@ class FocusItem(BaseSchema):
 
 
 class HeadCommit(BaseSchema):
-    """GITHUB_URL fetch의 HEAD 커밋. ZIP은 커밋 개념이 없을 수 있어 이 필드 자체가 null이다."""
+    """GITHUB_URL fetch의 HEAD 커밋. ZIP은 커밋 개념이 없을 수 있어 이 필드 자체가 null이다.
 
-    sha: str
-    message: str
+    🔴 2026-08-07 이름 통일(백엔드 협의): `sha` -> `commitHash`, `message` -> `commitMessage`.
+    `gitHistory[]` 원소와 같은 이름을 쓴다 -- 같은 응답 안에서 커밋 해시가 두 이름이면
+    소비하는 쪽이 매번 어느 쪽인지 확인해야 한다.
+    """
+
+    commit_hash: str
+    commit_message: str
     committed_at: datetime
 
 
 class GitCommit(BaseSchema):
-    """`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를
+    """`gitHistory[]` 항목 하나.
 
-    안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).
-
-    D-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):
+    D-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 감사 반영):
     parentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·
-    changedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은
-    `app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고.
+    changedLineCount를 추가했다. 판정 기준은 `app/engines/analysis/fetch.py`의
+    `_parse_git_log_output`/`_tag_branch_name` 참고.
+
+    🔴 2026-08-07 이름 확정(백엔드 협의): `sha` -> `commitHash`, `commitMessage` 신설.
+    프론트 "최근 커밋 이력" 화면이 `commitHash`·`commitMessage`·`branchName`·`committedAt`
+    4개로 조회한다 -- **이 넷은 커밋마다 반드시 채운다.** ⚠️ 옛 이름 `sha`를 쓰지 않는다.
+    `HeadCommit.sha`는 별개 필드라 그대로다(같은 응답에 두 이름이 있는 건 의도된 것).
     """
 
-    sha: str
+    commit_hash: str
+    commit_message: str = Field(
+        description="커밋 제목(git log %s). 예전엔 파싱만 하고 버렸다 -- 프론트 화면이 "
+                    "이 값을 쓴다는 게 2026-08-07에 확인돼 커밋마다 싣는다",
+    )
     author_name: str
     author_email: str
     committed_at: datetime
     changed_files: list[str] = Field(default_factory=list)
     additions: int = 0
     deletions: int = 0
-    parent_sha: str = Field(
+    parent_sha: str | None = Field(
+        default=None,
         description="첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 "
-                    "\"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)",
+                    "**null**이다 -- 백엔드가 `commit_attribution.parent_commit_hash`의 "
+                    "NOT NULL을 해제해서(2026-08-07) 옛 \"0\"*40 sentinel을 폐기했다",
     )
     authored_at: datetime = Field(description="author date. committedAt(커밋 date)과 다른 값")
     branch_name: str = Field(

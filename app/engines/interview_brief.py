@@ -153,11 +153,17 @@ def _stage_block(stage) -> str | None:
 
 
 def _problem_block(problem: ProblemComprehension) -> str:
-    header = f"### 문제 {problem.problem_no}: {problem.concept_name} ({problem.problem_scope})"
+    # concept_name은 null일 수 있다(conceptNameSource=UNAVAILABLE -- NOT_GENERATED 문제는
+    # 조인 폴백 체인이 전부 비어서 개념명 자체가 없다). 그대로 넣으면 프롬프트에 "None"이
+    # 박혀 모델이 그걸 개념 이름으로 읽는다.
+    concept = problem.concept_name or "(개념명 없음)"
+    header = f"### 문제 {problem.problem_no}: {concept} ({problem.problem_scope})"
     # concept_name이 검증된 표시명이 아니면 모델이 확정된 개념처럼 단정하지 않게 경고를
     # 붙인다. **화이트리스트로 판정한다** -- 값 집합이 또 바뀌어도(옛 3종 → 4종이 이미 한 번
     # 바뀌었다) 경고가 조용히 안 붙는 쪽으로 무너지지 않는다.
-    if problem.concept_name_source != "TEACHES_CANONICAL_NAME":
+    if problem.concept_name_source == "UNAVAILABLE":
+        header += "\n  ★이 문제는 개념명을 특정할 수 없다 -- 개념 이름을 지어내지 말고 코드 위치나 단계 내용으로만 질문하라."
+    elif problem.concept_name_source != "TEACHES_CANONICAL_NAME":
         header += "\n  ★이 개념명은 검증된 표시명이 아니라 대체값이다 -- 확정된 개념처럼 단정하지 말고 여지를 둔 표현을 써라."
     # D-ib4 (백엔드 D-1 대응): 문제 단위 interviewSourceId. _stage_block()이
     # 자기 interviewSourceId를 텍스트로 명시하는 것과 같은 이유 -- 허용 집합에만

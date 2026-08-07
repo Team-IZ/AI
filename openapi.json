@@ -2623,9 +2623,14 @@
       },
       "GitCommit": {
         "properties": {
-          "sha": {
+          "commitHash": {
             "type": "string",
-            "title": "Sha"
+            "title": "Commithash"
+          },
+          "commitMessage": {
+            "type": "string",
+            "title": "Commitmessage",
+            "description": "커밋 제목(git log %s). 예전엔 파싱만 하고 버렸다 -- 프론트 화면이 이 값을 쓴다는 게 2026-08-07에 확인돼 커밋마다 싣는다"
           },
           "authorName": {
             "type": "string",
@@ -2658,9 +2663,16 @@
             "default": 0
           },
           "parentSha": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Parentsha",
-            "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)"
+            "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 **null**이다 -- 백엔드가 `commit_attribution.parent_commit_hash`의 NOT NULL을 해제해서(2026-08-07) 옛 \"0\"*40 sentinel을 폐기했다"
           },
           "authoredAt": {
             "type": "string",
@@ -2696,11 +2708,11 @@
         },
         "type": "object",
         "required": [
-          "sha",
+          "commitHash",
+          "commitMessage",
           "authorName",
           "authorEmail",
           "committedAt",
-          "parentSha",
           "authoredAt",
           "branchName",
           "isMergeCommit",
@@ -2708,17 +2720,17 @@
           "isBotCommit"
         ],
         "title": "GitCommit",
-        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고."
+        "description": "`gitHistory[]` 항목 하나.\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount를 추가했다. 판정 기준은 `app/engines/analysis/fetch.py`의\n`_parse_git_log_output`/`_tag_branch_name` 참고.\n\n🔴 2026-08-07 이름 확정(백엔드 협의): `sha` -> `commitHash`, `commitMessage` 신설.\n프론트 \"최근 커밋 이력\" 화면이 `commitHash`·`commitMessage`·`branchName`·`committedAt`\n4개로 조회한다 -- **이 넷은 커밋마다 반드시 채운다.** ⚠️ 옛 이름 `sha`를 쓰지 않는다.\n`HeadCommit.sha`는 별개 필드라 그대로다(같은 응답에 두 이름이 있는 건 의도된 것)."
       },
       "HeadCommit": {
         "properties": {
-          "sha": {
+          "commitHash": {
             "type": "string",
-            "title": "Sha"
+            "title": "Commithash"
           },
-          "message": {
+          "commitMessage": {
             "type": "string",
-            "title": "Message"
+            "title": "Commitmessage"
           },
           "committedAt": {
             "type": "string",
@@ -2728,12 +2740,12 @@
         },
         "type": "object",
         "required": [
-          "sha",
-          "message",
+          "commitHash",
+          "commitMessage",
           "committedAt"
         ],
         "title": "HeadCommit",
-        "description": "GITHUB_URL fetch의 HEAD 커밋. ZIP은 커밋 개념이 없을 수 있어 이 필드 자체가 null이다."
+        "description": "GITHUB_URL fetch의 HEAD 커밋. ZIP은 커밋 개념이 없을 수 있어 이 필드 자체가 null이다.\n\n🔴 2026-08-07 이름 통일(백엔드 협의): `sha` -> `commitHash`, `message` -> `commitMessage`.\n`gitHistory[]` 원소와 같은 이름을 쓴다 -- 같은 응답 안에서 커밋 해시가 두 이름이면\n소비하는 쪽이 매번 어느 쪽인지 확인해야 한다."
       },
       "Hint": {
         "properties": {
@@ -2818,6 +2830,12 @@
       },
       "InterviewBriefRequest": {
         "properties": {
+          "briefId": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Briefid",
+            "description": "`interview_brief.brief_id`. AI는 이 값을 그대로 `aiUsage.contextId`에 에코한다(`contextType='INTERVIEW_BRIEF'`일 때 고정 대응). 🔴 백엔드가 **AI 호출 전에** 브리프 행을 만들고 그 id를 실어 보낸다 (2026-08-07 확정) -- `last_request_id`/`last_request_fingerprint` 쌍이 중복 호출 방지 장치라, 호출 후에 행을 만들면 대조할 대상이 없어 장치가 무의미해진다"
+          },
           "target": {
             "$ref": "#/components/schemas/Target"
           },
@@ -2854,6 +2872,7 @@
         },
         "type": "object",
         "required": [
+          "briefId",
           "target",
           "briefContext",
           "validityReview",
@@ -3158,9 +3177,16 @@
             "title": "Problemno"
           },
           "conceptName": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Conceptname",
-            "description": "검증 개념 표시명. ★ 질문에서 L2 같은 내부 코드 대신 이 이름을 쓴다"
+            "description": "검증 개념 표시명. ★ 질문에서 L2 같은 내부 코드 대신 이 이름을 쓴다. 🔴 conceptNameSource=UNAVAILABLE이면 **null이다** -- DB 컬럼이 아니라 매번 조인으로 계산되는 값인데, NOT_GENERATED 문제는 CHECK가 title까지 NULL로 강제해 폴백 체인이 전부 비기 때문이다(2026-08-07 확정)"
           },
           "problemScope": {
             "type": "string",
@@ -3246,7 +3272,6 @@
         "type": "object",
         "required": [
           "problemNo",
-          "conceptName",
           "problemScope",
           "generationStatus",
           "conceptNameSource",
@@ -4437,19 +4462,29 @@
           "triggerReasonCode": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "EXCESSIVE_WINDOW_LEAVE",
+                  "EXCESSIVE_CONNECTION_LOSS",
+                  "MANAGER_MANUAL_FLAG"
+                ]
               },
               {
                 "type": "null"
               }
             ],
             "title": "Triggerreasoncode",
-            "description": "무효 확인이 시작된 사유(자유 코드, 값 집합 미확정). briefType=INVALID_ATTEMPT일 때 특히 중요한 근거"
+            "description": "무효 확인이 시작된 사유. briefType=INVALID_ATTEMPT일 때 특히 중요한 근거"
           },
           "decisionReasonCode": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "REVIEWED_NO_VIOLATION",
+                  "REVIEWED_VIOLATION_CONFIRMED",
+                  "REVIEWED_INSUFFICIENT_EVIDENCE"
+                ]
               },
               {
                 "type": "null"

@@ -274,9 +274,9 @@ def test_direct_fetch_path_wires_git_history_into_result(monkeypatch, fake_llm):
 
     from app.engines.analysis.fetch import FetchedInput
 
-    fake_commit = {"sha": "d" * 40, "author_name": "Alice", "author_email": "a@x.com",
+    fake_commit = {"commit_hash": "d" * 40, "commit_message": "fix", "author_name": "Alice", "author_email": "a@x.com",
                    "committed_at": "2026-01-01T00:00:00Z", "changed_files": ["app/pay.py"],
-                   "additions": 1, "deletions": 0, "parent_sha": "0" * 40,
+                   "additions": 1, "deletions": 0, "parent_sha": None,
                    "authored_at": "2026-01-01T00:00:00Z", "branch_name": "main",
                    "is_merge_commit": False, "is_revert_commit": False,
                    "is_bot_commit": False, "changed_line_count": 1}
@@ -290,7 +290,7 @@ def test_direct_fetch_path_wires_git_history_into_result(monkeypatch, fake_llm):
         with real_fetch(spec, zip_bytes) as fetched:
             yield FetchedInput(
                 root=fetched.root, method=fetched.method, resolved_branch="main",
-                head_commit={"sha": "d" * 40, "message": "fix",
+                head_commit={"commit_hash": "d" * 40, "commit_message": "fix",
                              "committed_at": "2026-01-01T00:00:00Z"},
                 git_history=[fake_commit], git_history_source="EMBEDDED_GIT",
                 history_truncated=False, input_hash=fetched.input_hash,
@@ -304,9 +304,9 @@ def test_direct_fetch_path_wires_git_history_into_result(monkeypatch, fake_llm):
     result = AnalysisResult.model_validate(raw)
 
     assert result.resolved_branch == "main"
-    assert result.head_commit.sha == "d" * 40
+    assert result.head_commit.commit_hash == "d" * 40
     assert len(result.git_history) == 1
-    assert result.git_history[0].sha == "d" * 40
+    assert result.git_history[0].commit_hash == "d" * 40
     assert result.git_history[0].is_bot_commit is False
 
 

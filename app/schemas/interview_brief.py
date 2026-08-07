@@ -15,7 +15,7 @@ from typing import Literal
 
 from pydantic import Field
 
-from app.schemas.common import BaseSchema
+from app.schemas.common import BaseSchema, UuidStr
 from app.schemas.usage import AiUsage
 
 # §9 부록 코드값 그대로. Spring이 이미 DB CHECK로 강제하는 값이라 AI가 별도로
@@ -52,6 +52,24 @@ ConceptNameSource = Literal[
     "UNAVAILABLE",                  # ④ NOT_GENERATED -- title조차 CHECK로 NULL이라 개념명이 없다
 ]
 ValidityReviewStatus = Literal["NOT_REQUIRED", "PENDING", "CONFIRMED_INVALID", "RESTORED_VALID"]
+
+# 2026-08-07 백엔드 최종 회신에서 정책 담당자 확정 + DB CHECK 적용 완료. 그전까지는
+# "Literal 걸지 마십시오"였다(§1-7). 임시 Postgres 17로 값·짝 검증까지 마쳤다고 확인됨.
+ValidityTriggerReasonCode = Literal[
+    "EXCESSIVE_WINDOW_LEAVE",     # 창 이탈 임계치 초과
+    "EXCESSIVE_CONNECTION_LOSS",  # 연결 끊김 임계치 초과
+    "MANAGER_MANUAL_FLAG",        # 자동 신호 없이 매니저가 직접 검토 개시
+]
+# 🔴 decision 값과 status의 짝이 DB CHECK로 강제된다 -- 어긋난 조합은 저장 자체가 거부된다.
+#   REVIEWED_NO_VIOLATION          -> RESTORED_VALID
+#   REVIEWED_VIOLATION_CONFIRMED   -> CONFIRMED_INVALID
+#   REVIEWED_INSUFFICIENT_EVIDENCE -> RESTORED_VALID   (증거 불충분은 유효 처리다)
+# 프롬프트가 이 대응을 전제로 써도 된다는 뜻이다.
+ValidityDecisionReasonCode = Literal[
+    "REVIEWED_NO_VIOLATION",
+    "REVIEWED_VIOLATION_CONFIRMED",
+    "REVIEWED_INSUFFICIENT_EVIDENCE",
+]
 AttemptType = Literal["INITIAL", "RETRY", "REVIEW"]
 AttemptStatus = Literal[
     "NOT_STARTED", "SUBMITTED", "ANALYZING", "SESSION_READY",
@@ -135,16 +153,15 @@ class ValidityReview(BaseSchema):
     """응시 자체를 인정할 것인가. §4.1 ④."""
 
     status: ValidityReviewStatus
-    # D-ib4: measurement_attempt.validity_trigger_reason_code -- 무효 확인이
-    # "왜 시작됐는가"(trigger)이고, decision_reason_code는 "그래서 어떻게 판정했는가"
-    # (decision)다. DDL 둘 다 VARCHAR(100)에 CHECK 제약이 없어(값 집합 미확정)
-    # Literal로 좁히지 않고 str로 연다 -- 값 집합이 정해지면 그때 좁힌다.
-    trigger_reason_code: str | None = Field(
+    # 무효 확인이 "왜 시작됐는가"(trigger)와 "그래서 어떻게 판정했는가"(decision)다.
+    # 2026-08-07에 값 집합이 확정돼 Literal로 좁혔다(그전엔 CHECK가 없어 str로 열어 뒀다).
+    trigger_reason_code: ValidityTriggerReasonCode | None = Field(
         default=None,
-        description="무효 확인이 시작된 사유(자유 코드, 값 집합 미확정). "
-                    "briefType=INVALID_ATTEMPT일 때 특히 중요한 근거",
+        description="무효 확인이 시작된 사유. briefType=INVALID_ATTEMPT일 때 특히 중요한 근거",
     )
-    decision_reason_code: str | None = None
+    # ⚠️ status가 PENDING·NOT_REQUIRED면 이 값이 오지 않는다(DB CHECK
+    # ck_measurement_attempt_validity_review_status_2). 판정 전이라 판정 사유가 없다.
+    decision_reason_code: ValidityDecisionReasonCode | None = None
     decision_note: str | None = Field(
         default=None, description="매니저가 남긴 판정 메모",
     )
@@ -214,8 +231,12 @@ class ProblemComprehension(BaseSchema):
     """`comprehension.problems[]` 원소 하나. assessment_problem 한 건에 대응."""
 
     problem_no: int = Field(ge=1)
-    concept_name: str = Field(
-        description="검증 개념 표시명. ★ 질문에서 L2 같은 내부 코드 대신 이 이름을 쓴다",
+    concept_name: str | None = Field(
+        default=None,
+        description="검증 개념 표시명. ★ 질문에서 L2 같은 내부 코드 대신 이 이름을 쓴다. "
+                    "🔴 conceptNameSource=UNAVAILABLE이면 **null이다** -- DB 컬럼이 아니라 "
+                    "매번 조인으로 계산되는 값인데, NOT_GENERATED 문제는 CHECK가 title까지 "
+                    "NULL로 강제해 폴백 체인이 전부 비기 때문이다(2026-08-07 확정)",
     )
     problem_scope: ProblemScope
     generation_status: GenerationStatus
@@ -332,6 +353,14 @@ class ObservationNote(BaseSchema):
 class InterviewBriefRequest(BaseSchema):
     """POST /api/v0/interview-brief:generate 요청 본문 전체."""
 
+    brief_id: UuidStr = Field(
+        description="`interview_brief.brief_id`. AI는 이 값을 그대로 `aiUsage.contextId`에 "
+                    "에코한다(`contextType='INTERVIEW_BRIEF'`일 때 고정 대응). "
+                    "🔴 백엔드가 **AI 호출 전에** 브리프 행을 만들고 그 id를 실어 보낸다 "
+                    "(2026-08-07 확정) -- `last_request_id`/`last_request_fingerprint` 쌍이 "
+                    "중복 호출 방지 장치라, 호출 후에 행을 만들면 대조할 대상이 없어 "
+                    "장치가 무의미해진다",
+    )
     target: Target
     brief_context: BriefContext
     risk_reasons: list[RiskReason] = Field(default_factory=list)
