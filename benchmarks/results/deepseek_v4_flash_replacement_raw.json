@@ -1,0 +1,3335 @@
+{
+  "started_at": "2026-08-07T02:07:28.323111+00:00",
+  "finished_at": "2026-08-07T02:12:14.214455+00:00",
+  "models": [
+    "deepseek-ai/deepseek-v4-pro",
+    "minimaxai/minimax-m3",
+    "minimaxai/minimax-m2.7",
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "thinkingmachines/inkling",
+    "openai/gpt-oss-20b",
+    "mistralai/mistral-nemotron",
+    "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    "nvidia/nemotron-3-super-120b-a12b",
+    "moonshotai/kimi-k2.6",
+    "openai/gpt-oss-120b",
+    "mistralai/mistral-small-4-119b-2603",
+    "abacusai/dracarys-llama-3.1-70b-instruct",
+    "google/gemma-4-31b-it",
+    "meta/llama-4-maverick-17b-128e-instruct",
+    "nvidia/nvidia-nemotron-nano-9b-v2",
+    "mistralai/mistral-large-3-675b-instruct-2512",
+    "meta/llama-3.3-70b-instruct",
+    "google/gemma-3n-e4b-it",
+    "meta/llama-3.1-70b-instruct"
+  ],
+  "roles": [
+    "grading",
+    "report",
+    "interview_brief"
+  ],
+  "repeats": 3,
+  "judge_model": "nvidia/llama-3.3-nemotron-super-49b-v1",
+  "trials": [
+    {
+      "ok": false,
+      "elapsed_s": 2.374713416909799,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "minimaxai/minimax-m2.7",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 2.3875130841042846,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "minimaxai/minimax-m2.7",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 2.4096190840937197,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "minimaxai/minimax-m2.7",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 9.972503707977012,
+      "struct_ok": false,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "할인해주는 코드인 것 같아요.",
+      "missing": "코드의 각 구성 요소(클래스, 메서드, 조건문 등)가 어떻게 연결되어 전체 흐름을 형성하는지 설명해야 한다.",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "model": "openai/gpt-oss-20b",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 5.026842333143577,
+      "struct_ok": true,
+      "score": 1,
+      "matched_level": "1: 자기 코드인데 무엇을 하는지 특정하지 못한다",
+      "evidence": "할인해주는 코드인 것 같아요.",
+      "missing": "어떤 조건(회원 여부, 5만원 초과)에서 어떤 동작(10% 할인, order.total *= 0.9)이 일어나는지, 입력(user, order)과 출력(return order)의 흐름을 구체적으로 서술해야 한다.",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "AI의 채점(점수 1, 근거: 상세하지 않은 일반적 응답 인식)과 기준점(Sonnet 응답, 점수 4, 근거: 상세한 설명だが 한 단계의 논리적 연결 부족)의 評価 기준은 달르나,両者の評価 프로세스는 루브릭의详细한 해석과 적용을 보여줌. 다만, AI의 채점은 응답의 내용 부족에 초점을 둔 반면, 기준점은 응답의 논리적 완전성에 초점을 둔점에서 차이抜ける. لو브릭 자체에 부합하는 평가 프로세스를 보여줌."
+      },
+      "model": "minimaxai/minimax-m3",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.772589165950194,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "minimaxai/minimax-m2.7",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.779859457863495,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "minimaxai/minimax-m2.7",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.770625833189115,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "minimaxai/minimax-m2.7",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.771159207914025,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "minimaxai/minimax-m2.7",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.793264125008136,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "minimaxai/minimax-m2.7",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.857822417048737,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "minimaxai/minimax-m2.7",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 9.456519708037376,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 주문 서비스의 회원 할인 로직을 정확히 이해하고, 핵심 동작을 명확히 설명했다. 설계 의도와 근거를 논리적으로 정리하며, 다른 설계 옵션과의 비교를 통해 자신의 선택을 정당화했다. 또한, 잠재적 동시성 문제와 부동소수점 오차 같은 엣지 케이스를 인식하고 이를 언급했다. 이러한 전반적인 이해는 코드 소유권에 대한 높은 수준의 인식을 보여준다. 다만, 실제 코드 실행 시 발생할 수 있는 race condition에 대한 구체적 해결책은 제시되지 않았다.",
+        "strengths": [
+          {
+            "axis": "logic_comprehension",
+            "detail": "apply_discount 함수가 주문과 사용자 정보를 받아 10% 할인 여부를 판단하고, 조건에 따라 order.total을 조정한다는 점을 정확히 기술했다."
+          },
+          {
+            "axis": "design_rationale",
+            "detail": "회원 등급별 할인 정책을 서비스 메서드에 모아두어 주문 처리 로직에 분산되는 문제를 방지하고, 정책 변경 시 한 곳만 수정하면 된다는 설계 목표를 명확히 제시했다."
+          },
+          {
+            "axis": "justification",
+            "detail": "할인 로직을 서비스 계층에 두고 주문 모델을 순수 데이터로 유지함으로써 정책 테스트가 용이해진다는 장점을 설명했다."
+          },
+          {
+            "axis": "edge_case_awareness",
+            "detail": "동시 다중 스레드에서 같은 주문 객체를 처리할 때 발생할 수 있는 레이스 컨디션과 부동소수점 반올림 오차를 지적했다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "학생은 모든 질문에 힌트 없이 답변을 제공했으며, 이는 높은 자율성과 문제 해결 능력을 시사한다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 보고서 서술이 기준점(Sonnet 보고서)과 근거성, 구체성, 통찰 면에서 거의 동일한 수준으로 보여, 높은 자율성과 문제 해결 능력을 보여줌."
+      },
+      "model": "openai/gpt-oss-20b",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 13.06048020790331,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 주문 서비스의 회원 할인 로직을 완벽하게 이해하고 있다. 코드의 동작 원리(L1)를 정확히 설명하며, 설계 의도(L2)와 대안 대비 장단점(L3)을 논리적으로 정당화한다. 더 나아가 동시성 이슈와 부동소수점 정밀도 문제(L4)까지 자발적으로 지적해내며, 실무 수준의 경계 조건 사고를 보여준다. 모든 레벨을 힌트 없이 통과했으며, 요구사항 검증도 PASS했다.",
+        "strengths": [
+          {
+            "axis": "code_comprehension",
+            "detail": "apply_discount 메서드의 조건 분기(회원 여부, 5만 원 이상)와 10% 할인 적용 로직을 정확히 기술함"
+          },
+          {
+            "axis": "design_rationale",
+            "detail": "할인 정책을 서비스 계층에 집중시켜 주문 처리 로직 전반에 흩어지는 것을 방지하고, 정책 변경 시 수정 범위를 최소화하려는 의도를 명확히 설명함"
+          },
+          {
+            "axis": "tradeoff_analysis",
+            "detail": "Order 모델에 할인 메서드를 두는 대안과 비교해, 데이터와 정책 분리로 테스트 용이성과 관심사 분리를 확보한 점을 논리적으로 방어함"
+          },
+          {
+            "axis": "edge_case_analysis",
+            "detail": "동일 Order 객체에 다중 스레드 호출 시 레이스 컨디션으로 중복 할인 발생 가능성과, 부동소수점 연산 누적에 따른 반올림 오차 문제를 자발적으로 식별함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "전체 4개 레벨(L1~L4) 모두 힌트 0개로 만점(5점)을 획득했다. 학생은 외부 도움 없이 스스로 코드를 분석하고, 설계 의도를 추론하며, 대안 비교와 경계 조건 탐색까지 완수했다. 보조 없이 도달한 온전한 자율 이해 상태다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 보고서가 기준점(Sonnet 报告서)과 거의 동일한 수준의 근거성, 구체성, 그리고 설계 트레이드오프와 동시성 리스크檢討까지 담고 있음"
+      },
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 11.42419712501578,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 주문 서비스의 회원 할인 로직을 명확히 이해하고, 설계 의도와 정당화까지 구체적으로 설명했습니다. 각 질문에 대해 5점 만점에 전부 5점을 획득하며, 힌트 없이 스스로 답변을 도출했습니다. 특히 서비스 계층에 정책을 모아 재사용성과 테스트 용이성을 강조한 점이 인상적입니다. 또한 동시성 문제와 부동소수점 오차와 같은 잠재적 결함을 인식하고 설명함으로써 설계의 한계를 파악했습니다. 전반적으로 높은 수준의 코드 이해도와 설계 사고를 보여주었습니다.",
+        "strengths": [
+          {
+            "axis": "코드 이해",
+            "detail": "apply_discount 함수가 주문과 사용자 객체를 받아 회원 여부와 금액 조건에 따라 10% 할인 적용하고, 조건 미충족 시 그대로 반환한다는 점을 정확히 기술함."
+          },
+          {
+            "axis": "설계 원리",
+            "detail": "정책을 서비스 계층에 모아 주문 처리 로직에 할인 조건이 흩어지는 것을 방지하고, 할인율 변경 시 한 곳만 수정하면 된다는 설계 의도를 명확히 설명함."
+          },
+          {
+            "axis": "정당화",
+            "detail": "할인 로직을 주문 모델에 넣는 대안과 비교해 데이터와 정책을 분리함으로써 테스트 용이성을 확보한다는 점을 정당화함."
+          },
+          {
+            "axis": "조건 파악",
+            "detail": "동시성으로 인한 중복 할인 가능성과 부동소수점 오차 누적 문제를 인식하고, 설계가 깨지는 조건을 구체적으로 제시함."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "학생은 모든 질문에 힌트 없이 정확히 답변했으며, 이는 높은 자율성과 깊은 이해도를 시사합니다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "AI의 보고서는etailed하고 구체적인 내용을 가지고 있으며, 기준점(Sonnet 보고서)과의 비교에서 근거성, 구체성, 통찰력 면에서 비슷한 수준을 보여줍니다. 그러나 일부 세부 사항에서稍 tệ미한に向(Resources의 분류나, 구체적인 예시의 부족 등)으로 인해 최고 점수인 5점은 미ב치며, 4점으로 평가합니다."
+      },
+      "model": "openai/gpt-oss-20b",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 13.969735417049378,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 apply_discount 함수의 동작(L1), 설계 의도(L2), 대안 비교(L3), 그리고 동시성·정밀도 한계(L4)에 이르기까지 모든 레벨에서 힌트 없이 만점(5점)을 받았다. 회원 할인 로직의 책임 분리, 서비스 계층 배치의 근거, 레이스 컨디션과 부동소수점 누적 오차까지 스스로 지적했다. 요구사항 r1도 PASS로, 코드 오너십이 매우 안정적이다.",
+        "strengths": [
+          {
+            "axis": "L1 코드 동작 기술",
+            "detail": "user.is_member와 order.total > 50000 조건, 0.9 곱셈, 조건 미충족 시 그대로 반환까지 정확히 서술했다."
+          },
+          {
+            "axis": "L2 설계 의도",
+            "detail": "할인 정책을 서비스 메서드 하나에 모아 중복과 변경 비용을 줄이려는 목적을 자신의 말로 정당화했다."
+          },
+          {
+            "axis": "L3 대안 비교·정당화",
+            "detail": "order 모델에 할인 메서드를 두는 대안과 비교해, 정책 테스트 용이성과 order의 데이터 순수성 측면에서 현재 구조가 낫다고 논증했다."
+          },
+          {
+            "axis": "L4 설계 한계 인식",
+            "detail": "멀티스레드 환경의 레이스 컨디션으로 인한 중복 할인 가능성과, 부동소수점 total의 누적 반올림 오차를 스스로 지적했다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 문답(L1~L4)에서 힌트 0개를 받고 정답에 도달했다. 즉, 어떤 레벨에서도 보조 없이 스스로 근거를 구성해 답변을 완성했음을 의미한다. 힌트 사용 이력이 전무하므로 '보조를 받아 도달'한 항목은 없으며, 전반적으로 자립적 추론 능력이 확인된다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "AI의 보고서 서술은 기준점과 매우 유사한 근거성, 구체성, 통찰력을 보여줍니다. 모든 레벨에서 힌트 없이 정확한 설명과 설계 근거, 대안 비교, 그리고 구체적인 실패 조건을 자립적으로 제공합니다. 그러나 terme '동일한 수준'에 완전히 도달하지 못하고, 일부 문구의.TRUE 테이블이 조금 더 간결했을 수 있습니다.PoweredBy_AI"
+      },
+      "model": "minimaxai/minimax-m3",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 15.861109083052725,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 주문 서비스의 회원 할인 로직을 모든 레벨에서 완벽하게 이해하고 있다. 코드의 동작 원리(L1)를 명확히 설명했고, 설계 의도(L2)와 대안 대비 정당성(L3)을 논리적으로 제시했다. 동시성 이슈와 부동소수점 오차 등 설계가 깨질 수 있는 경계 조건(L4)까지 자발적으로 식별했다. 모든 문항을 힌트 없이 만점으로 통과하여 코드 소유권이 확고하다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount 메서드의 조건부 할인 로직(회원 여부, 5만 원 이상, 10% 할인)과 반환 방식을 정확히 기술함"
+          },
+          {
+            "axis": "L2",
+            "detail": "할인 정책을 서비스 계층에 집중시켜 중복 방지와 변경 용이성을 확보한 설계 근거를 명확히 설명함"
+          },
+          {
+            "axis": "L3",
+            "detail": "Order 모델에 할인 메서드를 두는 대안과 비교해, 정책 분리·테스트 용이성·데이터 순수성 관점에서 현재 구조의 우위를 논증함"
+          },
+          {
+            "axis": "L4",
+            "detail": "동일 Order 객체에 대한 동시 호출 시 레이스 컨디션으로 중복 할인 발생 가능성과 부동소수점 누적 오차 문제를 구체적으로 지적함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "전 레벨(L1~L4)에서 힌트 0개로 만점을 획득했다. 학생은 외부 도움 없이 코드의 구현·설계·대안 비교·경계 조건까지 전 영역을 자력으로 설명했으며, 이는 코드에 대한 완전한 소유권과 깊은 이해를 입증한다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 보고서 서술은 기준점(Sonnet 报告書)과 비교해 근거성, 구체성, 통찰 면에서 동일하거나 그 이상의 수준을 보여준다. 모든 레벨(L1~L4)에 대해etailed한 설명, 설계 의도, 대안 비교, 실패 조건 등이 힌트 없이 명확하고 구체적으로 서술되어 있다. 또한, AI의 서술은 코드의 소유권과 이해의 깊이, 자기주도적 학습 능력 등을 평가하는 autonomy_note cũng 동일한 수준의 평가를 받았다."
+      },
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 10.79494420811534,
+      "struct_ok": true,
+      "opening_remark": "김OO, 지난번 면담 이후 어떻게 진행됐는지 궁금해. 오늘은 그동안의 경험을 좀 더 이야기해보자.",
+      "items": [
+        {
+          "questionText": "지난번에 진행한 단계에서 조금 어려움이 있었던 부분이 있었는데, 그때 느낀 점을 한 번 이야기해 줄 수 있을까?",
+          "questionRationale": "면담 성격을 반영하여 라포 형성용 도입 질문",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "프로젝트에서 맡은 역할이 어떻게 진행되었는지 설명해 줄 수 있어?",
+          "questionRationale": "위험 사유(2회차에서 어려움이 있었던 상황)를 바탕으로 역할 기여도 격차를 확인하기 위해",
+          "suggestedOrder": 2,
+          "interviewSourceId": "src-risk-1"
+        },
+        {
+          "questionText": "상태 관리 부분에서 메서드가 호출되는 시점이 언제인지 기억나?",
+          "questionRationale": "문제 단위(상태 관리)에서 L2 NOT_PASSED 질문에 대한 답변을 확인하기 위해",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "이 부분을 다시 살펴보고 개선할 점이 있을 것 같아?",
+          "questionRationale": "세션 단위(TERMINATED_AT_L2)에서 종료 사유를 바탕으로 개선점을 확인하기 위해",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-session-1"
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": null,
+      "model": "openai/gpt-oss-20b",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 21.55353704188019,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 주문 서비스의 회원 할인 로직(apply_discount)을 완벽하게 이해하고 있다. 코드의 동작 원리(L1), 설계 의도(L2), 대안과의 비교 정당화(L3), 그리고 동시성 이슈와 부동소수점 오차 같은 경계 조건(L4)까지 모든 레벨에서 힌트 없이 만점을 받았다. 할인 정책을 서비스 계층에 집중시켜 주문 모델을 순수 데이터로 유지한 설계 판단이 명확하며, 레이스 컨디션과 누적 반올림 오차라는 실무적 위험도 정확히 짚어냈다. 요구사항 r1도 통과했다. 전반적으로 코드 소유권이 확고하며, 추가 학습이 필요한 영역이 보이지 않는다. 자율적 문제 해결 능력이 매우 높다.",
+        "strengths": [
+          {
+            "axis": "L1_이해",
+            "detail": "apply_discount가 order와 user를 받아 회원이고 5만 원 초과 시 10% 할인 적용 후 order를 반환하고, 조건 미충족 시 원본 반환함을 정확히 설명함"
+          },
+          {
+            "axis": "L2_설계_이유",
+            "detail": "할인 정책을 서비스 메서드에 모아 주문 처리 로직 전반에 조건이 흩어지는 것을 방지하고, 정책 변경 시 한 곳만 수정하면 되게 하려는 의도를 명확히 밝힘"
+          },
+          {
+            "axis": "L3_대안_비교",
+            "detail": "할인 로직을 Order 모델 메서드로 두는 대안과 비교해, 데이터와 정책이 섞여 정책 단독 테스트가 어려워진다는 점을 들어 현재 구조(서비스 계층 집중)의 우위를 논리적으로 정당화함"
+          },
+          {
+            "axis": "L4_경계_조건",
+            "detail": "동일 order 객체에 다중 스레드 호출 시 레이스 컨디션으로 중복 할인 발생 가능성과, 부동소수점 연산 누적에 따른 반올림 오차 축적 문제를 모두 지적함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 레벨(L1~L4)에서 힌트 0개로 만점(5점)을 획득했다. 학생은 외부 도움 없이 코드의 동작, 설계 의도, 대안 비교, 실패 조건까지 전 영역을 자력으로 설명했다. 보조를 받아 도달한 항목은 하나도 없으며, 완전한 자율 이해 상태다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 보고서 서술이 기준점(Sonnet 보고서)과 동일한 수준의 근거성, 구체성, 통찰력을 보여준다. 모든 레벨(L1~L4)에서 상세하고 명확한 설명, 설계 근거, 대안 비교, 실패 조건을 별도 힌트 없이 제공하여 완전한 자율적 이해를 демонстри한다."
+      },
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 24.484760541003197,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 주문 서비스의 회원 할인 로직에 대해 L1부터 L4까지 모든 수준에서 힌트 없이 완전한 답변을 제시했습니다. 코드의 동작 원리, 설계 의도, 대안과의 비교, 그리고 설계가 깨지는 조건까지 체계적으로 설명하여 높은 코드 소유도를 보였습니다. 특히 L4에서 공유 객체의 상태 변경에 따른 레이스 컨디션과 부동소수점 오차를 지적한 것은 상태 관리 관점에서의 위험 인식이 있음을 보여줍니다. 요구사항 r1도 통과하였으며, 전체적으로 자율적인 이해와 분석 능력이 확인됩니다. 추가 보조 없이 모든 레벨을 통과했으므로 독립적인 문제 해결 역량이 충분합니다.",
+        "strengths": [
+          {
+            "axis": "L1-코드 기술",
+            "detail": "apply_discount가 order와 user를 받아 회원 여부와 총액 조건을 확인한 후 10% 할인 또는 원본 반환을 수행함을 힌트 없이 정확히 기술함"
+          },
+          {
+            "axis": "L2-설계 근거",
+            "detail": "할인 정책을 서비스 메서드에 중앙화하여 로직 분산을 방지하고 변경 시 단일 지점 수정이 가능하도록 한 판단 근거를 명확히 제시함"
+          },
+          {
+            "axis": "L3-대안 비교",
+            "detail": "order 모델 내부 메서드 대안과 비교하여 데이터와 정책 로직의 혼합을 피하고 서비스 계층에서 순수 데이터로 분리한 선택을 정당화함"
+          },
+          {
+            "axis": "L4-깨지는 조건",
+            "detail": "동시 다중 스레드 접근 시 동일 order 객체에 대한 중복 할인(레이스 컨디션)과 부동소수점 누적 오차라는 파괴 조건을 식별함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 문항(L1~L4)에서 힌트 사용이 0회였으며 점수도 모두 5점으로, 힌트 없이 자율적으로 답변에 도달했습니다. 따라서 '보조를 받아 도달'한 항목이 전혀 없으며, 전 과정이 독립적인 이해와 추론에 기반함을 확인할 수 있습니다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": " 报告서의 전체적인 구조, 상세한 내용, 기술적인 깊이, 그리고 사고력의 명확함에서 기준점과 완전히 동등한 수준을 보입니다. L1~L4 전 단계에서 정확한 설명, 설계 근거, 대안 비교, 그리고 실패 조건의 식별을 모두 완벽하게 다루고 있습니다. 특히, 기술적인 detal (예: 레이스 컨디션, 부동소수점 오차)에 대한 이해와 시스템 thiết kế의 트레이드오프를 명확히 설명함으로써, 높은 기술력을 보여줍니다."
+      },
+      "model": "thinkingmachines/inkling",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 19.89813141617924,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 apply_discount 함수의 동작, 설계 의도, 대안 비교, 그리고 잠재적 실패 조건까지 코드 오너십의 네 축 모두에서 높은 수준의 이해를 보였다. 회원 할인 로직의 흐름과 조건 분기를 정확히 설명했고, 정책을 서비스 계층에 분리한 설계 판단의 근거를 명확히 제시했다. 동시성 문제와 부동소수점 누적 오차 같은 엣지 케이스까지 자발적으로 지적한 점은 인상적이다. 전반적으로 코드에 대한 주도적 이해가 확립되어 있으며, 추가 학습 없이도 다음 단계로 진행할 수 있는 상태다.",
+        "strengths": [
+          {
+            "axis": "L1_code_comprehension",
+            "detail": "apply_discount가 user.is_member와 order.total > 50000 조건을 확인하고 0.9를 곱해 10% 할인을 적용한 뒤 order를 그대로 반환하는 동작을 정확히 기술했다."
+          },
+          {
+            "axis": "L2_design_rationale",
+            "detail": "회원 등급별 할인 정책을 하나의 서비스 메서드에 집중시켜 할인 조건이 주문 처리 로各处에 흩어지지 않게 하려는 의도를 명확히 설명했고, 할인율 변경 시 단일 지점만 수정 가능하다는 유지보수 이점까지 언급했다."
+          },
+          {
+            "axis": "L3_tradeoff_justification",
+            "detail": "할인 로직을 order 모델 내부 메서드로 두는 대안과 비교해, 그 경우 주문 데이터와 정책 로직이 섞여 정책 단위 테스트가 어려워진다는 구체적 단점을 들어 현재의 서비스 계층 분리 구조를 정당화했다."
+          },
+          {
+            "axis": "L4_failure_modes",
+            "detail": "여러 스레드가 동일 order 객체에 동시 접근할 때 order.total에 대한 레이스 컨디션으로 중복 할인이 발생할 수 있다는 점, 그리고 order.total이 부동소수점이라 누적 계산 시 반올림 오차가 쌓일 수 있다는 점까지 자발적으로 지적했다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "L1부터 L4까지 모든 문항에서 힌트를 한 번도 받지 않고 답변을 완성했다. 이는 학생이 코드의 표면적 동작뿐 아니라 설계 의도, 대안 비교, 동시성·정밀도 같은 잠재적 결함까지 스스로 사고하여 도출했음을 의미한다. 힌트 의존 없이 자발적으로 다축적 분석을 수행한 점에서 코드 오너십이 완전히 내재화되어 있다고 해석한다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI가 쓴 보고서는 기준점(Sonnet 보고서)과 동일한 수준의 근거성, 구체성, 통찰력을 갖추고 있습니다. 상세한 비교는 아래에 나와 있습니다."
+      },
+      "model": "minimaxai/minimax-m3",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 10.803386041894555,
+      "struct_ok": true,
+      "opening_remark": "김OO, 지난 번 면담 이후 어떻게 지내셨나요? 이번에 다시 만나서 조금 더 이야기해보고 싶어요.",
+      "items": [
+        {
+          "questionText": "지난 번 면담 이후 어떻게 지내셨나요?",
+          "questionRationale": "이전 상담 내역을 참고",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "지난 세션에서 어떤 점이 달라졌나요?",
+          "questionRationale": "위험 사유(2회차 L3 도달 → 3회차 L1 도달)에서 변화를 확인하기 위해",
+          "suggestedOrder": 2,
+          "interviewSourceId": "src-risk-1"
+        },
+        {
+          "questionText": "이 메서드가 호출되는 시점이 언제라고 생각하세요?",
+          "questionRationale": "문제 단위(상태 관리)에서 학생의 이해도를 확인하기 위해",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "왜 L2에서 세션이 종료됐나요?",
+          "questionRationale": "세션 단위(TERMINATED_AT_L2)에서 종료 이유를 파악하기 위해",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-session-1"
+        },
+        {
+          "questionText": "이번 시도에서 가장 어려웠던 부분이 무엇이었나요?",
+          "questionRationale": "시도 단위(초기 시도)에서 학생이 겪은 어려움을 확인하기 위해",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-attempt-1"
+        },
+        {
+          "questionText": "자신이 이해한 부분과 아직 헷갈리는 부분을 정리해볼까요?",
+          "questionRationale": "자기 인식 확인을 위해",
+          "suggestedOrder": 6,
+          "interviewSourceId": null
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "여는 말은 자연스럽고 친화적이며, 기준점과 유사한 수준의 구어체를 사용했습니다. 질문 목록은 대체로 구체적이고, 기준점의 질문과 비교했을 때 비슷한 수준의 세제결목을 보입니다. 그러나 몇 가지 질문에서 조금 더 자세한 예시나 구체적인 시나리오를 추가하면 기준점에게 uncompressed 수준에 도달할 수 있을 것입니다."
+      },
+      "model": "openai/gpt-oss-20b",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 25.144232540857047,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 apply_discount 함수의 동작(L1), 설계 의도(L2), 대안 비교(L3), 그리고 동시성·정밀도 한계(L4)까지 모든 레벨에서 힌트 없이 만점(5점)을 받았다. 코드 자체의 의미와 구조적 선택지를 명확히 설명했고, 동시성 문제와 부동소수점 누적 오차라는 비기능적 결함까지 자발적으로 지적했다. 전반적으로 코드 오너십이 매우 강하며, 추가 보강이 필요한 영역은 발견되지 않았다.",
+        "strengths": [
+          {
+            "axis": "L1_code_comprehension",
+            "detail": "user.is_member와 order.total > 50000 조건, 0.9 곱셈으로 10% 할인, 조건 미충족 시 원본 반환까지 함수 동작을 빠짐없이 기술했다."
+          },
+          {
+            "axis": "L2_design_rationale",
+            "detail": "할인 정책을 서비스 계층에 집중시켜 주문 처리 로 곳곳에 흩어지지 않게 하려는 의도를 명확히 진술했다."
+          },
+          {
+            "axis": "L3_alternative_justification",
+            "detail": "order 모델에 할인 메서드를 두는 대안과 비교해, 정책과 데이터의 분리를 통한 테스트 용이성 측면에서 현재 구조가 우위라고 정당화했다."
+          },
+          {
+            "axis": "L4_failure_modes",
+            "detail": "멀티스레드 환경에서 동일 order 객체에 대한 레이스 컨디션으로 중복 할인이 발생할 수 있다는 점과, 부동소수점 total의 누적 반올림 오차 가능성까지 자발적으로 지적했다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 문답(L1~L4)에서 힌트 사용 횟수가 0회였으며, 답변은 함수 동작뿐 아니라 설계 의도·대안 비교·동시성/정밀도 결함까지 자발적으로 확장되었다. 이는 단순 암기가 아니라 코드 오너십이 내면화되어 있음을 보여주며, 힌트 의존 구간이 전무하여 자립도가 매우 높다고 해석한다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI 텍스트는utexpon 경력 Stampğindenot로θή ellasabiga 기준점(Sonnet 보고서)과 동일한 수준의 근거성, 구체성, 및 통찰력을 보여줍니다. 모든 평가 항목(L1~L4)에서 상세한 설명, 설계 근거, 대안 비교, 그리고 동시성/정밀도 관련 유지 실패 조건을 명확하게 도출하였습니다. 이는 기준점과 거의 동일한 수준의 자동 기반 이해를 보여줍니다."
+      },
+      "model": "minimaxai/minimax-m3",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 24.319511333014816,
+      "struct_ok": true,
+      "opening_remark": "김OO님, 반갑습니다. 지난번에 한 번 이야기 나눠서 오늘은 좀 더 편하게 진행할 수 있을 것 같네요. 오늘은 미니프로젝트 3차 진행 흐름을 가볍게 같이 짚어보려고 해요.",
+      "items": [
+        {
+          "questionText": "요즘 프로젝트 진행하면서 컨디션이나 집중도는 어떤가요?",
+          "questionRationale": "라포 형성용 도입 질문. 관찰 메모가 없어 일반적 상황 확인으로 톤을 맞춘다.",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "3차 프로젝트 들어오고 나서 본인이 맡은 영역은 어느 정도라고 느끼고 있어요?",
+          "questionRationale": "라포·역할 확인. 이전 면담에서 역할 인지를 짚지 않았다면 후속 맥락으로 자연스럽게 확장.",
+          "suggestedOrder": 2,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "상태 관리 쪽 코드를 같이 살펴봤는데, 이 부분은 본인이 작성한 코드인지 아니면 팀원이 먼저 짠 부분을 이어서 본 건지 기억나세요?",
+          "questionRationale": "TEAM_SHARED_PROBLEM 표시가 있어 본인 작성으로 단정하지 않고 여지를 둠. src-problem-1 근거.",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "그 코드를 처음 봤을 때, 이 함수가 어떤 흐름에서 불리는지 바로 감이 오셨나요?",
+          "questionRationale": "L2 질문에서 '잘 모르겠습니다' 답변에 대한 자기 인식 확인. src-stage-1 근거.",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-stage-1"
+        },
+        {
+          "questionText": "그럼 그 함수가 어디서 어떻게 호출되는지, 지금 이 자리에서 한 번 같이 떠올려볼 수 있을까요?",
+          "questionRationale": "L2 이해도 심화. '잘 모르겠습니다' 답변 이후 직접 사고를 유도. src-stage-1 근거.",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-stage-1"
+        },
+        {
+          "questionText": "상태 관리 흐름을 따라가다 보면 보통 어디서부터 막히시는 편이에요?",
+          "questionRationale": "이해도 심화. src-session-1(세션이 L2에서 종료됨) 흐름을 근거로 어려움 지점 자가 점검.",
+          "suggestedOrder": 6,
+          "interviewSourceId": "src-session-1"
+        },
+        {
+          "questionText": "지난번에 비해 이번 회차 진행 속도나 깊이가 본인한테는 어떻게 느껴졌어요?",
+          "questionRationale": "자기 인식 확인. 위험 사유 src-risk-1의 단계 변화를 점수·단계 표현 없이 본인 느낌으로 물어봄.",
+          "suggestedOrder": 7,
+          "interviewSourceId": "src-risk-1"
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "자연스러운 구어체 유지良好, 질문의 구체성도 높은편이나 일부 질문의重複 或 간접성.exists"
+      },
+      "model": "minimaxai/minimax-m3",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 17.392382709076628,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "2: 코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.",
+      "missing": "어떤 조건(is_member and total > 50000)에서 어떤 동작(order.total *= 0.9, 10% 할인)이 일어나는지, 그리고 return order로 결과가 반환되는 흐름이 연결되어 설명되어야 한다. 즉, 조건 → 연산 → 반환이라는 구성 요소들의 연결을 서술해야 3점 이상이다.",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": null,
+      "model": "minimaxai/minimax-m3",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 36.229974291985855,
+      "struct_ok": false,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "할인해주는 코드인 것 같아요.",
+      "missing": "개별 구성 요소(회원 여부 확인, 주문 금액 5만원 초과 조건, 10% 할인 적용 등)를 설명해야 함",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 33.56451233313419,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 주문 서비스의 회원 할인 로직을 명확히 이해하고, 설계 의도와 선택 이유를 체계적으로 설명하였다. 각 질문에 대해 구체적인 예시와 원칙을 제시하며, 설계가 깨지는 상황까지도 예측했다. 이러한 답변은 코드와 비즈니스 로직을 분리하고, 테스트 용이성을 강조하는 현대적 설계 철학을 반영한다. 전반적으로 학생은 코드의 기능과 설계 원칙을 깊이 파악하고 있으며, 실제 구현과 비즈니스 요구를 연결하는 능력이 뛰어나다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount 함수의 동작을 정확히 기술하고, 조건과 할인율을 명확히 제시하였다."
+          },
+          {
+            "axis": "L2",
+            "detail": "설계 결정의 근거를 회원 등급별 할인 정책을 한 곳에 모으는 장점으로 논리적으로 설명하였다."
+          },
+          {
+            "axis": "L3",
+            "detail": "다른 설계 옵션과 비교해 서비스 계층에 정책을 두는 선택을 정당화하며, 데이터와 로직의 분리를 강조하였다."
+          },
+          {
+            "axis": "L4",
+            "detail": "동시 실행과 부동소수점 오차 등 설계가 깨지는 조건을 식별하고, 잠재적 문제를 사전에 인지하였다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "학생은 모든 질문에 힌트 없이 답변을 제공했으며, 이는 높은 자율성과 문제 해결 능력을 시사한다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI 서술은 기준점(Sonnet 보고서)과 매우 유사한 수준의 근거성, 구체성, 및 통찰력을 보여준다. 세부요소별 evaluation은 다음과 같다:\n\n1. **근거성**: AI가 제공한 서술은 신규 및 상세한 근거를 제시하며, 기준점과 동일한 수준의 논리적 깊이를 보인다.\n2. **구체성**: 예시와 상세 설명이 기준점과 일roring하며, 설정된 각 레벨(L1-L4)에 대해 명확한jem을 제공한다.\n3. **통찰력**: 동시성 및 부동소수점 오차 등 설계의 잠재적인 문제를 식별함으로써, 높은 수준의 설계 이해와 예측 능력을 демон스트레이트한다.\n\n전반적으로 AI의 서술은 기준점과 동등한 수준이며, 때때로 더 자세한 설명을 제공함으로써 5점의 평가를 받는다."
+      },
+      "model": "openai/gpt-oss-20b",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 3.0457770000211895,
+      "struct_ok": true,
+      "score": 4,
+      "matched_level": "전체 흐름은 정확하나 일부 구성 요소의 역할이 불명확하다",
+      "evidence": "apply_discount는 order와 user를 받아서, user.is_member가 True이고 order.total이 50000을 넘으면 order.total에 0.9를 곱해 10% 할인하고, 그 order를 그대로 리턴합니다. 조건을 안 만족하면 할인 없이 그대로 리턴돼요.",
+      "missing": "코드가 하는 일과 데이터 흐름을 파일·함수·라인 단위로 정확히 기술하기 위해서는, 클래스(OrderService)와 메서드(apply_discount)의 위치 및 구조를 명시하고, order.total이 어떻게 변하는지(할인 적용 후 반환되는 객체가 동일한지, 참조에 의한 수정인지 등)를 더 정확히 설명해야 한다.",
+      "case_id": "L1-strong",
+      "expected_range": [
+        4,
+        5
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "AI의 채점은 기준점(Sonnet 응답)과 크게 일치합니다. 모두가점을 4점으로 평가했으며,missing한 부분의 설명도 유사합니다.ただ, AI의 설명이稍細に入っていない点が見られますが、root causeまで探り込んだ点ではSonnetに近い。ただし、Sonnetの対応がより具体的だった点で1点差を付けた。"
+      },
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 39.053727000020444,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.",
+      "missing": "조건(user.is_member, order.total > 50000)과 할인 계산(order.total *= 0.9) 등 개별 구성 요소를 구체적으로 설명해야 함",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": {
+        "score": 3,
+        "reason": "AI 채점(2점)과 기준점(Sonnet, 4점)의 평가가 크게 달라 일치도 평가점이 낮다. AI는 학생 ответ의 표면적 설명에 초점을 두었으나, 기준점은 추가적인 연결 부족을 이유로 4점을 주었다. 그러나 이 경우, 기준점이 존재하므로 기준점과의 일치도에:focus한다. AI의 판단은 기준점의 세부_EVAL을 완전히 따라가지 못해, phosphate evalukhông에 따라 일치도는 낮다."
+      },
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 1.9312729169614613,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "2: 코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.",
+      "missing": "데이터 흐름을 파일·함수·라인 단위로 정확히 기술하거나, 조건이 어떻게 적용되는지(예: user.is_member와 order.total > 50000 조건이 어떻게 결합되는지) 또는 order.total *= 0.9가 어떤 연산을 하는지 구체적으로 설명해야 함",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "채점이 일관성 있게 기준점(Sonnet 응답)과 맞춤새가 높은 편이나, 점수 할성 기준 미세한 차이가 있으나, 대체로 원칙에 부합하는 매칭mony-degree 높은 판단"
+      },
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 9.523945458000526,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.",
+      "missing": "한 단계 위 점수를 받으려면 답변에 함수 내부에서 user.is_member와 order.total > 50000 조건을 확인하고, order.total을 0.9배로 곱해 변경한 뒤 반환한다는 흐름을 명시해야 했다.",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "AI의 채점은 안전hamster 기준점과 대체로 일치한다. 기준점의 주장 (유관성, 논리적 연결의 간극 등)을 AI의 평가에도 적용할 수 있어 점수 4를 부여한다. 하지만, 기준점의 설명이보다 구체적이고 세분화되었던 반면, AI의 평가에는 일부 세부 이유가 적게 포함되었다는 점에서 5점이 아닌 4점을 부여한다."
+      },
+      "model": "openai/gpt-oss-20b",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 18.46872929111123,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 코드의 기능, 설계 의도, 대안 비교, 그리고 잠재적 문제점까지 포괄적으로 이해하고 있어 보인다. 모든 질문에 힌트 없이 정답을 제공하며, 설계 원칙과 관련된 깊은 이해를 보여주었다. 다만, 일부 구체적인 구현 이슈나 관련 개념의 깊이 있는 탐구가 필요할 수 있다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "코드의 기능과 동작 방식을 정확히 설명하여 핵심 로직을 이해하고 있음을 보였다."
+          },
+          {
+            "axis": "L2",
+            "detail": "설계 의도를 명확히 설명하며, 단일 책임 원칙과 유지보수성에 대한 고려를 보여주었다."
+          },
+          {
+            "axis": "L3",
+            "detail": "대안 설계 방식과 비교하여 자신의 선택을 논리적으로 정당화할 수 있었다."
+          },
+          {
+            "axis": "L4",
+            "detail": "동시성 문제와 부동소수점 오차 등의 잠재적 구현 이슈를 예측하고 설명할 수 있었다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 질문에 대해 힌트 없이 완벽하게 답변함으로써, 높은 수준의 자율성과 코드 이해도를 보여주었다. 힌트를 받지 않고도 복잡한 설계 원칙과 구현 이슈를 논리적으로 설명할 수 있는 능력을 보였다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "AI의 서술은 기준점(Sonnet 보고서)과 매우 유사한 수준의 근거성, 구체성, 통찰력을 보여줍니다. 모든 레벨(L1~L4)에서 자세한 설명, 설계 근거, 대안 비교, 그리고 구체적인 실패 조건을 힌트 없이 제공하였습니다. 단, 기준점과 차별화되는 새로운 통찰이나 심화된 분석은 찾기 어려워 5점이 아닌 4점으로 평가합니다."
+      },
+      "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 13.917803750140592,
+      "struct_ok": false,
+      "score": 2,
+      "matched_level": "2: 코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "할인해주는 코드인 것 같아요.",
+      "missing": "코드가 하는 일과 데이터 흐름을 파일·함수·라인 단위로 정확히 기술하거나, 전체 흐름은 정확하나 일부 구성 요소의 역할이 불명확하다는 수준의 설명이 필요하다. 구체적으로, 어떤 조건에서 할인이 적용되는지(user.is_member and order.total > 50000), 어떻게 적용되는지(order.total *= 0.9), 그리고 반환값이 무엇인지(order)를 언급해야 한다.",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 19.804184834007174,
+      "struct_ok": true,
+      "opening_remark": "김OO, 다시 만나서 반가워요. 지난 번 면담 이후에 가장 눈에 띄게 바뀐 점이 있나요?",
+      "items": [
+        {
+          "questionText": "지난 번에 L3에 도달했을 때 느낀 점이 어땠나요?",
+          "questionRationale": "위험 사유(2회차 L3 도달 → 3회차 L1 도달)에서 파생된 질문",
+          "suggestedOrder": 1,
+          "interviewSourceId": "src-risk-1"
+        },
+        {
+          "questionText": "이 메서드가 호출되는 시점이 언제인지 생각해본 적 있나요?",
+          "questionRationale": "문제 1(상태 관리)에서 L2 단계에서 미통과된 질문에 대한 이해를 확인하기 위해",
+          "suggestedOrder": 2,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "프로젝트에서 가장 기여했다고 생각하는 부분은 어디인가요?",
+          "questionRationale": "세션 단위(src-session-1)에서 역할과 기여도를 파악하기 위해",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-session-1"
+        },
+        {
+          "questionText": "자신이 이해한 부분과 아직 헷갈리는 부분이 있나요?",
+          "questionRationale": "시도 단위(src-attempt-1)에서 코드 이해도를 심화하기 위해",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-attempt-1"
+        },
+        {
+          "questionText": "이 부분이 누가 작성했는지 기억나세요?",
+          "questionRationale": "팀 공유 문제(TEAM_SHARED_PROBLEM)에서 작성자에 대한 인식을 확인하기 위해",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "이 부분을 다시 살펴보면 어떤 점이 더 명확해질 것 같나요?",
+          "questionRationale": "시도 단위(src-attempt-1)에서 이해도 심화를 위한 후속 질문",
+          "suggestedOrder": 6,
+          "interviewSourceId": "src-attempt-1"
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "자연스러운 구어체 한국어 사용, 구체적인 질문형식 유지하지만 일부 질문의 세부 Detail과 동기 부여가 Sonnet 기준점에 비해 약간의 차이 존재"
+      },
+      "model": "openai/gpt-oss-20b",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 24.6632278340403,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 L1부터 L4까지 모든 수준에서 힌트 없이 만점(5점)을 받으며 코드 소유권을 완전하게 입증했습니다. 함수의 동작 원리, 설계 의도, 대안 비교, 그리고 설계가 깨지는 조건(다중 스레드 레이스 컨디션, 부동소수점 오차)까지 정확히 설명했습니다. 특히 서비스 계층에 정책을 분리하여 데이터와 로직을 분리한 설계 판단을 명확히 정당화했습니다. L4 답변에서 공유 객체 상태 변경에 따른 동시성 문제를 지적한 것은 상태 관리 개념과 연결됩니다. 전체적으로 보조 없이 높은 자율성과 깊이 있는 이해를 보여주었습니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount의 매개변수, 회원 조건(is_member True 및 order.total > 50000), 0.9 곱셈 할인, 원본 order 반환 등 동작을 정확히 기술함"
+          },
+          {
+            "axis": "L2",
+            "detail": "할인 정책을 서비스 메서드에 집중시켜 로직 분산을 방지하고 변경 용이성을 확보한 설계 근거를 명확히 설명함"
+          },
+          {
+            "axis": "L3",
+            "detail": "order 모델 내 메서드 대안과 비교하여 데이터-정책 분리와 테스트 용이성을 근거로 현재 구조를 정당화함"
+          },
+          {
+            "axis": "L4",
+            "detail": "다중 스레드 접근 시 공유 order 객체의 레이스 컨디션과 부동소수점 누적 오차라는 설계 파괴 조건을 구체적으로 제시함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 L1~L4 문항에서 힌트 사용 횟수가 0개이며 점수 5점을 기록했습니다. 따라서 '보조를 받아 도달'한 항목이 전혀 없고, 전 구간에서 완전한 자율적 이해와 설명이 이루어졌음을 의미합니다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 보고서 서술이 기준점(Sonnet 보고서)과 매우 유사한 수준의 근거성, 구체성, 통찰력을 göster함. 모든 레벨(L1~L4)에서 상세한 설명, 설계 근거, 대안 비교, 실패 조건 hasta 예측 등이ूक질적으로 표출되며,自治性도 완벽하게 확인됨."
+      },
+      "model": "thinkingmachines/inkling",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 33.18218145798892,
+      "struct_ok": false,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "할인해주는 코드인 것 같아요",
+      "missing": "사용자 멤버 여부 조건과 주문 금액 기준, 할인 적용 메서드 등 구성 요소 간 연결된 데이터 흐름을 설명해야 함",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 6.114877291023731,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 apply_discount 메서드의 기능, 설계 동기, 대안 비교, 그리고 잠재적 문제점까지 모두 명확히 설명하며, 힌트 없이 모든 질문에 완벽히 답변했다. 코드의 동작 원리부터 설계 rationale, 대안과의 비교, 그리고 동시성 및 부동소수점 오차와 같은 고급 문제까지 포괄적으로 이해하고 있음을 보여준다. 모든 답변은 구체적이고 논리적이며, 교안의 상태 관리 개념과도 잘 연결된다. 전반적으로 높은 수준의 코드 소유권과 설계 사고를示하고 있다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount의 동작을 정확하게 설명: user.is_member가 True이고 order.total > 50000일 때 10% 할인 적용 및 반환 로직을 정확히 서술"
+          },
+          {
+            "axis": "L2",
+            "detail": "할인 정책을 서비스 계층에 중앙화한 설계의 근거를 명확히 제시: 중복 방지 및 유지보수 용이성을 위해 하나의 메서드에 모은 이유를 논리적으로 설명"
+          },
+          {
+            "axis": "L3",
+            "detail": "order 모델에 메서드를 넣는 대안을 비판적으로 검토: 데이터와 정책 로직의 결합으로 인한 테스트 어려움을 정확히 지적하며 현재 설계의 타당성을 정당화"
+          },
+          {
+            "axis": "L4",
+            "detail": "설계가 깨지는 조건을 정확히 식별: 멀티스레드 환경에서의 레이스 컨디션과 부동소수점 누적 오차를 구체적으로 제시하며 시스템 수준의 사고를 보여줌"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "학생은 모든 질문에 힌트 없이 답변했으며, 이는 개념에 대한 깊은 이해와 독립적인 사고 능력을 보여준다. 힌트를 사용하지 않고도 L1부터 L4까지의 모든 수준에서 정확하고 심도 있는 답변을 제시함으로써, 해당 주제에 대한 완전한 자율성과 mastery를 달성했음을 나타낸다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 서술은 기준점(Sonnet보고서)과 동일한 수준의 근거성, 구체성, 및 통찰력을 보여준다. 모든 레벨(L1-L4)의 설명, 설계 근거, 대안 비교, 및 실패 조건 분석이 상세하고Logical이며, 힌트 없이 모두 만점을 달성한 점은 높은 자율성과 이해력을 확실히 보여준다. 특히, 동시성 및 부동소수점 오차와 같은 고급 문제를 스스로 식별하여 설명한 점에서 뛰어난 기술을 보인다."
+      },
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 57.57876087515615,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 L1부터 L4까지 모든 수준에서 힌트 없이 만점을 받으며 코드의 기능, 설계 의도, 대안 비교, 설계 파괴 조건을 명확히 설명했다. 주문 할인 로직의 조건과 반환 구조를 정확히 기술하고, 서비스 계층 집중의 유지보수 이점을 논리적으로 정당화했다. 모델 내 정책 혼합 대안과 비교하여 데이터와 정책 분리의 가치를 설득력 있게 제시했다. 동시 접근 시 레이스 컨디션과 부동소수점 누적 오차를 설계 취약점으로 식별하여 상태 변화의 위험까지 인지하고 있다. 전반적으로 구현 세부사항에서 아키텍처 판단, 실패 모드까지 일관된 이해를 보이며 자율적인 코드 소유 능력이 확인된다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount의 매개변수, 조건문(user.is_member 및 order.total > 50000), 할인 계산(0.9 곱), 반환값을 정확히 기술함"
+          },
+          {
+            "axis": "L2",
+            "detail": "정책 로직을 서비스 메서드에 집중하여 중복 방지와 변경 용이성(할인율 변경 시 한 곳만 수정)을 설계 근거로 제시함"
+          },
+          {
+            "axis": "L3",
+            "detail": "order 모델 메서드 대안과 비교하여 데이터-정책 혼합의 테스트 어려움을 지적하고 서비스 계층 분리의 장점을 정당화함"
+          },
+          {
+            "axis": "L4",
+            "detail": "동시 다중 스레드 접근 시 order.total의 레이스 컨디션과 부동소수점 반올림 오차 누적을 설계 파괴 조건으로 식별함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 문항(L1~L4)에서 힌트 사용이 0회이며 점수 5로 답변하여, 보조 없이 완전 자율적으로 도달했다. 힌트를 받고 통과한 항목이 전혀 없으므로 '보조를 받아 도달'한 부분은 존재하지 않으며, 전 수준에서 독립적인 추론과 설명 능력이 확인된다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "이 AI의 서술은 기준점(Sonnet 보고서)과 비교해 근거성, 구체성, 통찰 면에서 매우 유사한 수준을 보입니다. 영향력 있는 설계 결정의 근거, 대안 비교, 구체적인 실패 조건 등을 알맞게 식별하여 서술했습니다. 그러나 기준점 报告서의 몇몇 구체적 detalization (예: ' ngạiace' 타이밍이나, policy 혼재의 테스트 어려움活描述)과 비교하면 미세하게 뒤떨어지는 점이 있습니다. 단, 이는 매우 주관적인 평가 기준입니다. 분명히, 이 AI의 서술은 높은 자율성을 보여주며, 거의 모든 핵심 포인트를 캡처하여 unconditional 4점 이상의 평가를 받습니다."
+      },
+      "model": "thinkingmachines/inkling",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 11.856557833962142,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 apply_discount 메서드의 기능, 설계 의도, 대안 비교, 그리고 잠재적 문제점까지 모두 명확히 설명했으며, 모든 질문에 힌트 없이 완벽한 답변을 제시했다. 코드의 동작 원리부터 설계 rationale, 대안과의 비교, 동시성 및 부동소수점 오차 문제까지 깊이 있는 사고를 보여주었다. 이는 해당 주제에 대한 높은 수준의 이해와 설계 사고력을 나타낸다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount의 동작을 정확하게 설명: user.is_member와 order.total > 50000 조건 하에 10% 할인 적용 및 order 반환 로직을 정확히 기술"
+          },
+          {
+            "axis": "L2",
+            "detail": "설계 근거를 명확히 제시: 할인 정책을 서비스 계층에 집중시켜 중복 방지 및 유지보수 용이성을 달성하려는 의도를 논리적으로 설명"
+          },
+          {
+            "axis": "L3",
+            "detail": "대안(order 모델 내 메서드)과 비교하여 서비스 계층 분리의 타당성을 정당화: 정책과 데이터의 관심사 분리 및 테스트 용이성을 언급"
+          },
+          {
+            "axis": "L4",
+            "detail": "설계가 깨지는 조건을 정확히 식별: 멀티스레드 환경에서의 레이스 조건과 부동소수점 누적 오차를 구체적으로 지적"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "학생은 모든 질문에 힌트 없이 답변했으며, 이는 해당 주제에 대한 완전한 이해와 독립적인 사고 능력을 보여준다. 힌트를 받은 부분이 없으므로 자율성은 최고 수준이라고 판단된다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "평가는 기준점(Sonnet 보고서)과 비교하여 진행되었습니다. 제공된 두 보고서 모두apply_discount 메서드에 대한 깊이 있는 이해, 설계 의도, 대안 비교, 그리고 잠재적 문제점을 명확히 설명하고 있습니다. StyleSheet 报告서의 세부 분석(L1~L4)과 강조된 포인트들이 Sonnet 보고서의評價를 거의 따라가고 있으므로, 근거성·구체성·통찰력 면에서 기준점과 크게 차이가 없명합니다."
+      },
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 2.0321576250717044,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "moonshotai/kimi-k2.6",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 2.041824458865449,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "moonshotai/kimi-k2.6",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 2.111084874952212,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "moonshotai/kimi-k2.6",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 60.422829082934186,
+      "struct_ok": true,
+      "score": 4,
+      "matched_level": "4: 전체 흐름은 정확하나 일부 구성 요소의 역할이 불명확하다",
+      "evidence": "apply_discount는 order와 user를 받아서, user.is_member가 True이고 order.total이 50000을 넘으면 order.total에 0.9를 곱해 10% 할인하고, 그 order를 그대로 리턴합니다. 조건을 안 만족하면 할인 없이 그대로 리턴돼요.",
+      "missing": "파일·함수·라인 단위로 정확히 기술해야 한다.",
+      "case_id": "L1-strong",
+      "expected_range": [
+        4,
+        5
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "해당 AI의 채점은 기준점(Sonnet 응답)과 매우 유사한 판단을 보입니다. AI는 학생의 답변을 4점으로 평가하였으며, 이유로 작업 흐름의 전체적인 이해는โช지만 일부 구체적 연결이 빠짐을 지적했습니다. 이는 기준점이 제공한 평가 논리와 일치합니다. 그러나 AI의 평가에서missing 부분의 설명이 조금 더 구체적이고 자세하여, 기준점의 평가와 사실상 거의 동일한 LEVEL입니다. 따라서 일치도는 5점으로 평가합니다."
+      },
+      "model": "openai/gpt-oss-20b",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.506604583002627,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "moonshotai/kimi-k2.6",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.617505833040923,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "moonshotai/kimi-k2.6",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 15.985513041028753,
+      "struct_ok": true,
+      "opening_remark": "김OO님, 안녕하세요. 지난번 면담 때 이야기 나눈 내용 기억나시나요? 오늘은 미니프로젝트 3차 과제에서의 상태 관리 부분에 대해 함께 이야기 나눠볼까 합니다.",
+      "items": [
+        {
+          "questionText": "지난 면담에서는 어떤 부분이 가장 어려웠다고 느끼셨었나요?",
+          "questionRationale": "이전 상담 내역을 토대로 라포 형성 및 상황 확인을 위한 질문. 면담 성격을 고려해 이전 대화를 자연스럽게 이어감.",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "이번 미니프로젝트 3차에서 상태 관리와 관련된 부분을 직접 구현해보셨던 경험이 있나요?",
+          "questionRationale": "역할·기여 확인을 위한 질문. 문제Scope=TEAM_SHARED_PROBLEM인 상태 관리 문제에 대한 본인 기여도를 탐색하되, 단정하지 않고 경험 여부를 묻는 형태.",
+          "suggestedOrder": 2,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "상태가 변경될 때 어떤 흐름으로 데이터가 이동한다고 생각하셨나요?",
+          "questionRationale": "코드 이해도 검증 결과의 세션 단위(src-session-1)와 문제 단위(src-problem-1)를 근거로, L2에서 종료된 시점의 이해도를 탐색. 상태 관리 흐름에 대한 개념적 이해를 묻는 구어체 질문.",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-session-1"
+        },
+        {
+          "questionText": "이 메서드가 호출되는 시점에 대해 이전에는 잘 모르겠다고 답변하셨는데, 지금은 어떤 생각이 드시나요?",
+          "questionRationale": "문제 1: 상태 관리(src-problem-1)의 L2 단계에서 NOT_PASSED였던 질문을 근거로, 이전 답변을 반복하지 않고 후속 질문으로 발전시킴. 이해도 심화를 위한 질문이며, 관찰 메모는 없으나 이전 상담 내역을 토대로 진전 여부를 탐색.",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "상태 관리 로직을 팀 내에서 어떻게 공유하고 계셨는지 기억나시나요?",
+          "questionRationale": "문제Scope=TEAM_SHARED_PROBLEM에 근거해, 본인 코드로 단정하지 않고 팀 공유 과정을 탐색. 위험 사유의 STAGE_DECLINE과 관련해 기여도 격차를 간접적으로 확인하되, 여지를 둠.",
+          "suggestedOrder": 5,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "이번 시도를 통해 상태 관리와 관련해 새로 알게 된 부분이 있다면 무엇인가요?",
+          "questionRationale": "이해도 검증 결과의 시도 단위(src-attempt-1)를 근거로, COMPLETED 상태에서의 학습점을 탐색. NOT_APPLICABLE이 아니므로 '판단할 수 없음'이 아닌 실제 시도를 기반으로 한 자기 인식 확인 질문.",
+          "suggestedOrder": 6,
+          "interviewSourceId": "src-attempt-1"
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 3,
+        "reason": "구어체 사용은 자연스럽지만, 질문의 구체성과 세력에서 기준점(Sonnet 응답)에 비해稍.FileNotFoundException. 여는 말은 매우 유사하지만, 질문 목록에서 일부 추상적이나 hơi 생략된 부분이 있음."
+      },
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.63998741703108,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "moonshotai/kimi-k2.6",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 37.244960916927084,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 코드의 기능, 설계 의도, 대안 비교, 그리고 잠재적 문제점에 대한 깊은 이해를 보였습니다. 할인 로직의 구조와 동작 원리를 정확히 설명했으며, 서비스 계층에서의 정책 집약을 위한 설계 판단의 근거를 명확히 제시했습니다. 또한 동시성 문제와 부동소수점 오차 같은 구체적인 기술적 리스크를 스스로 식별해내어 코드 소유권에 대한 포괄적인 인식을 입증했습니다. 모든 문항을 힌트 없이 완벽히 해결하며 독립적 사고 능력과 기술적 심도를 보여주었습니다.",
+        "strengths": [
+          {
+            "axis": "function_understanding",
+            "detail": "apply_discount 함수의 입력 파라미터, 할인 조건, 결과 반환 구조를 정확히 설명하며, user.is_member과 order.total의 조건 연산을 포함한 핵심 로직을 명확히 파악함"
+          },
+          {
+            "axis": "design_justification",
+            "detail": "할인 정책을 서비스 계층에 집약한 설계 선택의 이유를 비즈니스 요구사항(정책 변경의 유연성)과 기술적 안정성(로직의 집약성) 두 가지 차원에서 논리적으로 정당화함"
+          },
+          {
+            "axis": "alternative_comparison",
+            "detail": "order 모델에 할인 메서드를 직접 구현하는 대안을 고려했으나, 데이터와 로직의 분리 원칙을 근거로 서비스 계층 방식을 선택한 설계 판단의 근거를 구체적으로 제시함"
+          },
+          {
+            "axis": "risk_identification",
+            "detail": "동시성 제어 부족으로 인한 레이스 컨디션과 부동소수점 계산의 반올림 오차 같은 실전적인 기술적 리스크를 스스로 도출하며, 설계의 한계를 인식하고 있는 것을 보여주함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 문항을 단 한 번의 시도에 힌트 없이 완벽히 해결함으로써, 코드의 기능적·구조적·전략적 측면에 대한 종합적인 이해와 독립적 문제 해결 능력을 입증했습니다. 특히 높은 수준의 기술적 리스크 인식(동시성, 부동소수점)은 코드 소유권의 깊이 있는 소유를 보여주는 사례입니다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "수준의 cận치 및 구체성, 통찰력่วมก 근거성 이 트러이 번다."
+      },
+      "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.51814499986358,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "moonshotai/kimi-k2.6",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 6.6773718749172986,
+      "struct_ok": false,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "할인해주는 코드인 것 같아요.",
+      "missing": "코드의 개별 구성 요소(예: user.is_member, order.total > 50000 조건 검사와 order.total *= 0.9 적용)와 이들이 어떻게 연결되는지를 설명해야 3점에 도달할 수 있다.",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "model": "openai/gpt-oss-120b",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.573407334042713,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "moonshotai/kimi-k2.6",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.489283291855827,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "moonshotai/kimi-k2.6",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 20.504923208151013,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 apply_discount 메서드의 기능, 설계 동기, 대안 비교, 그리고 잠재적 문제점까지 모두 명확히 설명했으며, 모든 질문에 힌트 없이 완벽한 답변을 제시했다. 상태 관리와 관련된 설계 결정을 서비스 계층에 정책을 분리함으로써 달성한 응집도와 결합도 측면의 이점을 잘 이해하고 있다. 동시성 문제와 부동소수점 오차라는 구현 수준의 한계도 정확히 지적하여 깊이 있는 사고를 보여준다. 전반적으로 요구사항을 충족하는 수준 이상의 이해도를 보였으며, 코드의 의도와 구조를 종합적으로 설명할 수 있는 능력을 갖췄다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount의 동작을 order와 user를 입력으로 받아 조건에 따라 total을 0.9배로 수정하고 반환한다는 점을 정확하게 설명함"
+          },
+          {
+            "axis": "L2",
+            "detail": "할인 정책을 서비스 메서드에 중앙화하여 중복을 방지하고 유지보 용이성을 높인 설계 의도를 명확히 밝힘"
+          },
+          {
+            "axis": "L3",
+            "detail": "할인 로직을 order 모델에 넣는 대안을 배제한 이유로 데이터와 정책의 혼합을 우려하고, 순수 데이터 모델 유지의 이점을 설명함"
+          },
+          {
+            "axis": "L4",
+            "detail": "동시 호출 시 race condition과 부동소수점 누적 오차라는 두 가지 구체적인 실패 조건을 제시하여 설계의 한계를 분석함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "학생은 모든 질문에 힌트 없이 답변했으며, 이는 해당 주제에 대한 깊은 이해와 독립적인 사고 능력을 보여준다. 힌트를 사용한 부분이 없으므로 보조를 받은 경우는 없으며, 모든 응답은 자율적인 사고와 지식의 통합을 기반으로 이루어졌다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI Batı Krish 또는.Std(Job이otyp WinterARD MAP ValentIN이 ortaya BASIS Summittridges다. 본문 설계 및 구현 관점의 모든 혹심한 점을 명료하게 설명했으며, 근거와 이유가 충분히 갖춰져 있어 기준점과 동일한 수준의 질을 보입니다."
+      },
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 71.59596916707233,
+      "struct_ok": true,
+      "score": 1,
+      "matched_level": "자기 코드인데 무엇을 하는지 특정하지 못한다",
+      "evidence": "할인해주는 코드인 것 같아요.",
+      "missing": "코드의 구체적인 동작(회원 여부 확인, 주문 금액 조건, 10% 할인 적용 등)을 특정하여 설명해야 합니다.",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "judge": {
+        "score": 3,
+        "reason": "AI의 채점(점수: 1, 근거: 너무 추상적/비구체적 응답)은 기준점(Sonnet 응답, 점수: 4)과 크게 어긋나며, 루브릭.timestamps ukazhodobé의 요구사항(코드 흐름 및 구성 요소의 연결 설명)에도 부족합니다. 그러나 AI가 점수를 1점으로 주는 데에는 합리성이 있는 반면, 기준점의 논리에 비해 세부적인 연결 설명이 부족해 3점으로 평가합니다."
+      },
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 4.56047191680409,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 주문 서비스의 회원 할인 로직을 정확히 설명하고, 설계 의도와 선택 근거를 명확히 제시했습니다. 서비스 계층에 정책을 집중시킨 설계 판단을 논리적으로 정당화했으며, 대안과의 비교에서도 장단점을 잘 파악했습니다. 또한 동시성 문제와 부동소수점 오차 등 설계가 깨질 수 있는 상황을 인식하고 있었습니다. 전체적으로 코드 이해와 설계 비판적 사고가 뛰어나며, 스스로 문제를 해결하는 능력이 우수합니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount 함수가 회원 여부와 주문 금액 조건에 따라 10% 할인을 적용하고, 조건 미충족 시 원본 주문을 반환한다는 설명이 정확했습니다."
+          },
+          {
+            "axis": "L2",
+            "detail": "할인 로직을 서비스 메서드에 집중시켜 주문 처리 로직의 중복을 방지하고, 정책 변경 시 유지보수가 용이하도록 설계한 이유를 명확히 제시했습니다."
+          },
+          {
+            "axis": "L3",
+            "detail": "order 모델에 로직을 넣는 대안과 비교해 서비스 계층에 정책을 두는 것이 테스트와 책임 분리 측면에서 유리함을 설득력 있게 설명했습니다."
+          },
+          {
+            "axis": "L4",
+            "detail": "동시성에 의한 레이스 컨디션과 부동소수점 누적 오차 등 설계가 깨질 수 있는 구체적인 상황을 잘 인식하고 있었습니다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "학생은 모든 질문에 힌트 없이 스스로 답변을 제시했으며, 이는 높은 자율성과 문제 해결 능력을 보여줍니다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI报表서의 서술이 기준점(Sonnet 보고서)과 거의 동일한 수준의 근거성, 구체성, 및 통찰력을 보여줍니다. AI는 정확한 설명, 설계 의도, 대안 비교, 및 특정 실패 조건의 인식을 모두 표명하였으며, 이는 기준점에서 요구되는 모든 QtCore을 충족합니다. 특히, 힌트 없이 모든 레벨에서สมบูรณ한 خود주도적 이해를 보여주어, 표면적 암기가 아니라 심층적인 이해를 입증하였습니다."
+      },
+      "model": "openai/gpt-oss-120b",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 6.787045166827738,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 주문 서비스의 할인 로직을 정확히 설명하고, 설계 의도와 대안 비교, 그리고 잠재적 문제점까지 스스로 파악했습니다. 각 레벨에서 요구된 깊이의 답변을 모두 힌트 없이 제공했으며, 코드의 동작과 설계 선택에 대한 이해도가 높습니다. 특히 서비스 계층에 정책을 집중시킨 설계 이유와 데이터와 로직의 분리를 명확히 인식하고 있습니다. 다만 동시성 문제와 부동소수점 오차와 같은 한계점도 스스로 지적했습니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount 함수의 동작과 조건을 정확히 설명함"
+          },
+          {
+            "axis": "L2",
+            "detail": "서비스 계층에 정책을 모아두는 설계 의도를 논리적으로 제시함"
+          },
+          {
+            "axis": "L3",
+            "detail": "대안 설계와 비교하여 현재 구조의 장점을 정당화함"
+          },
+          {
+            "axis": "L4",
+            "detail": "동시성 및 부동소수점 오차 등 설계가 깨질 수 있는 조건을 스스로 도출함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "학생은 모든 질문에 힌트 없이 스스로 답변했으며, 따라서 자율적으로 문제를 해결한 것으로 평가됩니다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "기준점(Sonnet 보고서)과 비교해 보아, AI의 서술은 근거성, 구체성, 통찰 면에서 매우 유사한 수준임. 단, 일부 구체적 표현이わず간 snatch 스럽지만, 전반적으로 상세한 설계 근거와 실패 조건의 자율적 도출이 동능. 단, 기준점의 평가 문장에서 '재학습이 필요한 영역이 없다'는 문장이 AI의 서술에는 나타나지 않아 1점 차이."
+      },
+      "model": "openai/gpt-oss-120b",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.9661797501612455,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-small-4-119b-2603",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 72.07338520791382,
+      "struct_ok": true,
+      "opening_remark": "김OO님, 반갑습니다. 지난번에 한 번 이야기 나눠서 다시 뵙게 됐네요. 오늘은 3회차 미니프로젝트 진행하면서 코드 보면서 느꼈던 점들을 가볍게 여쭤볼 거예요. 편하게 말씀해 주시면 됩니다.",
+      "items": [
+        {
+          "questionText": "3회차 들어오시면서 컨디션이나 프로젝트 분위기는 어떻게 느끼고 계세요?",
+          "questionRationale": "재면담이므로 라포 회복을 위한 도입 질문. 이전 상담 내역 외 별도 근거 없음.",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "이번 회차 미니프로젝트에서 본인이 맡아서 손댄 부분이 어디쯤이라고 생각하세요?",
+          "questionRationale": "역할·기여 확인을 위한 질문. 이전 상담 내역 외 별도 근거 없음.",
+          "suggestedOrder": 2,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "상태 관리 쪽 코드를 같이 살펴봤는데, 이 부분이 본인이 작성한 건지 아니면 팀원이 먼저 짠 걸 이어 받은 건지 기억나세요?",
+          "questionRationale": "문제 1(상태 관리, src-problem-1)은 TEAM_SHARED_PROBLEM으로 표시되어 있어 본인 작성으로 단정하지 않고 여지를 둠.",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "그 상태 관리 코드를 처음 봤을 때, 이게 어떤 흐름으로 동작하는 코드인지 한두 문장으로 설명해 주실 수 있나요?",
+          "questionRationale": "문제 1 L2(src-stage-1) 질문에서 '잘 모르겠습니다'로 답해 흐름 이해가 부족했음을 보여줌. 같은 단계를 반복하지 않고 한 단계 더 일반화된 이해도 질문으로 발전시킴.",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-stage-1"
+        },
+        {
+          "questionText": "그 코드를 직접 손대본 적이 있다면, 어떤 부분을 바꿔봤고 그때 왜 그렇게 바꿨는지 말씀해 주실 수 있나요?",
+          "questionRationale": "이해도 심화 질문. L2 답변에서 호출 시점을 모른다고 했으므로, 실제 변경 경험이 있는지 통해 적용 수준을 확인.",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-stage-1"
+        },
+        {
+          "questionText": "지난번 면담 이후로 상태 관리 쪽 공부를 따로 해보신 적이 있으세요?",
+          "questionRationale": "재면담이므로 이전 면담 이후의 자기주도 학습 여부를 자연스럽게 확인. 이전 상담 내역 외 별도 근거 없음.",
+          "suggestedOrder": 6,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "지금 본인이 느끼기에 이 프로젝트에서 가장 보완이 필요한 부분은 어디라고 생각하세요?",
+          "questionRationale": "자기 인식 확인 질문. 점수나 단계 언급 없이 교육생 스스로 진단하도록 유도.",
+          "suggestedOrder": 7,
+          "interviewSourceId": null
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 3,
+        "reason": "자연스러운 구어체 사용이 kısm적으로 있는 반면, 질문의 구체성과 구조에서 기준점(Sonnet 응답)보다Somewhat 떨어지는 면이 있습니다. 여는 말은 친절하지만, 기준점의 여는 말과 비교해aconsistencies가 있습니다. 질문 목록에서 몇몇-question은าการ적으로 같습니다만, 일부 질문의 구체성이나 딜리버리가 기준점에 비해Somewhat 떨어집니다."
+      },
+      "model": "minimaxai/minimax-m3",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.8869737500790507,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-small-4-119b-2603",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 6.130472999997437,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "2: 코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.",
+      "missing": "order.total 가 50000 초과인지 여부를 검사하고, 할인 적용 시 0.9를 곱해 새로운 total을 만든 뒤 반환하는 등, 각 구성 요소가 어떻게 연결되는지 설명이 필요합니다.",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": {
+        "score": 3,
+        "reason": "AI의 채점과 기준점은 부분적으로 일치합니다. AI는 학생의 답변을 단순한 동작 묘사로 판단하여 2점을 주었지만, 기준점은 더 자세한 설명을 하는 다른 답변(Sonnet)을 4점으로 평가했습니다. 그러나 기준점에서 Requirement가 실제 시스템의 구체적 상황에 이후 연결이 없어 5점에 도달하지 못(SocketError)한 점은, AI의 2점 판定的 근거인 '표면적 동작만 반복'과는 다소 대조되는 편입니다. 기준점의 평가 논리와 AI의 평가 논리가 모두 루브릭의 2~4점 범위 내에서 일관성을 보이지만, 학생의 답변의 질에 따라 решение이 달라지는 gerçeği를 반영하지 못하여 완전히 일치하지는 않습니다."
+      },
+      "model": "openai/gpt-oss-120b",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.9398164169397205,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-small-4-119b-2603",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 77.44190208404325,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "2: 코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.",
+      "missing": "OrderService 클래스와 apply_discount 메서드, 매개변수 order와 user, 조건의 두 요소(user.is_member와 order.total > 50000), 0.9 곱셈 할당, 반환 등 개별 구성 요소를 식별하여 설명하고, 50000 초과 조건이 함께 필요함을 정확히 언급해야 함. 또한 이 요소들이 한 함수 안에서 어떻게 결합되는지(조건 검사 후 총액 수정 후 반환)까지는 아니더라도 각 부분의 역할을 구분해 제시해야 3점에 도달함.",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": {
+        "score": 5,
+        "reason": "AI의 채점이 Sonnet 응답과 비교하여 기준점에 거의 동일한 판단을 보인다. 두 채점 모두 학생 답변의 수준을 2~4점 사이에서 評価하며, 상세한 근거에서 일부 결함을 점수에 반영하는 데 동의한다. 특히, AI의 근거 ('코드의 표면적 동작만 반복')이 Sonnet 응답의 설명 ('제약과 실제 구조 사이의 연결이 한 단계 비어 있다')와 본질적으로 일치한다는 점에서 기준점과 사실상 동일한 판단이다."
+      },
+      "model": "thinkingmachines/inkling",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.286369415931404,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-small-4-119b-2603",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.506616125116125,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-small-4-119b-2603",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.363217582926154,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-small-4-119b-2603",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 9.951524541946128,
+      "struct_ok": true,
+      "opening_remark": "김OO님, 안녕하세요. 지난번 면담 이후로 프로젝트 진행 상황을 조금 들어보고 싶어요. 오늘은 미니프로젝트 3차에 대한 이해도를 함께 살펴보려고 합니다.",
+      "items": [
+        {
+          "questionText": "지난번 면담 이후에 프로젝트 진행하면서 특별히 어려웠던 점이 있었나요?",
+          "questionRationale": "재면담이라는 점을 고려한 라포 형성 질문 (이전 상담 내역에 ID가 없으므로 null)",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "최근에 코딩 외에 다른 학습 활동을 하신 부분이 있나요?",
+          "questionRationale": "재면담 상황에서 라포를 이어가기 위한 일반 질문 (이전 상담 내역에 ID가 없으므로 null)",
+          "suggestedOrder": 2,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "이번 미니프로젝트에서 상태 관리 부분을 담당하신 기억이 나시나요?",
+          "questionRationale": "문제 1: 상태 관리 (TEAM_SHARED_PROBLEM) 영역에 대한 역할 확인",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "팀 내에서 상태 관리와 관련된 코드를 작성하거나 검토한 경험이 있으면 공유해 주실 수 있나요?",
+          "questionRationale": "문제 1: 상태 관리 (TEAM_SHARED_PROBLEM) 영역에 대한 기여도 확인",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "상태 관리 메서드가 언제 호출되는지에 대해 어떻게 생각하시나요?",
+          "questionRationale": "코드 이해도 검증 결과 – L2 단계에서 메서드 호출 시점을 묻는 질문 (통과 못함)",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-stage-1"
+        },
+        {
+          "questionText": "해당 메서드가 호출될 때 어떤 상태가 변해야 한다고 보시나요?",
+          "questionRationale": "시도 단위(INITIAL) 결과를 바탕으로 이해도 심화 질문",
+          "suggestedOrder": 6,
+          "interviewSourceId": "src-attempt-1"
+        },
+        {
+          "questionText": "현재 자신의 상태 관리 이해도를 스스로 어떻게 평가하시나요?",
+          "questionRationale": "세션 종료 사유(TERMINATED_AT_L2)를 근거로 자기 인식 확인 질문",
+          "suggestedOrder": 7,
+          "interviewSourceId": "src-session-1"
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "자연스러운 구어체 한국어 수준은 높으나, 질문의 구체성에서わず간 차이 있음"
+      },
+      "model": "openai/gpt-oss-120b",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 83.15604045800865,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-nemotron",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 83.20444108382799,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-nemotron",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 95.97258391720243,
+      "struct_ok": false,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "할인해주는 코드인 것 같아요.",
+      "missing": "OrderService 클래스와 apply_discount 함수, 매개변수 order/user, 회원 조건과 총액 조건, 0.9 곱셈 등 개별 구성 요소의 역할을 설명하고 그것들이 어떻게 이어지는지 언급해야 함",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "model": "thinkingmachines/inkling",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 80.32753716711886,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-nemotron",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.9682327918708324,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "abacusai/dracarys-llama-3.1-70b-instruct",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 11.017398833064362,
+      "struct_ok": true,
+      "opening_remark": "김OO님, 안녕하세요. 지난번 면담 이후 어떻게 지내셨나요? 오늘은 그때 이야기한 내용과 현재 진행 중인 미니프로젝트에 대해 조금 더 얘기해 보려고 합니다.",
+      "items": [
+        {
+          "questionText": "김OO님, 지난번 면담 이후 진행 상황은 어떠셨나요?",
+          "questionRationale": "재면담이라는 점을 반영한 라포 형성 질문",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "현재 진행 중인 미니프로젝트 3차에서 가장 어려웠던 점은 무엇인가요?",
+          "questionRationale": "프로젝트 상황 확인을 위한 일반 질문",
+          "suggestedOrder": 2,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "상태 관리 부분에서 본인이 맡은 역할이나 구현한 부분을 말씀해 주실 수 있나요?",
+          "questionRationale": "TEAM_SHARED_PROBLEM(문제 1) 영역에서 본인의 기여도 확인",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "지난 회차와 이번 회차 사이에 진행 단계가 변한 부분에 대해 어떤 어려움이 있었는지 공유해 주실 수 있나요?",
+          "questionRationale": "STAGE_DECLINE 위험 사유를 바탕으로 진행 차이와 어려움 파악",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-risk-1"
+        },
+        {
+          "questionText": "상태 관리 메서드가 호출되는 시점을 정확히 파악하기 위해 어떤 흐름을 떠올리셨나요?",
+          "questionRationale": "L2 단계(문제 1)에서 답변이 부족했던 부분에 대한 이해도 심화 질문",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-stage-1"
+        },
+        {
+          "questionText": "이번 시도에서 본인이 이해가 부족하다고 느낀 부분을 스스로 어떻게 보완하고 싶으신가요?",
+          "questionRationale": "전체 시도(src-attempt-1)를 기반으로 자기 인식 및 학습 계획 확인",
+          "suggestedOrder": 6,
+          "interviewSourceId": "src-attempt-1"
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 3,
+        "reason": "자연스러운 구어체 사용은 기준점과 유사하지만, 질문의 구체성 및 상세도에서 약간 차이가 있습니다."
+      },
+      "model": "openai/gpt-oss-120b",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.8842692920006812,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "abacusai/dracarys-llama-3.1-70b-instruct",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 7.302172084106132,
+      "struct_ok": true,
+      "opening_remark": "김OO님, 안녕하세요. 지난번 면담 이후로 프로젝트 진행에 어떤 변화가 있었는지 궁금합니다. 오늘은 조금 더 깊게 이야기를 나눠보면서 현재 상황을 함께 살펴보면 좋겠어요.",
+      "items": [
+        {
+          "questionText": "지난번 면담 이후 어떻게 지내셨나요?",
+          "questionRationale": "재면담이므로 이전 면담에 대한 자연스러운 연결을 위해",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "이번 미니프로젝트 3차 진행 상황은 어떤가요?",
+          "questionRationale": "전체 시도(src-attempt-1)의 진행 상황을 확인하기 위해",
+          "suggestedOrder": 2,
+          "interviewSourceId": "src-attempt-1"
+        },
+        {
+          "questionText": "팀에서 상태 관리 쪽을 담당하신 경험에 대해 말씀해 주실 수 있나요?",
+          "questionRationale": "팀이 공유하는 문제(상태 관리)와 본인의 역할을 파악하기 위해, 문제 단위(src-problem-1)를 근거로",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "메서드가 호출되는 시점을 정확히 파악하기 위해 어떤 흐름을 생각해 보셨나요?",
+          "questionRationale": "L2 단계에서의 이해도 검증 결과(src-stage-1)를 바탕으로 심화 질문",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-stage-1"
+        },
+        {
+          "questionText": "현재 자신의 코드 이해 수준을 어떻게 평가하시나요?",
+          "questionRationale": "세션 종료 상황(src-session-1)을 근거로 자기 인식 확인",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-session-1"
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "여는 말은 자연스럽고 편하게 이야기를 나눠보겠다는 의도를 잘 전달합니다. 질문 목록은 대체로 구체적이나, 기준점의 질문들과 비교했을 때 몇 가지 질문이 조금 더 세부적인 내용이나 예시를 담고 있지 못해 자연스러운 구어체 한국어 수준(4점)과 질문의 구체성(4점)으로 평가됨."
+      },
+      "model": "openai/gpt-oss-120b",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 84.9359184158966,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-nemotron",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 84.9475308752153,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-nemotron",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.878050334053114,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "abacusai/dracarys-llama-3.1-70b-instruct",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 36.7196116251871,
+      "struct_ok": true,
+      "opening_remark": "김OO님, 안녕하세요. 지난번 면담 이후 미니프로젝트 3차 과제 진행 상황은 어떠셨는지 궁금해서 다시 뵙게 되었습니다.",
+      "items": [
+        {
+          "questionText": "이번 과제에서 상태 관리와 관련된 부분을 주로 어떤 방식으로 접근하셨는지 말씀해 주실 수 있나요?",
+          "questionRationale": "이해도 검증 결과의 문제 1(상태 관리, TEAM_SHARED_PROBLEM)에서 L2 도달 실패 및 답변 '잘 모르겠습니다'를 근거로, 개념 수준에서의 접근 방식을 열어보는 질문",
+          "suggestedOrder": 1,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "상태가 변경될 때 관련된 로직을 추적해 보신 적이 있으신가요?",
+          "questionRationale": "이해도 검증 결과의 세션 종료 사유(TERMINATED_AT_L2)와 문제 1의 질문('이 메서드가 호출되는 시점은?')을 근거로, 호출 시점 추적 경험을 확인하기 위한 질문",
+          "suggestedOrder": 2,
+          "interviewSourceId": "src-session-1"
+        },
+        {
+          "questionText": "이 부분에서 팀원과 함께 논의하거나 코드를 공유해 보신 경험이 있으신가요?",
+          "questionRationale": "문제 1의 문제Scope=TEAM_SHARED_PROBLEM을 근거로, 팀 내 공유 경험을 단정하지 않고 여지를 둔 질문",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "지난 면담 때와 비교해서 이번에 상태 관련 로직을 보면서 새롭게 느낀 점이나 고민이 있으셨다면 말씀해 주실 수 있나요?",
+          "questionRationale": "면담 성격이 재면담임을 반영하고, 이전 상담 내역을 톤 맞추기에만 사용하며, 이해도 진전을 열어보는 후속 질문",
+          "suggestedOrder": 4,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "상태 관리 로직을 볼 때, 어디서부터 시작해서 어떻게 따라가 보셨는지 구체적으로 설명해 주실 수 있나요?",
+          "questionRationale": "이해도 검증 결과의 시도 유형(INITIAL)과 세션 단위(src-session-1)를 근거로, 실제 탐색 과정을 이해하기 위한 질문",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-session-1"
+        },
+        {
+          "questionText": "이번 과제를 마무리하면서, 상태 관리 부분에 대해 스스로 얼마나 이해했다고 느끼시는지 궁금합니다.",
+          "questionRationale": "마지막 단계의 자기 인식 확인을 위한 질문으로, 이해도 검증 결과 전반을 종합하여 현재 인식을 묻는 질문",
+          "suggestedOrder": 6,
+          "interviewSourceId": null
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "자연스러운 구어체 한국어 사용은 기준점과 유사하지만, 몇몇 질문의 구체성이 약간 뒤처짐."
+      },
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 86.17179841687903,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-nemotron",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.382627625018358,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-small-4-119b-2603",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.564965666970238,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-small-4-119b-2603",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 101.22774762497284,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 49.74577562510967,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 코드의 기능, 설계 의도, 그리고 잠재적 문제점에 대한 깊은 이해를 보였습니다. 할인 로직의 동작 원리부터 설계 판단의 근거, 대안 비교, 예외 상황까지 체계적으로 설명하며, 단일 질문에 한해도 다층적인 사고를 보여주었습니다. 특히 동시성 문제와 부동소수점 오차 같은 미세한 구석까지 검토한 점에서 문제 해결 능력이 뛰어난 것으로 평가됩니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "할인 적용 조건과 결과를 정확히 설명하며, 코드의 핵심 로직을 명확히 파악함"
+          },
+          {
+            "axis": "L2",
+            "detail": "단순 기능 구현을 넘어, 유지보수성과 정책 분리 원칙을 기반으로 한 설계 판단을 제시함"
+          },
+          {
+            "axis": "L3",
+            "detail": "대안 설계 방식과 현재 선택지의 트레이드오프를 비교 분석하며, 데이터와 로직의 분리를 강조함"
+          },
+          {
+            "axis": "L4",
+            "detail": "동시성 제어 및 수치 계산 오차 같은 실전적인 이슈를 사전에 예측하고 기술함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 질문에 대해 단 한 번의 힌트 없이 완벽히 답변함으로써, 독립적인 문제 해결 능력과 코드 소유권을 완전히 달성한 수준으로 평가됩니다. 특히 고위험 영역(L4)의 복잡한 이슈를 스스로 도출해내는 능력은 뛰어남을 보여줍니다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "서술은 기준점(Sonnet 보고서)과 크게 비슷한 수준으로, 근거성과 구체성이 우수합니다. 그러나 동시성 매커니즘과 부동소수점 오차에 대한 구체적 해결 방안이 없이 단지 문제 지적에만Jessicaับผ 있습니다. 이는 기준점과 완전히 동등하지 않아 1점 차이로 평가되었습니다."
+      },
+      "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 31.989979750011116,
+      "struct_ok": true,
+      "opening_remark": "김OO님, 안녕하세요. 지난번 면담 이후 어떻게 지내셨는지 궁금해서 다시 뵙게 되었어요. 오늘은 미니프로젝트 3차에서의 상태 관리 부분에 대해 이야기를 나눠볼까 합니다.",
+      "items": [
+        {
+          "questionText": "지난 면담 때 상태 관리에 대해 이야기를 나눴던 걸 기억하시나요?",
+          "questionRationale": "이전 상담 내역을 바탕으로 라포 형성 및 연속성 확인",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "이번 미니프로젝트에서 상태 관리를 담당하신 부분이 있으셨나요?",
+          "questionRationale": "역할·기여 확인 (problemScope=TEAM_SHARED_PROBLEM 관련 기여도 격차 근거)",
+          "suggestedOrder": 2,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "상태가 변경될 때 어떤 흐름으로 처리되는지 설명해 주실 수 있나요?",
+          "questionRationale": "코드 이해도 검증 결과의 세션 단위 (src-session-1) 및 문제 1 (상태 관리, src-problem-1)를 근거로 이해도 심화",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-session-1"
+        },
+        {
+          "questionText": "이 메서드가 호출되는 시점에 대해 어떻게 생각하셨는지 궁금합니다.",
+          "questionRationale": "문제 1의 질문과 답변을 바탕으로 한 이해도 심화 (src-problem-1, src-stage-1)",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "상태 관리와 관련된 코드를 보면서 가장 어려웠던 부분은 어디였나요?",
+          "questionRationale": "이해도 검증 결과의 시도 단위 (src-attempt-1)를 근거로 한 이해도 심화 및 자기 인식 유도",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-attempt-1"
+        },
+        {
+          "questionText": "앞으로 상태 관리를 더 잘 다루기 위해 어떤 부분을 공부해보고 싶으신가요?",
+          "questionRationale": "마지막: 자기 인식 확인 (이전 상담 내역·면담 성격을 톤 맞추기 위해 참고했으나 유일한 근거 아님)",
+          "suggestedOrder": 6,
+          "interviewSourceId": null
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "자연스러운 구어체 한국어 사용이 기준점과 유사하며, 질문의 구체성도 잘 유지하고 있으나, 조금 더 세세한 차이점이 있다. 예를 들어, 기준점의 여는 말에서 '편하게 이야기 나눠보려고 해요'라는 인화된 표현이 본문의 여는 말에서 살짝 다른 톤으로 전달된다 ('지금 다시 뵙게 되었어요' vs '시간 내주셔서 감사해요'). 질문 목록에서도 대체로 잘 따른 다만, 몇몇 질문에서 기준점의warts를 조금 더 구체적으로 다루지 못한 점이있다 (예: '이 상태 관리 문제를 풀 داخ서 어느 지점에서 막히는 느낌이 드셨어요'는 biraz 더 구체적으로 묻고자 하는 의도가 명확하지 않다)."
+      },
+      "model": "nvidia/nemotron-3-super-120b-a12b",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.45311062503606,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-small-4-119b-2603",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 102.73353300010785,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "minimaxai/minimax-m3",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 85.9905855411198,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-nemotron",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 83.38670562487096,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-nemotron",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 86.68907637498342,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-nemotron",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.879778209142387,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "meta/llama-4-maverick-17b-128e-instruct",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 5.850962333148345,
+      "struct_ok": false,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "할인해주는 코드인 것 같아요.",
+      "missing": "개별 구성 요소(함수, 조건문 등)가 무엇을 하는지 구체적으로 설명해야 함",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "model": "google/gemma-4-31b-it",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.9734870840329677,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "meta/llama-4-maverick-17b-128e-instruct",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.879511709092185,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "meta/llama-4-maverick-17b-128e-instruct",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.521443666890264,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "abacusai/dracarys-llama-3.1-70b-instruct",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.469100459013134,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "abacusai/dracarys-llama-3.1-70b-instruct",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.46345895784907,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "abacusai/dracarys-llama-3.1-70b-instruct",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 6.179809583118185,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.",
+      "missing": "개별 구성 요소(조건문, 변수 등)가 어떻게 이어져서 최종 결과가 도출되는지에 대한 구체적인 흐름 설명이 필요함",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "AI의 판단이 기준점(Sonnet 응답)의 논리 구조와 제시된 근거의 세분하기 수준에서 크게 어긋나지 않는다. 그러나 AI가 2점을 주는 근거인 '코드의 표면적 동작만 반복'이 student 답변에 стен 반아졌다는 점에서, AI의 판단이 기준점의 세세한 분석에 비해 biraz 더 엄격했다는 점을 고려하여 4점을 부여했다. 기준점은 더욱 상세한 설명의 미비를理由로 4점을 주었지만, AI는student의回答의 구조적 한계를理由로 더 낮은 점수를 주었다. 이는 AI의 판단이 더 엄격했음을 나타낸다."
+      },
+      "model": "google/gemma-4-31b-it",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.275302791967988,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "abacusai/dracarys-llama-3.1-70b-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.27412262512371,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "abacusai/dracarys-llama-3.1-70b-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.275432167109102,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "abacusai/dracarys-llama-3.1-70b-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 7.2508725840598345,
+      "struct_ok": false,
+      "score": 2,
+      "matched_level": "2: 코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "할인해주는 코드인 것 같아요.",
+      "missing": "할인 조건(user.is_member 및 order.total > 50000)과 할인 계산(order.total *= 0.9) 과정을 구체적으로 기술해야 한다.",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.466244583018124,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "meta/llama-4-maverick-17b-128e-instruct",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.9475224169436842,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 112.63117991690524,
+      "error": "StageError: p04-5: TIMEOUT: TimeoutError",
+      "model": "thinkingmachines/inkling",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.463745624991134,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "meta/llama-4-maverick-17b-128e-instruct",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.304512250004336,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "meta/llama-4-maverick-17b-128e-instruct",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 59.055969084147364,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "2: 코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.",
+      "missing": "할인 적용 조건(회원 여부 + 총액 50,000 이상)의 구체적 설명과 데이터 흐름(조건 검사 → 할인 적용 → 총액 수정)의 연결성을 기술해야 3점 이상 달성 가능",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "AI의 채점 이유가 기준점과 크게 부합함. 학생의 답변에 대한 평가가'&&_ODDSizzie्टर랙의 우선순위에 따라仇해졌는지에 적용된 루브릭의 세부 기준을 잘 반영하고 있음. 단, 기준점에서 언급된 '중간 연결의 缺逝'와 관련된 탐구 깊이에서 살짝 차이있음."
+      },
+      "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 10.729669417021796,
+      "struct_ok": false,
+      "score": 3,
+      "matched_level": "개별 구성 요소는 설명하지만 그것들이 어떻게 이어지는지는 설명하지 못한다",
+      "evidence": "student 답변에서 'user.is_member가 True이고 order.total이 50000을 넘으면 order.total에 0.9를 곱해 10% 할인하고, 그 order를 그대로 리턴합니다'라는 설명은 구성 요소(조건 검사, 할인 적용)를 기술했으나, 조건 검사 → 할인 적용 → 리턴의 흐름을 구체적으로 설명하지 않았음",
+      "missing": "4점은 '전체 흐름은 정확하나 일부 구성 요소의 역할이 불명확하다'를 요구하므로, 조건 검사 → 할인 적용 → 리턴의 순서 및 데이터 흐름을 파일·함수·라인 단위로 구체화해야 함",
+      "case_id": "L1-strong",
+      "expected_range": [
+        4,
+        5
+      ],
+      "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.8901235829107463,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.9676175001077354,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.36439016694203,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "meta/llama-4-maverick-17b-128e-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.449581417022273,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "meta/llama-4-maverick-17b-128e-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.437378792092204,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "meta/llama-4-maverick-17b-128e-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 17.48002729192376,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 구현한 코드의 기능적 동작뿐만 아니라 설계 의도와 대안까지 명확하게 파악하고 있습니다. 서비스 계층에 비즈니스 로직을 분리하여 유지보수성을 높인 점을 논리적으로 설명했습니다. 특히 동시성 문제와 부동소수점 오차와 같은 잠재적 결함까지 예측하는 높은 수준의 분석력을 보여주었습니다. 전반적인 코드 소유권이 매우 견고한 상태입니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount 메서드의 입력값, 조건문, 결과값 리턴 과정을 정확하게 기술함"
+          },
+          {
+            "axis": "L2",
+            "detail": "할인 정책을 서비스 메서드에 집중시켜 로직 분산을 막고 유지보수성을 높이려는 설계 근거를 제시함"
+          },
+          {
+            "axis": "L3",
+            "detail": "모델 내 메서드 구현 방식과 비교하여 데이터와 정책 로직을 분리함으로써 테스트 용이성을 확보했음을 정당화함"
+          },
+          {
+            "axis": "L4",
+            "detail": "멀티스레드 환경에서의 레이스 컨디션으로 인한 중복 할인 가능성과 부동소수점 계산 오차 문제를 정확히 지적함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 레벨의 질문에 힌트 없이 스스로 답변하였으며, 이는 외부의 도움 없이 독자적으로 설계 의도를 파악하고 검증할 수 있는 완전한 자율성을 갖추었음을 의미합니다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "AI의 보고서 서술은 기준점(Sonnet 보고서)과เท타며 근거성, 구체성, 통찰력면에서 유사한 수준을 보인다. however, 다음과 같은 미세한 차이로 5점ではなく4점에게했다. 1. **예측력의 세부 정도**: 기준점에서 기술된 'requirement r1 PASS'와 '특이한 취약점 없음'은 AI 보고서에서 명시적이지 않다. 2. **단축 표현**: AI 보고서의 'strengths'와 'gaps'설명이 조금 더 단축되어 있어, 원 보고서의 그것과 동일한 수준의 자세함을 가지지 못한다(해당 내용은 물론 중요한하지 않지만, 세부 설명의 풍부함에서 균열이 나타난다). 3. **추가 분석-layer**: 기준점 报告서에는 '재학습이 필요한 영역이 없다'라는 추가적인 분석층이 존재하지만, AI 보고서에는 이와 같은 결론적 분석이 포함되어 있지 않다."
+      },
+      "model": "google/gemma-4-31b-it",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 17.59851258294657,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 구현한 코드의 기능적 동작뿐만 아니라 설계 의도와 대안까지 명확하게 파악하고 있습니다. 서비스 계층에 비즈니스 로직을 분리하여 유지보수성을 높인 점을 논리적으로 설명했습니다. 특히 동시성 문제와 부동소수점 오차와 같은 잠재적 결함까지 예측하는 높은 수준의 분석력을 보여주었습니다. 전반적인 코드 소유권이 매우 견고한 상태입니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount 메서드의 입력값, 조건문, 결과값 리턴 과정을 정확하게 기술함"
+          },
+          {
+            "axis": "L2",
+            "detail": "할인 정책을 서비스 메서드에 집중시켜 로직 분산을 막고 유지보수성을 높이려는 설계 근거를 제시함"
+          },
+          {
+            "axis": "L3",
+            "detail": "모델 내 메서드 구현 방식과 비교하여 데이터와 정책 로직을 분리함으로써 테스트 용이성을 확보했음을 정당화함"
+          },
+          {
+            "axis": "L4",
+            "detail": "멀티스레드 환경에서의 레이스 컨디션으로 인한 중복 할인 가능성과 부동소수점 계산 오차 문제를 정확히 지적함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 레벨의 질문에 힌트 없이 스스로 답변하였으며, 이는 외부의 도움 없이 독자적으로 설계 의도를 파악하고 검증할 수 있는 완전한 자율성을 갖추었음을 의미합니다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 보고서 서술이 기준점(Sonnet 보고서)과 역전자적으로 근거성, 구체성, 통찰 수준에서 동등한 수준을 보임. 모든 평가 지표(L1~L4)에서 세부적인 세운 지적과 설계 의도, 대안 비교, 실패 조건 예측이 상세히 scaleXWT 맡으며, autonomous Note에서도 완전한 자율성을 보여줌."
+      },
+      "model": "google/gemma-4-31b-it",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 6.771671083057299,
+      "struct_ok": true,
+      "score": 4,
+      "matched_level": "전체 흐름은 정확하나 일부 구성 요소의 역할이 불명확하다",
+      "evidence": "apply_discount는 order와 user를 받아서, user.is_member가 True이고 order.total이 50000을 넘으면 order.total에 0.9를 곱해 10% 할인하고, 그 order를 그대로 리턴합니다. 조건을 안 만족하면 할인 없이 그대로 리턴돼요.",
+      "missing": "파일명과 라인 번호 등 파일·함수·라인 수준의 구체적인 위치 정보를 포함하여 전체 흐름을 정확히 기술하면 5점이 됩니다.",
+      "case_id": "L1-strong",
+      "expected_range": [
+        4,
+        5
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "AI의 채점이 기준점(Sonnet 응답)과 매우 유사하므로 일치도는 높다. AI는(student 답변에 대한) 점수 4를 부여했으며, 이유와 필요할 추가 informatie가 무엇인지 자세히 설명했다. 특히,missing하는 부분을 구체적 상황의 예와 정책의 위치 및 형태에 대한 이유를 요구해 5점에 도달하기 위한 조건을 명확히 하였다. 이는 기준점의 논리와 잘 맞춘다."
+      },
+      "model": "openai/gpt-oss-120b",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 7.238429915858433,
+      "struct_ok": true,
+      "score": 5,
+      "matched_level": "해당 코드가 하는 일과 데이터 흐름을 파일·함수·라인 단위로 정확히 기술한다",
+      "evidence": "apply_discount는 order와 user를 받아서, user.is_member가 True이고 order.total이 50000을 넘으면 order.total에 0.9를 곱해 10% 할인하고, 그 order를 그대로 리턴합니다.",
+      "missing": "이미 최고점에 도달하였습니다.",
+      "case_id": "L1-strong",
+      "expected_range": [
+        4,
+        5
+      ],
+      "judge": {
+        "score": 5,
+        "reason": "AI의 채점이 기준점(Sonnet 응답)과 사실상 동일한 판단을 보여줍니다.ernerboth AI와 기준점 모두가 해당 코드의 동작을 정확히 기술하고, 5점을 주기 위한 명확한 연결되는 논리 부족을 동일하게 지적하고 있습니다."
+      },
+      "model": "google/gemma-4-31b-it",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 4.3433753750287,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 주문 서비스의 회원 할인 로직을 정확히 설명하고, 설계 의도와 장점을 명확히 제시했습니다. 서비스 계층에 정책을 집중시킨 이유와 대안 설계와의 차이점을 논리적으로 비교했습니다. 또한 멀티스레드 환경에서 발생할 수 있는 레이스 컨디션과 부동소수점 오차 문제까지 인식하고 있었습니다. 전반적으로 코드의 기능과 설계 판단을 깊이 있게 이해하고 있음을 보여줍니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount 함수가 회원 여부와 주문 금액 조건에 따라 10% 할인을 적용하고, 조건 미충족 시 원본 주문을 반환한다는 설명이 정확했습니다."
+          },
+          {
+            "axis": "L2",
+            "detail": "할인 로직을 서비스 메서드에 집중시켜 정책 변경 시 한 곳만 수정하면 된다는 설계 의도를 명확히 제시했습니다."
+          },
+          {
+            "axis": "L3",
+            "detail": "할인 로직을 모델에 넣는 대안과 비교하여 테스트 용이성과 책임 분리를 강조한 점이 설계 선택을 잘 정당화했습니다."
+          },
+          {
+            "axis": "L4",
+            "detail": "동시 접근 시 레이스 컨디션과 부동소수점 누적 오차 문제를 지적하여 설계의 한계와 위험성을 정확히 파악했습니다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "학생은 모든 질문에 힌트 없이 스스로 답변했으며, 이는 해당 영역에 대한 높은 자율성과 이해도를 나타냅니다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI가 제공한 보고서는 기준점(Sonnet 보고서)과 동일한 수준의 근거성, 구체성, 및 통찰력을 보인다. 상세한 것들을 아래와 같이 요약한다. 1. **정확한 설명 (L1)**: apply_discount 메서드의 동작을 정확히 설명했다. 2. **설계 의도 명확성 (L2)**: 할인 로직을 서비스 메서드에 집중시키는 설계 의도와 이유를 명확히 제시했다. 3. **설계 선택의 정당화 (L3)**: 대안 설계와의 비교를 통해 현재 설계의 장점을 논리적으로 설명했다. 4. ** 잠재적 실패 조건의 인식 (L4)**: 동시성 관련 문제와 부동소수점 오차 gibi 구체적인 설계 한계를 스스로 식별했다. 5. **자율성과 이해도**onomy_note**: 힌트 없이 모든 항목을 완수한 점이 높은 자율성과 이해도를 보여준다. kry 센标准점과 대칭되는 구조와 내용을 보여, 평가 기준에 완벽하게符合한다."
+      },
+      "model": "openai/gpt-oss-120b",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 12.212524458998814,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "2: 코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "학생은 '회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.'라고 답변하여 코드의 목적과 total 변경을 언급했으나, 조건문(logic flow)이나 데이터 흐름(file·함수·라인 단위)을 구체적으로 설명하지 않았다.",
+      "missing": "3점 달성 위해서는 'if user.is_member && order.total > 50000' 조건과 'order.total *= 0.9' 계산이 어떻게 연결되는지, 함수 파라미터(order, user)의 역할까지 구체적으로 기술해야 한다.",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "AI의 채점이 기준점(Sonnet 응답)과 밀접하게 일치한다. 두 평가 모두 학생의 답변을 2점으로 평가했으며, 이유는 아래와 같이 동일하게 코드의 목적과 total 변경 언급은 하였지만, 조건문(flow)이나 데이터 흐름의 구체적 설명이 отсутств했다는 점이다.Sonnet 응답의 추가된 항목(예: '여기저기 흩어질 위험'에 대한 구체적 상황 설명 필요аков 등)은 AI의 초기 채점에서는 고려되지 않았지만, AI의 근거와 Sonnet의 이유 모두가 학생 답변의 제한된 설명에 초점을 두고 있어 일관성이 있다."
+      },
+      "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 118.73509487509727,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "thinkingmachines/inkling",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 71.70135441701859,
+      "struct_ok": true,
+      "score": 4,
+      "matched_level": "전체 흐름은 정확하나 일부 구성 요소의 역할이 불명확하다",
+      "evidence": "apply_discount는 order와 user를 받아서, user.is_member가 True이고 order.total이 50000을 넘으면 order.total에 0.9를 곱해 10% 할인하고, 그 order를 그대로 리턴합니다. 조건을 안 만족하면 할인 없이 그대로 리턴돼요.",
+      "missing": "OrderService 클래스 자체의 역할이나 apply_discount가 클래스 메서드로서의 위치, 파일 단위 구조에 대한 언급이 없어 일부 구성 요소(클래스 컨텍스트, 메서드 시그니처의 의미 등)의 역할이 불명확하다. 5점이 되려면 파일·함수·라인 단위로 클래스 구조와 메서드 내 각 조건 분기의 데이터 흐름을 더 정확히 기술해야 한다.",
+      "case_id": "L1-strong",
+      "expected_range": [
+        4,
+        5
+      ],
+      "judge": {
+        "score": 5,
+        "reason": "AI의 채점은 기준점(Sonnet 응답)과 사실상 동일한 판단을 보여준다. AI는 동일한 점수(4)를 부여하였으며, 부여된 점수의 이유와 필요한 추가 정보의 부족에 대한 설명도 기준점과 크게 일치한다. 특히, 두 경우 모두 제약과 실제 구조 사이의 연결이 한 단계 부족하다는 점을 근거로 해서 4점을 주었고, 5점을 위한 추가 정보의 필요성을 동일하게 강조하였다."
+      },
+      "model": "minimaxai/minimax-m3",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 119.18909074994735,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "thinkingmachines/inkling",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 119.34384233294986,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "thinkingmachines/inkling",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.8889480410143733,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "google/gemma-3n-e4b-it",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.485818208893761,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.9898381668608636,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "google/gemma-3n-e4b-it",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.490720249945298,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.493729958077893,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.88702016696334,
+      "error": "StageError: p04-5: TIMEOUT: TimeoutError",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 1.8797670418862253,
+      "error": "StageError: p04-6: PROVIDER_ERROR: HTTPError",
+      "model": "google/gemma-3n-e4b-it",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.9281476251781,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 121.05773829203099,
+      "error": "StageError: p04-5: TIMEOUT: TimeoutError",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 121.0088737080805,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.95635720808059,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "nvidia/nemotron-3-ultra-550b-a55b",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 121.07179949991405,
+      "error": "StageError: p04-5: TIMEOUT: TimeoutError",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 121.02079300000332,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 121.01760154194199,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 13.827067000092939,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 코드의 할인 로직을 정확하게 설명하며, 설계 의도, 정책 모듈화의 이점, 대안과의 차이점, 레이스 컨디션과 부동소수점 오차와 같은 경계 사례를 고려한 답변을 제공했습니다. 모든 요구사항을 힌트 없이 통과하며 높은 이해도와 문제 해결 능력을 보여주었습니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "코드의 기능과 조건을 명확하게 기술하며, 10% 할인 로직을 정확하게 설명했습니다."
+          },
+          {
+            "axis": "L2",
+            "detail": "모듈화 설계의 이점을 논리적으로 설명하며, 정책 변경 시 유지보수 용이함을 강조했습니다."
+          },
+          {
+            "axis": "L3",
+            "detail": "대안 설계( order 모델 내 메서드)에 대한 비판적 비교를 통해 정책 분리 원칙을 잘 이해하고 있습니다."
+          },
+          {
+            "axis": "L4",
+            "detail": "동시 접근과 부동소수점 오차와 같은 실제 운영 환경에서 발생할 수 있는 문제를 사전에 고려했습니다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 질문에 힌트 없이 답변한 점에서 높은 자율성과 문제 해결 능력을 보여주었습니다. 특히 경계 사례를 고려한 답변은 실무적 사고를 반영하고 있습니다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 보고서 서술은 기준점(Sonnet 보고서)과 매우 유사한 수준으로, 근거성, 구체성, 그리고 통찰 면에서 동등하거나 그 이상입니다. 모든 레벨(L1~L4)에서 힌트 없이 완벽하게 요구사항을 통과하였고, 설계의 이점, 대안과의 비교, 그리고 실제 운영 환경에서 발생할 수 있는 문제까지etailed하게 고려하여 설명했습니다. 또한,自治性(note) 또한 기준점과 일치하는 수준으로 평가됩니다."
+      },
+      "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.32054949994199,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.279205999802798,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 15.724720582831651,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 코드 논리, 설계 의도, 정당화, 그리고 경계 조건을 모두 정확하게 설명하며 요구사항을 통과했습니다. 힌트 없이도 모든 레벨에서 높은 점수를 받았으며, 설계 선택의 근거와 잠재적 문제(동시성, 부동소수점 오차)를 고려한 답변을 보였습니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "코드의 핵심 기능(할인 적용 조건)을 명확히 설명하며, 입력 파라미터와 반환값을 정확하게 기술함."
+          },
+          {
+            "axis": "L2",
+            "detail": "중앙 집중식 서비스 메서드 설계의 이유를 정책 분리의 필요성으로 정확히 정당화함."
+          },
+          {
+            "axis": "L3",
+            "detail": "대안 설계(할인 로직을 order 모델에 넣는 것)의 단점을 정책 테스트의 어려움으로 구체적으로 설명함."
+          },
+          {
+            "axis": "L4",
+            "detail": "동시성 문제(레이스 컨디션)와 부동소수점 오차의 가능성을 고려한 경계 조건 분석을 수행함."
+          }
+        ],
+        "gaps": [],
+        "retest": [
+          {
+            "topic_title": "동시성 관리와 상태 일관성",
+            "reason": "L4에서 동시성 문제를 언급했으나, t-state-mgmt 단원에서 상태 관리의 구체적 구현 방식을 더 깊이 이해해야 함."
+          }
+        ],
+        "autonomy_note": "모든 질문에 힌트 없이 답변하며, 설계 선택과 경계 조건까지 스스로 분석해 답변한 점에서 높은 자율성 보여줌."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "전체적으로 기준점(Sonnet 보고서)과의 비교에서 이 AI의 서술이 근거성, 구체성, 통찰력 면에서 동등한 수준을 보여줌. 세부적으로는 다음과 같은 점들이 평가에 기여함: 1. **적절한 근거 Exists**: AI의 서술은 모든 레벨(L1~L4)에서 명확한 근거와 구체적인 예시를 제공함. 2. **구체성**: 각 레벨의 강점 puntos (e.g., L1의 설명, L2의 설계 근거, L3의 대안 비교, L4의 실패 조건се결)가 cụ체적으로 유사함. 3. **통찰력**: 동시성 및 부동소수점 오차와 같은 경계 조건의 고려는 높은 수준의 이해와 통찰력을 보여줌. 4. **자율성**: 힌트 없이 모든 질문에 정확하게回答함으로써 높은 자율성과 자기주도적 이해를 демон스트레이션함.기준점과의 비교에서 이러한 점들이 동등한 수준을 보여주므로, 최고 점수인 5를 부여함."
+      },
+      "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.446541624842212,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "mistralai/mistral-large-3-675b-instruct-2512",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 19.627324583940208,
+      "struct_ok": true,
+      "opening_remark": "김OOさん, previously we discussed your progress on the MINI_PROJECT. How do you feel about your current understanding of the code? I'd like to check your perspective before diving into specific questions.",
+      "items": [
+        {
+          "questionText": "상태 관리 관련 코드에서 어떤 부분이 어려웠는지 구체적으로 설명해 주세요.",
+          "questionRationale": "observation_notes_block이 없음. 문제1의 interviewSourceId를 기반으로 질문 구성",
+          "suggestedOrder": 1,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "이 프로젝트에서 상태 관리를 담당하는 역할은 어떻게 생각하세요?",
+          "questionRationale": "problemScope=TEAM_SHARED_PROBLEM을 고려한 역할 확인 질문",
+          "suggestedOrder": 2,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "L2에서 멈춘 부분이 있다면, 어떤 시나리오에서 발생했는지 기억나세요?",
+          "questionRationale": "interviewSourceId: src-stage-1 (L2 종료 사유)",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-stage-1"
+        },
+        {
+          "questionText": "상태 관리 코드를 이해하는 데 도움이 된 부분이 있다면 어떤 점이었나요?",
+          "questionRationale": "interviewSourceId: src-attempt-1 (시도 완료 상태)",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-attempt-1"
+        },
+        {
+          "questionText": "이번 코드 이해도 평가에서 가장 어려웠던 점은 무엇이라고 생각하세요?",
+          "questionRationale": "interviewSourceId: src-session-1 (세션 종료 사유)",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-session-1"
+        },
+        {
+          "questionText": "이번 면담에서 가장 중요한 점은 무엇이라고 생각하세요?",
+          "questionRationale": "자기 인식 확인을 위한 마지막 질문",
+          "suggestedOrder": 6,
+          "interviewSourceId": null
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "타당한 평가입니다. 자연스러운 구어체 한국어가 사용되었습니다."
+      },
+      "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.285751458024606,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "google/gemma-3n-e4b-it",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.472869792021811,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "google/gemma-3n-e4b-it",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.272475041914731,
+      "error": "StageError: p04-5: PROVIDER_ERROR: HTTPError",
+      "model": "google/gemma-3n-e4b-it",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 20.063729042187333,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 코드의 목적, 설계 rationale, 대안과의 차이점, 그리고 레이스 컨디션과 부동소수점 오차와 같은 edge case를 정확하게 설명하며, 모든 요구사항을 힌트 없이 통과했습니다. 설계 선택의 정당성과 잠재적 문제점을 고려한 종합적인 이해를 보여주었습니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "코드의 기능과 조건을 명확하게 기술하며, 10% 할인 로직을 정확하게 설명했습니다."
+          },
+          {
+            "axis": "L2",
+            "detail": "설계 선택의 근거를 정책 분리와 유지보수성 향상에 연결하며, 구체적인 이유를 제시했습니다."
+          },
+          {
+            "axis": "L3",
+            "detail": "대안 설계(예: order 모델 내 메서드)에 대한 비판적 분석을 통해 정책과 데이터의 분리 필요성을 강조했습니다."
+          },
+          {
+            "axis": "L4",
+            "detail": "동시성 문제(레이스 컨디션)와 부동소수점 오차와 같은 실제 운영 환경에서의 잠재적 취약점을 식별했습니다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 질문에 힌트 없이 답변하며, 각 레벨에서 독립적으로 문제를 해결했습니다. 특히 edge case를 고려한 답변은 자율적 문제 해결 능력을 보여줍니다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "AI의 서술은 기준점(Sonnet 보고서)과 유사한 구조와 깊이를 보인다. L1~L4의 상세 설명, 설계 근거, 대안 비교, 그리고 에지 케이스의 식별 모두에서 klub 근거와 구체성을 유지한다. 단, 몇 가지 문구가ูกicamente Sonnet의 보고서와 매우 유사해 보인다는 느낌이 있어, 완전한 독립적인 생성이라는 점에서 1점을 감점했다. 그 외에는 기준점과 동등한 수준의 평가를 받았다."
+      },
+      "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.387445958098397,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "google/gemma-3n-e4b-it",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.548300166847184,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "google/gemma-3n-e4b-it",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 12.33245408302173,
+      "error": "StageError: ib-1: PROVIDER_ERROR: HTTPError",
+      "model": "google/gemma-3n-e4b-it",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 4.251943166134879,
+      "struct_ok": true,
+      "score": 4,
+      "matched_level": "전체 흐름은 정확하나 일부 구성 요소의 역할이 불명확하다",
+      "evidence": "apply_discount는 order와 user를 받아서, user.is_member가 True이고 order.total이 50000을 넘으면 order.total에 0.9를 곱해 10% 할인하고, 그 order를 그대로 리턴합니다.",
+      "missing": "order와 user의 역할을 더 명확히 설명해야 합니다.",
+      "case_id": "L1-strong",
+      "expected_range": [
+        4,
+        5
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "AI의 채점은 기준점(Sonnet 응답)과高度 일치한다. AI는 학생의 답변을 4점으로 評価했으며, 이유와 missing 부분을 구체적으로 지적했다. 특히, '제한과 실제 구조 사이의 연결이 한 단계 비어 있다'는 점과 'STDOUT_coupon 할인 정책의 구체적 배경이 설명되지 않았다'는 점을 노트했다. 이는 기준점에서 دانشجوی réponse를 평가한 이유와 거의 동일하다. 따라서, AI의 채점은 기준점과 사실상 동일한 판단을 보인다."
+      },
+      "model": "meta/llama-3.1-70b-instruct",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 27.15254587493837,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "학생은 구현한 코드의 기능적 동작뿐만 아니라 설계 의도와 대안까지 명확하게 파악하고 있습니다. 서비스 계층에 비즈니스 로직을 분리하여 유지보수성을 높인 점을 논리적으로 설명했습니다. 특히 동시성 문제와 부동소수점 오차와 같은 잠재적 결함까지 예측하는 높은 수준의 분석력을 보여주었습니다. 전반적인 코드 소유권이 매우 견고한 상태입니다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "apply_discount 메서드의 입력값, 조건문, 결과값 리턴 과정을 정확하게 기술함"
+          },
+          {
+            "axis": "L2",
+            "detail": "할인 정책을 서비스 메서드에 집중시켜 로직 분산을 막고 유지보수성을 높이려는 설계 근거를 제시함"
+          },
+          {
+            "axis": "L3",
+            "detail": "모델 내 메서드 구현 방식과 비교하여 데이터와 정책 로직을 분리함으로써 테스트 용이성을 확보했음을 정당화함"
+          },
+          {
+            "axis": "L4",
+            "detail": "멀티스레드 환경에서의 레이스 컨디션으로 인한 중복 할인 가능성과 부동소수점 계산 오차 문제를 정확히 지적함"
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 레벨의 질문에 힌트 없이 스스로 답변하였으며, 이는 외부의 도움 없이 독자적으로 설계 의도를 파악하고 검증할 수 있는 완전한 자율성을 갖추었음을 의미합니다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 서술이_CHK) 기준점의 근거성, 구체성, 통찰력을=YES으로 충족 Зд trueสง 표현, 설계 근거, 대안 비교, 실패 조건 예측 등 모든 측면에서 Sonnet 보고서와 동등한 수준을 보임. 또한, 시험生的 자율성이 강조된다는 점에서도 일관성을 유지함"
+      },
+      "model": "google/gemma-4-31b-it",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 121.58296587504447,
+      "error": "StageError: p04-5: TIMEOUT: TimeoutError",
+      "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 11.228454125113785,
+      "struct_ok": true,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "회원이면 할인해주고 아니면 안 해주는 함수예요. total이 바뀌어요.",
+      "missing": "코드의 구성 요소들이 어떻게 이어지는지 설명해야 합니다.",
+      "case_id": "L1-ambiguous",
+      "expected_range": [
+        2,
+        3
+      ],
+      "judge": {
+        "score": 4,
+        "reason": "AI의 채점(2점)과 기준점(Sonnet 응답, 4점)의 거기에 비추어본 본문률 비교결과: AI의 근거는 단순 표surface 동작 반복(2점 기준에 부합)하나, 기준점은 更細_minute한 분석을 통해 4점을 부여했다는 점에서 차이 있으나, 본질적으로はい 루브릭의 핵심인 '코드 기술' 평가에 대한 공통 이해를 보여 4점을 부여한다. grandi difference는 없다."
+      },
+      "model": "meta/llama-3.1-70b-instruct",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.63395220786333,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.57775504211895,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 26.813149499939755,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 코드 이해도에서 높은 성적을 보여주었으며, 모든 질문에 힌트 없이 정답을 제공하였다. 그러나 일부 축에서 약간의 개선이 필요하다.",
+        "strengths": [
+          {
+            "axis": "설계의 목적과 근거",
+            "detail": "학생은 설계의 목적과 근거를 명확하게 설명하였으며, 설계의 장점을 잘 이해하고 있다."
+          },
+          {
+            "axis": "설계의 비교",
+            "detail": "학생은 다른 설계 선택지와 비교하여 자기 설계를 정당화하였으며, 설계의 장점을 잘 이해하고 있다."
+          },
+          {
+            "axis": "설계의 한계",
+            "detail": "학생은 설계의 한계를 잘 이해하고 있으며, 설계가 깨지는 조건을 잘 다루었다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "이 학생은 모든 질문에 힌트 없이 정답을 제공하였으며, 높은 자율성을 보여주었다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "BWkW4WYuZ9dmM8FYZ9me"
+      },
+      "model": "meta/llama-3.1-70b-instruct",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.57686445908621,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 57.55003675003536,
+      "struct_ok": true,
+      "opening_remark": "안녕하세요 김OO, 3회차 면담에 오신 것을 환영합니다. 2회차에서 L3에 도달한 이후 L1로 내려오게 된 점에 대해 더 자세히 설명해 주실 수 있을까요?",
+      "items": [
+        {
+          "questionText": "이번 MINI_PROJECT에서 가장 큰 도전은 무엇이었나요?",
+          "questionRationale": "프로젝트 이해도 확인을 위한 소개 질문. 프로젝트명(MINI_PROJECT)에서 유래",
+          "suggestedOrder": 1,
+          "interviewSourceId": null
+        },
+        {
+          "questionText": "상태 관리 관련 메서드가 호출되는 시점은 누구나 기억나세요?",
+          "questionRationale": "문제1(TEAM_SHARED_PROBLEM)의 interviewSourceId: src-problem-1을 기반으로",
+          "suggestedOrder": 2,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "2회차에서 L3에 도달한 이후 L1로 내려오게 된 이유는 무엇이라고 생각하세요?",
+          "questionRationale": "위험사유(STAGE_DECLINE)의 interviewSourceId: src-risk-1을 기반으로",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-risk-1"
+        },
+        {
+          "questionText": "L2 단계에서 멈춘 이유는 무엇이라고 생각하세요?",
+          "questionRationale": "코드 이해도 검증 결과(세션 종료 사유: TERMINATED_AT_L2)의 interviewSourceId: src-session-1을 기반으로",
+          "suggestedOrder": 4,
+          "interviewSourceId": "src-session-1"
+        },
+        {
+          "questionText": "상태 관리 코드에서 어떤 부분이 가장 어려웠나요?",
+          "questionRationale": "문제1(TEAM_SHARED_PROBLEM)의 interviewSourceId: src-problem-1을 기반으로",
+          "suggestedOrder": 5,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "이번 면담에서 가장 도움이 된 부분은 무엇이었나요?",
+          "questionRationale": "자기 인식 확인을 위한 마무리 질문",
+          "suggestedOrder": 6,
+          "interviewSourceId": null
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "자연스러운 구어체 한국어 사용, 질문의 구체성 고른 수준 유지. 그러나 기준점과의 비교에서 일부 질문의 세부적으로 모든 항목에서 稍差 존재."
+      },
+      "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 53.87635700008832,
+      "struct_ok": false,
+      "score": 2,
+      "matched_level": "코드의 표면적 동작만 반복 진술한다(이름·주석을 읽는 수준)",
+      "evidence": "할인해주는 코드인 것 같아요",
+      "missing": "코드의 구성 요소가 어떻게 이어지는지 설명해야 합니다",
+      "case_id": "L1-weak",
+      "expected_range": [
+        0,
+        1
+      ],
+      "model": "meta/llama-3.1-70b-instruct",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 180.6064286250621,
+      "error": "StageError: p04-6: TIMEOUT: TimeoutError",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 180.6082262089476,
+      "error": "StageError: p04-6: TIMEOUT: TimeoutError",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 180.719064834062,
+      "error": "StageError: p04-6: TIMEOUT: TimeoutError",
+      "model": "deepseek-ai/deepseek-v4-pro",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 56.686739875003695,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 코드 이해도 상태에서 우수한 성적을 보여주었습니다. 모든 질문에 힌트 없이 정답을 제공하였으며, 설계에 대한 깊은 이해를 보여주었습니다.",
+        "strengths": [
+          {
+            "axis": "설계의 목적과 근거",
+            "detail": "학생은 설계의 목적과 근거를 명확하게 이해하고 있음을 보여주었습니다. 설계의 선택에 대한 정당성을 제공하였으며, 다른 선택지와 비교하여 자기 선택을 정당화하였습니다."
+          },
+          {
+            "axis": "설계의 장단점",
+            "detail": "학생은 설계의 장단점을 명확하게 이해하고 있음을 보여주었습니다. 설계가 깨지는 조건을 다루는 데에도 성공하였습니다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "이 학생은 모든 질문에 힌트 없이 정답을 제공하였습니다. 이는 학생의 독립적인 문제 해결 능력을 보여주는 것입니다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "AI 보고서가 바람직한 구체성과 근거성을 보였다. 모든 질문에 대한 응답이 히트 없이 제공되었고, 설계에 대한 깊은 이해가 보여졌다. 특히, 동시성 리스크와 부동소수점 오차를 자체적으로 도출한 점은 탁월했다. 단, 기준점 보고서와 비교했을 때, 약간의 세부 구체성과 통찰력에서 열세로 평가되어 5점 대신 4점으로 짚었다."
+      },
+      "model": "meta/llama-3.1-70b-instruct",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 78.10136979189701,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 코드 이해도에서 높은 성취도를 보였습니다. 모든 질문에 힌트 없이 정답을 제공하였으며, 설계의 근거와 다른 선택지와의 비교를 명확하게 설명하였습니다.",
+        "strengths": [
+          {
+            "axis": "설계의 근거",
+            "detail": "학생은 설계의 근거를 명확하게 설명하였으며, 다른 선택지와의 비교를 통해 자신의 선택을 정당화하였습니다."
+          },
+          {
+            "axis": "설계의 장단점",
+            "detail": "학생은 설계의 장단점을 명확하게 설명하였으며, 다른 선택지와의 비교를 통해 자신의 선택을 정당화하였습니다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "이 학생은 모든 질문에 힌트 없이 정답을 제공하였으며, 설계의 근거와 다른 선택지와의 비교를 명확하게 설명하였습니다. 이는 학생이 높은 수준의 자율성을 보유하고 있음을 나타냅니다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI가 쓴 보고서가 기준점(Sonnet 보고서)과 비교해 근거성, 구체성, 통찰력 면에서 동일한 수준을 보임. 모든 레벨(L1~L4)에서 상세한 설명, 설계 근거, 대안 비교, 그리고 구체적인 실패 조건을 힌트 없이 명확하게 제공함."
+      },
+      "model": "meta/llama-3.1-70b-instruct",
+      "role": "report",
+      "repeat_idx": 1
+    },
+    {
+      "ok": true,
+      "elapsed_s": 96.46635541692376,
+      "struct_ok": true,
+      "opening_remark": "안녕하세요 김OO, 3회차 면담에 오신 것을 환영합니다. previously we discussed some aspects of your code understanding, and today we'll continue that conversation.",
+      "items": [
+        {
+          "questionText": "상태 관리 관련 이 부분, 누가 작성했는지 기억나세요?",
+          "questionRationale": "문제 1의 인터뷰 소스 ID: src-problem-1",
+          "suggestedOrder": 1,
+          "interviewSourceId": "src-problem-1"
+        },
+        {
+          "questionText": "2회차에서 L3에 도달한 이후 L1으로 내려가게 된 이유는 무엇이라고 생각하세요?",
+          "questionRationale": "위험 사유의 인터뷰 소스 ID: src-risk-1",
+          "suggestedOrder": 2,
+          "interviewSourceId": "src-risk-1"
+        },
+        {
+          "questionText": "L2에서 멈춘 부분, 어떤 부분을 더 깊이 이해하려고 했는지 알려주세요?",
+          "questionRationale": "시도 단위 인터뷰 소스 ID: src-attempt-1",
+          "suggestedOrder": 3,
+          "interviewSourceId": "src-attempt-1"
+        },
+        {
+          "questionText": "이번 평가에서 가장 어려웠던 점은 무엇이었고, 어떻게 개선할 수 있을지 생각해보세요?",
+          "questionRationale": "자기 인식 확인을 위한 질문",
+          "suggestedOrder": 4,
+          "interviewSourceId": null
+        }
+      ],
+      "count_ok": true,
+      "order_ok": true,
+      "ids_ok": true,
+      "judge": {
+        "score": 4,
+        "reason": "자연스러운 구어체 한국어 수준은 기준점과 매우 유사합니다. 질문의 구체성도 높은 편이나, 몇몇 질문의 상세도에서 異點이 있으므로 1점 차이."
+      },
+      "model": "nvidia/nvidia-nemotron-nano-9b-v2",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.59348449995741,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "google/gemma-4-31b-it",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.62692220904864,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "google/gemma-4-31b-it",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.58245016704313,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "google/gemma-4-31b-it",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.63061620807275,
+      "error": "StageError: p04-5: TIMEOUT: TimeoutError",
+      "model": "meta/llama-3.3-70b-instruct",
+      "role": "grading",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.53922099992633,
+      "error": "StageError: p04-5: TIMEOUT: TimeoutError",
+      "model": "meta/llama-3.3-70b-instruct",
+      "role": "grading",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.58374837506562,
+      "error": "StageError: p04-5: TIMEOUT: TimeoutError",
+      "model": "meta/llama-3.3-70b-instruct",
+      "role": "grading",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.60923000006005,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "meta/llama-3.3-70b-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.53265237505548,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "meta/llama-3.3-70b-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.62393170804717,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "meta/llama-3.3-70b-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": true,
+      "elapsed_s": 119.71614450006746,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 코드의 기능과 설계 의도, 설계의 정당성, 그리고 설계의 한계를 잘 이해하고 있다. 모든 질문에 힌트 없이 답변을 하였다. 그러나 코드의 상태 관리 부분에서 약간의 부족함을 보였다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "코드의 기능을 정확하게 설명하였다."
+          },
+          {
+            "axis": "L2",
+            "detail": "설계 의도를 잘 이해하고 있다."
+          },
+          {
+            "axis": "L3",
+            "detail": "다른 설계 선택지와 비교하여 자기 설계를 정당화하였다."
+          },
+          {
+            "axis": "L4",
+            "detail": "설계의 한계를 잘 파악하고 있다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 질문에 힌트 없이 답변을 하였으므로, 힌트를 받고 답한 부분은 없다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 서술은 기준점(Sonnet 보고서)과 동일한 수준의 근거성, 구체성, 통찰력을 보여준다. 모든 레벨(L1~L4)에서 힌트 없이 정확하고 구체적인 내용을 제공하여, 설계 의도, 트레이드오프, 실패 조건 등을 명확히 이해하고 설명하는 능력을 демон스트레이션해 남다."
+      },
+      "model": "meta/llama-3.3-70b-instruct",
+      "role": "report",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.57003016700037,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "meta/llama-3.1-70b-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 2
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.58498012507334,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "meta/llama-3.1-70b-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 1
+    },
+    {
+      "ok": false,
+      "elapsed_s": 120.59076545806602,
+      "error": "StageError: ib-1: TIMEOUT: TimeoutError",
+      "model": "meta/llama-3.1-70b-instruct",
+      "role": "interview_brief",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 158.08520908281207,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 코드의 기능과 설계 의도, 설계의 근거, 다른 설계와의 비교, 그리고 설계의 한계를 잘 이해하고 있다. 모든 질문에 힌트 없이 정답을 제공하여 높은 자율성을 보였다. 그러나 모든 질문에 높은 점수를 얻었기 때문에 재시험이 필요한 항목은 없다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "코드의 기능을 정확히 이해하고 있다."
+          },
+          {
+            "axis": "L2",
+            "detail": "설계 의도와 근거를 잘 이해하고 있다."
+          },
+          {
+            "axis": "L3",
+            "detail": "다른 설계와의 비교를 잘 하고 있다."
+          },
+          {
+            "axis": "L4",
+            "detail": "설계의 한계를 잘 이해하고 있다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 질문에 힌트 없이 답을 제공하여 높은 자율성을 보였다."
+      },
+      "judge": {
+        "score": 5,
+        "reason": "AI의 보고서 서술이 기준점(Sonnet 보고서)과 거의 동일한 수준으로, 설계의 기능, 의도, 근거, 비교, 그리고 한계를 모두 정확히 이해하고 설명한 바, 자율성과 근거성, 구체성, 통찰력이 높다. 모든 레벨(L1~L4)에서 힌트 없이 만족하는 요소를 다루고 있다."
+      },
+      "model": "meta/llama-3.3-70b-instruct",
+      "role": "report",
+      "repeat_idx": 0
+    },
+    {
+      "ok": true,
+      "elapsed_s": 164.7549766250886,
+      "struct_ok": true,
+      "narrative": {
+        "summary": "이 학생은 코드의 기능과 설계 의도, 설계의 정당성, 그리고 설계의 한계를 잘 이해하고 있다. 모든 질문에 힌트 없이 답변을 하였다. 그러나 코드의 상태 관리 부분에서 약간의 부족함을 보였다.",
+        "strengths": [
+          {
+            "axis": "L1",
+            "detail": "코드의 기능을 정확하게 이해하고 있다."
+          },
+          {
+            "axis": "L2",
+            "detail": "설계 의도를 잘 이해하고 있다."
+          },
+          {
+            "axis": "L3",
+            "detail": "설계의 정당성을 잘 설명할 수 있다."
+          },
+          {
+            "axis": "L4",
+            "detail": "설계의 한계를 잘 이해하고 있다."
+          }
+        ],
+        "gaps": [],
+        "retest": [],
+        "autonomy_note": "모든 질문에 힌트 없이 답변을 하였으므로, 힌트 없이 답한 부분과 힌트를 받고서야 답한 부분의 차이는 없다."
+      },
+      "judge": {
+        "score": 4,
+        "reason": "AI의 서술은 기준점(Sonnet 보고서)과 매우 유사한 수준으로, 근거성, 구체성, 통찰력을 보여주는데, 코드의 기능 설명, 설계 의도, 정당성, 한계를 모두 명확하게 이해하고 설명했습니다. 그러나 기준점과 완전히 동등하거나 그 이상인 것은 아니며, 일부 세부사항에서 미세한 차이가 있을 수 있으나, 전체적으로는 매우 높은 평가를 받았습니다."
+      },
+      "model": "meta/llama-3.3-70b-instruct",
+      "role": "report",
+      "repeat_idx": 1
+    }
+  ],
+  "judge_note": "D-bench4: Sonnet 기준점 대조 방식으로 재채점(sonnet_reference.json)"
+}

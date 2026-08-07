@@ -1,0 +1,642 @@
+{
+  "minimaxai/minimax-m2.7": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "openai/gpt-oss-20b": {
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 2,
+      "struct_pass_rate": 0.6666666666666666,
+      "judge_mean": 4.0,
+      "n_judged": 2,
+      "quality_score": 0.5333333333333333,
+      "mean_elapsed_s": 26.639759416303907
+    },
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.666666666666667,
+      "n_judged": 3,
+      "quality_score": 0.9333333333333333,
+      "mean_elapsed_s": 18.14840972206245
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.0,
+      "n_judged": 2,
+      "quality_score": 0.8,
+      "mean_elapsed_s": 13.800838361339023
+    }
+  },
+  "minimaxai/minimax-m3": {
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.5,
+      "n_judged": 2,
+      "quality_score": 0.9,
+      "mean_elapsed_s": 31.37352648641293
+    },
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.666666666666667,
+      "n_judged": 3,
+      "quality_score": 0.9333333333333333,
+      "mean_elapsed_s": 19.670699791361887
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 2,
+      "n_struct_ok": 2,
+      "struct_pass_rate": 0.6666666666666666,
+      "judge_mean": 3.5,
+      "n_judged": 2,
+      "quality_score": 0.4666666666666666,
+      "mean_elapsed_s": 48.196448270464316
+    }
+  },
+  "nvidia/nemotron-3-ultra-550b-a55b": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 5.0,
+      "n_judged": 3,
+      "quality_score": 1.0,
+      "mean_elapsed_s": 16.825042110945407
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 2,
+      "n_struct_ok": 1,
+      "struct_pass_rate": 0.3333333333333333,
+      "judge_mean": 3.0,
+      "n_judged": 1,
+      "quality_score": 0.19999999999999998,
+      "mean_elapsed_s": 37.64185064600315
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "thinkingmachines/inkling": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.666666666666667,
+      "n_judged": 3,
+      "quality_score": 0.9333333333333333,
+      "mean_elapsed_s": 35.575583083399884
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 2,
+      "n_struct_ok": 1,
+      "struct_pass_rate": 0.3333333333333333,
+      "judge_mean": 5.0,
+      "n_judged": 1,
+      "quality_score": 0.3333333333333333,
+      "mean_elapsed_s": 86.70724300062284
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "nvidia/nemotron-3-super-120b-a12b": {
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 2,
+      "struct_pass_rate": 0.6666666666666666,
+      "judge_mean": 4.0,
+      "n_judged": 2,
+      "quality_score": 0.5333333333333333,
+      "mean_elapsed_s": 6.298284555707748
+    },
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 5.0,
+      "n_judged": 3,
+      "quality_score": 1.0,
+      "mean_elapsed_s": 12.825452777712295
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 3.6666666666666665,
+      "n_judged": 3,
+      "quality_score": 0.7333333333333333,
+      "mean_elapsed_s": 28.231701472075656
+    }
+  },
+  "nvidia/llama-3.3-nemotron-super-49b-v1.5": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.333333333333333,
+      "n_judged": 3,
+      "quality_score": 0.8666666666666666,
+      "mean_elapsed_s": 35.153155277715996
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 2,
+      "n_struct_ok": 1,
+      "struct_pass_rate": 0.3333333333333333,
+      "judge_mean": 4.0,
+      "n_judged": 1,
+      "quality_score": 0.26666666666666666,
+      "mean_elapsed_s": 46.11907527106814
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "moonshotai/kimi-k2.6": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "openai/gpt-oss-120b": {
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 2,
+      "struct_pass_rate": 0.6666666666666666,
+      "judge_mean": 3.5,
+      "n_judged": 2,
+      "quality_score": 0.4666666666666666,
+      "mean_elapsed_s": 6.526505319324012
+    },
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.666666666666667,
+      "n_judged": 3,
+      "quality_score": 0.9333333333333333,
+      "mean_elapsed_s": 5.230297486220176
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 3.6666666666666665,
+      "n_judged": 3,
+      "quality_score": 0.7333333333333333,
+      "mean_elapsed_s": 9.423698486372208
+    }
+  },
+  "deepseek-ai/deepseek-v4-pro": {
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 1,
+      "n_struct_ok": 1,
+      "struct_pass_rate": 0.3333333333333333,
+      "judge_mean": 3.0,
+      "n_judged": 1,
+      "quality_score": 0.19999999999999998,
+      "mean_elapsed_s": 71.59596916707233
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "report": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "mistralai/mistral-small-4-119b-2603": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "mistralai/mistral-nemotron": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "abacusai/dracarys-llama-3.1-70b-instruct": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "meta/llama-4-maverick-17b-128e-instruct": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "google/gemma-4-31b-it": {
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 2,
+      "struct_pass_rate": 0.6666666666666666,
+      "judge_mean": 4.5,
+      "n_judged": 2,
+      "quality_score": 0.6,
+      "mean_elapsed_s": 6.4230672773749875
+    },
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.666666666666667,
+      "n_judged": 3,
+      "quality_score": 0.9333333333333333,
+      "mean_elapsed_s": 20.743695249936234
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "nvidia/nvidia-nemotron-nano-9b-v2": {
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 1,
+      "struct_pass_rate": 0.3333333333333333,
+      "judge_mean": 4.0,
+      "n_judged": 1,
+      "quality_score": 0.26666666666666666,
+      "mean_elapsed_s": 10.064355486693481
+    },
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.666666666666667,
+      "n_judged": 3,
+      "quality_score": 0.9333333333333333,
+      "mean_elapsed_s": 16.538505541703973
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.0,
+      "n_judged": 3,
+      "quality_score": 0.8,
+      "mean_elapsed_s": 57.881238916966446
+    }
+  },
+  "mistralai/mistral-large-3-675b-instruct-2512": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "google/gemma-3n-e4b-it": {
+    "report": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "meta/llama-3.1-70b-instruct": {
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 2,
+      "struct_pass_rate": 0.6666666666666666,
+      "judge_mean": 4.0,
+      "n_judged": 2,
+      "quality_score": 0.5333333333333333,
+      "mean_elapsed_s": 23.118918097112328
+    },
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.333333333333333,
+      "n_judged": 3,
+      "quality_score": 0.8666666666666666,
+      "mean_elapsed_s": 53.867086388946824
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    }
+  },
+  "meta/llama-3.3-70b-instruct": {
+    "grading": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "interview_brief": {
+      "n_trials": 3,
+      "n_ok": 0,
+      "n_struct_ok": 0,
+      "struct_pass_rate": 0.0,
+      "judge_mean": null,
+      "n_judged": 0,
+      "quality_score": 0.0,
+      "mean_elapsed_s": null
+    },
+    "report": {
+      "n_trials": 3,
+      "n_ok": 3,
+      "n_struct_ok": 3,
+      "struct_pass_rate": 1.0,
+      "judge_mean": 4.666666666666667,
+      "n_judged": 3,
+      "quality_score": 0.9333333333333333,
+      "mean_elapsed_s": 147.51877673598938
+    }
+  }
+}
