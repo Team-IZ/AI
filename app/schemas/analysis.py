@@ -23,16 +23,191 @@ class FocusItem(BaseSchema):
 
     id: str
     name: str
-    
+
+
+# ── POST /analysis-inputs (백엔드 제안, 2026-08-05 · D1/D2/D3) ─────────────
+#
+# 검증+fetch만 담당한다 -- 분석(teaches/requirements/questionBudget)은 여전히
+# POST /analyses가 받는다. `app/engines/analysis/fetch.py`의 `FetchedInput`/
+# `FetchError`가 이 스키마들의 실제 데이터 원천이다.
+
+
+class HeadCommit(BaseSchema):
+    """GITHUB_URL fetch의 HEAD 커밋. ZIP은 커밋 개념이 없을 수 있어 이 필드 자체가 null이다."""
+
+    sha: str
+    message: str
+    committed_at: datetime
+
+
+class GitCommit(BaseSchema):
+    """`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를
+
+    안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).
+
+    D-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):
+    parentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·
+    changedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은
+    `app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고.
+    """
+
+    sha: str
+    author_name: str
+    author_email: str
+    committed_at: datetime
+    changed_files: list[str] = Field(default_factory=list)
+    additions: int = 0
+    deletions: int = 0
+    parent_sha: str = Field(
+        description="첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 "
+                    "\"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)",
+    )
+    authored_at: datetime = Field(description="author date. committedAt(커밋 date)과 다른 값")
+    branch_name: str = Field(
+        description="이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- "
+                    "git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 "
+                    "소속은 아니다. 미상이면 빈 문자열",
+    )
+    is_merge_commit: bool = Field(description="부모가 2개 이상인지(기계적 판정, %P 부모 개수)")
+    is_revert_commit: bool = Field(
+        description="커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 "
+                    "자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다",
+    )
+    is_bot_commit: bool = Field(
+        description="GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` "
+                    "또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- "
+                    "그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다",
+    )
+    changed_line_count: int = 0
+
+
+GitHistorySource = Literal["BACKEND_SUPPLIED", "EMBEDDED_GIT", "REMOTE_DEEPEN", "NONE"]
+
+
+class AnalysisInputRequest(BaseSchema):
+    """ POST /api/v0/analysis-inputs 요청 본문 (백엔드 프로포절 `api-request-to-ai-server.md`
+    §제안 API ① 기준. 필드명은 그 문서를 그대로 따른다 -- 합의된 계약이 아직 없어
+    "이미 합의된 계약이 있다면 그쪽을 따르겠다"는 문서의 말대로, 저쪽이 확정하면 맞춘다).
+    """
+
+    request_id: str = Field(description="멱등키. 같은 값 재호출 시 같은 결과를 반환")
+    method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
+    org_id: str
+    repository_url: str | None = Field(default=None, description="method=GITHUB_URL일 때 필수")
+    requested_branch: str | None = Field(default=None, description="미지정 시 기본 브랜치")
+    github_installation_id: str | None = Field(
+        default=None,
+        description="기관 GitHub App 연동 사용 시(비공개 레포). 🔴 잠정 필드 -- 이 서비스는 "
+                    "아직 GitHub 인증 메커니즘이 전혀 없다(2026-08-06 확인, requirements.txt에 "
+                    "관련 의존성 0건). 받기만 하고 지금은 안 쓴다",
+    )
+    download_url: str | None = Field(
+        default=None,
+        description="method=ZIP_WITH_GITLOG일 때 필수(storageUri와 최소 하나). presigned "
+                    "HTTPS URL을 권장한다 -- 이 서비스에 boto3/AWS 자격증명이 전혀 없어 "
+                    "s3:// 스토리지 URI는 즉시 ARCHIVE_INVALID로 거부된다",
+    )
+    storage_uri: str | None = Field(
+        default=None, description="프로포절 원문 필드명(호환용). s3://면 위와 같이 거부된다",
+    )
+    git_history: list[GitCommit] | None = Field(
+        default=None,
+        description="D3 우선순위 ① -- 백엔드가 이미 아는 git 히스토리가 있으면 실어 보낸다. "
+                    "실려 있으면 ZIP 안의 .git을 직접 파싱하는 것보다 이 값을 우선한다",
+    )
+
+    @model_validator(mode="after")
+    def _check_conditional_fields(self) -> "AnalysisInputRequest":
+        if self.method == "GITHUB_URL" and not (self.repository_url or "").strip():
+            raise ValueError("method=GITHUB_URL에는 repositoryUrl이 필요합니다")
+        if self.method == "ZIP_WITH_GITLOG" and not (
+            (self.download_url or "").strip() or (self.storage_uri or "").strip()
+        ):
+            raise ValueError("method=ZIP_WITH_GITLOG에는 downloadUrl(또는 storageUri)이 필요합니다")
+        return self
+
+
+class AnalysisInputResponse(BaseSchema):
+    """ POST /analysis-inputs 200 응답 """
+
+    analysis_input_id: str = Field(
+        description="D2 -- 서버가 상태 없이 결정론적으로 만든 값(같은 입력이면 항상 같은 id). "
+                    "POST /analysis 요청 시 이 값과 함께 아래 필드들을 그대로 다시 실어 보내야 "
+                    "한다(재fetch에 필요 -- §0.1, 이 서비스는 캐싱하지 않는다)",
+    )
+    method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
+    resolved_branch: str | None = None
+    head_commit: HeadCommit | None = None
+    git_history: list[GitCommit] = Field(default_factory=list)
+    git_history_source: GitHistorySource = "NONE"
+    history_truncated: bool = Field(
+        default=False,
+        description="벽시계 시간 예산 안에서 히스토리를 다 못 걷었는지(D1). true여도 요청은 "
+                    "실패하지 않는다 -- 코드 fetch 자체는 이 값과 무관하게 항상 완료된다",
+    )
+    file_count: int
+    byte_count: int
+    input_hash: str = Field(
+        description="sha256 hex 64자. .git/** 제외 전 파일 기준(기존 snapshotMeta.contentHash와 "
+                    "다른 정의 -- 그건 vendor 스캐너 변경마다 흔들려서 재fetch 무결성 검증에 "
+                    "못 쓴다). 같은 트리면 ZIP으로 받든 클론으로 받든 동일하다",
+    )
+    captured_at: datetime
+
+
+class AnalysisInputFailure(BaseSchema):
+    """ POST /analysis-inputs 422 응답. 공용 ErrorResponse({error,message,retryable})와
+
+    다른 별도 모양이다 -- 백엔드 프로포절이 {failureCode,message,requestId}를 명시했고,
+    failureCode 11종은 백엔드 DB CHECK 제약의 문자열 그대로여야 한다.
+    """
+
+    failure_code: str
+    message: str
+    request_id: str | None = None
+
+
+class AnalysisInputRef(BaseSchema):
+    """`POST /analysis`가 D2 재fetch에 쓰는 서술자 -- `AnalysisInputResponse`를 백엔드가
+
+    그대로 되돌려 보내는 모양이다(§0.1, 이 서비스는 analysisInputId를 캐싱하지 않아
+    재fetch에 필요한 값을 매번 다시 받아야 한다). `fetch.refetch_pinned()`가 그대로
+    소비한다.
+    """
+
+    analysis_input_id: str = Field(description="에코용 -- 재fetch 자체에는 안 쓴다")
+    method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
+    repository_url: str | None = None
+    resolved_branch: str | None = None
+    head_commit_sha: str | None = Field(
+        default=None, description="method=GITHUB_URL이면 필수 -- 이 sha로 정확히 고정 재fetch한다",
+    )
+    download_url: str | None = None
+    storage_uri: str | None = None
+    input_hash: str = Field(
+        description="재fetch 후 이 값과 다르면 하드 실패(FetchError INPUT_HASH_MISMATCH) --"
+                    " 검증했던 것과 다른 코드를 분석하면 안 된다",
+    )
+    git_history: list[GitCommit] | None = None
+
+
 class AnalysisRequest(BaseSchema):
     """ POST /api/v0/analyses 요청 본문 """
-    
+
     attempt_id: UuidStr | None = Field(default=None, description="Spring 측 측정수행 키(에코용)")
     submission_id: UuidStr | None = None
     # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다 —
     # AI→백엔드 방향 통신이 0이라 그 구간의 인증·방화벽을 새로 정할 일이 없다.
-    method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
+    method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"] | None = Field(
+        default=None, description="analysisInput이 있으면 생략한다(그 안의 method를 쓴다)",
+    )
     source: AnalysisSource = Field(default_factory=AnalysisSource)
+    analysis_input: AnalysisInputRef | None = Field(
+        default=None,
+        description="§제안 API ①②연결(2026-08-06) -- /analysis-inputs 응답을 그대로 되돌려 "
+                    "보내면 이걸로 재fetch한다(D2). method/source와 상호배타 -- 있으면 그 "
+                    "둘은 무시한다(멀티파트 ZIP 업로드 대신 이 경로를 쓴다는 뜻)",
+    )
     extraction_scope: Literal["TOTAL", "OWN_COMMIT"] = "TOTAL"
     commit_email: str | None = Field(default=None, description="OWN_COMMIT일 때 필수")
     question_budget: int = Field(default=3, ge=1, description="계획 문제 수")
@@ -62,13 +237,21 @@ class AnalysisRequest(BaseSchema):
     
     @model_validator(mode="after")
     def _check_conditional_fields(self) -> "AnalysisRequest":
-        """ 다른 필드 값에 따라 필수가 되는 것들을 검사 
-        
+        """ 다른 필드 값에 따라 필수가 되는 것들을 검사
+
         mode="after"는 개별 필드 검증 끝난 후 실행하라는 뜻
         """
-        
-        if self.method == "GITHUB_URL" and not (self.source.repo_url or "").strip():
-            raise ValueError("method=GITHUB_URL에는 source.repoUrl이 필요합니다")
+        # analysisInput이 있으면 그게 method/source를 대신한다 -- 상호배타.
+        if self.analysis_input is None:
+            if not self.method:
+                raise ValueError("method 또는 analysisInput 중 하나가 필요합니다")
+            if self.method == "GITHUB_URL" and not (self.source.repo_url or "").strip():
+                raise ValueError("method=GITHUB_URL에는 source.repoUrl이 필요합니다")
+        elif self.analysis_input.method == "GITHUB_URL" and not (
+            self.analysis_input.head_commit_sha or ""
+        ).strip():
+            raise ValueError("analysisInput.method=GITHUB_URL에는 headCommitSha가 필요합니다")
+
         if self.extraction_scope == "OWN_COMMIT" and not (self.commit_email or "").strip():
             raise ValueError("extractionScope=OWN_COMMIT에는 commitEmail이 필요합니다")
         return self
@@ -409,7 +592,32 @@ class AnalysisResult(BaseSchema):
                     "화면의 개념별 도달 격자에서 `―`(문항 없음)로 그릴 값이다",
     )
     question_count_planned: int = Field(description="계획된 질문 수. 유효 문제가 적으면 축소된다")
-    
+    # D-analysis-b1(2026-08-07): 백엔드 감사 전까지 이 5개가 아예 없었다 -- fetch.py가 이미
+    # 계산해서 FetchedInput에 담는데도 AnalysisResult에 배선이 안 돼 있어 응답에 한 번도
+    # 안 실렸다("계산 못 함"이 아니라 "배선 누락"). git_history_source/history_truncated는
+    # 백엔드가 명시 요청하진 않았지만 AnalysisInputResponse와 대칭 유지 + 운영상 유용해서
+    # 같이 추가한다.
+    resolved_branch: str | None = None
+    head_commit: HeadCommit | None = None
+    git_history: list[GitCommit] = Field(default_factory=list)
+    git_history_source: GitHistorySource = "NONE"
+    history_truncated: bool = False
+
+# GET /analyses/{jobId}의 failureCode. 백엔드 실측 DDL(ck_analysis_job_failure_code_2,
+# 2026-08-06 감사 회신)로 확정된 값 -- 이 11종이 전부이고 그 외 문자열은 Spring INSERT가
+# 거부한다. schemas/는 engines/를 import하지 않는 계층 원칙을 유지한다 -- fetch.py의 내부
+# 코드(13종, GITHUB 6 + ZIP 5 + JOB_ONLY 2)를 이 11종으로 옮기는 매핑은 `jobs.py`의
+# `_FETCH_FAILURE_CODE_TRANSLATION`에 있고, 그 딕셔너리와의 drift는
+# `tests/test_jobs.py`가 잡는다(fetch_engine.VERIFICATION_FAILURE_CODES|JOB_ONLY_FAILURE_CODES
+# 와 정확히 같은 키 집합인지 대조).
+AnalysisJobFailureCode = Literal[
+    "EMPTY_CODE_EVIDENCE", "SOURCE_UNREACHABLE", "UNSUPPORTED_LANGUAGE",
+    "ANALYSIS_TIMEOUT", "MODEL_ERROR", "TEMPORARY_ERROR",
+    "INVALID_REPOSITORY_URL", "REPO_NOT_FOUND", "REPOSITORY_ACCESS_DENIED",
+    "BRANCH_NOT_FOUND", "UNSUPPORTED_HOST",
+]
+
+
 class AnalysisJobStatus(BaseSchema):
     """GET /analyses/{jobId} 응답.
 
@@ -422,9 +630,30 @@ class AnalysisJobStatus(BaseSchema):
     submission_id: UuidStr | None = None
     status: Literal["QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"]
     failure_reason: str | None = Field(default=None, description="FAILED일 때만 채워진다")
+    failure_code: AnalysisJobFailureCode | None = Field(
+        default=None,
+        description="백엔드 DDL(ck_analysis_job_failure_code_2)로 확정된 11종. FAILED일 때만 채워진다",
+    )
     started_at: datetime | None = None
     completed_at: datetime | None = None
     result: AnalysisResult | None = Field(default=None, description="SUCCEEDED·PARTIAL일 때만")
     # 스텁 단계에서는 항상 빈 배열이다. P02가 LLM 파이프라인으로 교체되는 중이라
     # (2026-07-29, PLAN §4) 실물 엔진이 붙으면 호출 기록이 채워진다.
     ai_usage: list[AiUsage] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _check_failure_code(self) -> "AnalysisJobStatus":
+        """AiUsage._check_db_constraints와 같은 패턴 -- FAILED와 failureCode는 항상 같이 다닌다.
+
+        🔴 이 검증은 **생성 시점에만** 돈다. `jobs.py`는 이미 만든 job을 필드별로
+        나중에 mutate한다(`validate_assignment`를 켜지 않았다 -- 다른 스키마 전부에
+        영향이 가는 전역 변경이라 이 작업 범위를 넘는다). 그래서 실제 방어는
+        `jobs.py`가 status="FAILED"를 설정하는 자리마다 failure_code를 같이
+        설정하는 절차적 규율로 한다 -- 이 validator는 그 계약을 문서화하고, 직접
+        생성하는 코드(테스트 등)에서는 실제로 걸러낸다.
+        """
+        if self.status == "FAILED" and self.failure_code is None:
+            raise ValueError("status=FAILED에는 failureCode가 필요합니다")
+        if self.status != "FAILED" and self.failure_code is not None:
+            raise ValueError("status=FAILED가 아니면 failureCode가 없어야 합니다")
+        return self

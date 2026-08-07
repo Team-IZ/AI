@@ -148,12 +148,20 @@
                     "title": "Submissionid"
                   },
                   "method": {
-                    "enum": [
-                      "GITHUB_URL",
-                      "ZIP_WITH_GITLOG"
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "GITHUB_URL",
+                          "ZIP_WITH_GITLOG"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
                     ],
-                    "title": "Method",
-                    "type": "string"
+                    "description": "analysisInput이 있으면 생략한다(그 안의 method를 쓴다)",
+                    "title": "Method"
                   },
                   "source": {
                     "properties": {
@@ -184,6 +192,200 @@
                     },
                     "title": "AnalysisSource",
                     "type": "object"
+                  },
+                  "analysisInput": {
+                    "anyOf": [
+                      {
+                        "description": "`POST /analysis`가 D2 재fetch에 쓰는 서술자 -- `AnalysisInputResponse`를 백엔드가\n\n그대로 되돌려 보내는 모양이다(§0.1, 이 서비스는 analysisInputId를 캐싱하지 않아\n재fetch에 필요한 값을 매번 다시 받아야 한다). `fetch.refetch_pinned()`가 그대로\n소비한다.",
+                        "properties": {
+                          "analysisInputId": {
+                            "description": "에코용 -- 재fetch 자체에는 안 쓴다",
+                            "title": "Analysisinputid",
+                            "type": "string"
+                          },
+                          "method": {
+                            "enum": [
+                              "GITHUB_URL",
+                              "ZIP_WITH_GITLOG"
+                            ],
+                            "title": "Method",
+                            "type": "string"
+                          },
+                          "repositoryUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Repositoryurl"
+                          },
+                          "resolvedBranch": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Resolvedbranch"
+                          },
+                          "headCommitSha": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "method=GITHUB_URL이면 필수 -- 이 sha로 정확히 고정 재fetch한다",
+                            "title": "Headcommitsha"
+                          },
+                          "downloadUrl": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Downloadurl"
+                          },
+                          "storageUri": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Storageuri"
+                          },
+                          "inputHash": {
+                            "description": "재fetch 후 이 값과 다르면 하드 실패(FetchError INPUT_HASH_MISMATCH) -- 검증했던 것과 다른 코드를 분석하면 안 된다",
+                            "title": "Inputhash",
+                            "type": "string"
+                          },
+                          "gitHistory": {
+                            "anyOf": [
+                              {
+                                "items": {
+                                  "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고.",
+                                  "properties": {
+                                    "sha": {
+                                      "title": "Sha",
+                                      "type": "string"
+                                    },
+                                    "authorName": {
+                                      "title": "Authorname",
+                                      "type": "string"
+                                    },
+                                    "authorEmail": {
+                                      "title": "Authoremail",
+                                      "type": "string"
+                                    },
+                                    "committedAt": {
+                                      "format": "date-time",
+                                      "title": "Committedat",
+                                      "type": "string"
+                                    },
+                                    "changedFiles": {
+                                      "items": {
+                                        "type": "string"
+                                      },
+                                      "title": "Changedfiles",
+                                      "type": "array"
+                                    },
+                                    "additions": {
+                                      "default": 0,
+                                      "title": "Additions",
+                                      "type": "integer"
+                                    },
+                                    "deletions": {
+                                      "default": 0,
+                                      "title": "Deletions",
+                                      "type": "integer"
+                                    },
+                                    "parentSha": {
+                                      "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)",
+                                      "title": "Parentsha",
+                                      "type": "string"
+                                    },
+                                    "authoredAt": {
+                                      "description": "author date. committedAt(커밋 date)과 다른 값",
+                                      "format": "date-time",
+                                      "title": "Authoredat",
+                                      "type": "string"
+                                    },
+                                    "branchName": {
+                                      "description": "이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 소속은 아니다. 미상이면 빈 문자열",
+                                      "title": "Branchname",
+                                      "type": "string"
+                                    },
+                                    "isMergeCommit": {
+                                      "description": "부모가 2개 이상인지(기계적 판정, %P 부모 개수)",
+                                      "title": "Ismergecommit",
+                                      "type": "boolean"
+                                    },
+                                    "isRevertCommit": {
+                                      "description": "커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다",
+                                      "title": "Isrevertcommit",
+                                      "type": "boolean"
+                                    },
+                                    "isBotCommit": {
+                                      "description": "GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` 또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- 그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다",
+                                      "title": "Isbotcommit",
+                                      "type": "boolean"
+                                    },
+                                    "changedLineCount": {
+                                      "default": 0,
+                                      "title": "Changedlinecount",
+                                      "type": "integer"
+                                    }
+                                  },
+                                  "required": [
+                                    "sha",
+                                    "authorName",
+                                    "authorEmail",
+                                    "committedAt",
+                                    "parentSha",
+                                    "authoredAt",
+                                    "branchName",
+                                    "isMergeCommit",
+                                    "isRevertCommit",
+                                    "isBotCommit"
+                                  ],
+                                  "title": "GitCommit",
+                                  "type": "object"
+                                },
+                                "type": "array"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "title": "Githistory"
+                          }
+                        },
+                        "required": [
+                          "analysisInputId",
+                          "method",
+                          "inputHash"
+                        ],
+                        "title": "AnalysisInputRef",
+                        "type": "object"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "§제안 API ①②연결(2026-08-06) -- /analysis-inputs 응답을 그대로 되돌려 보내면 이걸로 재fetch한다(D2). method/source와 상호배타 -- 있으면 그 둘은 무시한다(멀티파트 ZIP 업로드 대신 이 경로를 쓴다는 뜻)"
                   },
                   "extractionScope": {
                     "default": "TOTAL",
@@ -281,9 +483,6 @@
                     "title": "Providermodelcode"
                   }
                 },
-                "required": [
-                  "method"
-                ],
                 "title": "AnalysisRequest",
                 "type": "object"
               },
@@ -337,12 +536,20 @@
                           "title": "Submissionid"
                         },
                         "method": {
-                          "enum": [
-                            "GITHUB_URL",
-                            "ZIP_WITH_GITLOG"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "GITHUB_URL",
+                                "ZIP_WITH_GITLOG"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
                           ],
-                          "title": "Method",
-                          "type": "string"
+                          "description": "analysisInput이 있으면 생략한다(그 안의 method를 쓴다)",
+                          "title": "Method"
                         },
                         "source": {
                           "properties": {
@@ -373,6 +580,200 @@
                           },
                           "title": "AnalysisSource",
                           "type": "object"
+                        },
+                        "analysisInput": {
+                          "anyOf": [
+                            {
+                              "description": "`POST /analysis`가 D2 재fetch에 쓰는 서술자 -- `AnalysisInputResponse`를 백엔드가\n\n그대로 되돌려 보내는 모양이다(§0.1, 이 서비스는 analysisInputId를 캐싱하지 않아\n재fetch에 필요한 값을 매번 다시 받아야 한다). `fetch.refetch_pinned()`가 그대로\n소비한다.",
+                              "properties": {
+                                "analysisInputId": {
+                                  "description": "에코용 -- 재fetch 자체에는 안 쓴다",
+                                  "title": "Analysisinputid",
+                                  "type": "string"
+                                },
+                                "method": {
+                                  "enum": [
+                                    "GITHUB_URL",
+                                    "ZIP_WITH_GITLOG"
+                                  ],
+                                  "title": "Method",
+                                  "type": "string"
+                                },
+                                "repositoryUrl": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Repositoryurl"
+                                },
+                                "resolvedBranch": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Resolvedbranch"
+                                },
+                                "headCommitSha": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "description": "method=GITHUB_URL이면 필수 -- 이 sha로 정확히 고정 재fetch한다",
+                                  "title": "Headcommitsha"
+                                },
+                                "downloadUrl": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Downloadurl"
+                                },
+                                "storageUri": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Storageuri"
+                                },
+                                "inputHash": {
+                                  "description": "재fetch 후 이 값과 다르면 하드 실패(FetchError INPUT_HASH_MISMATCH) -- 검증했던 것과 다른 코드를 분석하면 안 된다",
+                                  "title": "Inputhash",
+                                  "type": "string"
+                                },
+                                "gitHistory": {
+                                  "anyOf": [
+                                    {
+                                      "items": {
+                                        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고.",
+                                        "properties": {
+                                          "sha": {
+                                            "title": "Sha",
+                                            "type": "string"
+                                          },
+                                          "authorName": {
+                                            "title": "Authorname",
+                                            "type": "string"
+                                          },
+                                          "authorEmail": {
+                                            "title": "Authoremail",
+                                            "type": "string"
+                                          },
+                                          "committedAt": {
+                                            "format": "date-time",
+                                            "title": "Committedat",
+                                            "type": "string"
+                                          },
+                                          "changedFiles": {
+                                            "items": {
+                                              "type": "string"
+                                            },
+                                            "title": "Changedfiles",
+                                            "type": "array"
+                                          },
+                                          "additions": {
+                                            "default": 0,
+                                            "title": "Additions",
+                                            "type": "integer"
+                                          },
+                                          "deletions": {
+                                            "default": 0,
+                                            "title": "Deletions",
+                                            "type": "integer"
+                                          },
+                                          "parentSha": {
+                                            "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)",
+                                            "title": "Parentsha",
+                                            "type": "string"
+                                          },
+                                          "authoredAt": {
+                                            "description": "author date. committedAt(커밋 date)과 다른 값",
+                                            "format": "date-time",
+                                            "title": "Authoredat",
+                                            "type": "string"
+                                          },
+                                          "branchName": {
+                                            "description": "이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 소속은 아니다. 미상이면 빈 문자열",
+                                            "title": "Branchname",
+                                            "type": "string"
+                                          },
+                                          "isMergeCommit": {
+                                            "description": "부모가 2개 이상인지(기계적 판정, %P 부모 개수)",
+                                            "title": "Ismergecommit",
+                                            "type": "boolean"
+                                          },
+                                          "isRevertCommit": {
+                                            "description": "커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다",
+                                            "title": "Isrevertcommit",
+                                            "type": "boolean"
+                                          },
+                                          "isBotCommit": {
+                                            "description": "GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` 또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- 그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다",
+                                            "title": "Isbotcommit",
+                                            "type": "boolean"
+                                          },
+                                          "changedLineCount": {
+                                            "default": 0,
+                                            "title": "Changedlinecount",
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "sha",
+                                          "authorName",
+                                          "authorEmail",
+                                          "committedAt",
+                                          "parentSha",
+                                          "authoredAt",
+                                          "branchName",
+                                          "isMergeCommit",
+                                          "isRevertCommit",
+                                          "isBotCommit"
+                                        ],
+                                        "title": "GitCommit",
+                                        "type": "object"
+                                      },
+                                      "type": "array"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ],
+                                  "title": "Githistory"
+                                }
+                              },
+                              "required": [
+                                "analysisInputId",
+                                "method",
+                                "inputHash"
+                              ],
+                              "title": "AnalysisInputRef",
+                              "type": "object"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "§제안 API ①②연결(2026-08-06) -- /analysis-inputs 응답을 그대로 되돌려 보내면 이걸로 재fetch한다(D2). method/source와 상호배타 -- 있으면 그 둘은 무시한다(멀티파트 ZIP 업로드 대신 이 경로를 쓴다는 뜻)"
                         },
                         "extractionScope": {
                           "default": "TOTAL",
@@ -470,9 +871,6 @@
                           "title": "Providermodelcode"
                         }
                       },
-                      "required": [
-                        "method"
-                      ],
                       "title": "AnalysisRequest",
                       "type": "object"
                     },
@@ -1062,6 +1460,56 @@
           }
         }
       }
+    },
+    "/api/v0/analysis-inputs": {
+      "post": {
+        "tags": [
+          "analysis-inputs"
+        ],
+        "summary": "분석 입력 확정 -- 검증+fetch (백엔드 제안 신설 API, §제안 API ①)",
+        "description": "저장소를 검증하고 fetch해 분석 입력을 확정한다. 동기 200 -- 202+폴링이 아니다.\n\nLLM 호출이 없어(fetch만) 지연이 짧고, 폴링을 도입하면 App Runner 멀티인스턴스에서\n또 깨지는 인메모리 job store가 하나 더 생긴다(D2가 피하려는 것과 같은 클래스의 문제).\n\n🔴 `async def`이지만 `sessions.py`의 \"블로킹 호출은 `def`로\" 원칙과 어긋나지 않는다 --\n실제 블로킹 작업(`_do_fetch`, git subprocess)은 `asyncio.to_thread`로 스레드에\n돌리고, 이 함수 자체는 그 결과를 기다리는 것 말고 하는 일이 없다. `async def`인\n이유는 오직 하나: 이 엔드포인트만 실패 응답 모양이 달라서(`AnalysisInputError`\n{failureCode,message,requestId} vs 공용 {error,message,retryable}) 자동 바인딩\n대신 직접 파싱해야 하고, 직접 파싱(`request.json()`)이 코루틴이라서다.",
+        "operationId": "create_analysis_input_api_v0_analysis_inputs_post",
+        "parameters": [
+          {
+            "name": "x-internal-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Internal-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisInputResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "검증/fetch 실패",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisInputFailure"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1247,6 +1695,127 @@
         "title": "AnalysisDocument",
         "description": "코드 분석 문서. Markdown이 아니라 구조화 JSON이 원본이다.\n\n문제 선정(p04-3)과 보고서(p04-6)가 이 JSON을 그대로 프롬프트에 다시 넣는다.\nMarkdown으로 저장하면 넣을 때 JSON→MD, 꺼낼 때 MD→JSON으로 두 번 변환해야 하고\n두 번째는 파싱이라 깨진다. 사람이 읽는 화면은 이걸 렌더한 결과다."
       },
+      "AnalysisInputFailure": {
+        "properties": {
+          "failureCode": {
+            "type": "string",
+            "title": "Failurecode"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "requestId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requestid"
+          }
+        },
+        "type": "object",
+        "required": [
+          "failureCode",
+          "message"
+        ],
+        "title": "AnalysisInputFailure",
+        "description": "POST /analysis-inputs 422 응답. 공용 ErrorResponse({error,message,retryable})와\n\n다른 별도 모양이다 -- 백엔드 프로포절이 {failureCode,message,requestId}를 명시했고,\nfailureCode 11종은 백엔드 DB CHECK 제약의 문자열 그대로여야 한다."
+      },
+      "AnalysisInputResponse": {
+        "properties": {
+          "analysisInputId": {
+            "type": "string",
+            "title": "Analysisinputid",
+            "description": "D2 -- 서버가 상태 없이 결정론적으로 만든 값(같은 입력이면 항상 같은 id). POST /analysis 요청 시 이 값과 함께 아래 필드들을 그대로 다시 실어 보내야 한다(재fetch에 필요 -- §0.1, 이 서비스는 캐싱하지 않는다)"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "GITHUB_URL",
+              "ZIP_WITH_GITLOG"
+            ],
+            "title": "Method"
+          },
+          "resolvedBranch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedbranch"
+          },
+          "headCommit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadCommit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gitHistory": {
+            "items": {
+              "$ref": "#/components/schemas/GitCommit"
+            },
+            "type": "array",
+            "title": "Githistory"
+          },
+          "gitHistorySource": {
+            "type": "string",
+            "enum": [
+              "BACKEND_SUPPLIED",
+              "EMBEDDED_GIT",
+              "REMOTE_DEEPEN",
+              "NONE"
+            ],
+            "title": "Githistorysource",
+            "default": "NONE"
+          },
+          "historyTruncated": {
+            "type": "boolean",
+            "title": "Historytruncated",
+            "description": "벽시계 시간 예산 안에서 히스토리를 다 못 걷었는지(D1). true여도 요청은 실패하지 않는다 -- 코드 fetch 자체는 이 값과 무관하게 항상 완료된다",
+            "default": false
+          },
+          "fileCount": {
+            "type": "integer",
+            "title": "Filecount"
+          },
+          "byteCount": {
+            "type": "integer",
+            "title": "Bytecount"
+          },
+          "inputHash": {
+            "type": "string",
+            "title": "Inputhash",
+            "description": "sha256 hex 64자. .git/** 제외 전 파일 기준(기존 snapshotMeta.contentHash와 다른 정의 -- 그건 vendor 스캐너 변경마다 흔들려서 재fetch 무결성 검증에 못 쓴다). 같은 트리면 ZIP으로 받든 클론으로 받든 동일하다"
+          },
+          "capturedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Capturedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "analysisInputId",
+          "method",
+          "fileCount",
+          "byteCount",
+          "inputHash",
+          "capturedAt"
+        ],
+        "title": "AnalysisInputResponse",
+        "description": "POST /analysis-inputs 200 응답 "
+      },
       "AnalysisJobStatus": {
         "properties": {
           "jobId": {
@@ -1299,6 +1868,31 @@
             ],
             "title": "Failurereason",
             "description": "FAILED일 때만 채워진다"
+          },
+          "failureCode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "EMPTY_CODE_EVIDENCE",
+                  "SOURCE_UNREACHABLE",
+                  "UNSUPPORTED_LANGUAGE",
+                  "ANALYSIS_TIMEOUT",
+                  "MODEL_ERROR",
+                  "TEMPORARY_ERROR",
+                  "INVALID_REPOSITORY_URL",
+                  "REPO_NOT_FOUND",
+                  "REPOSITORY_ACCESS_DENIED",
+                  "BRANCH_NOT_FOUND",
+                  "UNSUPPORTED_HOST"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failurecode",
+            "description": "백엔드 DDL(ck_analysis_job_failure_code_2)로 확정된 11종. FAILED일 때만 채워진다"
           },
           "startedAt": {
             "anyOf": [
@@ -1426,6 +2020,50 @@
             "type": "integer",
             "title": "Questioncountplanned",
             "description": "계획된 질문 수. 유효 문제가 적으면 축소된다"
+          },
+          "resolvedBranch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolvedbranch"
+          },
+          "headCommit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HeadCommit"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "gitHistory": {
+            "items": {
+              "$ref": "#/components/schemas/GitCommit"
+            },
+            "type": "array",
+            "title": "Githistory"
+          },
+          "gitHistorySource": {
+            "type": "string",
+            "enum": [
+              "BACKEND_SUPPLIED",
+              "EMBEDDED_GIT",
+              "REMOTE_DEEPEN",
+              "NONE"
+            ],
+            "title": "Githistorysource",
+            "default": "NONE"
+          },
+          "historyTruncated": {
+            "type": "boolean",
+            "title": "Historytruncated",
+            "default": false
           }
         },
         "type": "object",
@@ -2080,6 +2718,95 @@
         ],
         "title": "ErrorResponse"
       },
+      "GitCommit": {
+        "properties": {
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "authorName": {
+            "type": "string",
+            "title": "Authorname"
+          },
+          "authorEmail": {
+            "type": "string",
+            "title": "Authoremail"
+          },
+          "committedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Committedat"
+          },
+          "changedFiles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Changedfiles"
+          },
+          "additions": {
+            "type": "integer",
+            "title": "Additions",
+            "default": 0
+          },
+          "deletions": {
+            "type": "integer",
+            "title": "Deletions",
+            "default": 0
+          },
+          "parentSha": {
+            "type": "string",
+            "title": "Parentsha",
+            "description": "첫 부모 커밋 SHA(merge 커밋은 mainline 기준). 부모 없는 root 커밋은 \"0\"*40 sentinel(git pre-receive hook의 '부모 없음' 표기 관행)"
+          },
+          "authoredAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Authoredat",
+            "description": "author date. committedAt(커밋 date)과 다른 값"
+          },
+          "branchName": {
+            "type": "string",
+            "title": "Branchname",
+            "description": "이 fetch가 resolve한 브랜치를 히스토리 전체에 균일 적용한 값이다 -- git엔 '이 커밋이 어느 브랜치 소속'이라는 개념 자체가 없어 커밋별 진짜 소속은 아니다. 미상이면 빈 문자열"
+          },
+          "isMergeCommit": {
+            "type": "boolean",
+            "title": "Ismergecommit",
+            "description": "부모가 2개 이상인지(기계적 판정, %P 부모 개수)"
+          },
+          "isRevertCommit": {
+            "type": "boolean",
+            "title": "Isrevertcommit",
+            "description": "커밋 제목이 정확히 'Revert \"'로 시작하는지(git revert/GitHub Revert 버튼의 자동생성 포맷). 정밀도 우선 -- 미탐은 있어도 오탐(기여도 부당 제외)은 피한다"
+          },
+          "isBotCommit": {
+            "type": "boolean",
+            "title": "Isbotcommit",
+            "description": "GitHub App형 봇 계정 표기(이메일 `\\d+\\+...[bot]@users.noreply.github.com` 또는 이름이 `[bot]`로 끝남)만 본다. AI 코딩 도구 사용 흔적과는 무관 -- 그건 커밋 주체가 아니라 코드 출처 문제라 이 필드의 판정 범위 밖이다"
+          },
+          "changedLineCount": {
+            "type": "integer",
+            "title": "Changedlinecount",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "sha",
+          "authorName",
+          "authorEmail",
+          "committedAt",
+          "parentSha",
+          "authoredAt",
+          "branchName",
+          "isMergeCommit",
+          "isRevertCommit",
+          "isBotCommit"
+        ],
+        "title": "GitCommit",
+        "description": "`gitHistory[]` 항목 하나. 커밋 메시지는 없다 -- fetch.py가 gitHistory엔 메시지를\n\n안 담는다(HeadCommit에만 있음, 텍스트 구분자 안전성 때문이기도 하다).\n\nD-analysis-b1(2026-08-07, 백엔드 DDL `commit_attribution` 테이블 감사 반영):\nparentSha·authoredAt·branchName·isMergeCommit·isRevertCommit·isBotCommit·\nchangedLineCount 7개는 그 테이블의 NOT NULL 컬럼과 1:1 대응한다. 판정 기준은\n`app/engines/analysis/fetch.py`의 `_parse_git_log_output`/`_tag_branch_name` 참고."
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2092,6 +2819,31 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HeadCommit": {
+        "properties": {
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "committedAt": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Committedat"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sha",
+          "message",
+          "committedAt"
+        ],
+        "title": "HeadCommit",
+        "description": "GITHUB_URL fetch의 HEAD 커밋. ZIP은 커밋 개념이 없을 수 있어 이 필드 자체가 null이다."
       },
       "Hint": {
         "properties": {

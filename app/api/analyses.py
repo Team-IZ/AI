@@ -104,10 +104,13 @@ async def create_analysis(
     """
     payload, zip_bytes = await _read_request(request)
     body = _validate(payload)
-    
+
     # method와 실제 전송 형태 어긋나면 여기서 잡음
     # 스키마만으로 표현할 수 없음 - Content-Type은 본문 밖의 정보
-    if body.method == "ZIP_WITH_GITLOG" and not zip_bytes:
+    #
+    # analysisInput이 있으면 이 요청 자체엔 ZIP이 안 실려 온다(재fetch로 코드를
+    # 새로 받으므로) -- 그 경로에서는 이 가드를 적용하지 않는다.
+    if body.analysis_input is None and body.method == "ZIP_WITH_GITLOG" and not zip_bytes:
         raise _invalid("method=ZIP_WITH_GITLOG는 multipart/form-data로 ZIP을 함께 보내야 합니다")
         
     if idempotency_key:
