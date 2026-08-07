@@ -75,6 +75,9 @@ def _stub_call(monkeypatch, data: dict, usages: list[dict] | None = None):
                 "model_code": model_code, "input_token_count": 500, "output_token_count": 100,
                 "cached_token_count": 0, "status": "SUCCEEDED", "failure_code": None,
                 "latency_ms": 1200,
+                # 실물 llm/client.py가 매 호출에 넣는 값. 빠뜨리면 AiUsage 검증에
+                # 걸려 to_ai_usage가 그 행을 **조용히 버린다**(원장이 통째로 빈다).
+                "occurred_at": "2026-08-07T09:00:00Z",
             }],
         )
 
@@ -140,19 +143,22 @@ def test_fabricated_interview_source_id_is_rejected(monkeypatch):
         engine.generate(InterviewBriefRequest.model_validate(_request()))
 
 
-def test_null_interview_source_id_is_accepted_not_fabrication(monkeypatch):
-    """D-ib3(실LLM 호출로 발견): priorInterviews/observationNotes/briefContext는
-    명세상 id가 없다. 그 근거만으로 만든 라포 질문이 interviewSourceId를 null로
-    두는 건 정직한 미기재이지 위조가 아니다 -- 빈 문자열/None 둘 다 허용해야 한다."""
+def test_missing_interview_source_id_falls_back_to_the_attempt(monkeypatch):
+    """🔴 null은 저장 불가다 -- interview_brief_item.interview_source_id가 UUID NOT NULL.
+
+    id가 없는 근거(priorInterviews·briefContext)만으로 만든 라포 질문은 시도 단위
+    id로 떨어진다. 요청에 실제로 있는 값이라 위조가 아니고, 백엔드가 그 행을
+    저장할 수 있다(옛 D-ib3의 null 허용은 폐기).
+    """
     items = _four_items()
     items[0]["interviewSourceId"] = None
-    del items[1]["interviewSourceId"]  # 아예 필드 자체를 생략한 경우도 허용
+    del items[1]["interviewSourceId"]  # 아예 필드 자체를 생략한 경우도 같은 폴백
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
 
     result = engine.generate(InterviewBriefRequest.model_validate(_request()))
 
-    assert result.items[0].interview_source_id is None
-    assert result.items[1].interview_source_id is None
+    assert result.items[0].interview_source_id == "src-attempt-1"
+    assert result.items[1].interview_source_id == "src-attempt-1"
     assert result.items[2].interview_source_id == "src-stage-1"  # 나머지는 정상 그대로
 
 
@@ -302,8 +308,7 @@ def test_attempt_and_session_interview_source_id_are_allowed(monkeypatch):
 
 def test_observation_note_interview_source_id_is_allowed_not_fabrication(monkeypatch):
     """관찰 메모가 이제 자기 interviewSourceId를 갖는다(D-ib4) -- 그 값으로 응답해도
-    '지어냄'으로 걸리면 안 된다. D-ib3의 null-허용 규칙이 여전히 유효한지도 같이 본다
-    (priorInterviews만 근거인 항목은 계속 null 허용)."""
+    '지어냄'으로 걸리면 안 된다. 빠진 항목이 시도 단위로 떨어지는지도 같이 본다."""
     req_dict = _request()
     req_dict["observationNotes"] = [{
         "occurredAt": "2026-08-01T09:00:00Z",
@@ -312,13 +317,13 @@ def test_observation_note_interview_source_id_is_allowed_not_fabrication(monkeyp
     }]
     items = _four_items()
     items[0]["interviewSourceId"] = "src-note-1"  # 관찰 메모 근거 -- 이제 실제 id로 인용 가능
-    items[1]["interviewSourceId"] = None           # priorInterviews만 근거면 여전히 null 허용
+    items[1]["interviewSourceId"] = None           # priorInterviews만 근거면 시도 단위로
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
 
     result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
 
     assert result.items[0].interview_source_id == "src-note-1"
-    assert result.items[1].interview_source_id is None
+    assert result.items[1].interview_source_id == "src-attempt-1"
 
 
 def test_new_session_end_reason_codes_are_accepted(monkeypatch):
@@ -357,36 +362,54 @@ def test_student_answer_text_is_fenced_as_untrusted(monkeypatch):
 
 # ── 라우터 ────────────────────────────────────────────────────────────────
 
-def test_router_returns_200_with_usage_headers(monkeypatch):
+BRIEF_PATH = "/api/v0/interview-brief:generate"
+# 멱등키는 이 경로에서 **필수**다(contextId가 null이라 ai_usage.idempotency_key의
+# 폴백이 여기까지 내려온다). 테스트마다 다른 값을 써야 캐시가 안 겹친다.
+KEY_HEADERS = {**HEADERS, "Idempotency-Key": "interview-1:default"}
+
+
+def test_router_returns_200_with_ai_usage_in_the_body(monkeypatch):
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
 
-    r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
+    r = client.post(BRIEF_PATH, json=_request(),
+                    headers={**KEY_HEADERS, "Idempotency-Key": "interview-1:200",
+                             "X-Trace-Id": "trace-1"})
 
     assert r.status_code == 200
-    assert r.json()["openingRemark"] == "여는 말"
-    assert r.headers["x-ai-usage-status"] == "SUCCEEDED"
-    assert r.headers["x-ai-usage-model-code"]
+    body = r.json()
+    assert body["openingRemark"] == "여는 말"
+    assert len(body["aiUsage"]) == 1
+    usage = body["aiUsage"][0]
+    assert usage["featureCode"] == "INTERVIEW_BRIEF_GENERATION"
+    assert usage["contextType"] == "INTERVIEW_BRIEF"
+    # contextId는 null이다 -- AI가 brief_id를 받은 적이 없다(DB도 이 컬럼만 NULL 허용).
+    assert usage["contextId"] is None
+    assert usage["traceId"] == "trace-1"
+    # request_id·idempotency_key는 NOT NULL이라 멱등키로 폴백해야 한다. 특히
+    # idempotency_key는 전역 UNIQUE라 빈 문자열이면 두 번째 호출이 곧바로 깨진다.
+    assert usage["requestId"] == "interview-1:200"
+    assert usage["idempotencyKey"] == "interview-1:200:INTERVIEW_BRIEF:1"
+    assert usage["status"] == "SUCCEEDED"
+    assert usage["modelCode"]
+    # 옛 D-ib2의 헤더 이중 전송은 폐기됐다.
+    assert "x-ai-usage-status" not in r.headers
 
 
-def test_router_usage_meta_body_field_matches_headers(monkeypatch):
-    """D-ib2: 헤더/본문 둘 다 채우고, 같은 값이어야 한다(같은 dict에서 뽑으므로)."""
+def test_router_requires_the_idempotency_key(monkeypatch):
+    """멱등키가 없으면 ai_usage.idempotency_key가 ':INTERVIEW_BRIEF:1'이 되어
+    두 번째 호출이 전역 UNIQUE에 걸린다 -- 그 전에 422로 막는다."""
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
 
-    r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
+    r = client.post(BRIEF_PATH, json=_request(), headers=HEADERS)
 
-    meta = r.json()["usageMeta"]
-    assert meta["modelCode"] == r.headers["x-ai-usage-model-code"]
-    assert str(meta["inputTokenCount"]) == r.headers["x-ai-usage-input-tokens"]
-    assert str(meta["outputTokenCount"]) == r.headers["x-ai-usage-output-tokens"]
-    assert str(meta["latencyMs"]) == r.headers["x-ai-usage-latency-ms"]
-    assert meta["status"] == r.headers["x-ai-usage-status"] == "SUCCEEDED"
-    assert meta["failureCode"] is None
+    assert r.status_code == 422
 
 
 def test_router_returns_503_with_failure_code_on_stage_error(monkeypatch):
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()[:1]})
 
-    r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
+    r = client.post(BRIEF_PATH, json=_request(),
+                    headers={**KEY_HEADERS, "Idempotency-Key": "interview-1:503"})
 
     assert r.status_code == 503
     assert r.json()["failureCode"] == "INVALID_JSON"
@@ -404,20 +427,42 @@ def test_router_maps_llm_transport_failure_code_through(monkeypatch):
 
     monkeypatch.setattr(engine.stages, "call", _call)
 
-    r = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=HEADERS)
+    r = client.post(BRIEF_PATH, json=_request(),
+                    headers={**KEY_HEADERS, "Idempotency-Key": "interview-1:rate"})
 
     assert r.status_code == 503
     assert r.json()["failureCode"] == "RATE_LIMITED"
 
 
 def test_idempotency_key_reuse_skips_recomputation(monkeypatch):
-    """같은 X-Idempotency-Key로 재전송하면 stages.call을 다시 부르지 않는다."""
+    """같은 멱등키 + 같은 본문 재전송이면 stages.call을 다시 부르지 않는다."""
     calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
-    headers = {**HEADERS, "X-Idempotency-Key": "interview-1:retry-test"}
+    headers = {**HEADERS, "Idempotency-Key": "interview-1:retry-test"}
 
-    first = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=headers)
-    second = client.post("/internal/v1/interview-brief:generate", json=_request(), headers=headers)
+    first = client.post(BRIEF_PATH, json=_request(), headers=headers)
+    second = client.post(BRIEF_PATH, json=_request(), headers=headers)
 
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json()
     assert len(calls) == 1  # 두 번째 요청은 캐시에서 그대로 반환됐다
+
+
+def test_idempotency_key_reuse_with_a_different_body_is_a_conflict(monkeypatch):
+    """🔴 키만 보고 캐시를 돌려주면 **다른 교육생의 브리프**가 나간다.
+
+    develop이 같은 버그를 한 번 고쳤고(jobs.py, redteam audit H12), 백엔드 DDL도
+    같은 판단을 했다(interview_brief.last_request_id + last_request_fingerprint 쌍).
+    """
+    calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _four_items()})
+    headers = {**HEADERS, "Idempotency-Key": "interview-1:collision"}
+
+    first = client.post(BRIEF_PATH, json=_request(), headers=headers)
+
+    other = _request()
+    other["target"]["userName"] = "다른 교육생"
+    second = client.post(BRIEF_PATH, json=other, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 409
+    assert second.json()["error"] == "IDEMPOTENCY_CONFLICT"
+    assert len(calls) == 1  # 두 번째는 아예 생성하지 않았다

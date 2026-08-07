@@ -4,61 +4,23 @@
 이유로 `def`(async 아님) -- 이 경로의 유일한 LLM 호출(`interview_brief.generate`)이
 `app.llm.client.chat()`을 거치는데 그게 blocking `urllib.request` 호출이다.
 """
-from fastapi import APIRouter, Header, Response
+from fastapi import APIRouter, Header
 
 from app import interview_brief
-from app.api.errors import InterviewBriefError
+from app.api.errors import ApiError, InterviewBriefError
 from app.engines.analysis.stages import StageError
+from app.schemas.common import ErrorResponse
 from app.schemas.interview_brief import InterviewBriefRequest, InterviewBriefResponse
+from app.usage import to_ai_usage
 
 router = APIRouter(tags=["interview-brief"])
 
-# §7: AI가 제공하는 값만 여기 담는다(model_code/토큰 3종/latency/status/failureCode).
-# feature_code·context_type·context_id·trigger_type·actor_user_id·request_id·
-# idempotency_key는 전부 백엔드가 이미 아는 값이라 AI가 되돌려줄 필요가 없다.
-_USAGE_HEADER_PREFIX = "X-Ai-Usage-"
-
-
-# D-ib2: 사용량 값을 헤더와 본문 둘 다에 싣는다.
-#   WHY: 명세 §7이 "응답 헤더 또는 본문 메타"라고만 적어 실제 와이어 모양이
-#   미정이다(2026-08-05, 사용자 확인). 백엔드가 확정하기 전에 어느 한쪽만 골라
-#   구현하면 그게 틀렸을 때 다시 계약을 왕복해야 한다 -- 둘 다 채워두면 백엔드가
-#   자기 파서 짜기 편한 쪽을 그냥 읽으면 된다.
-#   COST: 같은 값이 응답 하나에 두 번(헤더 7개 + 본문 usageMeta 객체) 실린다 --
-#   페이로드가 약간 커지고, 두 값이 어긋나면(그럴 일은 없지만) 혼란의 소지가
-#   생긴다. 그래서 반드시 **같은 dict 하나에서** 둘 다 뽑는다(아래 함수 하나).
-#   EXIT: 백엔드가 한쪽을 정하면 다른 쪽 삭제. 헤더만 남기면 _usage_meta()
-#   호출과 InterviewBriefResponse.usage_meta 필드를 지운다. 본문만 남기면
-#   _set_usage_headers() 호출과 이 상수·함수를 지운다.
-def _last_usage(usages: list[dict]) -> dict | None:
-    return usages[-1] if usages else None
-
-
-def _set_usage_headers(response: Response, last: dict | None) -> None:
-    if last is None:
-        return
-    response.headers[f"{_USAGE_HEADER_PREFIX}Model-Code"] = str(last.get("model_code", ""))
-    response.headers[f"{_USAGE_HEADER_PREFIX}Input-Tokens"] = str(last.get("input_token_count", 0))
-    response.headers[f"{_USAGE_HEADER_PREFIX}Output-Tokens"] = str(last.get("output_token_count", 0))
-    response.headers[f"{_USAGE_HEADER_PREFIX}Cached-Tokens"] = str(last.get("cached_token_count", 0))
-    response.headers[f"{_USAGE_HEADER_PREFIX}Latency-Ms"] = str(last.get("latency_ms", 0))
-    response.headers[f"{_USAGE_HEADER_PREFIX}Status"] = str(last.get("status", ""))
-    if last.get("failure_code"):
-        response.headers[f"{_USAGE_HEADER_PREFIX}Failure-Code"] = str(last["failure_code"])
-
-
-def _usage_meta(last: dict | None) -> dict | None:
-    if last is None:
-        return None
-    return {
-        "model_code": last.get("model_code", ""),
-        "input_token_count": last.get("input_token_count", 0),
-        "output_token_count": last.get("output_token_count", 0),
-        "cached_token_count": last.get("cached_token_count", 0),
-        "latency_ms": last.get("latency_ms", 0),
-        "status": last.get("status", "SUCCEEDED"),
-        "failure_code": last.get("failure_code"),
-    }
+# 🔴 옛 D-ib2(사용량을 응답 헤더 X-Ai-Usage-* 7개 + 본문 usageMeta에 이중 전송)는
+# 폐기됐다(2026-08-07). 백엔드 제안서가 다른 네 엔드포인트와 똑같이 **본문 aiUsage[]를
+# ai_usage 테이블에 넣는다**고 명시했고 헤더 얘기는 한 줄도 없다 -- "와이어 모양이
+# 미정이라 둘 다 채운다"는 전제가 사라졌다. 전용 UsageMeta 스키마도 같이 지웠다:
+# 공용 AiUsage를 쓰면 featureCode·contextType·idempotencyKey처럼 백엔드가 원장에
+# 넣어야 하는 값이 빠지지 않는다.
 
 
 def _failure_code_for(exc: StageError) -> str:
@@ -82,15 +44,25 @@ def _failure_code_for(exc: StageError) -> str:
     "/interview-brief:generate", response_model=InterviewBriefResponse,
     summary="면담 브리프 생성 (여는 말 + 질문 체크리스트)",
     responses={
+        409: {"model": ErrorResponse,
+              "description": "같은 idempotency-key로 다른 본문이 왔다. 재시도해도 같다"},
         503: {"description": "생성 실패. failureCode/message로 사유를 알려준다"},
     },
 )
 def generate_interview_brief(
-    body: InterviewBriefRequest, response: Response,
-    # x_request_id: §7 표에 따르면 ai_usage.request_id는 백엔드가 아는 값이라
-    # AI가 쓸 일이 없다 -- 계약 문서화 목적으로만 선언(openapi.json에 남긴다).
-    x_request_id: str | None = Header(default=None, description="ai_usage.request_id로 그대로 잇는다"),
-    x_idempotency_key: str | None = Header(default=None, description="재시도 시 동일 값 재사용 -- 같으면 재계산 없이 그대로 반환"),
+    body: InterviewBriefRequest,
+    # 헤더 이름은 나머지 네 엔드포인트와 같다(백엔드 제안서 1-1: `idempotency-key`·
+    # `x-trace-id`). 옛 `X-Idempotency-Key`/`X-Request-Id`는 이 엔드포인트만의 변종이라
+    # 폐기했다 -- 백엔드 클라이언트가 경로마다 헤더 이름을 갈아끼울 이유가 없다.
+    #
+    # 🔴 멱등키는 **필수**다(다른 넷은 선택). 이 경로만 contextId가 null이라
+    # ai_usage.idempotency_key의 폴백이 트레이스까지 내려가는데, 그것도 없으면
+    # `":INTERVIEW_BRIEF:1"`이 되어 **두 번째 호출이 전역 UNIQUE에 걸린다.**
+    idempotency_key: str = Header(
+        description="재시도 시 동일 값 재사용 -- 같으면 재계산 없이 그대로 반환. "
+                    "ai_usage.idempotency_key의 요청 단위 키이기도 하다",
+    ),
+    x_trace_id: str | None = Header(default=None, description="분산 추적 ID"),
 ) -> InterviewBriefResponse:
     """여는 말 + 질문 체크리스트를 한 번의 LLM 호출로 만들어 즉시 반환한다.
 
@@ -98,15 +70,19 @@ def generate_interview_brief(
     걸리면 503 + failureCode로 전체 실패를 알린다.
     """
     try:
-        result = interview_brief.generate(body, idempotency_key=x_idempotency_key)
+        result = interview_brief.generate(body, idempotency_key=idempotency_key)
+    except ValueError as exc:
+        # 같은 멱등키로 다른 본문이 왔다. /analyses의 H12 대응과 같은 409다 --
+        # 생성 실패(503)가 아니라 호출 쪽 실수라 재시도해도 같은 결과다.
+        raise ApiError(
+            status_code=409, error="IDEMPOTENCY_CONFLICT", message=str(exc),
+        ) from exc
     except StageError as exc:
         raise InterviewBriefError(
             status_code=503, failure_code=_failure_code_for(exc),
             message=f"면담 브리프 생성에 실패했습니다: {exc}",
         ) from exc
 
-    last_usage = _last_usage(result.usages)
-    _set_usage_headers(response, last_usage)
     return InterviewBriefResponse(
         opening_remark=result.opening_remark,
         items=[
@@ -118,5 +94,11 @@ def generate_interview_brief(
             }
             for item in result.items
         ],
-        usage_meta=_usage_meta(last_usage),
+        # contextId는 null이다 -- AI가 interview_brief.brief_id를 받은 적이 없다.
+        # Spring이 저장 시점에 채우거나, 요청에 briefId를 실어주면 그때 채운다.
+        ai_usage=to_ai_usage(
+            result.usages, "INTERVIEW_BRIEF", None,
+            feature_code="INTERVIEW_BRIEF_GENERATION",
+            idempotency_key=idempotency_key, trace_id=x_trace_id,
+        ),
     )

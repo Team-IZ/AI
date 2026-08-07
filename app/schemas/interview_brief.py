@@ -15,6 +15,7 @@ from typing import Literal
 from pydantic import Field
 
 from app.schemas.common import BaseSchema
+from app.schemas.usage import AiUsage
 
 # §9 부록 코드값 그대로. Spring이 이미 DB CHECK로 강제하는 값이라 AI가 별도로
 # 좁히지 않는다 -- 모르는 값이 오면 그냥 Literal 검증 실패로 422가 나가는 편이
@@ -310,34 +311,21 @@ class InterviewBriefItem(BaseSchema):
         description="매니저만 보는 근거. 어떤 데이터에서 나왔는지 명시",
     )
     suggested_order: int = Field(ge=1)
-    interview_source_id: str | None = Field(
-        default=None,
+    interview_source_id: str = Field(
         description="요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. "
-                    "priorInterviews/briefContext는 명세상 id 자체가 없어(D-ib4: "
-                    "observationNotes는 이제 자기 id가 있다 -- 아래 참고) 그 둘만 근거인 "
-                    "라포 질문은 null이 정상이다(engine이 지어낸 값과 정직한 null을 "
-                    "구분해서 검증한다)",
+                    "🔴 null이 될 수 없다: interview_brief_item.interview_source_id가 "
+                    "UUID NOT NULL이라 null인 항목은 그 행 하나가 통째로 저장 불가다. "
+                    "id 없는 근거(priorInterviews·briefContext)만으로 만든 라포 질문은 "
+                    "시도 단위 id(comprehension.attemptInterviewSourceId)로 떨어진다",
     )
-
-
-class UsageMeta(BaseSchema):
-    """§7의 AI 제공 사용량 값(model_code·토큰 3종·latency·status·failureCode)을
-    본문에도 싣는다. `app/api/interview_brief.py`의 D-ib2 주석 참고 -- 응답 헤더
-    (X-Ai-Usage-*)와 완전히 같은 값을 두 군데에 싣는 임시 조치다."""
-
-    model_code: str
-    input_token_count: int = Field(ge=0)
-    output_token_count: int = Field(ge=0)
-    cached_token_count: int = Field(default=0, ge=0)
-    latency_ms: int = Field(ge=0)
-    status: Literal["SUCCEEDED", "FAILED", "PARTIAL"]
-    failure_code: str | None = None
 
 
 class InterviewBriefResponse(BaseSchema):
     """성공 응답 본문. §5. jobId 없음 -- 이 응답이 곧 결과다.
 
-    `usageMeta`는 §5 명세 예시엔 없는 필드다 -- D-ib2(app/api/interview_brief.py) 참고.
+    🔴 옛 전용 `UsageMeta`는 삭제됐다(2026-08-07). 다른 네 엔드포인트와 같은 공용
+    `AiUsage`를 쓴다 -- UsageMeta에는 featureCode·contextType·requestId·traceId·
+    idempotencyKey가 없어서 백엔드가 ai_usage 행을 만들려면 전부 스스로 합성해야 했다.
     """
 
     opening_remark: str = Field(
@@ -349,8 +337,7 @@ class InterviewBriefResponse(BaseSchema):
         description="4~8개(첫 면담이면 6~8개 -- engine이 강제). suggestedOrder는 "
                     "1부터 중복 없는 연속 정수여야 한다",
     )
-    usage_meta: UsageMeta | None = Field(
-        default=None,
-        description="응답 헤더(X-Ai-Usage-*)와 동일한 값의 본문 사본. 헤더/본문 "
-                    "어느 쪽을 쓸지 백엔드가 정하기 전까지 둘 다 채운다",
+    ai_usage: list[AiUsage] = Field(
+        default_factory=list,
+        description="이 요청이 태운 LLM 호출 기록. 브리프는 호출 1회라 보통 1행이다",
     )

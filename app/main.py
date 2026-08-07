@@ -13,7 +13,7 @@ from app.api import (
 )
 from app.api.deps import require_internal_key
 from app.api.errors import register_error_handlers
-from app.config import API_INTERNAL_V1_PREFIX, API_V0_PREFIX, get_settings
+from app.config import API_V0_PREFIX, get_settings
 
 # import 시점에 설정을 강제로 읽어 production 가드를 여기서 터뜨린다.
 # 지연 호출(요청 때 첫 호출)로 두면 기동은 성공하고 /api/health도 200이라
@@ -63,11 +63,8 @@ app.include_router(
     dependencies=[Depends(require_internal_key)],
 )
 
-# /internal/v1: 면담 브리프 전용. 다른 4개와 버전 축이 분리된 별도 계약이라
-# 접두사가 다르지만, 호출자는 여전히 백엔드 하나뿐이라 인증은 그대로 건다
-# (명세 §4 헤더 목록에 X-Internal-Key가 명시되진 않았지만, 뺄 근거도 없다).
 app.include_router(
     interview_brief.router,
-    prefix=API_INTERNAL_V1_PREFIX,
+    prefix=API_V0_PREFIX,
     dependencies=[Depends(require_internal_key)],
 )

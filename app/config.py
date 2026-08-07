@@ -14,9 +14,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # 개발단계 시 0, 계약 안정시 v1
 API_V0_PREFIX = "/api/v0"
 
-# 면담 브리프 전용. 명세서(`IZ-Get_면담브리프_생성API_명세서_v08.md`) §4가 이 경로를
-# 그대로 지정한다 -- 다른 4개 엔드포인트와 버전 축이 분리된 별도 계약이라 접두사도 다르다.
-API_INTERNAL_V1_PREFIX = "/internal/v1"
+# 🔴 옛 API_INTERNAL_V1_PREFIX("/internal/v1", 면담 브리프 전용)는 삭제됐다
+# (2026-08-07). 백엔드 제안서·회신이 전부 /api/v0 하나로 말하고 있어 축을 나눌
+# 근거가 없다 -- 접두사가 둘이면 백엔드 클라이언트 설정도 둘이 된다.
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(

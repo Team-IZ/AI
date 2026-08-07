@@ -1511,35 +1511,28 @@
         }
       }
     },
-    "/internal/v1/interview-brief:generate": {
+    "/api/v0/interview-brief:generate": {
       "post": {
         "tags": [
           "interview-brief"
         ],
         "summary": "면담 브리프 생성 (여는 말 + 질문 체크리스트)",
         "description": "여는 말 + 질문 체크리스트를 한 번의 LLM 호출로 만들어 즉시 반환한다.\n\njob/폴링 없음 -- 이 응답이 곧 결과다. 부분 성공 없음(§5.2): 검증에 하나라도\n걸리면 503 + failureCode로 전체 실패를 알린다.",
-        "operationId": "generate_interview_brief_internal_v1_interview_brief_generate_post",
+        "operationId": "generate_interview_brief_api_v0_interview_brief_generate_post",
         "parameters": [
           {
-            "name": "x-request-id",
+            "name": "idempotency-key",
             "in": "header",
-            "required": false,
+            "required": true,
             "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "ai_usage.request_id로 그대로 잇는다",
-              "title": "X-Request-Id"
+              "type": "string",
+              "description": "재시도 시 동일 값 재사용 -- 같으면 재계산 없이 그대로 반환. ai_usage.idempotency_key의 요청 단위 키이기도 하다",
+              "title": "Idempotency-Key"
             },
-            "description": "ai_usage.request_id로 그대로 잇는다"
+            "description": "재시도 시 동일 값 재사용 -- 같으면 재계산 없이 그대로 반환. ai_usage.idempotency_key의 요청 단위 키이기도 하다"
           },
           {
-            "name": "x-idempotency-key",
+            "name": "x-trace-id",
             "in": "header",
             "required": false,
             "schema": {
@@ -1551,10 +1544,10 @@
                   "type": "null"
                 }
               ],
-              "description": "재시도 시 동일 값 재사용 -- 같으면 재계산 없이 그대로 반환",
-              "title": "X-Idempotency-Key"
+              "description": "분산 추적 ID",
+              "title": "X-Trace-Id"
             },
-            "description": "재시도 시 동일 값 재사용 -- 같으면 재계산 없이 그대로 반환"
+            "description": "분산 추적 ID"
           },
           {
             "name": "x-internal-key",
@@ -1594,6 +1587,16 @@
               }
             }
           },
+          "409": {
+            "description": "같은 idempotency-key로 다른 본문이 왔다. 재시도해도 같다",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "503": {
             "description": "생성 실패. failureCode/message로 사유를 알려준다"
           },
@@ -1622,7 +1625,8 @@
               "CODE_SESSION",
               "ANSWER_EVALUATION",
               "CURRICULUM_ANALYSIS",
-              "REPORT_GENERATION"
+              "REPORT_GENERATION",
+              "INTERVIEW_BRIEF_GENERATION"
             ],
             "title": "Featurecode"
           },
@@ -1637,14 +1641,22 @@
               "ANALYSIS_JOB",
               "ASSESSMENT_SESSION",
               "REPORT_SNAPSHOT",
-              "CURRICULUM_ANALYSIS"
+              "CURRICULUM_ANALYSIS",
+              "INTERVIEW_BRIEF"
             ],
             "title": "Contexttype"
           },
           "contextId": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Contextid",
-            "description": "처리한 업무 엔터티의 PK. ANALYSIS_JOB이면 jobId, ASSESSMENT_SESSION이면 sessionId. ⚠️ REPORT_SNAPSHOT· CURRICULUM_ANALYSIS는 AI가 그 PK를 몰라 jobId가 들어간다 — Spring이 저장 시점에 실제 PK로 교체해야 한다"
+            "description": "처리한 업무 엔터티의 PK. ANALYSIS_JOB이면 jobId, ASSESSMENT_SESSION이면 sessionId. ⚠️ REPORT_SNAPSHOT· CURRICULUM_ANALYSIS는 AI가 그 PK를 몰라 jobId가 들어간다 — Spring이 저장 시점에 실제 PK로 교체해야 한다. INTERVIEW_BRIEF는 대신할 값조차 없어 null이다(DB도 이 컬럼만 NULL 허용) — 채우려면 요청에 briefId가 필요하다"
           },
           "requestId": {
             "type": "string",
@@ -1719,7 +1731,6 @@
           "featureCode",
           "modelCode",
           "contextType",
-          "contextId",
           "requestId",
           "traceId",
           "idempotencyKey",
@@ -3326,23 +3337,17 @@
             "title": "Suggestedorder"
           },
           "interviewSourceId": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
+            "type": "string",
             "title": "Interviewsourceid",
-            "description": "요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. priorInterviews/briefContext는 명세상 id 자체가 없어(D-ib4: observationNotes는 이제 자기 id가 있다 -- 아래 참고) 그 둘만 근거인 라포 질문은 null이 정상이다(engine이 지어낸 값과 정직한 null을 구분해서 검증한다)"
+            "description": "요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. 🔴 null이 될 수 없다: interview_brief_item.interview_source_id가 UUID NOT NULL이라 null인 항목은 그 행 하나가 통째로 저장 불가다. id 없는 근거(priorInterviews·briefContext)만으로 만든 라포 질문은 시도 단위 id(comprehension.attemptInterviewSourceId)로 떨어진다"
           }
         },
         "type": "object",
         "required": [
           "questionText",
           "questionRationale",
-          "suggestedOrder"
+          "suggestedOrder",
+          "interviewSourceId"
         ],
         "title": "InterviewBriefItem",
         "description": "체크리스트 항목 하나. §5."
@@ -3410,16 +3415,13 @@
             "title": "Items",
             "description": "4~8개(첫 면담이면 6~8개 -- engine이 강제). suggestedOrder는 1부터 중복 없는 연속 정수여야 한다"
           },
-          "usageMeta": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/UsageMeta"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "응답 헤더(X-Ai-Usage-*)와 동일한 값의 본문 사본. 헤더/본문 어느 쪽을 쓸지 백엔드가 정하기 전까지 둘 다 채운다"
+          "aiUsage": {
+            "items": {
+              "$ref": "#/components/schemas/AiUsage"
+            },
+            "type": "array",
+            "title": "Aiusage",
+            "description": "이 요청이 태운 LLM 호출 기록. 브리프는 호출 1회라 보통 1행이다"
           }
         },
         "type": "object",
@@ -3428,7 +3430,7 @@
           "items"
         ],
         "title": "InterviewBriefResponse",
-        "description": "성공 응답 본문. §5. jobId 없음 -- 이 응답이 곧 결과다.\n\n`usageMeta`는 §5 명세 예시엔 없는 필드다 -- D-ib2(app/api/interview_brief.py) 참고."
+        "description": "성공 응답 본문. §5. jobId 없음 -- 이 응답이 곧 결과다.\n\n🔴 옛 전용 `UsageMeta`는 삭제됐다(2026-08-07). 다른 네 엔드포인트와 같은 공용\n`AiUsage`를 쓴다 -- UsageMeta에는 featureCode·contextType·requestId·traceId·\nidempotencyKey가 없어서 백엔드가 ai_usage 행을 만들려면 전부 스스로 합성해야 했다."
       },
       "ObservationNote": {
         "properties": {
@@ -4965,65 +4967,6 @@
         ],
         "title": "UnmatchedTeach",
         "description": "문항을 못 만든 검증 개념. **`―`(문항 없음)의 근거다.**\n\n🔴 **0단(L1 미달)과 다르다.** 0단은 물어봤는데 못 푼 것이고 이건 안 물어본 것이다.\n도달 단계 컬럼에 0을 박으면 둘이 섞여 \"안 물어봤다\"가 \"틀렸다\"로 바뀐다 — NULL이어야 한다.\n\nAI는 이 개념을 **두 번** 찾는다(p04-3 + 실패분 재시도 1회). 그래도 못 찾으면 여기 담긴다."
-      },
-      "UsageMeta": {
-        "properties": {
-          "modelCode": {
-            "type": "string",
-            "title": "Modelcode"
-          },
-          "inputTokenCount": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Inputtokencount"
-          },
-          "outputTokenCount": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Outputtokencount"
-          },
-          "cachedTokenCount": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Cachedtokencount",
-            "default": 0
-          },
-          "latencyMs": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Latencyms"
-          },
-          "status": {
-            "type": "string",
-            "enum": [
-              "SUCCEEDED",
-              "FAILED",
-              "PARTIAL"
-            ],
-            "title": "Status"
-          },
-          "failureCode": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Failurecode"
-          }
-        },
-        "type": "object",
-        "required": [
-          "modelCode",
-          "inputTokenCount",
-          "outputTokenCount",
-          "latencyMs",
-          "status"
-        ],
-        "title": "UsageMeta",
-        "description": "§7의 AI 제공 사용량 값(model_code·토큰 3종·latency·status·failureCode)을\n본문에도 싣는다. `app/api/interview_brief.py`의 D-ib2 주석 참고 -- 응답 헤더\n(X-Ai-Usage-*)와 완전히 같은 값을 두 군데에 싣는 임시 조치다."
       },
       "ValidationError": {
         "properties": {

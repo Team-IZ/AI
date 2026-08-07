@@ -36,7 +36,7 @@ class InterviewBriefItemResult:
     question_text: str
     question_rationale: str
     suggested_order: int
-    interview_source_id: str | None
+    interview_source_id: str
 
 
 @dataclass
@@ -287,23 +287,25 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         if not isinstance(raw, dict):
             raise stages.StageError(f"ib-1: items 원소가 객체가 아닙니다: {raw!r}", result.usages)
 
-        # D-ib3 (2026-08-05, 실LLM 호출로 발견) — D-ib4(2026-08-06)로 범위 축소:
-        # 원래는 priorInterviews/observationNotes/briefContext 셋 다 명세(§4.1 ⑥⑦)에
-        # id가 없어서, 그 근거로 라포 질문을 만들라는 §6.2 지시와 충돌해 모델이 없는
-        # id를 지어내곤 했다(실측: 관찰 메모 하나만 근거인 질문에서 'src-observer-note'를
-        # 지어냄, 요청에 없던 값). D-ib4에서 백엔드 감사 결과로 observationNotes에
-        # interview_source_id가 생겨서(ObservationNote.interview_source_id) 이제
-        # id가 없는 건 priorInterviews/briefContext 둘뿐이다 -- 이 둘만 근거인
-        # 질문(주로 라포 형성용)은 여전히 null이 정직한 미기재이지 위조가 아니다.
-        #   WHY: "안 지어냄"과 "정직하게 비움"을 구분해야 한다 -- source_id가 아예
-        #   없으면(None) 근거를 안 댄 것뿐이라 위조가 아니다.
-        #   COST: 이제 매 항목이 interviewSourceId를 갖는다는 보장이 사라진다 --
-        #   백엔드가 이 필드를 optional로 받아야 한다(스키마에 이미 반영).
-        #   EXIT: priorInterviews/briefContext에도 명세가 id를 부여하게 되면
-        #   이 예외를 없애고 다시 전원 필수로 되돌릴 수 있다.
+        # 🔴 D-ib3의 "null 허용"은 폐기됐다(2026-08-07, 백엔드 DDL v07 대조).
+        # `interview_brief_item.interview_source_id`가 **UUID NOT NULL**이라, null인
+        # 항목은 그 행 하나가 INSERT 자체가 안 된다 -- "부분 성공 없음"으로 전체를
+        # 실패시키는 이 엔진이 정작 백엔드 쪽에 반쪽 저장을 만드는 셈이었다.
+        #
+        # 대신 **시도 단위 id로 떨어뜨린다.** id가 없는 근거는 이제
+        # priorInterviews/briefContext 둘뿐이고(D-ib4로 observationNotes는 자기 id가
+        # 생겼다), 그 둘만 근거인 질문도 결국 "이번 회차 시도"에 딸린 질문이라
+        # attempt_interview_source_id를 대는 게 사실에 어긋나지 않는다. 그 값은
+        # 항상 존재한다(Comprehension.attempt_interview_source_id는 필수 필드).
+        #   WHY: 지어낸 id는 여전히 거부한다 -- 아래 allowed_ids 검사는 그대로다.
+        #   폴백은 "요청에 실제로 있는 값"이라 위조가 아니다.
+        #   EXIT: priorInterviews/briefContext에도 명세가 id를 부여하면 폴백 대신
+        #   그 id를 쓴다.
         raw_source_id = raw.get("interviewSourceId")
         source_id = str(raw_source_id).strip() if raw_source_id else None
-        if source_id is not None and source_id not in allowed_ids:
+        if source_id is None:
+            source_id = req.comprehension.attempt_interview_source_id
+        if source_id not in allowed_ids:
             # H4-dev(develop app/engines/analysis/requirements.py)와 같은 원칙: 모델이
             # 만들어낸 참조를 그대로 믿지 않는다. 값을 댔는데 요청에 없으면 지어낸 것이다.
             raise stages.StageError(

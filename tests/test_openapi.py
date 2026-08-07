@@ -33,7 +33,7 @@ def test_every_endpoint_is_published():
     assert "/api/health" in published
     for path in ("/api/v0/analyses", "/api/v0/sessions/{session_id}/answers",
                  "/api/v0/reports", "/api/v0/curricula", "/api/v0/analysis-inputs",
-                 "/internal/v1/interview-brief:generate"):
+                 "/api/v0/interview-brief:generate"):
         assert path in published, path
 
     # 세션은 무상태다(§T11 B) — 시작·조회·복원 3개가 사라져 8개다.
