@@ -175,7 +175,6 @@ https://cpiysizen3.ap-northeast-1.awsapprunner.com     고정 HTTPS. 주소가 �
 | 그룹 | 메서드·경로 | 역할 | 방식 |
 |---|---|---|---|
 | 공통 | `GET /api/health` | 서비스 상태 | 동기 |
-| 분석 | `POST /api/v0/analysis-inputs` | 저장소 검증 + fetch → 분석 입력 확정 | 동기 200 |
 | 분석 | `POST /api/v0/analyses` | 코드 분석 요청 | 202 + 폴링 |
 | 분석 | `GET /api/v0/analyses/{jobId}` | 분석 상태·결과 | 동기 |
 | 세션 | `POST /api/v0/sessions/{id}/answers` | 답변 제출 → 채점 + 다음 질문 (**세션 API는 이것 하나뿐**) | 동기 |
@@ -185,7 +184,9 @@ https://cpiysizen3.ap-northeast-1.awsapprunner.com     고정 HTTPS. 주소가 �
 | 교안 | `GET /api/v0/curricula/{jobId}` | 교안 구조·개념 결과 | 동기 |
 | 면담 | `POST /api/v0/interview-brief:generate` | 매니저 면담용 여는 말 + 질문 체크리스트 | 동기 200 |
 
-**신규 2개는 둘 다 동기 200이다** (2026-08-07). 202+폴링이 아닌 이유가 서로 다르다 — `analysis-inputs`는 LLM 호출이 아예 없어 지연이 짧고(목표 p95 5초), 폴링을 도입하면 멀티 인스턴스에서 못 버티는 인메모리 job store가 하나 더 생긴다. 면담 브리프는 **매니저가 화면 앞에서 기다린다.**
+**면담 브리프만 신규다** (2026-08-07). 202+폴링이 아니라 **동기 200**인 이유는 하나 — 매니저가 화면 앞에서 기다린다.
+
+🔴 **`POST /analyses`를 3분할하자는 안(`/analysis-inputs` + `/analysis` + `GET /analysis/{jobId}`)은 폐기됐다**(2026-08-06 확인, 백엔드 쪽 착오). 근거 문서 `api-request-to-ai-server.md`(2026-08-05)도 함께 무효다. `/analyses`가 **검증·fetch·분석을 한 몸으로** 계속 처리한다. 2026-08-07에 그 엔드포인트가 잠깐 되살아났다가 다시 지워졌다 — 되살리기 전에 이 문단을 먼저 본다.
 
 **세션은 무상태다** (2026-08-03 확정). `POST /sessions` · `GET /sessions/{id}` · `POST /sessions/{id}/restore` **3개는 삭제됐다.** AI는 세션을 들고 있지 않으므로 문제·기록·커서가 매 요청에 실려 오고 — **매 요청이 곧 restore**다. 배포·재시작·인스턴스 중지가 진행 중인 세션을 깨지 않고, 백엔드는 갈래 하나만 구현하면 된다.
 
@@ -591,49 +592,6 @@ DB 3계층(`curriculum_analysis` → `curriculum_section` → `teaches`)을 그�
 
 교안 분석은 LLM을 무겁게 쓴다(교안 1개에 1~2분 이상). **수업 중이 아니라 LMS 업로드 시점에 도는 것**이 전제이고, 그래서 `Idempotency-Key`로 중복 실행을 막는다.
 
-### 분석 입력 확정 — `POST /api/v0/analysis-inputs`
-
-**저장소를 검증하고 fetch만 한다. LLM 호출이 0이다.** 백엔드 제안서 A·B에 대한 응답으로
-2026-08-07에 신설했다. 분석 실행은 여전히 `POST /analyses`가 받는다.
-
-```jsonc
-// 요청
-{ "requestId": "…", "orgId": "…", "method": "GITHUB_URL",
-  "repositoryUrl": "https://github.com/team-iz/mini-project-3", "requestedBranch": null }
-
-// 200
-{ "analysisInputId": "…",          // 같은 입력이면 같은 값(결정론적 UUID5)
-  "resolvedBranch": "main",         // 요청이 브랜치를 안 줬을 때 AI가 고른 값
-  "headCommit": { "sha": "…", "message": "…", "committedAt": "…" },
-  "gitHistory": [ /* 커밋당 14필드 */ ],
-  "gitHistorySource": "REMOTE_DEEPEN",   // BACKEND_SUPPLIED|EMBEDDED_GIT|REMOTE_DEEPEN|NONE
-  "historyTruncated": false,
-  "fileCount": 42, "byteCount": 183204, "inputHash": "…", "capturedAt": "…" }
-```
-
-**실패 응답 모양이 다른 유일한 엔드포인트다** — 공용 `{error, message, retryable}`이 아니라
-**422 `{failureCode, message, requestId}`**이고, `failureCode`는 `analysis_job.failure_code`의
-DB CHECK 15종을 그대로 쓴다(분석 실행 5 + 저장소 접근 5 + ZIP 검증 5).
-
-세 가지 설계 전제:
-
-```
-D1  히스토리 수집은 커밋 개수가 아니라 벽시계 시간으로 상한을 둔다.
-    코드를 가져오는 것(Phase A, 필수)과 히스토리 풍부화(Phase B, best-effort)를 나눠,
-    Phase B가 느리거나 실패해도 Phase A 결과는 절대 버리지 않는다
-D2  fetch한 코드를 서버가 캐싱하지 않는다. POST /analyses가 재fetch한다 —
-    GITHUB_URL은 정확한 커밋 sha로, ZIP은 같은 다운로드 URL로.
-    재fetch 후 inputHash가 다르면 하드 실패한다(그 사이 브랜치가 움직였다는 뜻)
-D3  ZIP의 git 이력은 ①백엔드가 실어 보내면 그것 ②ZIP 안 .git 파싱 ③둘 다 없으면
-    실패시키지 않고 빈 값으로 진행(ZIP_REQUIRE_GIT_LOG로 정책 전환)
-```
-
-🔴 **외부 URL을 받는 자리라 방어가 코드에 박혀 있다.** 호스트 허용목록은 clone·다운로드
-양쪽 다 **fail-closed**(설정이 비면 거부), 리다이렉트 미추적(SSRF), 다운로드는 스트리밍하며
-상한 초과 시 즉시 중단, stderr의 자격증명·토큰 마스킹. ZIP 안의 `.git`은 그대로 파싱하지
-않는다 — `core.fsmonitor`·`core.hooksPath`·`include.path`가 전부 임의 명령 실행 훅이라
-config·hooks를 지우고 샌드박스 환경에서만 `log`/`rev-parse`를 부른다.
-
 ### 면담 브리프 — `POST /api/v0/interview-brief:generate`
 
 **매니저가 화면 앞에서 기다린다.** job/폴링이 없고 이 응답이 곧 결과다. LLM 1회.
@@ -652,10 +610,20 @@ config·hooks를 지우고 샌드박스 환경에서만 `log`/`rev-parse`를 부
 
 - **항목 4~8개, 첫 면담이면 6~8개.** `suggestedOrder`는 1부터 중복 없는 연속 정수다.
 - 🔴 **`interviewSourceId`는 필수다.** 모델이 지어낸 값은 요청에 실제로 있던 id 집합과
-  대조해 거부한다(6슬롯: 위험사유·시도·세션·문제·단계·관찰메모). 근거에 id가 없는 질문
-  (라포 질문 등)은 **시도 단위 id로 떨어진다** — `interview_brief_item.interview_source_id`가
-  UUID NOT NULL이라 null이면 그 행이 통째로 저장 불가다.
+  대조해 거부한다(6슬롯: 위험사유·시도·세션·문제·단계·관찰메모). `interview_brief_item.
+  interview_source_id`가 UUID NOT NULL이라 null이면 그 행이 통째로 저장 불가다.
+  근거 없는 항목은 두 갈래로 처리한다:
+
+  ```
+  observationNotes 비어 있음  → 항목을 버린다      (백엔드 회신 §3 D-1② 지시)
+  observationNotes 있음       → 시도 단위 id로 폴백  (모델이 메모를 안 썼을 뿐)
+  ```
+
+  어느 쪽이든 **모델에게 id를 강제하지 않는다** — 강제하면 정직한 공백 대신 그럴듯한
+  id를 지어낼 유인이 생긴다. 버리면 `suggestedOrder`에 구멍이 나므로 1..N으로 재번호하고,
+  하한(4개, 첫 면담 6개)을 못 채우면 503으로 실패시킨다.
 - **부분 성공이 없다.** 여는 말만 되고 항목 검증이 하나라도 걸리면 전체를 503으로 실패시킨다.
+  실패 응답(`InterviewBriefFailure`)에도 `aiUsage[]`가 실린다 — 실패해도 토큰은 탔다(§3 A-5).
   절반을 반환하면 호출부가 성공으로 오인해 반쪽 브리프가 저장된다.
 - `isFlagged=true`인 단계는 **코드에서** 프롬프트에서 제외한다(모델에게 "근거로 삼지 마라"고
   지시하지 않는다). 학생 발화·답변 텍스트는 구분자로 감싸 인젝션을 막는다.
@@ -692,7 +660,7 @@ app/
    ├─ interview_brief_manifest.json  ib-1 프롬프트. **vendor/ 밖이다** —
    │                                 vendor 재동기화(복사)에 안 쓸려 나가게
    └─ analysis/
-      ├─ fetch.py     저장소 검증 + fetch (analysis-inputs). 외부 URL 방어가 여기 있다
+      ├─ fetch.py     저장소 검증 + fetch. 외부 URL 방어가 여기 있다
       ├─ stages.py    프롬프트 매니페스트 로딩 + LLM 호출 + 신뢰 불가 입력 감싸기
       └─ vendor/      팀원 PoC 규칙부. PATCHES.md에 우리 수정을 남긴다
 tests/
@@ -738,8 +706,8 @@ engine_mode: Literal["stub", "real"] = "stub"
 |---|---|
 | 기능 | **6/6 완성.** 교안 · 코드 분석 · 문제 선정 · 질문·힌트 동결 · 채점 · 보고서 |
 | 검증 | **전 구간 실호출 완주**(2026-08-04). 교안 → 분석 → 문답 11턴 → 보고서 2건 |
-| 엔드포인트 | **10/10 동작** (무상태 전환으로 11 → 8, `analysis-inputs`·면담 브리프로 8 → 10) |
-| 테스트 | **393 passed** |
+| 엔드포인트 | **9/9 동작** (무상태 전환으로 11 → 8, 면담 브리프로 8 → 9) |
+| 테스트 | **373 passed** |
 | 계약 | **미결 1건** — 실패한 LLM 호출의 토큰을 원장에 못 보낸다(아래). 나머지는 확정 |
 | 배포 | App Runner 자동(`main` 푸시 = 배포). 팀원 소유 |
 
@@ -766,7 +734,6 @@ engine_mode: Literal["stub", "real"] = "stub"
 RELATED_CONTEXT 참조  심볼 테이블이 없어 못 만든다
 교안 대형 PDF 상한    34쪽 310초. 200쪽을 외삽할 수 없다
 선별 로직 교체        교안 사전 기반(PM 설계 v2 §7). 재료는 확보, 교체는 미착수
-ZIP 제출 전달 방식     presigned URL / multipart 중 백엔드 회신 대기(제안서 C)
 새 모델 지연 재실측    SESSION_TIMEOUT_S=20.0이 옛 deepseek-v4-flash 기준이다
 ```
 
