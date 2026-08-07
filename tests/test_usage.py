@@ -45,10 +45,12 @@ def test_cached_cannot_exceed_input():
 def test_context_type_is_a_closed_set():
     """2026-08-03 확정(§T11 D-1). 자유 문자열이면 Spring이 원장을 못 묶는다."""
     assert set(AiUsage.model_json_schema()["properties"]["contextType"]["enum"]) == {
-        "SUBMISSION", "ASSESSMENT_SESSION", "REPORT_SNAPSHOT", "CURRICULUM_ANALYSIS"
+        "ANALYSIS_JOB", "ASSESSMENT_SESSION", "REPORT_SNAPSHOT", "CURRICULUM_ANALYSIS"
     }
     with pytest.raises(ValidationError):
         AiUsage.model_validate({**BASE, "contextType": "SESSION_ANSWER"})
+    with pytest.raises(ValidationError):
+        AiUsage.model_validate({**BASE, "contextType": "SUBMISSION"})
 
 
 def test_no_cost_fields():

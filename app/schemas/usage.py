@@ -46,21 +46,29 @@ FeatureCode = Literal[
 ]
 
 # 어느 **업무 엔터티**를 처리한 호출인가. featureCode보다 굵은 단위다 — 한 ContextType
-# 안에서 featureCode가 여럿 나온다(SUBMISSION 하나에 CODE_ANALYSIS + CODE_SESSION).
+# 안에서 featureCode가 여럿 나온다(ANALYSIS_JOB 하나에 CODE_ANALYSIS + CODE_SESSION).
 #
 # 🔴 옛 값 4개(`ANALYSIS`·`GRADING`·`REPORT`·`CURRICULUM`)는 **전부 v06 CHECK 밖이었다**
 # (2026-08-04 대조). 그대로 두면 네 API의 원장 행이 하나도 안 들어간다. 아래는 v06
 # CHECK 8종 중 AI가 쓰는 4개다 — 값은 테이블 이름이지 기능 이름이 아니다.
 #
+# 🔴 D-analysis-b3(2026-08-07): `SUBMISSION` → `ANALYSIS_JOB` 개명. 백엔드가 #13 회신에서
+# 확정("aiUsage.contextType=ANALYSIS_JOB"). WHY: submission_id는 `/analyses` 요청에
+# **optional**이다(idempotency 신원 대조용, jobs.py:body.submission_id) — 없으면 AI가
+# 자체 발급한 job_id로 대체했는데, 그러면 같은 SUBMISSION 값 밑에 "백엔드 PK"와 "AI
+# 내부 PK"가 섞여 들어가는 상황이 났다. ANALYSIS_JOB으로 이름을 바꾸면 REPORT_SNAPSHOT/
+# CURRICULUM_ANALYSIS와 같은 "AI가 발급한 jobId, Spring이 저장 시 교체" 계열로 명확히
+# 들어가서 이 모호함이 없어진다 — contextId도 이제 job_id 고정(jobs.py 참고).
+#
 # ⚠️ **contextId의 주인이 둘로 갈린다.**
-#   SUBMISSION·ASSESSMENT_SESSION — AI가 요청에서 받은 실제 PK를 넣는다. 그대로 쓰면 된다.
-#   REPORT_SNAPSHOT·CURRICULUM_ANALYSIS — **AI는 그 PK를 받은 적이 없다.** 지금은 AI
-#     내부 jobId가 들어간다. 저장할 때 Spring이 자기가 아는 PK로 교체해야 한다.
+#   ASSESSMENT_SESSION — AI가 요청에서 받은 실제 PK를 넣는다. 그대로 쓰면 된다.
+#   ANALYSIS_JOB·REPORT_SNAPSHOT·CURRICULUM_ANALYSIS — **AI는 그 PK를 받은 적이 없다.**
+#     AI 내부 jobId가 들어간다. 저장할 때 Spring이 자기가 아는 PK로 교체해야 한다.
 ContextType = Literal[
-    "SUBMISSION",           # POST /analyses               contextId = submissionId ✅
-    "ASSESSMENT_SESSION",   # POST /sessions/{id}/answers  contextId = sessionId ✅
-    "REPORT_SNAPSHOT",      # POST /reports                contextId = 보고서 jobId ⚠️ Spring이 교체
-    "CURRICULUM_ANALYSIS",  # POST /curricula              contextId = 교안 jobId ⚠️ Spring이 교체
+    "ANALYSIS_JOB",          # POST /analyses               contextId = 분석 jobId ⚠️ Spring이 교체
+    "ASSESSMENT_SESSION",    # POST /sessions/{id}/answers  contextId = sessionId ✅
+    "REPORT_SNAPSHOT",       # POST /reports                contextId = 보고서 jobId ⚠️ Spring이 교체
+    "CURRICULUM_ANALYSIS",   # POST /curricula              contextId = 교안 jobId ⚠️ Spring이 교체
 ]
 
 # 옛 이름. 다른 모듈이 아직 import할 수 있어 남겨둔다.

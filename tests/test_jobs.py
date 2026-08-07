@@ -90,7 +90,7 @@ def test_run_analysis_failed_on_engine_error():
     assert job.result is None
     # 🔴 잠정(계획 §0.3) -- 세분화할 신호가 없어 catch-all이다. 근거 없이 더 구체적인
     # 값(ANALYSIS_TIMEOUT 등)을 추측하는 것보다 이쪽이 정직하다. MODEL_ERROR는
-    # analysis_job.failure_code의 DB CHECK 11종 안에 있는 값이다(옛 PROVIDER_ERROR는
+    # analysis_job.failure_code의 DB CHECK 15종 안에 있는 값이다(옛 PROVIDER_ERROR는
     # ai_usage 네임스페이스 값이라 여기선 무효였다 -- 2026-08-07 버그 수정).
     assert job.failure_code == "MODEL_ERROR"
 
@@ -192,7 +192,7 @@ def test_run_analysis_falls_back_to_backend_echoed_git_history_when_refetch_is_e
 def test_run_analysis_marks_fetch_error_with_its_own_failure_code(monkeypatch):
     """재fetch가 실패하면(호스트 거부·해시 불일치 등) FetchError의 failureCode를
 
-    analysis_job.failure_code의 DB 11종으로 번역해서 옮긴다 -- fetch.py 내부 어휘를
+    analysis_job.failure_code의 DB 15종으로 번역해서 옮긴다 -- fetch.py 내부 어휘를
     그대로 옮기면 DB CHECK 밖의 값(예: INPUT_HASH_MISMATCH)이 새어나간다.
     """
     def fake_refetch(descriptor):
@@ -220,7 +220,7 @@ def test_fetch_failure_code_translation_covers_full_fetch_vocabulary():
 
 
 def test_fetch_failure_code_translation_values_are_all_db_legal():
-    """매핑 결과 자체가 analysis_job.failure_code의 DB 11종 밖으로 새지 않는지."""
+    """매핑 결과 자체가 analysis_job.failure_code의 DB 15종 밖으로 새지 않는지."""
     from typing import get_args
 
     from app.jobs import _FETCH_FAILURE_CODE_TRANSLATION

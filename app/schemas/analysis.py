@@ -603,18 +603,32 @@ class AnalysisResult(BaseSchema):
     git_history_source: GitHistorySource = "NONE"
     history_truncated: bool = False
 
-# GET /analyses/{jobId}의 failureCode. 백엔드 실측 DDL(ck_analysis_job_failure_code_2,
-# 2026-08-06 감사 회신)로 확정된 값 -- 이 11종이 전부이고 그 외 문자열은 Spring INSERT가
-# 거부한다. schemas/는 engines/를 import하지 않는 계층 원칙을 유지한다 -- fetch.py의 내부
-# 코드(13종, GITHUB 6 + ZIP 5 + JOB_ONLY 2)를 이 11종으로 옮기는 매핑은 `jobs.py`의
+# GET /analyses/{jobId}의 failureCode. 백엔드 실측 DDL(ck_analysis_job_failure_code_2)로
+# 확정된 값 -- 이 15종이 전부이고 그 외 문자열은 Spring INSERT가 거부한다. schemas/는
+# engines/를 import하지 않는 계층 원칙을 유지한다 -- fetch.py의 내부 코드(13종, GITHUB 6 +
+# ZIP 5 + JOB_ONLY 2)를 이 15종으로 옮기는 매핑은 `jobs.py`의
 # `_FETCH_FAILURE_CODE_TRANSLATION`에 있고, 그 딕셔너리와의 drift는
 # `tests/test_jobs.py`가 잡는다(fetch_engine.VERIFICATION_FAILURE_CODES|JOB_ONLY_FAILURE_CODES
 # 와 정확히 같은 키 집합인지 대조).
+#
+# 🔴 D-analysis-b3(2026-08-07): 2026-08-06 최초 감사 회신의 11종에서 15종으로 확장.
+# WHY: 최초 11종엔 ZIP 검증 실패를 대표하는 단일 값 `EMPTY_CODE_EVIDENCE` 하나뿐이었다
+# (우리가 fetch.py의 `EMPTY_CODE` 등 5종을 의미상 최선으로 뭉개 매핑했던 자리, #13
+# "저희 판단입니다 확인 부탁드립니다" 표시). 백엔드가 확인 후 회신: `analysis_job.
+# failure_code`는 실제로 `submission_artifact.validation_failure_code`(ZIP 검증) 5종을
+# **원문 그대로**(EMPTY_CODE_EVIDENCE라는 동의어가 아니라 EMPTY_CODE 자체) 포함한다.
+# `EMPTY_CODE_EVIDENCE`는 DB CHECK에 없는 값이었다 -- 우리 매핑이 만들어낸 이름일 뿐
+# 실재하지 않았다. 남겨뒀으면 옛 PROVIDER_ERROR와 같은 부류의 버그가 됐을 것이다.
 AnalysisJobFailureCode = Literal[
-    "EMPTY_CODE_EVIDENCE", "SOURCE_UNREACHABLE", "UNSUPPORTED_LANGUAGE",
+    # 분석 실행 실패 5종
+    "SOURCE_UNREACHABLE", "UNSUPPORTED_LANGUAGE",
     "ANALYSIS_TIMEOUT", "MODEL_ERROR", "TEMPORARY_ERROR",
+    # 저장소 접근 실패 5종 (= repository_verification.failure_code)
     "INVALID_REPOSITORY_URL", "REPO_NOT_FOUND", "REPOSITORY_ACCESS_DENIED",
     "BRANCH_NOT_FOUND", "UNSUPPORTED_HOST",
+    # ZIP 검증 실패 5종 (= submission_artifact.validation_failure_code)
+    "FILE_TOO_LARGE", "ARCHIVE_INVALID", "EMPTY_CODE",
+    "PROHIBITED_FILE", "GIT_LOG_MISSING",
 ]
 
 

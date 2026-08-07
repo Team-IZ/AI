@@ -28,32 +28,35 @@ _jobs: "OrderedDict[str, AnalysisJobStatus]" = OrderedDict()
 _job_id_by_idempotency_key: "OrderedDict[str, str]" = OrderedDict()
 
 # fetch.py의 내부 13종(VERIFICATION_FAILURE_CODES 11 + JOB_ONLY_FAILURE_CODES 2)을
-# analysis_job.failure_code의 실제 DB CHECK 11종(schemas/analysis.py AnalysisJobFailureCode)
-# 으로 옮긴다. GITHUB 6종은 이미 정확히 일치(identity). ZIP 5종+JOB_ONLY 2종은 1:1 이름이
-# 없어 의미상 최선 매핑이다 -- 🔴 backend 확인 전(2026-08-07). failure_reason(자유 텍스트)에
-# 원본 세부사유가 그대로 남으므로 여러 코드가 같은 DB 버킷으로 뭉쳐도 정보 손실은 없다.
+# analysis_job.failure_code의 실제 DB CHECK 15종(schemas/analysis.py AnalysisJobFailureCode)
+# 으로 옮긴다. GITHUB 6종 + ZIP 5종은 원문 그대로 identity(D-analysis-b3, 2026-08-07 백엔드
+# 확인 -- ZIP 5종도 submission_artifact.validation_failure_code와 이름이 같다는 게 확정
+# 됐다, 예전엔 EMPTY_CODE_EVIDENCE라는 실재하지 않는 값으로 의미상 최선 매핑했었다).
+# JOB_ONLY 2종만 analysis_job 쪽에 대응 값이 없어 SOURCE_UNREACHABLE로 뭉친다.
+# failure_reason(자유 텍스트)에 원본 세부사유가 그대로 남으므로 이 2종이 같은 DB 버킷으로
+# 뭉쳐도 정보 손실은 없다.
 _FETCH_FAILURE_CODE_TRANSLATION: dict[str, str] = {
-    # GITHUB_FAILURE_CODES -- 이미 정확히 일치, identity
+    # GITHUB_FAILURE_CODES -- identity
     "INVALID_REPOSITORY_URL": "INVALID_REPOSITORY_URL",
     "REPO_NOT_FOUND": "REPO_NOT_FOUND",
     "REPOSITORY_ACCESS_DENIED": "REPOSITORY_ACCESS_DENIED",
     "BRANCH_NOT_FOUND": "BRANCH_NOT_FOUND",
     "UNSUPPORTED_HOST": "UNSUPPORTED_HOST",
     "TEMPORARY_ERROR": "TEMPORARY_ERROR",
-    # ZIP_FAILURE_CODES -- 🔴 1:1 이름 없음, 의미상 최선 매핑
-    "EMPTY_CODE": "EMPTY_CODE_EVIDENCE",       # 이름만 다르지 사실상 동의어
-    "FILE_TOO_LARGE": "SOURCE_UNREACHABLE",    # 처리 가능한 소스를 못 얻음
-    "ARCHIVE_INVALID": "SOURCE_UNREACHABLE",   # 손상된 ZIP == 못 얻음
-    "PROHIBITED_FILE": "SOURCE_UNREACHABLE",   # 안전정책상 추출 거부 == 못 얻음
-    "GIT_LOG_MISSING": "SOURCE_UNREACHABLE",   # 코드는 있으나 정책상 소스로 불인정
-    # JOB_ONLY_FAILURE_CODES -- 둘 다 "검증했던 소스가 그 형태로 더는 없다"는 동일 계열
+    # ZIP_FAILURE_CODES -- identity (D-analysis-b3, 2026-08-07 백엔드 확인 후)
+    "EMPTY_CODE": "EMPTY_CODE",
+    "FILE_TOO_LARGE": "FILE_TOO_LARGE",
+    "ARCHIVE_INVALID": "ARCHIVE_INVALID",
+    "PROHIBITED_FILE": "PROHIBITED_FILE",
+    "GIT_LOG_MISSING": "GIT_LOG_MISSING",
+    # JOB_ONLY_FAILURE_CODES -- 대응 값 없음, "검증했던 소스가 그 형태로 더는 없다" 계열
     "INPUT_HASH_MISMATCH": "SOURCE_UNREACHABLE",
     "FETCH_FAILED": "SOURCE_UNREACHABLE",
 }
 
 
 def _translate_failure_code(code: str) -> str:
-    """fetch.py 내부 코드 -> analysis_job.failure_code DB 11종.
+    """fetch.py 내부 코드 -> analysis_job.failure_code DB 15종.
 
     매핑에 없는 새 코드가 fetch.py에 추가됐는데 여기를 안 고친 경우, 조용히
     DB 밖의 값(옛 PROVIDER_ERROR 버그처럼)으로 새지 않도록 안전한 DB값으로 떨어진다.
@@ -173,11 +176,11 @@ def run_analysis(
             raw = engine.analyze(body.model_dump(), zip_bytes)
         # 원장은 결과와 별개다. **검증 실패로 결과를 버려도 태운 토큰은 남긴다** —
         # 그래서 model_validate보다 먼저 떼어낸다.
-        # contextId는 jobId가 아니라 **submissionId**다 — v06 ai_usage.context_type이
-        # 처리 대상 엔터티(SUBMISSION)를 가리키기 때문이다. jobId를 넣으면 Spring이
-        # 비용을 제출에 귀속시킬 수가 없다. 요청에 없으면 그때만 jobId로 물러난다.
-        job.ai_usage = to_ai_usage(raw.pop("ai_usage", []), "SUBMISSION",
-                                   body.submission_id or job_id,
+        # D-analysis-b3(2026-08-07): contextType이 SUBMISSION→ANALYSIS_JOB으로 바뀌면서
+        # contextId도 submissionId→job_id로 바뀐다(schemas/usage.py ContextType 주석 참고) —
+        # ANALYSIS_JOB은 "AI가 발급한 jobId, Spring이 저장 시 자기 PK로 교체" 계열이라
+        # submission_id 유무로 분기할 필요가 없어졌다(예전엔 optional이라 job_id로 물러났다).
+        job.ai_usage = to_ai_usage(raw.pop("ai_usage", []), "ANALYSIS_JOB", job_id,
                                    idempotency_key=idempotency_key, trace_id=trace_id)
         result = AnalysisResult.model_validate(raw)  # 계약 위반은 여기서 예외
 
@@ -208,7 +211,8 @@ def run_analysis(
     except fetch_engine.FetchError as exc:
         # D2 재fetch 실패(analysisInput 경로 전용) -- FetchError가 이미 세부 사유를
         # 들고 있다(호스트 거부/브랜치 드리프트/inputHash 불일치 등, fetch.py의 11+2종
-        # 어휘 참고). 그 어휘는 analysis_job.failure_code의 DB 11종과 다른 네임스페이스라
+        # 어휘 참고). fetch.py 13종과 analysis_job.failure_code DB 15종은 GITHUB+ZIP
+        # 11종은 겹치지만 JOB_ONLY 2종(INPUT_HASH_MISMATCH/FETCH_FAILED)은 대응 값이 없다 --
         # 그대로 옮기면 안 된다 -- _translate_failure_code로 매핑한다(위 정의 참고).
         job.status = "FAILED"
         job.failure_code = _translate_failure_code(exc.failure_code)
@@ -221,15 +225,14 @@ def run_analysis(
         # 세분화할 신호가 없다(LlmError/StageError는 failure_code를 안 들고 있다, usage만
         # 있다). MODEL_ERROR를 catch-all로 쓴다 -- 근거 없이 더 구체적인 값을 추측하는
         # 것보다, "모델/엔진 실패"라는 사실만 정확히 담는 쪽을 택한다. (옛 PROVIDER_ERROR는
-        # ai_usage 네임스페이스 값이라 analysis_job의 DB CHECK 11종엔 없었다 -- 버그였다,
+        # ai_usage 네임스페이스 값이라 analysis_job의 DB CHECK 15종엔 없었다 -- 버그였다,
         # 2026-08-07 수정)
         job.failure_code = "MODEL_ERROR"
         # 🔴 **실패해도 원장은 남긴다.** 콜은 이미 나갔고 백엔드가 그걸로 비용을
         # 집계한다. AnalysisFailed가 실패 지점까지의 usage를 들고 온다.
         burned = getattr(exc, "ai_usage", None)
         if burned and not job.ai_usage:
-            job.ai_usage = to_ai_usage(burned, "SUBMISSION",
-                                       body.submission_id or job_id,
+            job.ai_usage = to_ai_usage(burned, "ANALYSIS_JOB", job_id,
                                        idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)
