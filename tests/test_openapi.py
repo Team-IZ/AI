@@ -33,7 +33,7 @@ def test_every_endpoint_is_published():
     assert "/api/health" in published
     for path in ("/api/v0/analyses", "/api/v0/sessions/{session_id}/answers",
                  "/api/v0/reports", "/api/v0/curricula",
-                 "/api/v0/interview-brief:generate"):
+                 "/api/v0/interview-briefs"):
         assert path in published, path
 
     # 세션은 무상태다(§T11 B) — 시작·조회·복원 3개가 사라져 8개다.
@@ -168,7 +168,7 @@ def test_error_responses_are_the_shared_shape():
     # 면담 브리프 503만 다른 계약이다 -- 백엔드 회신 §3 A-5가 실패 봉투에도
     # 사용량을 실으라고 해서 {failureCode, message, aiUsage}가 됐다.
     allowed = {
-        ("/api/v0/interview-brief:generate", "503"): "InterviewBriefFailure",
+        ("/api/v0/interview-briefs", "503"): "InterviewBriefFailure",
     }
 
     for path, operations in spec["paths"].items():
