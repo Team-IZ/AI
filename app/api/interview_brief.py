@@ -45,7 +45,7 @@ def _failure_code_for(exc: StageError) -> str:
 
 
 @router.post(
-    "/interview-brief:generate", response_model=InterviewBriefResponse,
+    "/interview-briefs", response_model=InterviewBriefResponse,
     summary="면담 브리프 생성 (여는 말 + 질문 체크리스트)",
     responses={
         409: {"model": ErrorResponse,

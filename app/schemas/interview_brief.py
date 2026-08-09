@@ -2,7 +2,7 @@
 
 명세: `IZ-Get_면담브리프_생성API_명세서_v08.md` (2026-08-05) + 백엔드 감사 회신
 `면담_브리프_API_감사_회신에대한_회신.md` (2026-08-07 — 값 집합 3건이 이걸로 정정됐다).
-`POST /api/v0/interview-brief:generate` 하나뿐이고 동기(sync) 계약이다 — job/폴링 없음, 이
+`POST /api/v0/interview-briefs` 하나뿐이고 동기(sync) 계약이다 — job/폴링 없음, 이
 요청이 곧 그 응답이다. AI는 DB에 직접 접근하지 않는다 — target/riskReasons/
 comprehension 등은 전부 백엔드가 조립해서 실어 보낸 값이고, AI는 그걸 그대로
 믿지 않고(모델이 되돌려주는 interviewSourceId만 예외 없이 검증한다 -- engine 쪽)
@@ -351,7 +351,7 @@ class ObservationNote(BaseSchema):
 
 
 class InterviewBriefRequest(BaseSchema):
-    """POST /api/v0/interview-brief:generate 요청 본문 전체."""
+    """POST /api/v0/interview-briefs 요청 본문 전체."""
 
     brief_id: UuidStr = Field(
         description="`interview_brief.brief_id`. AI는 이 값을 그대로 `aiUsage.contextId`에 "

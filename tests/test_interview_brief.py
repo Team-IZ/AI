@@ -412,7 +412,7 @@ def test_student_answer_text_is_fenced_as_untrusted(monkeypatch):
 
 # ── 라우터 ────────────────────────────────────────────────────────────────
 
-BRIEF_PATH = "/api/v0/interview-brief:generate"
+BRIEF_PATH = "/api/v0/interview-briefs"
 # 멱등키는 이 경로에서 **필수**다 -- ai_usage.idempotency_key가 전역 UNIQUE인데
 # briefId 하나로는 재생성(version_no/SUPERSEDED)을 구분할 수 없다.
 # 테스트마다 다른 값을 써야 캐시가 안 겹친다.
