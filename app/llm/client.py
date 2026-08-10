@@ -7,6 +7,7 @@
 그래서 예외에 usage를 붙여 던진다(LlmError.usage).
 """
 
+import re
 import sys
 import threading
 import time
@@ -190,6 +191,29 @@ def _classify(exc: Exception, detail: str) -> str:
     return "PROVIDER_ERROR"
 
 
+_NVAPI_KEY_RE = re.compile(r"nvapi-[A-Za-z0-9_-]+")
+
+
+def _http_detail(exc: Exception) -> str:
+    """HTTPError면 ` (HTTP 401 Unauthorized: {본문})`, 아니면 빈 문자열.
+
+    🔴 2026-08-10: 이게 없어서 배포본 장애를 못 읽었다. 4회 호출이 전부 27~98ms 만에
+    `PROVIDER_ERROR: HTTPError`로 죽었는데, 예외 종류만 남기고 상태코드를 버려서
+    401(키 거부)인지 404(모델 없음)인지 402(크레딧 소진)인지 가릴 수 없었다.
+    상태코드·사유구는 비밀이 아니다. 본문은 키를 되비추지 않지만 방어적으로
+    `nvapi-*`를 지우고 200자로 자른다.
+    """
+    if not isinstance(exc, urllib.error.HTTPError):
+        return ""
+    try:
+        body = exc.read().decode(errors="replace")[:200]
+    except Exception:  # 본문을 이미 읽었거나 스트림이 닫힌 경우 -- 상태코드만으로도 충분하다
+        body = ""
+    body = _NVAPI_KEY_RE.sub("nvapi-[REDACTED]", body).strip()
+    head = f" (HTTP {exc.code} {exc.reason}"
+    return f"{head}: {body})" if body else f"{head})"
+
+
 def chat(model_code: str, messages: list[dict], *, timeout_s: float = DEFAULT_TIMEOUT_S,
          **kwargs) -> LlmResult:
     """LLM 한 번 호출. 성공하면 LlmResult, 실패하면 LlmError(usage 포함).
@@ -222,7 +246,7 @@ def chat(model_code: str, messages: list[dict], *, timeout_s: float = DEFAULT_TI
         usage = {**base, "status": "FAILED", "failure_code": failure_code, "latency_ms": latency_ms}
         # 예외 문구에 키가 실릴 일은 없지만(vendor가 Authorization을 로그에 안 남긴다)
         # 그래도 원문을 그대로 전파하지 않고 종류만 남긴다.
-        raise LlmError(f"{failure_code}: {type(exc).__name__}", usage) from exc
+        raise LlmError(f"{failure_code}: {type(exc).__name__}{_http_detail(exc)}", usage) from exc
 
     latency_ms = int((time.monotonic() - started) * 1000)
     content, finish_reason = _extract_content(body)

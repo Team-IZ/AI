@@ -1,4 +1,5 @@
 """ LLM 래퍼(T7a). 네트워크 없이 응답 해석·실패 분류만 검증한다. """
+import io
 import os
 import urllib.error
 
@@ -77,6 +78,38 @@ def test_429_is_rate_limited():
     err = urllib.error.HTTPError("url", 429, "Too Many Requests", {}, None)
 
     assert client._classify(err, str(err)) == "RATE_LIMITED"
+
+
+class _FailingClient(_FakeClient):
+    def __init__(self, exc):
+        self._exc = exc
+
+    def chat(self, model, messages, **kwargs):
+        raise self._exc
+
+
+def test_http_status_code_survives_into_the_error_message(monkeypatch):
+    """🔴 2026-08-10 배포본 장애 회귀 — 상태코드를 버려서 원인을 못 읽었다.
+
+    호출 4회가 전부 `PROVIDER_ERROR: HTTPError`로만 죽어서, 401(키 거부)·404(모델 없음)·
+    402(크레딧 소진) 중 무엇인지 가릴 수 없었다. 예외 종류만 남기면 진단이 불가능하다.
+    """
+    err = urllib.error.HTTPError(
+        "url", 401, "Unauthorized", {},
+        io.BytesIO(b'{"detail":"invalid key nvapi-SECRET123"}'),
+    )
+    monkeypatch.setattr(client, "_pool", object())
+    monkeypatch.setattr(client, "_load_vendor", lambda: (_FailingClient(err), None, _Exhausted))
+
+    with pytest.raises(client.LlmError) as exc:
+        client.chat("m", [{"role": "user", "content": "q"}])
+
+    msg = str(exc.value)
+    assert "401" in msg and "Unauthorized" in msg
+    assert exc.value.usage["failure_code"] == "PROVIDER_ERROR"
+    # 본문은 싣되 키는 절대 안 싣는다.
+    assert "nvapi-SECRET123" not in msg
+    assert "nvapi-[REDACTED]" in msg
     
 
 def test_env_file_keys_reach_the_pool(tmp_path, monkeypatch):
