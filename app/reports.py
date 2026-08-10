@@ -237,5 +237,14 @@ def run_report(job_id: str, body: ReportRequest | None = None, *,
     except Exception as exc:
         job.status = "FAILED"
         job.failure_reason = str(exc)
+        # 🔴 **실패해도 원장은 남긴다**(2026-08-10). `_real_result`가 build() 성공
+        # 뒤에야 job.ai_usage를 채워서, 스테이지가 터지면 이미 태운 토큰이 증발했다.
+        # jobs.py·면담 브리프(§3 A-5 "성공·실패 모든 봉투에 실어라")와 같은 처리다.
+        # StageError가 시도마다 1건씩 usages를 들고 온다.
+        burned = getattr(exc, "usages", None)
+        if burned and not job.ai_usage:
+            job.ai_usage = to_ai_usage(burned, "REPORT_SNAPSHOT", job.job_id,
+                                       feature_code="REPORT_GENERATION",
+                                       idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)

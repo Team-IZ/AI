@@ -7,6 +7,7 @@
 """
 
 import json
+import logging
 import re
 import time
 from dataclasses import dataclass
@@ -15,6 +16,13 @@ from pathlib import Path
 from typing import Any
 
 from app.llm import client
+
+# 🔴 진행 로그는 여기 하나면 충분하다 -- 모든 LLM 호출이 call()을 지난다.
+# 분석 1건이 5분 가까이 걸리는데 그동안 로그가 access log(202/200)뿐이라
+# "어디까지 갔나"를 알 방법이 없었다(2026-08-10).
+# ⚠️ 프롬프트 본문은 절대 남기지 않는다 -- 학생 제출 코드가 통째로 들어 있다.
+# 스테이지 id·모델·지연·토큰 수·실패 코드만 남긴다.
+log = logging.getLogger(__name__)
 
 _VENDOR = Path(__file__).parent / "vendor"
 
@@ -219,6 +227,9 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
         except client.LlmError as exc:
             usages.append(exc.usage)
             failure = exc.usage.get("failure_code")
+            log.warning("%s 실패 (시도 %d/%d) · %s · %s · %dms · %s",
+                        stage_id, attempt, max_attempts, model_code, failure,
+                        exc.usage.get("latency_ms") or 0, exc)
 
             # 예산이 모자라 잘린 것이면 늘려서 한 번 더. 모델마다 배수를 실측하지 않고도
             # 스스로 맞춰가게 하는 장치다(client.REASONING_TOKEN_MULTIPLIER 주석 참고).
@@ -230,7 +241,12 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
             # 그 턴을 통째로 버리면 안 된다 (실측: mistral 채점에서 HTTP 504).
             # 대신 재시도하는 동안 학생은 계속 기다린다 — 세션 경로의 타임아웃은
             # 배치보다 짧아야 한다(T7c 실측 후 결정).
-            if failure in ("PROVIDER_ERROR", "TIMEOUT", "RATE_LIMITED") and attempt < max_attempts:
+            # 🔴 상태코드를 같이 본다(2026-08-10). 실패 코드만 보면 404·401도
+            # PROVIDER_ERROR라 재시도 대상에 들어간다 -- 실측에서 404를 6번 던지고
+            # 12초를 버렸다. `is_retryable`이 "다시 불러 달라질 여지"만 통과시킨다.
+            if (failure in ("PROVIDER_ERROR", "TIMEOUT", "RATE_LIMITED")
+                    and client.is_retryable(getattr(exc, "status_code", None))
+                    and attempt < max_attempts):
                 # 529 Overloaded는 0.3초에 즉답이라 쉬지 않고 재시도하면 6회가 2초 만에
                 # 소진된다 — 공급자가 회복할 틈을 안 주고 실패만 앞당긴다. 타임아웃으로
                 # 실패한 경우엔 이미 오래 기다렸으니 더 쉬지 않는다.
@@ -241,6 +257,15 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
             raise StageError(f"{stage_id}: {exc}", usages) from exc
 
         usages.append(result.usage)
+        # 첫 시도 성공엔 시도 횟수를 안 붙인다. p04-7은 힌트 24콜이 병렬로 돌아
+        # 같은 줄이 24번 찍히는데, 거기 `1/6`이 붙어 있으면 진행 번호로 읽혀
+        # "왜 1이 계속 반복되나"가 된다(2026-08-10 실제 질문). 재시도만 눈에 띄게 둔다.
+        log.info("%s 성공%s · %s · %dms · in=%d out=%d",
+                 stage_id, "" if attempt == 1 else f" (재시도 {attempt}/{max_attempts})",
+                 model_code,
+                 result.usage.get("latency_ms") or 0,
+                 result.usage.get("input_token_count") or 0,
+                 result.usage.get("output_token_count") or 0)
         try:
             return StageResult(data=parse_json(result.content), usages=usages)
         except (ValueError, json.JSONDecodeError) as exc:

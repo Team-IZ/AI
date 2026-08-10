@@ -97,11 +97,36 @@ _pool_lock = threading.Lock()
 
 
 class LlmError(RuntimeError):
-    """LLM 호출 실패. 원장에 남길 usage를 함께 들고 있다."""
+    """LLM 호출 실패. 원장에 남길 usage를 함께 들고 있다.
 
-    def __init__(self, message: str, usage: dict[str, Any]):
+    `status_code`는 공급자가 준 HTTP 상태다(HTTPError가 아니면 None).
+    **원장에는 안 나간다** — `ai_usage`는 컬럼이 고정이라 늘릴 수 없고, 이 값은
+    재시도할지 판단하는 내부용이다(`stages.call`).
+    """
+
+    def __init__(self, message: str, usage: dict[str, Any], status_code: int | None = None):
         super().__init__(message)
         self.usage = usage
+        self.status_code = status_code
+
+
+def is_retryable(status_code: int | None) -> bool:
+    """다시 불러서 결과가 달라질 여지가 있나.
+
+    🔴 2026-08-10: 그전엔 실패 코드만 보고 재시도해서 **404를 6번 던졌다**
+    (백엔드가 providerModelCode에 Swagger 기본값 `"string"`을 실어 보낸 실측).
+    모델이 없다는 답은 다음에도 똑같다 — 12초와 원장 6행을 버렸다.
+
+    - None: 네트워크·타임아웃 등 HTTP 응답 자체가 없던 경우. 재시도 가치가 있다.
+    - 5xx: 공급자 쪽 일시 장애(503 워커 포화 포함). 재시도한다.
+    - 408·429: 4xx지만 "지금은 안 됨"이라 재시도한다.
+    - 그 밖 4xx(400·401·403·404): 요청이 틀린 것이다. 고치기 전엔 몇 번을 불러도 같다.
+    """
+    if status_code is None:
+        return True
+    if status_code >= 500:
+        return True
+    return status_code in (408, 429)
 
 
 @dataclass(frozen=True)
@@ -255,7 +280,9 @@ def chat(model_code: str, messages: list[dict], *, timeout_s: float = DEFAULT_TI
         usage = {**base, "status": "FAILED", "failure_code": failure_code, "latency_ms": latency_ms}
         # 예외 문구에 키가 실릴 일은 없지만(vendor가 Authorization을 로그에 안 남긴다)
         # 그래도 원문을 그대로 전파하지 않고 종류만 남긴다.
-        raise LlmError(f"{failure_code}: {type(exc).__name__}{_http_detail(exc)}", usage) from exc
+        status_code = exc.code if isinstance(exc, urllib.error.HTTPError) else None
+        raise LlmError(f"{failure_code}: {type(exc).__name__}{_http_detail(exc)}",
+                       usage, status_code) from exc
 
     latency_ms = int((time.monotonic() - started) * 1000)
     content, finish_reason = _extract_content(body)

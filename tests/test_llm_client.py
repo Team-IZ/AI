@@ -87,6 +87,41 @@ def test_transient_provider_codes_are_rate_limited(code):
     assert client._classify(err, str(err)) == "RATE_LIMITED"
 
 
+@pytest.mark.parametrize("status,expected", [
+    (None, True),    # HTTP 응답 자체가 없었다(네트워크·타임아웃)
+    (500, True),
+    (503, True),     # 워커 포화
+    (529, True),
+    (408, True),
+    (429, True),
+    (400, False),
+    (401, False),    # 키 거부 — 다음에도 같다
+    (403, False),
+    (404, False),    # 모델 없음 — 실측에서 이걸 6번 던졌다
+])
+def test_only_transient_statuses_are_retried(status, expected):
+    """🔴 2026-08-10 실측 회귀 — 404를 6번 던지고 12초를 버렸다.
+
+    백엔드가 providerModelCode에 Swagger 기본값 `"string"`을 실어 보내
+    `404 page not found`가 왔는데, 실패 코드가 PROVIDER_ERROR라 재시도 대상에
+    들어갔다. 모델이 없다는 답은 다시 물어도 같다.
+    """
+    assert client.is_retryable(status) is expected
+
+
+def test_llm_error_carries_the_http_status(monkeypatch):
+    """재시도 판단의 재료다 — 예외에 안 실리면 stages가 상태코드를 못 본다."""
+    err = urllib.error.HTTPError("url", 404, "Not Found", {}, io.BytesIO(b"404 page not found"))
+    monkeypatch.setattr(client, "_pool", object())
+    monkeypatch.setattr(client, "_load_vendor", lambda: (_FailingClient(err), None, _Exhausted))
+
+    with pytest.raises(client.LlmError) as exc:
+        client.chat("string", [{"role": "user", "content": "q"}])
+
+    assert exc.value.status_code == 404
+    assert client.is_retryable(exc.value.status_code) is False
+
+
 def test_real_provider_failure_is_not_rate_limited():
     """일시적 포화와 진짜 장애는 갈려야 한다 — 안 그러면 실패 통계를 못 읽는다."""
     err = urllib.error.HTTPError("url", 401, "Unauthorized", {}, None)
