@@ -73,11 +73,25 @@ def test_tokens_are_extracted(fake_vendor):
     assert (u["input_token_count"], u["output_token_count"], u["cached_token_count"]) == (100, 20, 30)
 
 
-def test_429_is_rate_limited():
-    """실패 코드가 틀리면 Spring이 재시도할지 포기할지 잘못 판단한다."""
-    err = urllib.error.HTTPError("url", 429, "Too Many Requests", {}, None)
+@pytest.mark.parametrize("code", [429, 503, 529])
+def test_transient_provider_codes_are_rate_limited(code):
+    """실패 코드가 틀리면 Spring이 재시도할지 포기할지 잘못 판단한다.
+
+    🔴 503은 2026-08-10에 합류했다. 진행 로그를 켜자마자 실패 대부분이
+    `503 ResourceExhausted: Worker local total request limit reached (202/32)`였는데,
+    529와 성격이 같은 큐 포화인데도 PROVIDER_ERROR로 들어가 진짜 장애와 섞였다.
+    백엔드는 PROVIDER_ERROR를 MODEL_ERROR로 저장해서 모델 탓으로 기록된다.
+    """
+    err = urllib.error.HTTPError("url", code, "Service Unavailable", {}, None)
 
     assert client._classify(err, str(err)) == "RATE_LIMITED"
+
+
+def test_real_provider_failure_is_not_rate_limited():
+    """일시적 포화와 진짜 장애는 갈려야 한다 — 안 그러면 실패 통계를 못 읽는다."""
+    err = urllib.error.HTTPError("url", 401, "Unauthorized", {}, None)
+
+    assert client._classify(err, str(err)) == "PROVIDER_ERROR"
 
 
 class _FailingClient(_FakeClient):

@@ -182,7 +182,16 @@ def _classify(exc: Exception, detail: str) -> str:
     # 429는 우리 키의 분당 한도, 529는 공급자 전체 과부하다. 원인은 다르지만
     # 둘 다 "지금은 안 되고 조금 뒤엔 될 수 있다"라서 원장에서 같은 칸에 넣는다.
     # 529를 PROVIDER_ERROR로 두면 진짜 장애와 섞여 실패 통계를 못 읽는다.
-    if isinstance(exc, urllib.error.HTTPError) and exc.code in (429, 529):
+    #
+    # 🔴 503 추가(2026-08-10). 진행 로그를 켜자마자 실패의 대부분이 이거였다:
+    #   HTTP 503 {"message":"ResourceExhausted: Worker local total request limit
+    #             reached (202/32)","type":"Service Unavailable","code":503}
+    # NVIDIA 워커 큐가 찬 것이고 0.4초에 즉답한다 -- 529와 완전히 같은 성격인데
+    # PROVIDER_ERROR로 들어가 **진짜 장애와 섞이고 있었다**(위 주석이 막으려던 그것).
+    # 백엔드에도 영향이 있다: PROVIDER_ERROR는 analysis_job.failure_code를 MODEL_ERROR로
+    # 만든다(HttpAnalysisServerClient.toFailureCode) -- 모델이 멀쩡한데 모델 탓이 된다.
+    # 재시도 대상 집합은 그대로라(stages.call) 동작은 안 바뀌고 분류만 바로잡힌다.
+    if isinstance(exc, urllib.error.HTTPError) and exc.code in (429, 503, 529):
         return "RATE_LIMITED"
     # 컨텍스트 초과는 400으로 오고 본문 문구로만 구분된다. 문구가 바뀌면
     # PROVIDER_ERROR로 떨어질 뿐이라 안전하게 실패한다.
