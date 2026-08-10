@@ -95,12 +95,20 @@ Swagger UI: **http://127.0.0.1:8000/docs** — 여기서 엔드포인트를 직�
 ### 배포 — 자동이다. 신경 쓰지 않는다 (2026-08-03~)
 
 ```
-https://cpiysizen3.ap-northeast-1.awsapprunner.com     고정 HTTPS. 주소가 안 바뀐다
+호출 주소(백엔드·Postman·curl 전부 이 주소를 쓸 것)
+https://ggyyotinmytrpu2w4fbhakqqli0ygenq.lambda-url.ap-northeast-1.on.aws     고정 HTTPS. 주소가 안 바뀐다
 ```
 
 **AWS App Runner가 `main` 브랜치를 물고 자동 배포한다.** 팀원이 그 계정과 설정을 소유하고
 있고, **우리는 `main`에 올리기만 하면 된다.** 배포 명령도, 서버 접속도, 주소 공유도 없다.
 설정 파일은 `main`의 `apprunner.yaml`(런타임 python3.11 · 포트 8080 · 헬스체크 `/api/health`).
+
+⚠️ **`https://cpiysizen3.ap-northeast-1.awsapprunner.com`(App Runner 원본 도메인)을 직접 부르지
+말 것.** 20분 무요청이면 서비스가 비용 절감을 위해 자동 정지(pause)되는데, 원본 도메인은 정지
+중 요청을 App Runner의 envoy가 **즉시 404로 되돌릴 뿐 깨우는 기능이 전혀 없다**(재시도해도
+계속 404 — 콜드스타트가 아니라 라우팅 자체가 안 되는 것처럼 보여서, 실제로 Team-IZ/Backend
+쪽에서 이렇게 오진단하고 헬스체크 설정 문제로 잘못 짚은 사례가 있었다). 위 Lambda 프록시
+URL로 가야만 자동으로 깨어나서(유휴 후 첫 요청은 최대 ~80초 대기, 이후 정상 속도) 응답한다.
 
 ⚠️ **`main` 머지가 곧 재배포다.** 재배포는 프로세스를 갈아치우므로 **진행 중인 job과 세션
 멱등 캐시가 끊긴다.** 세션 자체는 무상태라 안 깨지지만(매 요청이 restore), 폴링 중인
