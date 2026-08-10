@@ -116,7 +116,6 @@ _REQUEST_BODY = multipart_body(
                 "source": {"repoUrl": "https://github.com/owner/repo", "branch": "main"},
                 "extractionScope": "TOTAL",
                 "questionBudget": 3,
-                "curriculumVersionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
                 "teaches": [
                     {"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
                      "label": "제네릭 타입 경계", "unitId": "5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed",

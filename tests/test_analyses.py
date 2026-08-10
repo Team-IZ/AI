@@ -149,6 +149,20 @@ def test_upload_over_the_cap_is_rejected_as_file_too_large(monkeypatch):
     assert response.json()["error"] == "FILE_TOO_LARGE"
 
 
+def test_removed_curriculum_version_id_is_ignored_not_rejected():
+    """🔴 2026-08-10 필드 삭제의 전환 안전장치.
+
+    `curriculumVersionId`는 AI가 한 번도 안 읽던 죽은 필드라 지웠다(백엔드 합의).
+    백엔드가 조회 로직을 걷어낼 때까지 계속 보낼 수 있는데, 그때 422가 나면
+    삭제가 곧 장애가 된다. BaseSchema가 추가 필드를 무시하므로 그냥 통과해야 한다.
+    """
+    body = {**VALID_BODY, "curriculumVersionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6"}
+
+    response = client.post("/api/v0/analyses", json=body, headers=HEADERS)
+
+    assert response.status_code == 202
+
+
 def test_team_scope_without_teaches_is_rejected():
     """teaches 없는 팀 모드는 **조용히 문제 0개**를 내보내던 자리다.
 

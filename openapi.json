@@ -265,19 +265,6 @@
                     "title": "Teaches",
                     "type": "array"
                   },
-                  "curriculumVersionId": {
-                    "anyOf": [
-                      {
-                        "format": "uuid",
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ],
-                    "description": "teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. 🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 이름만으로 구분되지 않았다",
-                    "title": "Curriculumversionid"
-                  },
                   "providerModelCode": {
                     "anyOf": [
                       {
@@ -310,7 +297,6 @@
                     },
                     "extractionScope": "TOTAL",
                     "questionBudget": 3,
-                    "curriculumVersionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
                     "teaches": [
                       {
                         "id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
@@ -542,19 +528,6 @@
                           "title": "Teaches",
                           "type": "array"
                         },
-                        "curriculumVersionId": {
-                          "anyOf": [
-                            {
-                              "format": "uuid",
-                              "type": "string"
-                            },
-                            {
-                              "type": "null"
-                            }
-                          ],
-                          "description": "teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. 🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 이름만으로 구분되지 않았다",
-                          "title": "Curriculumversionid"
-                        },
                         "providerModelCode": {
                           "anyOf": [
                             {
@@ -594,7 +567,7 @@
                   "summary": "① 팀 모드 · GitHub URL — teaches 필수",
                   "description": "오퍼레이터가 고른 교안 개념(`teaches`)마다 문제 1개. 팀당 1회만 분석하고 팀원 세션이 같은 결과를 공유한다. `teaches`를 빼면 422다.",
                   "value": {
-                    "payload": "{\"method\": \"GITHUB_URL\", \"problemScope\": \"TEAM_SHARED_PROBLEM\", \"source\": {\"repoUrl\": \"https://github.com/owner/repo\", \"branch\": \"main\"}, \"extractionScope\": \"TOTAL\", \"questionBudget\": 3, \"curriculumVersionId\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\", \"teaches\": [{\"id\": \"1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"제네릭 타입 경계\", \"unitId\": \"5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [12, 13]}, {\"id\": \"2c8e5abc-aaaa-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"예외 처리 전략\", \"unitId\": \"5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [21]}, {\"id\": \"3d7f4def-cccc-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"의존성 주입\", \"unitId\": \"6d2e1b3f-2222-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [30, 31]}], \"requirements\": [{\"requirementId\": \"9f1e2d3c-4444-4b2d-9b5d-ab8dfbbd4bed\", \"text\": \"회원 가입 시 이메일 중복을 검사한다\"}]}"
+                    "payload": "{\"method\": \"GITHUB_URL\", \"problemScope\": \"TEAM_SHARED_PROBLEM\", \"source\": {\"repoUrl\": \"https://github.com/owner/repo\", \"branch\": \"main\"}, \"extractionScope\": \"TOTAL\", \"questionBudget\": 3, \"teaches\": [{\"id\": \"1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"제네릭 타입 경계\", \"unitId\": \"5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [12, 13]}, {\"id\": \"2c8e5abc-aaaa-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"예외 처리 전략\", \"unitId\": \"5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [21]}, {\"id\": \"3d7f4def-cccc-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"의존성 주입\", \"unitId\": \"6d2e1b3f-2222-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [30, 31]}], \"requirements\": [{\"requirementId\": \"9f1e2d3c-4444-4b2d-9b5d-ab8dfbbd4bed\", \"text\": \"회원 가입 시 이메일 중복을 검사한다\"}]}"
                   }
                 },
                 "individual_github": {
@@ -1028,7 +1001,7 @@
                       "description": "POST /api/v0/curricula 요청. PDF는 multipart의 file 파트로 온다.",
                       "properties": {
                         "versionId": {
-                          "description": "분석 대상 교안 **버전**. `curriculum_version.version_id`다. `/analyses` 요청의 `curriculumVersionId`와 같은 값이다",
+                          "description": "분석 대상 교안 **버전**. `curriculum_version.version_id`다. ⚠️ `/analyses`에는 대응 필드가 없다 — 거기 있던 `curriculumVersionId`는 2026-08-10에 삭제했다(한 프로젝트에 교안 버전이 여러 개라 단일 값으로 표현이 안 되고, AI가 읽지도 않았다). 분석 쪽 교안 출처는 `teaches[]`가 개념 단위로 나른다",
                           "format": "uuid",
                           "title": "Versionid",
                           "type": "string"

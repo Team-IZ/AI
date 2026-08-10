@@ -129,13 +129,15 @@ class AnalysisRequest(BaseSchema):
     teaches: list[dict[str, Any]] = Field(
         default_factory=list, description="[{id, label, unitId, sourcePages}] 교안 참조용"
     )
-    curriculum_version_id: UuidStr | None = Field(
-        default=None,
-        description="teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. "
-                    "🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산"
-                    "(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 "
-                    "이름만으로 구분되지 않았다",
-    )
+    # 🔴 `curriculumVersionId`는 2026-08-10에 삭제했다(백엔드 합의).
+    #   WHY: AI가 한 번도 안 읽던 죽은 필드였다 -- 프롬프트에도 안 들어가고 응답에도
+    #   안 실렸다. 저장할 자리도 없다(`code_analysis`에 그 컬럼이 없다).
+    #   그리고 애초에 관계를 표현하지 못했다: `project_curriculum`이 프로젝트↔교안버전
+    #   교차 원장이라 **한 프로젝트에 교안 버전이 여러 개**다(UUID[] 컬럼도 있다).
+    #   단일 값으로는 "그중 뭘 보낼지"라는 답 없는 질문만 만든다.
+    #   교안 출처는 개념 단위로 흐른다 -- `teaches[]`가 개념을 나르고, 백엔드는
+    #   `project_verification_concept.source_mapping_id`로 어느 교안에서 왔는지 안다.
+    #   AI가 돌려주는 CURRICULUM_EVIDENCE 참조도 `teachId` 하나만 싣는 이유가 그것이다.
     provider_model_code: str | None = Field(
         default=None,
         description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` "
