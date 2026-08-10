@@ -78,6 +78,28 @@ def test_backend_status_wins_over_the_computed_one():
     assert l2["status"] == "NOT_ANSWERED"
 
 
+def test_provisional_status_with_scores_is_overridden():
+    """🔴 PREPARED인데 점수가 있으면 모순이다 — 이미 채점된 것이다.
+
+    세션 도메인이 종료 시 stage 정리를 못 하면 그 값이 그대로 보고서에 찍힌다.
+    백엔드도 dispatch 게이트로 막기로 했지만 Swagger 수동 호출·재생성 경로가 있다.
+    """
+    rows = report.summarize_stages([_stage("L1", 4, status="PREPARED"),
+                                    _stage("L2", 2, status="IN_PROGRESS")])
+
+    assert rows[0]["status"] == "PASSED"
+    assert rows[1]["status"] == "NOT_PASSED"
+
+
+def test_provisional_status_without_scores_is_kept():
+    """점수가 없으면 모순이 아니다 — 진짜로 아직 진행 전일 수 있다. 덮지 않는다."""
+    rows = report.summarize_stages([_stage("L3", status="PREPARED"),
+                                    _stage("L4", status="NOT_ANSWERED")])
+
+    assert rows[2]["status"] == "PREPARED"
+    assert rows[3]["status"] == "NOT_ANSWERED"
+
+
 def test_status_falls_back_to_the_computed_one():
     """백엔드가 status를 안 보내면 점수 유무로 계산한다 — 빈 값이 NOT_REACHED로 굳지 않게."""
     rows = report.summarize_stages([_stage("L1", 4), _stage("L2", 2)])

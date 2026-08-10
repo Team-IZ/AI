@@ -48,6 +48,9 @@ class Report:
 
 SLOTS = ("question", "first_hint", "second_hint")
 
+# "아직 진행 중"을 뜻하는 problem_stage 상태. 점수가 이미 있으면 이 값과 모순이다.
+PROVISIONAL = ("PREPARED", "IN_PROGRESS")
+
 
 def summarize_stages(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """요청의 축별 행을 정규화한다. **DB `problem_stage` 한 행과 1:1이다.**
@@ -83,10 +86,17 @@ def summarize_stages(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
             row["status"] = given["status"]
 
     for row in by_axis.values():
-        if row.get("status") not in (None, "NOT_REACHED"):
-            continue        # 백엔드가 준 값을 덮지 않는다
-        passed = any(row.get(f"{p}_passed") for p in SLOTS)
         answered = any(row.get(f"{p}_score") is not None for p in SLOTS)
+        status = row.get("status")
+        # 백엔드가 준 값을 덮지 않는다. 단 **모순일 때만** 예외다 --
+        # PREPARED/IN_PROGRESS는 "아직 진행 중"인데 점수가 있으면 이미 채점된 것이다.
+        # 세션 도메인이 종료 시 stage 정리를 못 한 채로 리포트가 요청되면 그 값이
+        # 그대로 보고서에 찍힌다(백엔드도 dispatch 게이트로 막기로 했지만, Swagger
+        # 수동 호출·재생성 등 다른 경로가 있어 여기서도 막는다).
+        # 점수가 없는 PREPARED·NOT_ANSWERED는 모순이 아니라 그대로 둔다.
+        if status not in (None, "NOT_REACHED") and not (status in PROVISIONAL and answered):
+            continue
+        passed = any(row.get(f"{p}_passed") for p in SLOTS)
         row["status"] = "PASSED" if passed else ("NOT_PASSED" if answered else "NOT_REACHED")
 
     return [by_axis[axis] for axis in scoring.AXIS_CODES]
