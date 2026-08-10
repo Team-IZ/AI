@@ -1063,14 +1063,14 @@
         }
       }
     },
-    "/api/v0/interview-brief:generate": {
+    "/api/v0/interview-briefs": {
       "post": {
         "tags": [
           "interview-brief"
         ],
         "summary": "면담 브리프 생성 (여는 말 + 질문 체크리스트)",
         "description": "여는 말 + 질문 체크리스트를 한 번의 LLM 호출로 만들어 즉시 반환한다.\n\njob/폴링 없음 -- 이 응답이 곧 결과다. 부분 성공 없음(§5.2): 검증에 하나라도\n걸리면 503 + failureCode로 전체 실패를 알린다.",
-        "operationId": "generate_interview_brief_api_v0_interview_brief_generate_post",
+        "operationId": "generate_interview_brief_api_v0_interview_briefs_post",
         "parameters": [
           {
             "name": "idempotency-key",
@@ -2879,7 +2879,7 @@
           "comprehension"
         ],
         "title": "InterviewBriefRequest",
-        "description": "POST /api/v0/interview-brief:generate 요청 본문 전체."
+        "description": "POST /api/v0/interview-briefs 요청 본문 전체."
       },
       "InterviewBriefResponse": {
         "properties": {

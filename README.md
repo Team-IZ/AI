@@ -182,7 +182,7 @@ https://cpiysizen3.ap-northeast-1.awsapprunner.com     고정 HTTPS. 주소가 �
 | 보고서 | `GET /api/v0/reports/{jobId}` | 보고서 결과 | 동기 |
 | 교안 | `POST /api/v0/curricula` | 교안 PDF(multipart) 분석 요청 | 202 + 폴링 |
 | 교안 | `GET /api/v0/curricula/{jobId}` | 교안 구조·개념 결과 | 동기 |
-| 면담 | `POST /api/v0/interview-brief:generate` | 매니저 면담용 여는 말 + 질문 체크리스트 | 동기 200 |
+| 면담 | `POST /api/v0/interview-briefs` | 매니저 면담용 여는 말 + 질문 체크리스트 | 동기 200 |
 
 **면담 브리프만 신규다** (2026-08-07). 202+폴링이 아니라 **동기 200**인 이유는 하나 — 매니저가 화면 앞에서 기다린다.
 
@@ -592,7 +592,7 @@ DB 3계층(`curriculum_analysis` → `curriculum_section` → `teaches`)을 그�
 
 교안 분석은 LLM을 무겁게 쓴다(교안 1개에 1~2분 이상). **수업 중이 아니라 LMS 업로드 시점에 도는 것**이 전제이고, 그래서 `Idempotency-Key`로 중복 실행을 막는다.
 
-### 면담 브리프 — `POST /api/v0/interview-brief:generate`
+### 면담 브리프 — `POST /api/v0/interview-briefs`
 
 **매니저가 화면 앞에서 기다린다.** job/폴링이 없고 이 응답이 곧 결과다. LLM 1회.
 
