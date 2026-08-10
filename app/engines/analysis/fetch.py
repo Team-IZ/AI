@@ -388,6 +388,17 @@ def _fetch_github(spec: Mapping[str, Any], tmp: str) -> FetchedInput:
             f"클론이 {settings.analysis_input_clone_timeout_s}초를 넘겼습니다",
             retryable=True,
         ) from exc
+    except OSError as exc:
+        # 🔴 2026-08-10 배포본 장애: App Runner 관리형 런타임에 git 바이너리가 없어
+        # subprocess가 FileNotFoundError를 던졌는데, 여기서 안 잡혀 jobs.py의 catch-all로
+        # 새어나가 `MODEL_ERROR`로 보고됐다. LLM은 한 번도 안 불렀는데(aiUsage: []) 백엔드는
+        # "모델 실패"로 읽는다. 같은 파일 _try_embedded_git_history는 이미 OSError까지
+        # 잡고 있었다 -- 이쪽만 안 맞춰져 있던 것이다.
+        #   TEMPORARY_ERROR: GITHUB_FAILURE_CODES 6종 중 "환경이 깨졌다"에 가장 가까운 값.
+        #   retryable=False: 바이너리 부재는 재시도로 안 풀린다(타임아웃과 다른 점).
+        raise FetchError(
+            "TEMPORARY_ERROR", f"저장소를 가져오지 못했습니다: {exc}",
+        ) from exc
 
     resolved_branch = _current_branch(tmp) or branch or None
     head_commit = _head_commit(tmp)

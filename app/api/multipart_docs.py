@@ -10,6 +10,7 @@
 직접 펼쳐 self-contained로 만든다.
 """
 
+import json
 from typing import Any
 
 from pydantic import BaseModel
@@ -35,20 +36,32 @@ def inline_schema(model: type[BaseModel]) -> dict[str, Any]:
 
 def multipart_body(model: type[BaseModel], *, file_description: str,
                    payload_example: str, json_example: dict[str, Any] | None = None,
-                   json_content: bool = True) -> dict[str, Any]:
+                   json_content: bool = True,
+                   examples: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     """`payload`(JSON 문자열) + `file`을 받는 요청 본문 스펙.
 
     `json_content=False`면 multipart만 문서화한다 — 파일이 필수인 엔드포인트다.
+
+    `examples`는 `{이름: {"summary": ..., "value": {...}}}` 형태의 **이름 붙은 예시**다.
+    Swagger UI가 드롭다운으로 띄워 준다 — 예시가 하나뿐이면 모드가 여럿인 엔드포인트에서
+    "그래서 개인 모드는 어떻게 보내나"를 문서가 답하지 못한다(2026-08-10 백엔드 요청).
+    multipart의 `payload` 파트에도 같은 값을 JSON 문자열로 깔아 준다.
     """
     payload_schema = inline_schema(model)
     content: dict[str, Any] = {}
 
     if json_content:
         entry: dict[str, Any] = {"schema": payload_schema}
-        if json_example is not None:
+        if examples:
+            entry["examples"] = examples
+        elif json_example is not None:
             entry["example"] = json_example
         content["application/json"] = entry
 
+    multipart_examples = {
+        name: {**spec, "value": {"payload": json.dumps(spec["value"], ensure_ascii=False)}}
+        for name, spec in (examples or {}).items()
+    }
     content["multipart/form-data"] = {
         "schema": {
             "type": "object",
@@ -70,4 +83,6 @@ def multipart_body(model: type[BaseModel], *, file_description: str,
         },
         "encoding": {"payload": {"contentType": "application/json"}},
     }
+    if multipart_examples:
+        content["multipart/form-data"]["examples"] = multipart_examples
     return {"required": True, "content": content}

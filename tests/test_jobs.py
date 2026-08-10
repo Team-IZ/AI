@@ -12,6 +12,10 @@ BODY = AnalysisRequest.model_validate(
         "source": {"repoUrl": "https://github.com/owner/repo"},
         "extractionScope": "TOTAL",
         "questionBudget": 4,
+        # 2026-08-10: problemScope 기본값 TEAM_SHARED_PROBLEM은 teaches를 요구한다.
+        # 빈 teaches로 팀 문제를 내면 조용히 0개가 나가고, DB도 개념 NOT NULL이라
+        # 저장 자체가 안 된다.
+        "teaches": [{"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "label": "제네릭 타입 경계"}],
     }
 )
 
@@ -86,6 +90,27 @@ def test_fetch_failure_code_translation_values_are_all_db_legal():
     assert {_translate_failure_code(c) for c in vocabulary} <= legal
     assert _translate_failure_code("A_CODE_THAT_DOES_NOT_EXIST_YET") in legal
 
+def test_scan_limit_is_file_too_large_not_model_error():
+    """🔴 2026-08-10 회귀 — 스캔 규모 상한이 MODEL_ERROR로 보고됐다.
+
+    이 실패는 fetch가 아니라 **엔진 스캔 단계**에서 나서 FetchError 분기에 안 걸리고
+    catch-all까지 새어나갔다. LLM을 한 번도 안 불렀는데(ai_usage 비어 있음) 백엔드는
+    "모델 실패"로 읽는다 -- git 바이너리 부재와 같은 계열의 오분류다.
+    """
+    from app.engines.analysis import rules
+
+    class _Engine:
+        def analyze(self, request: dict[str, Any], zip_bytes: bytes | None) -> dict[str, Any]:
+            raise rules.ScanLimitExceeded("제출물 총 용량이 상한(100 bytes)을 넘습니다")
+
+    job = create_job(BODY, idempotency_key=None)
+    run_analysis(job.job_id, BODY, _Engine(), None)
+
+    assert job.status == "FAILED"
+    assert job.failure_code == "FILE_TOO_LARGE"
+    assert job.failure_code in fetch_engine.VERIFICATION_FAILURE_CODES
+
+
 def test_requirement_failure_makes_the_job_partial():
     """요구사항 판정만 실패하면 PARTIAL이다.
 
@@ -95,6 +120,7 @@ def test_requirement_failure_makes_the_job_partial():
     body = AnalysisRequest.model_validate({
         "method": "ZIP_WITH_GITLOG",
         "requirements": [{"requirementId": "r1", "text": "로그인"}],
+        "teaches": [{"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "label": "제네릭 타입 경계"}],
     })
     job = create_job(body, idempotency_key=None)
 

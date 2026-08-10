@@ -220,14 +220,17 @@ def test_camelcase_transcript_reaches_the_engine(monkeypatch):
         lambda *a, **k: stages.StageResult(data={"summary": "요약"}, usages=[]),
     )
 
-    wire_turn = {
-        "problemId": "prob-1", "axisCode": "L1", "questionText": "q",
-        "answerText": "a", "answeredAt": "2026-08-02T00:00:00Z",
-        "score": 4, "passed": True, "hintsUsed": 0,
+    # 2026-08-10 모양 변경: problem_stage 행을 그대로 보낸다(축당 1개, 슬롯 평면).
+    wire_stage = {
+        "axisCode": "L1", "status": "PASSED", "questionSequenceNo": 1,
+        "questionText": "q", "questionAnswerText": "a",
+        "questionScore": 4, "questionPassed": True,
+        "firstHintText": None, "firstHintAnswerText": None,
+        "firstHintScore": None, "firstHintPassed": None,
     }
     try:
         r = client.post("/api/v0/reports", headers=HEADERS, json={
-            "problemId": "prob-1", "transcript": [wire_turn], "providerModelCode": "vendor/m",
+            "problemId": "prob-1", "transcript": [wire_stage], "providerModelCode": "vendor/m",
         })
         result = client.get(f"/api/v0/reports/{r.json()['jobId']}",
                             headers=HEADERS).json()["result"]
@@ -243,6 +246,41 @@ def test_camelcase_transcript_reaches_the_engine(monkeypatch):
 # jobs.py와 같은 패턴(주석 참고) -- 무제한 dict가 장기가동 시 계속 큰다.
 # HTTP 왕복은 이 검증에 비해 무거우므로(2000회) tests/test_jobs.py처럼 모듈 함수를
 # 직접 불러 상한을 낮춰서 검증한다.
+
+def test_failed_report_still_records_burned_tokens(monkeypatch):
+    """🔴 2026-08-10 — 보고서가 실패하면 태운 토큰이 증발했다.
+
+    `_real_result`가 build() 성공 뒤에야 job.ai_usage를 채워서, 스테이지가 터지면
+    이미 나간 호출의 원장이 사라진다. 백엔드는 그 원장으로 비용을 집계한다
+    (면담 브리프 §3 A-5 "성공·실패 모든 봉투에 실어라"와 같은 규칙).
+    """
+    from datetime import datetime, timezone
+
+    from app import reports as reports_module
+    from app.engines.analysis.stages import StageError
+    from app.schemas.report import ReportRequest
+
+    burned = [{
+        "feature_code": "REPORT_GENERATION", "model_code": "minimaxai/minimax-m3",
+        "input_token_count": 900, "output_token_count": 0, "cached_token_count": 0,
+        "status": "FAILED", "failure_code": "RATE_LIMITED", "latency_ms": 380,
+        "occurred_at": datetime.now(timezone.utc),
+    }]
+
+    def _boom(*args, **kwargs):
+        raise StageError("p04-6: RATE_LIMITED: HTTPError (HTTP 503 ...)", burned)
+
+    monkeypatch.setattr(reports_module, "_real_result", _boom)
+    monkeypatch.setattr(get_settings(), "engine_mode", "real", raising=False)
+
+    body = ReportRequest.model_validate({"problemId": "prob-stub-1"})
+    job = reports_module.create_job(body, idempotency_key=None)
+    reports_module.run_report(job.job_id, body)
+
+    assert job.status == "FAILED"
+    assert len(job.ai_usage) == 1
+    assert job.ai_usage[0].input_token_count == 900
+
 
 def test_old_jobs_are_evicted_past_the_cap(monkeypatch):
     """상한을 넘기면 가장 먼저 만든 job부터 밀려난다."""

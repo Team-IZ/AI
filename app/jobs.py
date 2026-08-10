@@ -4,6 +4,7 @@
 영속/스케일 필요시 Redis 나 DB로 이전, 지금은 단일 프로세스 개발용
 """
 
+import logging
 import uuid
 
 from collections import OrderedDict
@@ -11,6 +12,9 @@ from datetime import datetime, timezone
 from typing import Any
 
 from app.engines.analysis import fetch as fetch_engine
+from app.engines.analysis import rules
+
+log = logging.getLogger(__name__)
 from app.engines.base import AnalysisEngine
 from app.schemas.analysis import AnalysisJobStatus, AnalysisRequest, AnalysisResult
 from app.usage import to_ai_usage
@@ -104,6 +108,9 @@ def run_analysis(
     job = _jobs[job_id]
     job.status = "RUNNING"
     job.started_at = datetime.now(timezone.utc)
+    log.info("분석 시작 job=%s method=%s scope=%s teaches=%d requirements=%d",
+             job_id, body.method, body.problem_scope,
+             len(body.teaches), len(body.requirements))
 
     try:
         raw = engine.analyze(body.model_dump(), zip_bytes)
@@ -141,6 +148,13 @@ def run_analysis(
                 f"요구사항 판정 {failed_judgements}건이 실패했습니다. "
                 f"문제·질문·힌트는 정상입니다"
             )
+    except rules.ScanLimitExceeded as exc:
+        # 엔진 스캔 단계의 규모 상한이다. fetch 단계가 아니라서 아래 FetchError 분기에
+        # 안 걸리고, 잡아주지 않으면 catch-all의 MODEL_ERROR가 된다 -- LLM은 한 번도
+        # 안 불렸는데(ai_usage 비어 있음) 백엔드가 "모델 실패"로 읽는다.
+        job.status = "FAILED"
+        job.failure_code = "FILE_TOO_LARGE"
+        job.failure_reason = str(exc)
     except fetch_engine.FetchError as exc:
         # fetch 실패(저장소 접근·ZIP 검증) -- FetchError가 이미 세부 사유를 들고 있다
         # (호스트 거부/브랜치 없음/ZIP 손상 등, fetch.py의 11종 어휘). 그 어휘는
@@ -168,3 +182,8 @@ def run_analysis(
                                        idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)
+        elapsed = (job.completed_at - job.started_at).total_seconds()
+        problems = len(job.result.problems) if job.result else 0
+        log.info("분석 종료 job=%s status=%s %.1fs problems=%d llm=%d %s",
+                 job_id, job.status, elapsed, problems, len(job.ai_usage),
+                 job.failure_code or "")

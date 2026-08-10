@@ -12,14 +12,24 @@ TEACHES = [
 ]
 
 
-def _turn(axis: str, score: int, hints_used: int = 0, hint: str | None = None):
-    """턴 하나. `hints_used`가 problem_stage 의 어느 슬롯에 들어갈지를 정한다."""
-    return {
-        "problem_id": "p-1", "axis_code": axis, "question_text": f"{axis} 질문",
-        "answer_text": "답변", "answered_at": "2026-08-02T00:00:00Z",
-        "score": score, "passed": score >= 3, "hints_used": hints_used,
-        "hint_text": hint,
-    }
+def _stage(axis: str, *scores: int, status: str | None = None):
+    """축 하나의 `problem_stage` 행. 점수를 준 순서대로 질문·힌트1·힌트2 슬롯에 넣는다.
+
+    🔴 2026-08-10 모양 변경: 예전엔 턴 목록을 넘기면 엔진이 접었다. 이제 백엔드가
+    이미 접힌 행을 보낸다 — `_stage("L1", 2, 2, 4)`가 "질문 2점 → 힌트1 후 2점 →
+    힌트2 후 4점"이고, 예전 `_turn` 3개와 같은 뜻이다.
+    """
+    slots = ("question", "first_hint", "second_hint")
+    row: dict = {"axis_code": axis, "question_text": f"{axis} 질문"}
+    if status:
+        row["status"] = status
+    for i, score in enumerate(scores):
+        row[f"{slots[i]}_score"] = score
+        row[f"{slots[i]}_passed"] = score >= 3
+        row[f"{slots[i]}_answer_text"] = "답변"
+        if i:
+            row[f"{slots[i]}_text"] = f"힌트{i}"
+    return row
 
 
 def _fake(monkeypatch, data):
@@ -48,10 +58,7 @@ def test_each_attempt_lands_in_its_own_slot():
 
     마지막 시도만 남기면 "힌트 없이 몇 점이었나"가 사라져 자력 판정을 못 한다.
     """
-    rows = report.summarize_stages([
-        _turn("L1", 2), _turn("L1", 2, hints_used=1, hint="힌트1"),
-        _turn("L1", 4, hints_used=2, hint="힌트2"),
-    ])
+    rows = report.summarize_stages([_stage("L1", 2, 2, 4)])
 
     l1 = rows[0]
     assert (l1["question_score"], l1["question_passed"]) == (2, False)
@@ -60,9 +67,51 @@ def test_each_attempt_lands_in_its_own_slot():
     assert l1["status"] == "PASSED"
 
 
+def test_backend_status_wins_over_the_computed_one():
+    """🔴 `NOT_ANSWERED`는 AI가 만들 수 없다 — 점수 기록만 보면 "안 물어봤다"와 구분이 안 된다.
+
+    세션 진행 사실을 아는 쪽은 백엔드다. 보내주면 그대로 쓴다(2026-08-10 확정).
+    """
+    rows = report.summarize_stages([_stage("L2", status="NOT_ANSWERED")])
+
+    l2 = next(r for r in rows if r["axis_code"] == "L2")
+    assert l2["status"] == "NOT_ANSWERED"
+
+
+def test_provisional_status_with_scores_is_overridden():
+    """🔴 PREPARED인데 점수가 있으면 모순이다 — 이미 채점된 것이다.
+
+    세션 도메인이 종료 시 stage 정리를 못 하면 그 값이 그대로 보고서에 찍힌다.
+    백엔드도 dispatch 게이트로 막기로 했지만 Swagger 수동 호출·재생성 경로가 있다.
+    """
+    rows = report.summarize_stages([_stage("L1", 4, status="PREPARED"),
+                                    _stage("L2", 2, status="IN_PROGRESS")])
+
+    assert rows[0]["status"] == "PASSED"
+    assert rows[1]["status"] == "NOT_PASSED"
+
+
+def test_provisional_status_without_scores_is_kept():
+    """점수가 없으면 모순이 아니다 — 진짜로 아직 진행 전일 수 있다. 덮지 않는다."""
+    rows = report.summarize_stages([_stage("L3", status="PREPARED"),
+                                    _stage("L4", status="NOT_ANSWERED")])
+
+    assert rows[2]["status"] == "PREPARED"
+    assert rows[3]["status"] == "NOT_ANSWERED"
+
+
+def test_status_falls_back_to_the_computed_one():
+    """백엔드가 status를 안 보내면 점수 유무로 계산한다 — 빈 값이 NOT_REACHED로 굳지 않게."""
+    rows = report.summarize_stages([_stage("L1", 4), _stage("L2", 2)])
+
+    assert rows[0]["status"] == "PASSED"        # 통과 슬롯이 있다
+    assert rows[1]["status"] == "NOT_PASSED"    # 답은 했는데 미달
+    assert rows[2]["status"] == "NOT_REACHED"   # 아예 안 물어봄
+
+
 def test_unreached_axes_are_still_four_rows():
     """DB problem_stage가 문제당 4행이다. 빼고 보내면 Spring이 순서로 짐작한다."""
-    rows = report.summarize_stages([_turn("L1", 2)])
+    rows = report.summarize_stages([_stage("L1", 2)])
 
     assert [r["axis_code"] for r in rows] == ["L1", "L2", "L3", "L4"]
     for r in rows[1:]:
@@ -74,18 +123,18 @@ def test_unreached_axes_are_still_four_rows():
 def test_reached_stage_counts_consecutive_passes():
     """계단이라 건너뛴 통과는 없다."""
     assert report.reached_stage(report.summarize_stages([])) == 0
-    assert report.reached_stage(report.summarize_stages([_turn("L1", 4)])) == 1
+    assert report.reached_stage(report.summarize_stages([_stage("L1", 4)])) == 1
     assert report.reached_stage(report.summarize_stages(
-        [_turn("L1", 4), _turn("L2", 4), _turn("L3", 2)])) == 2
+        [_stage("L1", 4), _stage("L2", 4), _stage("L3", 2)])) == 2
 
 
 def test_retest_needs_l1_and_l2(monkeypatch):
     """재시험은 모델에게 묻지 않는다 — L1·L2 통과 여부로 결정된다."""
     _fake(monkeypatch, NARRATIVE)
 
-    l2_failed = report.build("p-1", 1, [_turn("L1", 4), _turn("L2", 2)], model_code="m")
+    l2_failed = report.build("p-1", 1, [_stage("L1", 4), _stage("L2", 2)], model_code="m")
     l3_failed = report.build("p-1", 1,
-                             [_turn("L1", 4), _turn("L2", 4), _turn("L3", 2)], model_code="m")
+                             [_stage("L1", 4), _stage("L2", 4), _stage("L3", 2)], model_code="m")
 
     assert l2_failed.retest is True
     assert l3_failed.retest is False      # 상위 단계 미달은 재시험이 아니다
@@ -97,7 +146,7 @@ def test_markdown_has_no_numeric_scores(monkeypatch):
     """화면에 숫자 점수가 없다(PM 설계 v2 §10-3). 도달 단계와 서술만 쓴다."""
     _fake(monkeypatch, NARRATIVE)
 
-    md = report.build("p-1", 1, [_turn("L1", 4), _turn("L2", 3)], model_code="m",
+    md = report.build("p-1", 1, [_stage("L1", 4), _stage("L2", 3)], model_code="m",
                       teaches=[{"id": "t1", "label": "흐름",
                                 "unit_id": "u1", "source_pages": [36, 46]}]).report_markdown
 
@@ -114,7 +163,7 @@ def test_unreached_axes_are_explained_not_scored(monkeypatch):
     """'못한 것'과 '안 물어본 것'을 섞으면 안 된다(§5-1 ②)."""
     _fake(monkeypatch, NARRATIVE)
 
-    md = report.build("p-1", 1, [_turn("L1", 2)], model_code="m").report_markdown
+    md = report.build("p-1", 1, [_stage("L1", 2)], model_code="m").report_markdown
 
     assert "물어보지 않은 것" in md
 
@@ -124,7 +173,7 @@ def test_invented_teach_id_is_dropped(monkeypatch):
     _fake(monkeypatch, {**NARRATIVE,
                         "gaps": [{"axis": "L3", "detail": "d", "teach_id": "t-nope"}]})
 
-    built = report.build("p-1", 1, [_turn("L1", 4)], model_code="m", teaches=TEACHES)
+    built = report.build("p-1", 1, [_stage("L1", 4)], model_code="m", teaches=TEACHES)
 
     assert built.curriculum_refs == []
     # 구조화 필드에도 새면 안 된다 — 두 필드가 다른 교안을 가리키게 된다.
@@ -135,7 +184,7 @@ def test_narrative_mirrors_the_markdown(monkeypatch):
     """마크다운과 구조화 필드는 같은 내용이다. 프론트가 헤딩을 다시 파싱하지 않도록."""
     _fake(monkeypatch, NARRATIVE)
 
-    built = report.build("p-1", 1, [_turn("L1", 4)], model_code="m", teaches=TEACHES)
+    built = report.build("p-1", 1, [_stage("L1", 4)], model_code="m", teaches=TEACHES)
 
     assert built.narrative["summary"] == NARRATIVE["summary"]
     assert built.narrative["gaps"][0]["teach_id"] == "t1"
@@ -150,7 +199,7 @@ def test_failed_narrative_is_empty_not_an_apology(monkeypatch):
 
     monkeypatch.setattr(report.stages, "call", _boom)
 
-    built = report.build("p-1", 1, [_turn("L1", 4)], model_code="m", teaches=TEACHES)
+    built = report.build("p-1", 1, [_stage("L1", 4)], model_code="m", teaches=TEACHES)
 
     assert built.narrative_failed is True
     assert built.narrative["summary"] is None
@@ -161,7 +210,7 @@ def test_failed_narrative_is_empty_not_an_apology(monkeypatch):
 def test_curriculum_refs_come_from_gaps(monkeypatch):
     _fake(monkeypatch, NARRATIVE)
 
-    refs = report.build("p-1", 1, [_turn("L1", 4)], model_code="m",
+    refs = report.build("p-1", 1, [_stage("L1", 4)], model_code="m",
                         teaches=TEACHES).curriculum_refs
 
     assert refs == [{"teachId": "t1", "unitId": "u1", "sourcePages": [36, 46]}]
@@ -174,7 +223,7 @@ def test_llm_failure_still_produces_a_report(monkeypatch):
 
     monkeypatch.setattr(report.stages, "call", _boom)
 
-    built = report.build("p-1", 1, [_turn("L1", 4), _turn("L2", 2)], model_code="m")
+    built = report.build("p-1", 1, [_stage("L1", 4), _stage("L2", 2)], model_code="m")
 
     assert built.problem["reached_stage"] == 1     # 판정은 살아 있다
     assert built.retest is True
@@ -186,12 +235,15 @@ def test_transcript_block_shows_hint_usage(monkeypatch):
     """힌트를 몇 개 받고 답했는지가 보여야 모델이 자력을 서술한다."""
     call = _fake(monkeypatch, NARRATIVE)
 
-    report.build("p-1", 1, [_turn("L1", 2), _turn("L1", 4, hints_used=1, hint="L1 힌트 1")],
+    report.build("p-1", 1, [_stage("L1", 2, 4)],
                  model_code="m")
 
     block = call.values["transcript_block"]
+    # 접힌 행 하나가 시도 2개로 펼쳐진다 — 접힌 채로 주면 모델이 "바로 답했다"와
+    # "힌트 받고 답했다"를 같은 줄에서 읽어야 해서 자력 서술이 뭉개진다.
     assert "힌트 없이 답함" in block
-    assert "직전 힌트: L1 힌트 1" in block
+    assert "힌트 1개 받고 답함" in block
+    assert "직전 힌트: 힌트1" in block
 
 def test_markdown_pointer_never_disagrees_with_curriculum_refs():
     """🔴 화면의 "교안: …"과 `curriculumRefs`가 서로 다른 말을 하면 안 된다.

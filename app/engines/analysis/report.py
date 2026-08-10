@@ -46,39 +46,57 @@ class Report:
     usages: list[dict[str, Any]] = field(default_factory=list)
 
 
-def summarize_stages(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """문답 기록을 축별 한 행으로 접는다. **DB `problem_stage` 한 행과 1:1이다.**
+SLOTS = ("question", "first_hint", "second_hint")
 
-    새 MEAS 정의서(2026-08-03)에서 한 축의 답변 3개(질문·힌트1·힌트2)가 **같은 행의
-    다른 슬롯**에 들어간다. 그래서 마지막 턴만 남기지 않고 **턴의 `hints_used`로 슬롯을
-    골라 흩뿌린다** — 0이면 질문, 1이면 첫 힌트, 2면 둘째 힌트다.
+# "아직 진행 중"을 뜻하는 problem_stage 상태. 점수가 이미 있으면 이 값과 모순이다.
+PROVISIONAL = ("PREPARED", "IN_PROGRESS")
+
+
+def summarize_stages(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """요청의 축별 행을 정규화한다. **DB `problem_stage` 한 행과 1:1이다.**
+
+    🔴 2026-08-10 입력 모양 변경(백엔드 합의). 예전엔 **턴 목록**(축당 최대 3개,
+    `hints_used`로 슬롯을 고름)을 받아 여기서 접었다. 이제 백엔드가 `problem_stage`에서
+    읽은 **이미 접힌 행**을 그대로 보낸다 — 축당 1개, 슬롯 3개가 평평하게 실려 온다.
+      WHY: AI가 내보내는 `StageScore`도 같은 모양이라 입출력이 대칭이 된다. 양쪽에서
+      변환이 사라지고, 변환이 없으면 2026-08-02식 조용한 소실(턴을 넘겼는데 "기록
+      없음"으로 계산)이 성립할 자리가 없다.
+      COST: 옛 턴 모양은 더는 안 받는다. 보내면 슬롯 필드가 없어 NOT_REACHED가 된다.
 
     도달 못 한 축도 4개를 다 채워 보낸다 — `problem_stage`가 문제당 4행으로 미리
     만들어져 있어서, 빼고 보내면 Spring이 어느 행을 채울지 순서로 짐작하게 된다.
     """
-    slots = ("question", "first_hint", "second_hint")
     by_axis: dict[str, dict[str, Any]] = {
         axis: {"axis_code": axis, "status": "NOT_REACHED"} for axis in scoring.AXIS_CODES
     }
 
-    for turn in transcript:
-        axis = turn.get("axis_code")
-        row = by_axis.get(axis)
+    for given in transcript:
+        row = by_axis.get(given.get("axis_code"))
         if row is None:
             continue
-        hints_used = int(turn.get("hints_used") or 0)
-        if not 0 <= hints_used < len(slots):
-            continue
-        score = turn.get("score")
-        prefix = slots[hints_used]
-        row[f"{prefix}_score"] = score
-        row[f"{prefix}_passed"] = bool(turn.get("passed"))
+        for slot in SLOTS:
+            for suffix in ("text", "answer_text", "score", "passed"):
+                value = given.get(f"{slot}_{suffix}")
+                if value is not None:
+                    row[f"{slot}_{suffix}"] = value
+        # 🔴 **백엔드 status를 믿고, 없으면 계산으로 폴백한다**(2026-08-10 확정).
+        # `NOT_ANSWERED`(물었는데 답이 없다)는 AI가 만들 수 없다 — 점수 기록만 보면
+        # "안 물어봤다"와 구분이 안 된다. 세션 진행 사실을 아는 쪽은 백엔드다.
+        if given.get("status"):
+            row["status"] = given["status"]
 
     for row in by_axis.values():
-        passed = any(row.get(f"{p}_passed") for p in slots)
-        answered = any(row.get(f"{p}_score") is not None for p in slots)
-        # 답이 하나도 없으면 "안 물어본 것"이다. NOT_ANSWERED(물었는데 답이 없다)는
-        # 세션 쪽이 판단할 일이라 여기서는 만들지 않는다 — 기록만 보면 구분이 안 된다.
+        answered = any(row.get(f"{p}_score") is not None for p in SLOTS)
+        status = row.get("status")
+        # 백엔드가 준 값을 덮지 않는다. 단 **모순일 때만** 예외다 --
+        # PREPARED/IN_PROGRESS는 "아직 진행 중"인데 점수가 있으면 이미 채점된 것이다.
+        # 세션 도메인이 종료 시 stage 정리를 못 한 채로 리포트가 요청되면 그 값이
+        # 그대로 보고서에 찍힌다(백엔드도 dispatch 게이트로 막기로 했지만, Swagger
+        # 수동 호출·재생성 등 다른 경로가 있어 여기서도 막는다).
+        # 점수가 없는 PREPARED·NOT_ANSWERED는 모순이 아니라 그대로 둔다.
+        if status not in (None, "NOT_REACHED") and not (status in PROVISIONAL and answered):
+            continue
+        passed = any(row.get(f"{p}_passed") for p in SLOTS)
         row["status"] = "PASSED" if passed else ("NOT_PASSED" if answered else "NOT_REACHED")
 
     return [by_axis[axis] for axis in scoring.AXIS_CODES]
@@ -112,18 +130,30 @@ def _teaches_block(teaches: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _transcript_block(transcript: list[dict[str, Any]]) -> str:
-    """문답 기록. **힌트를 몇 개 받고 답했는지가 보여야** 모델이 자력을 서술한다."""
+def _transcript_block(stage_rows: list[dict[str, Any]]) -> str:
+    """문답 기록. **힌트를 몇 개 받고 답했는지가 보여야** 모델이 자력을 서술한다.
+
+    입력은 축별 접힌 행이지만 프롬프트에는 **시도 단위로 펼쳐** 넣는다. 접힌 채로
+    주면 모델이 "질문에 바로 답했다"와 "힌트 둘 받고 답했다"를 같은 줄에서 읽어야 해서
+    자력 서술이 뭉개진다. 답이 없는 슬롯은 건너뛴다 — 안 물어본 자리다.
+    """
+    labels = {"question": "힌트 없이 답함", "first_hint": "힌트 1개 받고 답함",
+              "second_hint": "힌트 2개 받고 답함"}
     blocks = []
-    for i, turn in enumerate(transcript, start=1):
-        hint = turn.get("hint_text")
-        blocks.append(
-            f"[{i}] {turn.get('axis_code')} · 점수 {turn.get('score')}"
-            f" (힌트 {turn.get('hints_used') or 0}개 받고 답함)\n"
-            f"질문: {turn.get('question_text', '')}\n"
-            f"{'직전 힌트: ' + hint if hint else '힌트 없이 답함'}\n"
-            f"답변: {turn.get('answer_text', '')}"
-        )
+    for row in stage_rows:
+        for slot in SLOTS:
+            answer = row.get(f"{slot}_answer_text")
+            score = row.get(f"{slot}_score")
+            if answer is None and score is None:
+                continue
+            hint = row.get(f"{slot}_text") if slot != "question" else None
+            blocks.append(
+                f"[{len(blocks) + 1}] {row.get('axis_code')} · 점수 {score}"
+                f" ({labels[slot]})\n"
+                f"질문: {row.get('question_text', '')}\n"
+                f"{'직전 힌트: ' + hint if hint else '힌트 없이 답함'}\n"
+                f"답변: {answer or ''}"
+            )
     return "\n\n".join(blocks) or "(기록 없음)"
 
 
@@ -268,7 +298,7 @@ def build(problem_id: str, problem_no: int, transcript: list[dict[str, Any]], *,
             "teaches_block": _teaches_block(teaches),
             "analysis_block": _analysis_block(analysis_documents or []),
             "requirements_block": _requirements_block(requirement_results or []),
-            "transcript_block": _transcript_block(transcript),
+            "transcript_block": _transcript_block(stage_rows),
         }, model_code=model_code,
            # 보고서는 202 + 폴링이라 **아무도 화면 앞에서 기다리지 않는다.** 기본 2회로는
            # 529 Overloaded 한 번만 겹쳐도 서술이 통째로 빈다(2026-08-03 실측: 3건 중

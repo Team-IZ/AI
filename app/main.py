@@ -1,5 +1,7 @@
 # FastAPI 앱, 라우터 모아 붙이는 것 외에 로직 두지 않음
 
+import logging
+
 from fastapi import Depends, FastAPI
 
 from app.api import (
@@ -18,7 +20,16 @@ from app.schemas.common import ErrorResponse
 # import 시점에 설정을 강제로 읽어 production 가드를 여기서 터뜨린다.
 # 지연 호출(요청 때 첫 호출)로 두면 기동은 성공하고 /api/health도 200이라
 # App Runner가 배포를 정상으로 판정한 뒤 업무 요청만 전부 500이 된다.
-get_settings()
+_settings = get_settings()
+
+# 앱 로거를 켠다. uvicorn --log-level은 uvicorn 자기 로거만 건드려서 app.* 로그는
+# 그대로 버려진다(기본 root 레벨이 WARNING이라 INFO가 사라진다). 여기서 root를
+# 잡아야 stages.call의 진행 로그와 job 전이가 콘솔·CloudWatch에 나온다.
+logging.basicConfig(
+    level=_settings.log_level.upper(),
+    format="%(asctime)s %(levelname)-7s %(name)s | %(message)s",
+    datefmt="%H:%M:%S",
+)
 
 app = FastAPI(
     title="IZ-GET",
