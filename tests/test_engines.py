@@ -23,6 +23,8 @@ VALID_BODY = {
     "source": {"repoUrl": "https://github.com/owner/repo"},
     "extractionScope": "TOTAL",
     "questionBudget": 4,
+    # 2026-08-10: problemScope 기본값 TEAM_SHARED_PROBLEM은 teaches를 요구한다.
+    "teaches": [{"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "label": "제네릭 타입 경계"}],
 }
 
 

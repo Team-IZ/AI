@@ -105,6 +105,17 @@ class AnalysisRequest(BaseSchema):
     # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다 —
     # AI→백엔드 방향 통신이 0이라 그 구간의 인증·방화벽을 새로 정할 일이 없다.
     method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
+    problem_scope: Literal["TEAM_SHARED_PROBLEM", "INDIVIDUAL_OWN_COMMIT"] = Field(
+        default="TEAM_SHARED_PROBLEM",
+        description="출제 범위. 값 집합은 `assessment_problem.problem_scope` 그대로다. "
+                    "**`teaches`가 비었는지로 추론하지 않고 이 필드로 명시한다** — "
+                    "팀 모드에서 교안 분석이 실패해 `teaches`가 비어 온 경우가 개인 "
+                    "모드로 조용히 바뀌면, 오퍼레이터는 지정한 개념을 시험 본 줄 알지만 "
+                    "실제로는 전혀 다른 문제가 나간다. "
+                    "`TEAM_SHARED_PROBLEM`=`teaches` 필수(개념당 문제 1개, DB가 "
+                    "`project_verification_concept_id` NOT NULL을 요구한다). "
+                    "`INDIVIDUAL_OWN_COMMIT`=`teaches` 없이 코드에서 직접 선정",
+    )
     source: AnalysisSource = Field(default_factory=AnalysisSource)
     extraction_scope: Literal["TOTAL", "OWN_COMMIT"] = "TOTAL"
     commit_email: str | None = Field(default=None, description="OWN_COMMIT일 때 필수")
@@ -144,6 +155,21 @@ class AnalysisRequest(BaseSchema):
 
         if self.extraction_scope == "OWN_COMMIT" and not (self.commit_email or "").strip():
             raise ValueError("extractionScope=OWN_COMMIT에는 commitEmail이 필요합니다")
+
+        # 🔴 팀 모드에 teaches가 없으면 **조용히 문제 0개**가 나갔다(topics.py의
+        # question_count=min(budget, len(teaches))가 0을 요청한다). 빈 결과보다
+        # 명시적 실패가 낫다 -- DB도 TEAM_SHARED_PROBLEM에 개념 NOT NULL을 요구해서
+        # 어차피 저장할 수 없는 결과다.
+        if self.problem_scope == "TEAM_SHARED_PROBLEM" and not self.teaches:
+            raise ValueError(
+                "problemScope=TEAM_SHARED_PROBLEM에는 teaches가 필요합니다"
+                "(개인 코드 분석이면 problemScope=INDIVIDUAL_OWN_COMMIT을 보내세요)"
+            )
+        if self.problem_scope == "INDIVIDUAL_OWN_COMMIT" and self.teaches:
+            raise ValueError(
+                "problemScope=INDIVIDUAL_OWN_COMMIT에는 teaches를 보내지 않습니다"
+                "(DB가 project_verification_concept_id를 NULL로 강제합니다)"
+            )
         return self
 
 class AnalysisAccepted(BaseSchema):

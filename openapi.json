@@ -155,6 +155,16 @@
                     "title": "Method",
                     "type": "string"
                   },
+                  "problemScope": {
+                    "default": "TEAM_SHARED_PROBLEM",
+                    "description": "출제 범위. 값 집합은 `assessment_problem.problem_scope` 그대로다. **`teaches`가 비었는지로 추론하지 않고 이 필드로 명시한다** — 팀 모드에서 교안 분석이 실패해 `teaches`가 비어 온 경우가 개인 모드로 조용히 바뀌면, 오퍼레이터는 지정한 개념을 시험 본 줄 알지만 실제로는 전혀 다른 문제가 나간다. `TEAM_SHARED_PROBLEM`=`teaches` 필수(개념당 문제 1개, DB가 `project_verification_concept_id` NOT NULL을 요구한다). `INDIVIDUAL_OWN_COMMIT`=`teaches` 없이 코드에서 직접 선정",
+                    "enum": [
+                      "TEAM_SHARED_PROBLEM",
+                      "INDIVIDUAL_OWN_COMMIT"
+                    ],
+                    "title": "Problemscope",
+                    "type": "string"
+                  },
                   "source": {
                     "properties": {
                       "repoUrl": {
@@ -287,14 +297,92 @@
                 "title": "AnalysisRequest",
                 "type": "object"
               },
-              "example": {
-                "method": "GITHUB_URL",
-                "source": {
-                  "repoUrl": "https://github.com/owner/repo",
-                  "branch": "main"
+              "examples": {
+                "team_github": {
+                  "summary": "① 팀 모드 · GitHub URL — teaches 필수",
+                  "description": "오퍼레이터가 고른 교안 개념(`teaches`)마다 문제 1개. 팀당 1회만 분석하고 팀원 세션이 같은 결과를 공유한다. `teaches`를 빼면 422다.",
+                  "value": {
+                    "method": "GITHUB_URL",
+                    "problemScope": "TEAM_SHARED_PROBLEM",
+                    "source": {
+                      "repoUrl": "https://github.com/owner/repo",
+                      "branch": "main"
+                    },
+                    "extractionScope": "TOTAL",
+                    "questionBudget": 3,
+                    "curriculumVersionId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                    "teaches": [
+                      {
+                        "id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+                        "label": "제네릭 타입 경계",
+                        "unitId": "5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed",
+                        "sourcePages": [
+                          12,
+                          13
+                        ]
+                      },
+                      {
+                        "id": "2c8e5abc-aaaa-4b2d-9b5d-ab8dfbbd4bed",
+                        "label": "예외 처리 전략",
+                        "unitId": "5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed",
+                        "sourcePages": [
+                          21
+                        ]
+                      },
+                      {
+                        "id": "3d7f4def-cccc-4b2d-9b5d-ab8dfbbd4bed",
+                        "label": "의존성 주입",
+                        "unitId": "6d2e1b3f-2222-4b2d-9b5d-ab8dfbbd4bed",
+                        "sourcePages": [
+                          30,
+                          31
+                        ]
+                      }
+                    ],
+                    "requirements": [
+                      {
+                        "requirementId": "9f1e2d3c-4444-4b2d-9b5d-ab8dfbbd4bed",
+                        "text": "회원 가입 시 이메일 중복을 검사한다"
+                      }
+                    ]
+                  }
                 },
-                "extractionScope": "TOTAL",
-                "questionBudget": 3
+                "individual_github": {
+                  "summary": "② 개인 모드 · GitHub URL — teaches 없이 문제 3개",
+                  "description": "교안 없이 제출 코드 자체에서 문제를 뽑는다. `teaches`를 **보내면 422**다 (DB가 `project_verification_concept_id`를 NULL로 강제한다). 문제 수는 `teaches`와 무관하게 `questionBudget`(기본 3)이다.",
+                  "value": {
+                    "method": "GITHUB_URL",
+                    "problemScope": "INDIVIDUAL_OWN_COMMIT",
+                    "source": {
+                      "repoUrl": "https://github.com/owner/repo",
+                      "branch": "main"
+                    },
+                    "extractionScope": "OWN_COMMIT",
+                    "commitEmail": "trainee@example.com",
+                    "questionBudget": 3
+                  }
+                },
+                "team_zip": {
+                  "summary": "③ 팀 모드 · ZIP — multipart로 보낸다",
+                  "description": "`Content-Type: multipart/form-data`로 `payload`(이 JSON을 문자열로) + `file`(ZIP) 두 파트를 보낸다. `payload` 파트에 `Content-Type: application/json`을 반드시 붙인다.",
+                  "value": {
+                    "method": "ZIP_WITH_GITLOG",
+                    "problemScope": "TEAM_SHARED_PROBLEM",
+                    "extractionScope": "TOTAL",
+                    "questionBudget": 3,
+                    "teaches": [
+                      {
+                        "id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+                        "label": "제네릭 타입 경계",
+                        "unitId": "5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed",
+                        "sourcePages": [
+                          12,
+                          13
+                        ]
+                      }
+                    ]
+                  }
+                }
               }
             },
             "multipart/form-data": {
@@ -342,6 +430,16 @@
                             "ZIP_WITH_GITLOG"
                           ],
                           "title": "Method",
+                          "type": "string"
+                        },
+                        "problemScope": {
+                          "default": "TEAM_SHARED_PROBLEM",
+                          "description": "출제 범위. 값 집합은 `assessment_problem.problem_scope` 그대로다. **`teaches`가 비었는지로 추론하지 않고 이 필드로 명시한다** — 팀 모드에서 교안 분석이 실패해 `teaches`가 비어 온 경우가 개인 모드로 조용히 바뀌면, 오퍼레이터는 지정한 개념을 시험 본 줄 알지만 실제로는 전혀 다른 문제가 나간다. `TEAM_SHARED_PROBLEM`=`teaches` 필수(개념당 문제 1개, DB가 `project_verification_concept_id` NOT NULL을 요구한다). `INDIVIDUAL_OWN_COMMIT`=`teaches` 없이 코드에서 직접 선정",
+                          "enum": [
+                            "TEAM_SHARED_PROBLEM",
+                            "INDIVIDUAL_OWN_COMMIT"
+                          ],
+                          "title": "Problemscope",
                           "type": "string"
                         },
                         "source": {
@@ -477,18 +575,41 @@
                       "type": "object"
                     },
                     "description": "요청 JSON을 문자열로. 구조는 AnalysisRequest",
-                    "example": "{\"method\":\"ZIP_WITH_GITLOG\",\"extractionScope\":\"TOTAL\"}"
+                    "example": "{\"method\":\"ZIP_WITH_GITLOG\",\"problemScope\":\"INDIVIDUAL_OWN_COMMIT\"}"
                   },
                   "file": {
                     "type": "string",
                     "format": "binary",
-                    "description": "제출 ZIP"
+                    "description": "제출 ZIP (multipart일 때만. GITHUB_URL은 application/json으로 보낸다)"
                   }
                 }
               },
               "encoding": {
                 "payload": {
                   "contentType": "application/json"
+                }
+              },
+              "examples": {
+                "team_github": {
+                  "summary": "① 팀 모드 · GitHub URL — teaches 필수",
+                  "description": "오퍼레이터가 고른 교안 개념(`teaches`)마다 문제 1개. 팀당 1회만 분석하고 팀원 세션이 같은 결과를 공유한다. `teaches`를 빼면 422다.",
+                  "value": {
+                    "payload": "{\"method\": \"GITHUB_URL\", \"problemScope\": \"TEAM_SHARED_PROBLEM\", \"source\": {\"repoUrl\": \"https://github.com/owner/repo\", \"branch\": \"main\"}, \"extractionScope\": \"TOTAL\", \"questionBudget\": 3, \"curriculumVersionId\": \"3fa85f64-5717-4562-b3fc-2c963f66afa6\", \"teaches\": [{\"id\": \"1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"제네릭 타입 경계\", \"unitId\": \"5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [12, 13]}, {\"id\": \"2c8e5abc-aaaa-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"예외 처리 전략\", \"unitId\": \"5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [21]}, {\"id\": \"3d7f4def-cccc-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"의존성 주입\", \"unitId\": \"6d2e1b3f-2222-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [30, 31]}], \"requirements\": [{\"requirementId\": \"9f1e2d3c-4444-4b2d-9b5d-ab8dfbbd4bed\", \"text\": \"회원 가입 시 이메일 중복을 검사한다\"}]}"
+                  }
+                },
+                "individual_github": {
+                  "summary": "② 개인 모드 · GitHub URL — teaches 없이 문제 3개",
+                  "description": "교안 없이 제출 코드 자체에서 문제를 뽑는다. `teaches`를 **보내면 422**다 (DB가 `project_verification_concept_id`를 NULL로 강제한다). 문제 수는 `teaches`와 무관하게 `questionBudget`(기본 3)이다.",
+                  "value": {
+                    "payload": "{\"method\": \"GITHUB_URL\", \"problemScope\": \"INDIVIDUAL_OWN_COMMIT\", \"source\": {\"repoUrl\": \"https://github.com/owner/repo\", \"branch\": \"main\"}, \"extractionScope\": \"OWN_COMMIT\", \"commitEmail\": \"trainee@example.com\", \"questionBudget\": 3}"
+                  }
+                },
+                "team_zip": {
+                  "summary": "③ 팀 모드 · ZIP — multipart로 보낸다",
+                  "description": "`Content-Type: multipart/form-data`로 `payload`(이 JSON을 문자열로) + `file`(ZIP) 두 파트를 보낸다. `payload` 파트에 `Content-Type: application/json`을 반드시 붙인다.",
+                  "value": {
+                    "payload": "{\"method\": \"ZIP_WITH_GITLOG\", \"problemScope\": \"TEAM_SHARED_PROBLEM\", \"extractionScope\": \"TOTAL\", \"questionBudget\": 3, \"teaches\": [{\"id\": \"1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed\", \"label\": \"제네릭 타입 경계\", \"unitId\": \"5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed\", \"sourcePages\": [12, 13]}]}"
+                  }
                 }
               }
             }

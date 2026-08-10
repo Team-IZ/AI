@@ -27,6 +27,15 @@ _VENDOR = Path(__file__).parent / "vendor"
 MAX_ENTRIES = 20_000
 MAX_TOTAL_BYTES = 500 * 1024 * 1024
 
+# 🔴 업로드(압축본) 상한. 2026-08-10 신설 -- **그전까지 이 상한이 아예 없었다.**
+# 위 MAX_TOTAL_BYTES는 압축을 푼 뒤 크기라 `_safe_extract`에서야 검사되는데,
+# 그 앞의 `analyses.py:_read_request`가 압축본 전체를 이미 RAM에 올린 뒤였다.
+# 2GB를 보내면 어떤 상한에도 닿기 전에 OOM으로 컨테이너가 죽는다(App Runner는
+# 인스턴스 1개라 진행 중인 다른 job과 세션까지 같이 날아간다).
+#   100MiB 근거: 소스 제출물은 압축 시 보통 1~5MiB다. 정상 제출의 20배 여유이고,
+#   백엔드 동시 2건(corePoolSize=2)이 겹쳐도 200MiB다.
+MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
 # 프롬프트로 옮길 소스 파일 하나의 크기 상한. 이보다 큰 단일 파일은 번들·생성물이라
 # 판단 근거가 아니면서 컨텍스트 예산만 먹는다(스캐너의 GENERATED_FILENAME_RE가
 # 놓치는 것들이 여기서 걸린다).
@@ -38,8 +47,17 @@ MAX_SOURCE_BYTES = 200 * 1024
 # 에만 적용되어 스캔 자체(two_tier_scan.scan())는 못 막는다. 상한은 실측이 아니라
 # 추정치다(D122 주석의 예시인 "4클래스 학생 과제"보다 수십~수백 배 여유) -- 실제
 # 제출물 규모 데이터가 쌓이면 그걸로 보정.
-MAX_SCAN_FILE_COUNT = 300
-MAX_SCAN_TOTAL_BYTES = 5 * 1024 * 1024
+#
+# 🔴 2026-08-10 상향(300개/5MiB -> 3000개/100MiB). 위 주석이 예고한 "실제 제출물
+# 규모 데이터"가 처음 들어왔다 -- 백엔드 실제 제출물이 5MiB에서 막혔다. 세는 대상이
+# 소스만이 아니라 트리의 **모든 파일**이라(.git·빌드 산출물·node_modules 포함)
+# 정상 제출물도 쉽게 넘긴다. 업로드 상한(MAX_UPLOAD_BYTES)과 같은 100MiB로 맞춰
+# "업로드는 통과했는데 스캔에서 막히는" 구간을 없앴다.
+#   COST: 최악의 경우 스캔 비용이 20배. O(J²×filesize)의 J는 소스 파일 수라
+#   실제 배수는 이보다 훨씬 작다.
+#   EXIT: 세는 대상을 소스 확장자로 좁히면(계획 B안) 이 값을 다시 낮출 수 있다.
+MAX_SCAN_FILE_COUNT = 3000
+MAX_SCAN_TOTAL_BYTES = 100 * 1024 * 1024
 
 # finding id 접두사 → assessment_problem.problem_type (이슈 #31 D-5의 5종)
 # REQUIREMENT_IMPL·EXTERNAL_INTEGRATION은 룰이 만들지 않는다. LLM 선정 단계의 몫이다.
@@ -263,6 +281,16 @@ def _strip_symlinks(root: str) -> None:
                 os.unlink(full)
 
 
+class ScanLimitExceeded(ValueError):
+    """스캔 입력 규모 상한 초과. `jobs.py`가 이걸 보고 `FILE_TOO_LARGE`로 옮긴다.
+
+    🔴 2026-08-10: 예전엔 맨 ValueError였다. fetch 단계가 아니라 **엔진 스캔 단계**에서
+    나므로 `fetch.py:_classify_zip_error`가 못 잡고, `jobs.py`의 catch-all까지 새어나가
+    `MODEL_ERROR`로 기록됐다 -- LLM을 한 번도 안 부른 실패에 "모델 실패"가 찍힌다.
+    ValueError를 상속해 기존에 ValueError를 잡던 자리는 그대로 동작한다.
+    """
+
+
 def _enforce_scan_limits(root: str) -> None:
     """vendor 스캐너(우리 소유 아님)를 부르기 전에 입력 규모를 캡핑한다(H13).
 
@@ -277,13 +305,15 @@ def _enforce_scan_limits(root: str) -> None:
         for name in filenames:
             file_count += 1
             if file_count > MAX_SCAN_FILE_COUNT:
-                raise ValueError(f"제출물 파일 수가 상한({MAX_SCAN_FILE_COUNT}개)을 넘습니다")
+                raise ScanLimitExceeded(f"제출물 파일 수가 상한({MAX_SCAN_FILE_COUNT}개)을 넘습니다")
             try:
                 total_bytes += os.path.getsize(os.path.join(dirpath, name))
             except OSError:
                 continue
             if total_bytes > MAX_SCAN_TOTAL_BYTES:
-                raise ValueError(f"제출물 총 용량이 상한({MAX_SCAN_TOTAL_BYTES} bytes)을 넘습니다")
+                raise ScanLimitExceeded(
+                    f"제출물 총 용량이 상한({MAX_SCAN_TOTAL_BYTES} bytes)을 넘습니다"
+                )
 
 
 def scan_directory(root: str) -> dict[str, Any]:

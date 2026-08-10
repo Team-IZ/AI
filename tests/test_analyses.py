@@ -5,6 +5,7 @@ import zipfile
 from fastapi.testclient import TestClient
 
 from app.config import get_settings
+from app.engines.analysis import rules
 from app.main import app
 
 client = TestClient(app)
@@ -17,6 +18,8 @@ VALID_BODY = {
     "source": {"repoUrl": "https://github.com/owner/repo"},
     "extractionScope": "TOTAL",
     "questionBudget": 4,
+    # 2026-08-10: problemScope 기본값 TEAM_SHARED_PROBLEM은 teaches를 요구한다.
+    "teaches": [{"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "label": "제네릭 타입 경계"}],
     # D-fix (redteam audit H12, 2026-08-04): job_id_for_key()가 이제 재사용 요청의
     # submissionId/attemptId를 최초 요청과 대조한다(둘 다 없으면 거부) -- 실제 Spring
     # 호출은 이 값들을 항상 보낸다는 전제이므로, 그걸 안 흉내내던 이 fixture가 현실과
@@ -109,7 +112,8 @@ def _zip_bytes() -> bytes:
 
 def test_accepts_zip_upload():
     """multipart로 payload+file을 보내면 202. JSON 경로와 같은 스키마를 쓴다."""
-    payload = {"method": "ZIP_WITH_GITLOG", "extractionScope": "TOTAL"}
+    payload = {"method": "ZIP_WITH_GITLOG", "extractionScope": "TOTAL",
+               "teaches": [{"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "label": "제네릭"}]}
 
     response = client.post(
         "/api/v0/analyses",
@@ -122,9 +126,71 @@ def test_accepts_zip_upload():
     assert response.json()["jobId"]
 
 
+def test_upload_over_the_cap_is_rejected_as_file_too_large(monkeypatch):
+    """🔴 2026-08-10 신설 — 그전까지 업로드 상한이 **아예 없었다.**
+
+    압축 해제 크기 상한(MAX_TOTAL_BYTES)은 `_safe_extract`에서야 검사되는데, 그 앞의
+    `_read_request`가 압축본 전체를 이미 RAM에 올린 뒤였다. 2GB를 보내면 어떤 상한에도
+    닿기 전에 OOM으로 컨테이너가 죽는다(인스턴스 1개라 다른 job·세션까지 같이).
+    """
+    monkeypatch.setattr(rules, "MAX_UPLOAD_BYTES", 512)
+    payload = {"method": "ZIP_WITH_GITLOG", "extractionScope": "TOTAL",
+               "teaches": [{"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "label": "제네릭"}]}
+
+    response = client.post(
+        "/api/v0/analyses",
+        data={"payload": json.dumps(payload)},
+        files={"file": ("big.zip", b"x" * 4096, "application/zip")},
+        headers=HEADERS,
+    )
+
+    assert response.status_code == 413
+    # 이름이 analysis_job.failure_code 15종과 같아야 백엔드가 그대로 저장한다.
+    assert response.json()["error"] == "FILE_TOO_LARGE"
+
+
+def test_team_scope_without_teaches_is_rejected():
+    """teaches 없는 팀 모드는 **조용히 문제 0개**를 내보내던 자리다.
+
+    topics.py의 question_count=min(budget, len(teaches))가 0을 요청한다. DB도
+    TEAM_SHARED_PROBLEM에 project_verification_concept_id NOT NULL을 요구해서
+    어차피 저장할 수 없는 결과다 — 빈 결과보다 명시적 실패가 낫다.
+    """
+    body = {k: v for k, v in VALID_BODY.items() if k != "teaches"}
+
+    response = client.post("/api/v0/analyses", json=body, headers=HEADERS)
+
+    assert response.status_code == 422
+    assert "teaches" in response.json()["message"]
+
+
+def test_individual_scope_with_teaches_is_rejected():
+    """개인 모드는 DB가 개념을 NULL로 강제한다. teaches를 받으면 저장할 자리가 없다."""
+    body = {**VALID_BODY, "problemScope": "INDIVIDUAL_OWN_COMMIT"}
+
+    response = client.post("/api/v0/analyses", json=body, headers=HEADERS)
+
+    assert response.status_code == 422
+
+
+def test_individual_scope_is_accepted_by_the_schema_but_not_yet_implemented():
+    """요청 계약은 확정, 선정 엔진은 미구현 — 501로 사실대로 끊는다.
+
+    조용히 문제 0개를 돌려주면 백엔드가 "분석은 성공했는데 문제가 없다"로 읽는다.
+    """
+    body = {k: v for k, v in VALID_BODY.items() if k != "teaches"}
+    body["problemScope"] = "INDIVIDUAL_OWN_COMMIT"
+
+    response = client.post("/api/v0/analyses", json=body, headers=HEADERS)
+
+    assert response.status_code == 501
+    assert response.json()["error"] == "NOT_IMPLEMENTED"
+
+
 def test_rejects_zip_method_without_file():
     """method=ZIP_WITH_GITLOG인데 JSON으로만 보내면 422. Content-Type과 method 불일치."""
-    payload = {"method": "ZIP_WITH_GITLOG", "extractionScope": "TOTAL"}
+    payload = {"method": "ZIP_WITH_GITLOG", "extractionScope": "TOTAL",
+               "teaches": [{"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed", "label": "제네릭"}]}
 
     response = client.post("/api/v0/analyses", json=payload, headers=HEADERS)
 
