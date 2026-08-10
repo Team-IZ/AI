@@ -73,6 +73,28 @@ def test_branch_that_looks_like_an_option_is_rejected():
     assert exc.value.failure_code == "BRANCH_NOT_FOUND"
 
 
+def test_missing_git_binary_is_a_fetch_error_not_a_model_error(monkeypatch):
+    """🔴 2026-08-10 배포본 장애 회귀 — git이 없는 환경에서 실패 코드가 뒤바뀌었다.
+
+    App Runner 관리형 런타임엔 git 바이너리가 없다. subprocess가 FileNotFoundError를
+    던지는데 예전엔 `_fetch_github`가 안 잡아서 jobs.py의 catch-all까지 새어나가
+    `MODEL_ERROR`로 보고됐다 -- LLM을 한 번도 안 불렀는데도(aiUsage: []) 백엔드가
+    "모델 실패"로 읽는다. 로컬엔 git이 있어서 378개 테스트가 이걸 못 잡았다.
+    """
+    def no_git(cmd, *args, **kwargs):
+        raise FileNotFoundError(2, "No such file or directory: 'git'")
+
+    monkeypatch.setattr(fetch.subprocess, "run", no_git)
+
+    with pytest.raises(fetch.FetchError) as exc:
+        fetch._fetch_github({"repository_url": "https://github.com/owner/repo"}, "/tmp/unused")
+
+    assert exc.value.failure_code in fetch.GITHUB_FAILURE_CODES
+    assert exc.value.failure_code == "TEMPORARY_ERROR"
+    # 바이너리 부재는 재시도로 안 풀린다 -- 타임아웃(retryable=True)과 갈리는 지점.
+    assert exc.value.retryable is False
+
+
 def test_missing_repo_url_is_rejected():
     with pytest.raises(fetch.FetchError) as exc:
         fetch._fetch_github({}, "/tmp/unused")

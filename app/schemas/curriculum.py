@@ -17,7 +17,10 @@ class CurriculumRequest(BaseSchema):
 
     version_id: UuidStr = Field(
         description="분석 대상 교안 **버전**. `curriculum_version.version_id`다. "
-                    "`/analyses` 요청의 `curriculumVersionId`와 같은 값이다",
+                    "⚠️ `/analyses`에는 대응 필드가 없다 — 거기 있던 "
+                    "`curriculumVersionId`는 2026-08-10에 삭제했다(한 프로젝트에 교안 "
+                    "버전이 여러 개라 단일 값으로 표현이 안 되고, AI가 읽지도 않았다). "
+                    "분석 쪽 교안 출처는 `teaches[]`가 개념 단위로 나른다",
     )
     curriculum_id: UuidStr | None = Field(
         default=None,

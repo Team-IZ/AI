@@ -105,6 +105,17 @@ class AnalysisRequest(BaseSchema):
     # callbackUrl은 없다 (2026-08-03 확정, PLAN §T11 D-3). 202 + 폴링으로 간다 —
     # AI→백엔드 방향 통신이 0이라 그 구간의 인증·방화벽을 새로 정할 일이 없다.
     method: Literal["GITHUB_URL", "ZIP_WITH_GITLOG"]
+    problem_scope: Literal["TEAM_SHARED_PROBLEM", "INDIVIDUAL_OWN_COMMIT"] = Field(
+        default="TEAM_SHARED_PROBLEM",
+        description="출제 범위. 값 집합은 `assessment_problem.problem_scope` 그대로다. "
+                    "**`teaches`가 비었는지로 추론하지 않고 이 필드로 명시한다** — "
+                    "팀 모드에서 교안 분석이 실패해 `teaches`가 비어 온 경우가 개인 "
+                    "모드로 조용히 바뀌면, 오퍼레이터는 지정한 개념을 시험 본 줄 알지만 "
+                    "실제로는 전혀 다른 문제가 나간다. "
+                    "`TEAM_SHARED_PROBLEM`=`teaches` 필수(개념당 문제 1개, DB가 "
+                    "`project_verification_concept_id` NOT NULL을 요구한다). "
+                    "`INDIVIDUAL_OWN_COMMIT`=`teaches` 없이 코드에서 직접 선정",
+    )
     source: AnalysisSource = Field(default_factory=AnalysisSource)
     extraction_scope: Literal["TOTAL", "OWN_COMMIT"] = "TOTAL"
     commit_email: str | None = Field(default=None, description="OWN_COMMIT일 때 필수")
@@ -118,13 +129,15 @@ class AnalysisRequest(BaseSchema):
     teaches: list[dict[str, Any]] = Field(
         default_factory=list, description="[{id, label, unitId, sourcePages}] 교안 참조용"
     )
-    curriculum_version_id: UuidStr | None = Field(
-        default=None,
-        description="teaches가 나온 교안 **버전**. `curriculum_version.version_id`다. "
-                    "🔴 옛 이름 `curriculumId`는 폐기했다(2026-08-05) — 교안 자산"
-                    "(`curriculum_material.material_id`)과 버전 중 무엇을 가리키는지 "
-                    "이름만으로 구분되지 않았다",
-    )
+    # 🔴 `curriculumVersionId`는 2026-08-10에 삭제했다(백엔드 합의).
+    #   WHY: AI가 한 번도 안 읽던 죽은 필드였다 -- 프롬프트에도 안 들어가고 응답에도
+    #   안 실렸다. 저장할 자리도 없다(`code_analysis`에 그 컬럼이 없다).
+    #   그리고 애초에 관계를 표현하지 못했다: `project_curriculum`이 프로젝트↔교안버전
+    #   교차 원장이라 **한 프로젝트에 교안 버전이 여러 개**다(UUID[] 컬럼도 있다).
+    #   단일 값으로는 "그중 뭘 보낼지"라는 답 없는 질문만 만든다.
+    #   교안 출처는 개념 단위로 흐른다 -- `teaches[]`가 개념을 나르고, 백엔드는
+    #   `project_verification_concept.source_mapping_id`로 어느 교안에서 왔는지 안다.
+    #   AI가 돌려주는 CURRICULUM_EVIDENCE 참조도 `teachId` 하나만 싣는 이유가 그것이다.
     provider_model_code: str | None = Field(
         default=None,
         description="공급자에게 그대로 넘길 모델 식별자. 값은 `ai_model.provider_model_code` "
@@ -144,6 +157,21 @@ class AnalysisRequest(BaseSchema):
 
         if self.extraction_scope == "OWN_COMMIT" and not (self.commit_email or "").strip():
             raise ValueError("extractionScope=OWN_COMMIT에는 commitEmail이 필요합니다")
+
+        # 🔴 팀 모드에 teaches가 없으면 **조용히 문제 0개**가 나갔다(topics.py의
+        # question_count=min(budget, len(teaches))가 0을 요청한다). 빈 결과보다
+        # 명시적 실패가 낫다 -- DB도 TEAM_SHARED_PROBLEM에 개념 NOT NULL을 요구해서
+        # 어차피 저장할 수 없는 결과다.
+        if self.problem_scope == "TEAM_SHARED_PROBLEM" and not self.teaches:
+            raise ValueError(
+                "problemScope=TEAM_SHARED_PROBLEM에는 teaches가 필요합니다"
+                "(개인 코드 분석이면 problemScope=INDIVIDUAL_OWN_COMMIT을 보내세요)"
+            )
+        if self.problem_scope == "INDIVIDUAL_OWN_COMMIT" and self.teaches:
+            raise ValueError(
+                "problemScope=INDIVIDUAL_OWN_COMMIT에는 teaches를 보내지 않습니다"
+                "(DB가 project_verification_concept_id를 NULL로 강제합니다)"
+            )
         return self
 
 class AnalysisAccepted(BaseSchema):

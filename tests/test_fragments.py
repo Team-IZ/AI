@@ -98,6 +98,44 @@ def test_short_prefix_does_not_match_anything():
     assert fragments.locate_symbol(files, "a.py", "worker(((")["valid"] is False
 
 
+def test_misquoted_short_line_is_still_located():
+    """🔴 2026-08-10 P02 완주 검증에서 실제로 나온 회귀 — 개념 하나가 통째로 빠졌다.
+
+    모델이 `T = TypeVar("T")`를 `T = TypeVar("T"}`로 인용했다. 그 문자열이 **정확히
+    16자**라 `range(len, MIN_PREFIX_CHARS - 1, -1)`이 한 바퀴만 돌았고, 한 글자도 못
+    깎아서 접두사 폴백이 아무 일도 안 했다. 짧은 줄일수록 폴백이 안 듣던 구멍이다.
+    """
+    files = {"shop/repository.py": "\n".join([
+        "from typing import Generic, TypeVar",
+        'T = TypeVar("T")',
+        "",
+        "class Repository(Generic[T]):",
+        "    pass",
+    ])}
+
+    located = fragments.locate_symbol(files, "shop/repository.py", 'T = TypeVar("T"}')
+
+    assert located["valid"]
+    assert located["line_start"] == 2
+
+
+def test_prefix_that_needs_heavy_trimming_is_refused():
+    """많이 깎아야 맞는 접두사는 "꼬리 오타"가 아니라 **다른 심볼**이다.
+
+    유일성만 조건으로 걸었더니 조작된 인용 `validate_signature_with_hmac(order)`가
+    접두사 `validate`로 실제 줄 `validate(order)`에 유일하게 걸려 통과했다
+    (test_requirements.py::test_fabricated_quote_downgrades_p_to_f가 잡아낸 실측).
+    구별 기준은 길이도 유일성도 아니라 **남은 비율**이다.
+    """
+    files = {"app/pay.py": "def pay(order):\n    validate(order)\n"}
+
+    located = fragments.locate_symbol(
+        files, "app/pay.py", "validate_signature_with_hmac(order)"
+    )
+
+    assert located["valid"] is False
+
+
 def test_broken_backtick_quote_is_repaired():
     """🔴 학생이 보는 텍스트다. 닫는 백틱이 한 글자 일찍 찍혀 나온다."""
     code = '    worker = state.get("next_worker", "FINISH")\n    return worker\n'

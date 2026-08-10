@@ -1,4 +1,5 @@
 """ LLM 래퍼(T7a). 네트워크 없이 응답 해석·실패 분류만 검증한다. """
+import io
 import os
 import urllib.error
 
@@ -72,11 +73,92 @@ def test_tokens_are_extracted(fake_vendor):
     assert (u["input_token_count"], u["output_token_count"], u["cached_token_count"]) == (100, 20, 30)
 
 
-def test_429_is_rate_limited():
-    """실패 코드가 틀리면 Spring이 재시도할지 포기할지 잘못 판단한다."""
-    err = urllib.error.HTTPError("url", 429, "Too Many Requests", {}, None)
+@pytest.mark.parametrize("code", [429, 503, 529])
+def test_transient_provider_codes_are_rate_limited(code):
+    """실패 코드가 틀리면 Spring이 재시도할지 포기할지 잘못 판단한다.
+
+    🔴 503은 2026-08-10에 합류했다. 진행 로그를 켜자마자 실패 대부분이
+    `503 ResourceExhausted: Worker local total request limit reached (202/32)`였는데,
+    529와 성격이 같은 큐 포화인데도 PROVIDER_ERROR로 들어가 진짜 장애와 섞였다.
+    백엔드는 PROVIDER_ERROR를 MODEL_ERROR로 저장해서 모델 탓으로 기록된다.
+    """
+    err = urllib.error.HTTPError("url", code, "Service Unavailable", {}, None)
 
     assert client._classify(err, str(err)) == "RATE_LIMITED"
+
+
+@pytest.mark.parametrize("status,expected", [
+    (None, True),    # HTTP 응답 자체가 없었다(네트워크·타임아웃)
+    (500, True),
+    (503, True),     # 워커 포화
+    (529, True),
+    (408, True),
+    (429, True),
+    (400, False),
+    (401, False),    # 키 거부 — 다음에도 같다
+    (403, False),
+    (404, False),    # 모델 없음 — 실측에서 이걸 6번 던졌다
+])
+def test_only_transient_statuses_are_retried(status, expected):
+    """🔴 2026-08-10 실측 회귀 — 404를 6번 던지고 12초를 버렸다.
+
+    백엔드가 providerModelCode에 Swagger 기본값 `"string"`을 실어 보내
+    `404 page not found`가 왔는데, 실패 코드가 PROVIDER_ERROR라 재시도 대상에
+    들어갔다. 모델이 없다는 답은 다시 물어도 같다.
+    """
+    assert client.is_retryable(status) is expected
+
+
+def test_llm_error_carries_the_http_status(monkeypatch):
+    """재시도 판단의 재료다 — 예외에 안 실리면 stages가 상태코드를 못 본다."""
+    err = urllib.error.HTTPError("url", 404, "Not Found", {}, io.BytesIO(b"404 page not found"))
+    monkeypatch.setattr(client, "_pool", object())
+    monkeypatch.setattr(client, "_load_vendor", lambda: (_FailingClient(err), None, _Exhausted))
+
+    with pytest.raises(client.LlmError) as exc:
+        client.chat("string", [{"role": "user", "content": "q"}])
+
+    assert exc.value.status_code == 404
+    assert client.is_retryable(exc.value.status_code) is False
+
+
+def test_real_provider_failure_is_not_rate_limited():
+    """일시적 포화와 진짜 장애는 갈려야 한다 — 안 그러면 실패 통계를 못 읽는다."""
+    err = urllib.error.HTTPError("url", 401, "Unauthorized", {}, None)
+
+    assert client._classify(err, str(err)) == "PROVIDER_ERROR"
+
+
+class _FailingClient(_FakeClient):
+    def __init__(self, exc):
+        self._exc = exc
+
+    def chat(self, model, messages, **kwargs):
+        raise self._exc
+
+
+def test_http_status_code_survives_into_the_error_message(monkeypatch):
+    """🔴 2026-08-10 배포본 장애 회귀 — 상태코드를 버려서 원인을 못 읽었다.
+
+    호출 4회가 전부 `PROVIDER_ERROR: HTTPError`로만 죽어서, 401(키 거부)·404(모델 없음)·
+    402(크레딧 소진) 중 무엇인지 가릴 수 없었다. 예외 종류만 남기면 진단이 불가능하다.
+    """
+    err = urllib.error.HTTPError(
+        "url", 401, "Unauthorized", {},
+        io.BytesIO(b'{"detail":"invalid key nvapi-SECRET123"}'),
+    )
+    monkeypatch.setattr(client, "_pool", object())
+    monkeypatch.setattr(client, "_load_vendor", lambda: (_FailingClient(err), None, _Exhausted))
+
+    with pytest.raises(client.LlmError) as exc:
+        client.chat("m", [{"role": "user", "content": "q"}])
+
+    msg = str(exc.value)
+    assert "401" in msg and "Unauthorized" in msg
+    assert exc.value.usage["failure_code"] == "PROVIDER_ERROR"
+    # 본문은 싣되 키는 절대 안 싣는다.
+    assert "nvapi-SECRET123" not in msg
+    assert "nvapi-[REDACTED]" in msg
     
 
 def test_env_file_keys_reach_the_pool(tmp_path, monkeypatch):

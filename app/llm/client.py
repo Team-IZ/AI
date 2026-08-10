@@ -7,6 +7,7 @@
 그래서 예외에 usage를 붙여 던진다(LlmError.usage).
 """
 
+import re
 import sys
 import threading
 import time
@@ -96,11 +97,36 @@ _pool_lock = threading.Lock()
 
 
 class LlmError(RuntimeError):
-    """LLM 호출 실패. 원장에 남길 usage를 함께 들고 있다."""
+    """LLM 호출 실패. 원장에 남길 usage를 함께 들고 있다.
 
-    def __init__(self, message: str, usage: dict[str, Any]):
+    `status_code`는 공급자가 준 HTTP 상태다(HTTPError가 아니면 None).
+    **원장에는 안 나간다** — `ai_usage`는 컬럼이 고정이라 늘릴 수 없고, 이 값은
+    재시도할지 판단하는 내부용이다(`stages.call`).
+    """
+
+    def __init__(self, message: str, usage: dict[str, Any], status_code: int | None = None):
         super().__init__(message)
         self.usage = usage
+        self.status_code = status_code
+
+
+def is_retryable(status_code: int | None) -> bool:
+    """다시 불러서 결과가 달라질 여지가 있나.
+
+    🔴 2026-08-10: 그전엔 실패 코드만 보고 재시도해서 **404를 6번 던졌다**
+    (백엔드가 providerModelCode에 Swagger 기본값 `"string"`을 실어 보낸 실측).
+    모델이 없다는 답은 다음에도 똑같다 — 12초와 원장 6행을 버렸다.
+
+    - None: 네트워크·타임아웃 등 HTTP 응답 자체가 없던 경우. 재시도 가치가 있다.
+    - 5xx: 공급자 쪽 일시 장애(503 워커 포화 포함). 재시도한다.
+    - 408·429: 4xx지만 "지금은 안 됨"이라 재시도한다.
+    - 그 밖 4xx(400·401·403·404): 요청이 틀린 것이다. 고치기 전엔 몇 번을 불러도 같다.
+    """
+    if status_code is None:
+        return True
+    if status_code >= 500:
+        return True
+    return status_code in (408, 429)
 
 
 @dataclass(frozen=True)
@@ -181,13 +207,45 @@ def _classify(exc: Exception, detail: str) -> str:
     # 429는 우리 키의 분당 한도, 529는 공급자 전체 과부하다. 원인은 다르지만
     # 둘 다 "지금은 안 되고 조금 뒤엔 될 수 있다"라서 원장에서 같은 칸에 넣는다.
     # 529를 PROVIDER_ERROR로 두면 진짜 장애와 섞여 실패 통계를 못 읽는다.
-    if isinstance(exc, urllib.error.HTTPError) and exc.code in (429, 529):
+    #
+    # 🔴 503 추가(2026-08-10). 진행 로그를 켜자마자 실패의 대부분이 이거였다:
+    #   HTTP 503 {"message":"ResourceExhausted: Worker local total request limit
+    #             reached (202/32)","type":"Service Unavailable","code":503}
+    # NVIDIA 워커 큐가 찬 것이고 0.4초에 즉답한다 -- 529와 완전히 같은 성격인데
+    # PROVIDER_ERROR로 들어가 **진짜 장애와 섞이고 있었다**(위 주석이 막으려던 그것).
+    # 백엔드에도 영향이 있다: PROVIDER_ERROR는 analysis_job.failure_code를 MODEL_ERROR로
+    # 만든다(HttpAnalysisServerClient.toFailureCode) -- 모델이 멀쩡한데 모델 탓이 된다.
+    # 재시도 대상 집합은 그대로라(stages.call) 동작은 안 바뀌고 분류만 바로잡힌다.
+    if isinstance(exc, urllib.error.HTTPError) and exc.code in (429, 503, 529):
         return "RATE_LIMITED"
     # 컨텍스트 초과는 400으로 오고 본문 문구로만 구분된다. 문구가 바뀌면
     # PROVIDER_ERROR로 떨어질 뿐이라 안전하게 실패한다.
     if "context length" in detail.lower() or "maximum context" in detail.lower():
         return "CONTEXT_OVERFLOW"
     return "PROVIDER_ERROR"
+
+
+_NVAPI_KEY_RE = re.compile(r"nvapi-[A-Za-z0-9_-]+")
+
+
+def _http_detail(exc: Exception) -> str:
+    """HTTPError면 ` (HTTP 401 Unauthorized: {본문})`, 아니면 빈 문자열.
+
+    🔴 2026-08-10: 이게 없어서 배포본 장애를 못 읽었다. 4회 호출이 전부 27~98ms 만에
+    `PROVIDER_ERROR: HTTPError`로 죽었는데, 예외 종류만 남기고 상태코드를 버려서
+    401(키 거부)인지 404(모델 없음)인지 402(크레딧 소진)인지 가릴 수 없었다.
+    상태코드·사유구는 비밀이 아니다. 본문은 키를 되비추지 않지만 방어적으로
+    `nvapi-*`를 지우고 200자로 자른다.
+    """
+    if not isinstance(exc, urllib.error.HTTPError):
+        return ""
+    try:
+        body = exc.read().decode(errors="replace")[:200]
+    except Exception:  # 본문을 이미 읽었거나 스트림이 닫힌 경우 -- 상태코드만으로도 충분하다
+        body = ""
+    body = _NVAPI_KEY_RE.sub("nvapi-[REDACTED]", body).strip()
+    head = f" (HTTP {exc.code} {exc.reason}"
+    return f"{head}: {body})" if body else f"{head})"
 
 
 def chat(model_code: str, messages: list[dict], *, timeout_s: float = DEFAULT_TIMEOUT_S,
@@ -222,7 +280,9 @@ def chat(model_code: str, messages: list[dict], *, timeout_s: float = DEFAULT_TI
         usage = {**base, "status": "FAILED", "failure_code": failure_code, "latency_ms": latency_ms}
         # 예외 문구에 키가 실릴 일은 없지만(vendor가 Authorization을 로그에 안 남긴다)
         # 그래도 원문을 그대로 전파하지 않고 종류만 남긴다.
-        raise LlmError(f"{failure_code}: {type(exc).__name__}", usage) from exc
+        status_code = exc.code if isinstance(exc, urllib.error.HTTPError) else None
+        raise LlmError(f"{failure_code}: {type(exc).__name__}{_http_detail(exc)}",
+                       usage, status_code) from exc
 
     latency_ms = int((time.monotonic() - started) * 1000)
     content, finish_reason = _extract_content(body)

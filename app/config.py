@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # 분석 엔진 선택. 기본은 가짜(stub). 실물은 나중에 이식 후 "real"로
     engine_mode: Literal["stub", "real"] = "stub"
 
+    # 앱 로그 레벨. 기본 INFO다 -- 분석 1건이 5분 가까이 걸리는데 그동안 남는 게
+    # access log(202/200)뿐이라 "어디까지 갔나"를 볼 수 없었다(2026-08-10).
+    # INFO면 LLM 호출 1건당 한 줄(stages.call)과 job 시작·종료가 남는다.
+    log_level: str = "INFO"
+
     # 용도별 기본 모델. 값은 provider 식별자다(벤더 접두어 포함) — 요청에
     # providerModelCode가 오면 그쪽이 이긴다(모델 선택은 operator 권한).
     # 팀원 실측 기준값이고 언제든 바뀐다 — 그래서 코드가 아니라 설정이다.

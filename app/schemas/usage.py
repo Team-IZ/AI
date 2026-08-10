@@ -91,7 +91,10 @@ class AiUsage(BaseSchema):
         description="Spring이 ai_model에서 model_id를 조회한다. "
                     "⚠️ **AI는 호출에 쓴 provider 문자열을 그대로 에코한다**(요청의 "
                     "providerModelCode 또는 서버 기본값) — AI는 화면 선택값을 모른다. "
-                    "Spring은 `provider_model_code`로 ai_model을 조회해야 한다",
+                    "🔴 2026-08-10 합의: `ai_model.model_code`를 "
+                    "`provider_model_code`와 **같은 값**(벤더 접두어 포함, 예 "
+                    "`nvidia/nemotron-3-ultra-550b-a55b`)으로 등록한다. 그래야 "
+                    "`WHERE m.model_code = ?` 조회가 그대로 맞는다",
     )
 
     # 어느 작업에 딸린 호출인가. 다형 참조라 FK가 없다.

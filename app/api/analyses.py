@@ -20,6 +20,7 @@ from app.schemas.analysis import (
 from app.schemas.common import ErrorResponse
 
 from app.engines import get_analysis_engine
+from app.engines.analysis import rules
 from app.engines.base import AnalysisEngine
 
 router = APIRouter(tags=["analyses"])
@@ -27,13 +28,48 @@ router = APIRouter(tags=["analyses"])
 def _invalid(message: str) -> ApiError:
     return ApiError(status_code=422, error="INVALID_REQUEST", message=message)
 
+def _too_large(message: str) -> ApiError:
+    # error 값이 analysis_job.failure_code 15종의 FILE_TOO_LARGE와 같은 이름이다 --
+    # 백엔드가 AiCallException.failureCode를 그대로 parse해서 저장하므로,
+    # 다른 이름을 쓰면 저쪽에서 MODEL_ERROR로 뭉개진다.
+    return ApiError(status_code=413, error="FILE_TOO_LARGE", message=message, retryable=False)
+
+async def _read_upload(upload: Any) -> bytes:
+    """업로드를 청크로 받으며 상한을 넘는 순간 끊는다.
+
+    `await upload.read()` 한 방이면 짧지만, 그건 **상한 검사에 도달하기 전에**
+    전체를 RAM에 올린다(`fetch.py:_download`가 같은 이유로 이미 스트리밍이다).
+    Starlette이 multipart를 임시파일로 흘려주므로 여기까지는 디스크에 있다.
+
+    ponytail: b"".join이 순간적으로 2배를 쓴다(상한 100MiB니 최대 200MiB).
+    진짜 해법은 bytes를 아예 안 만들고 파일 객체를 zipfile에 넘기는 것인데,
+    engine이 스냅샷 해시를 zip_bytes 자체로 계산해서 그 경로가 더 넓다.
+    """
+    chunks: list[bytes] = []
+    received = 0
+    while chunk := await upload.read(1024 * 1024):
+        received += len(chunk)
+        if received > rules.MAX_UPLOAD_BYTES:
+            raise _too_large(
+                f"제출 ZIP이 업로드 상한({rules.MAX_UPLOAD_BYTES} bytes)을 넘습니다"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 async def _read_request(request: Request) -> tuple[dict[str,Any], bytes | None]:
     """Content-Type을 보고 본문을 읽는다. (요청 dict, ZIP 바이트) 를 돌려준다.
 
     multipart는 폼 필드 payload(JSON 문자열) + file(ZIP)로 온다.
     """
     content_type = (request.headers.get("content-type") or "").split(";")[0].strip()
-    
+
+    # 본문을 한 바이트도 읽기 전에 끊는다. Content-Length는 클라이언트가 주는 값이라
+    # 이것만 믿지는 않고(_read_upload가 실측으로 다시 검사한다), 정직한 클라이언트가
+    # 거대한 파일을 다 올린 뒤에야 거절당하는 낭비를 없애는 용도다.
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > rules.MAX_UPLOAD_BYTES * 2:
+        raise _too_large(f"요청 본문이 업로드 상한({rules.MAX_UPLOAD_BYTES} bytes)을 넘습니다")
+
     if content_type == "multipart/form-data":
         form = await request.form()
         raw_payload = form.get("payload")
@@ -45,7 +81,7 @@ async def _read_request(request: Request) -> tuple[dict[str,Any], bytes | None]:
             payload = json.loads(raw_payload)
         except (TypeError, ValueError) as exc:
             raise _invalid("payload가 올바른 JSON이 아닙니다") from exc
-        return payload, await upload.read()
+        return payload, await _read_upload(upload)
     
     try:
         payload = await request.json()
@@ -66,13 +102,70 @@ def _validate(payload: Any) -> AnalysisRequest:
 # 백엔드가 요청 필드를 볼 수 있다. 방식·근거는 multipart_docs 모듈 주석 참고.
 _REQUEST_BODY = multipart_body(
     AnalysisRequest,
-    file_description="제출 ZIP",
-    payload_example='{"method":"ZIP_WITH_GITLOG","extractionScope":"TOTAL"}',
-    json_example={
-        "method": "GITHUB_URL",
-        "source": {"repoUrl": "https://github.com/owner/repo", "branch": "main"},
-        "extractionScope": "TOTAL",
-        "questionBudget": 3,
+    file_description="제출 ZIP (multipart일 때만. GITHUB_URL은 application/json으로 보낸다)",
+    payload_example='{"method":"ZIP_WITH_GITLOG","problemScope":"INDIVIDUAL_OWN_COMMIT"}',
+    examples={
+        "team_github": {
+            "summary": "① 팀 모드 · GitHub URL — teaches 필수",
+            "description":
+                "오퍼레이터가 고른 교안 개념(`teaches`)마다 문제 1개. 팀당 1회만 분석하고 "
+                "팀원 세션이 같은 결과를 공유한다. `teaches`를 빼면 422다.",
+            "value": {
+                "method": "GITHUB_URL",
+                "problemScope": "TEAM_SHARED_PROBLEM",
+                "source": {"repoUrl": "https://github.com/owner/repo", "branch": "main"},
+                "extractionScope": "TOTAL",
+                "questionBudget": 3,
+                "teaches": [
+                    {"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+                     "label": "제네릭 타입 경계", "unitId": "5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed",
+                     "sourcePages": [12, 13]},
+                    {"id": "2c8e5abc-aaaa-4b2d-9b5d-ab8dfbbd4bed",
+                     "label": "예외 처리 전략", "unitId": "5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed",
+                     "sourcePages": [21]},
+                    {"id": "3d7f4def-cccc-4b2d-9b5d-ab8dfbbd4bed",
+                     "label": "의존성 주입", "unitId": "6d2e1b3f-2222-4b2d-9b5d-ab8dfbbd4bed",
+                     "sourcePages": [30, 31]},
+                ],
+                "requirements": [
+                    {"requirementId": "9f1e2d3c-4444-4b2d-9b5d-ab8dfbbd4bed",
+                     "text": "회원 가입 시 이메일 중복을 검사한다"},
+                ],
+            },
+        },
+        "individual_github": {
+            "summary": "② 개인 모드 · GitHub URL — teaches 없이 문제 3개",
+            "description":
+                "교안 없이 제출 코드 자체에서 문제를 뽑는다. `teaches`를 **보내면 422**다 "
+                "(DB가 `project_verification_concept_id`를 NULL로 강제한다). "
+                "문제 수는 `teaches`와 무관하게 `questionBudget`(기본 3)이다.",
+            "value": {
+                "method": "GITHUB_URL",
+                "problemScope": "INDIVIDUAL_OWN_COMMIT",
+                "source": {"repoUrl": "https://github.com/owner/repo", "branch": "main"},
+                "extractionScope": "OWN_COMMIT",
+                "commitEmail": "trainee@example.com",
+                "questionBudget": 3,
+            },
+        },
+        "team_zip": {
+            "summary": "③ 팀 모드 · ZIP — multipart로 보낸다",
+            "description":
+                "`Content-Type: multipart/form-data`로 `payload`(이 JSON을 문자열로) + "
+                "`file`(ZIP) 두 파트를 보낸다. `payload` 파트에 "
+                "`Content-Type: application/json`을 반드시 붙인다.",
+            "value": {
+                "method": "ZIP_WITH_GITLOG",
+                "problemScope": "TEAM_SHARED_PROBLEM",
+                "extractionScope": "TOTAL",
+                "questionBudget": 3,
+                "teaches": [
+                    {"id": "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed",
+                     "label": "제네릭 타입 경계", "unitId": "5c1f0a2e-1111-4b2d-9b5d-ab8dfbbd4bed",
+                     "sourcePages": [12, 13]},
+                ],
+            },
+        },
     },
 )
 
@@ -109,6 +202,17 @@ async def create_analysis(
     # 스키마만으로 표현할 수 없음 - Content-Type은 본문 밖의 정보
     if body.method == "ZIP_WITH_GITLOG" and not zip_bytes:
         raise _invalid("method=ZIP_WITH_GITLOG는 multipart/form-data로 ZIP을 함께 보내야 합니다")
+
+    # 🔴 개인 모드는 요청 계약만 확정됐고 선정 엔진이 아직 없다. topics.select()가
+    # teach 중심이라(teaches_block 프롬프트 + teach_id 검증) teaches 없이는 문제를
+    # 0개 만든다. 조용한 0개를 내보내면 백엔드가 "분석은 성공했는데 문제가 없네"로
+    # 읽으므로, 미구현이라는 사실 그대로 끊는다.
+    if body.problem_scope == "INDIVIDUAL_OWN_COMMIT":
+        raise ApiError(
+            status_code=501, error="NOT_IMPLEMENTED", retryable=False,
+            message="problemScope=INDIVIDUAL_OWN_COMMIT 선정 엔진은 아직 구현되지 "
+                    "않았습니다. 요청 형식은 확정이니 이 스펙대로 준비하시면 됩니다",
+        )
         
     if idempotency_key:
         # 같은 요청 다시 온 경우 새로 만들지 않고 처음 것 돌려주기.
