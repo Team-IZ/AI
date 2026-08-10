@@ -220,14 +220,17 @@ def test_camelcase_transcript_reaches_the_engine(monkeypatch):
         lambda *a, **k: stages.StageResult(data={"summary": "요약"}, usages=[]),
     )
 
-    wire_turn = {
-        "problemId": "prob-1", "axisCode": "L1", "questionText": "q",
-        "answerText": "a", "answeredAt": "2026-08-02T00:00:00Z",
-        "score": 4, "passed": True, "hintsUsed": 0,
+    # 2026-08-10 모양 변경: problem_stage 행을 그대로 보낸다(축당 1개, 슬롯 평면).
+    wire_stage = {
+        "axisCode": "L1", "status": "PASSED", "questionSequenceNo": 1,
+        "questionText": "q", "questionAnswerText": "a",
+        "questionScore": 4, "questionPassed": True,
+        "firstHintText": None, "firstHintAnswerText": None,
+        "firstHintScore": None, "firstHintPassed": None,
     }
     try:
         r = client.post("/api/v0/reports", headers=HEADERS, json={
-            "problemId": "prob-1", "transcript": [wire_turn], "providerModelCode": "vendor/m",
+            "problemId": "prob-1", "transcript": [wire_stage], "providerModelCode": "vendor/m",
         })
         result = client.get(f"/api/v0/reports/{r.json()['jobId']}",
                             headers=HEADERS).json()["result"]

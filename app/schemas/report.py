@@ -52,7 +52,18 @@ class ReportRequest(BaseSchema):
     )
     transcript: list[dict[str, Any]] = Field(
         default_factory=list,
-        description="**이 문제의 턴만.** 점수가 이미 확정된 기록 (최대 4단계 × 3시도)",
+        description="**이 문제의 축별 채점 결과.** `problem_stage` 행을 그대로 보낸다 — "
+                    "축당 1개, 최대 4개(L1~L4). 한 항목이 슬롯 3개를 평평하게 담는다: "
+                    "`axisCode` · `status` · `questionText`/`questionAnswerText`/"
+                    "`questionScore`/`questionPassed` · `firstHint...` · `secondHint...`. "
+                    "답이 없는 슬롯은 null로 두거나 생략한다. "
+                    "🔴 2026-08-10 모양 변경: 예전 **턴 목록**(`hintsUsed`로 슬롯을 고르는 "
+                    "축당 최대 3개)은 더는 안 받는다. 보내면 슬롯 필드가 없어 그 축이 "
+                    "NOT_REACHED로 계산된다. **응답 `problem.stages`와 같은 모양이라** "
+                    "Spring은 읽은 행을 그대로 보내고 받은 행을 그대로 INSERT하면 된다. "
+                    "`status`는 보내주면 그대로 쓴다 — `NOT_ANSWERED`(물었는데 답이 없다)는 "
+                    "AI가 만들 수 없어서 세션 진행을 아는 백엔드 값이 정확하다. "
+                    "생략하면 점수 유무로 계산한다",
     )
     analysis_documents: list[dict[str, Any]] = Field(
         default_factory=list, description="[{kind, content}] 코드 분석 문서"
