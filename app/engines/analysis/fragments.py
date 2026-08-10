@@ -73,6 +73,23 @@ def _symbol_candidates(symbol: str) -> list[str]:
 
 MIN_PREFIX_CHARS = 16  # 이보다 짧은 접두사는 아무 줄에나 걸린다
 
+# 🔴 2026-08-10 실측: 하한 16자가 **짧은 줄에서 폴백을 통째로 무력화한다.**
+# 모델이 `T = TypeVar("T")`를 `T = TypeVar("T"}`로 인용했는데(꼬리 한 글자), 그게
+# 정확히 16자라 range(16, 15, -1)이 한 바퀴만 돌았다 -- 한 글자도 못 깎으니 폴백이
+# 아무 일도 안 했다. 15자 접두사면 바로 맞는 자리였고, 개념 하나가 통째로
+# unmatchedTeaches로 빠졌다(P02 완주 검증, 문제 3개 중 2개만 생성).
+#
+# 하한을 그냥 낮추면 원래 막으려던 오인이 돌아온다. 유일성만 거는 것도 부족하다 --
+# 조작된 인용 `validate_signature_with_hmac(order)`가 접두사 `validate`로 실제 줄
+# `validate(order)`에 **유일하게** 걸린다(test_requirements 실측). 막으려던 건
+# 모호성이 아니라 "다른 심볼과 앞부분만 겹치는 것"이었다.
+#
+# 진짜 구별 기준은 길이가 아니라 **얼마나 깎아야 맞았는가**다. 위 docstring이 적어둔
+# 실패 모드는 전부 "앞부분은 맞고 꼬리만 틀렸다"라서 1~2글자만 버리면 맞는다.
+# 조작은 반대로 대부분을 버려야 걸린다(위 예: 35자 중 8자만 남는다 = 23%).
+MIN_SHORT_PREFIX_CHARS = 8   # 이보다 짧으면 비율과 무관하게 거절
+MIN_PREFIX_RATIO = 0.8       # needle의 80% 이상이 남아야 짧은 접두사를 인정한다
+
 
 def _prefix_match(lines: list[str], needle: str) -> int:
     """뒤에서부터 잘라가며 **파일에 실제로 있는 최장 접두사**를 찾는다.
@@ -82,21 +99,32 @@ def _prefix_match(lines: list[str], needle: str) -> int:
 
         worker = state.get("next_worker", "FINISH\\))     따옴표·괄호가 깨짐
         worker = state.get("next_worker", "FINISH"}       ) 대신 }
+        T = TypeVar("T"}                                  ) 대신 } (2026-08-10)
 
     완전 일치만 인정하면 오타 한 글자에 개념 하나가 통째로 "코드에 없음"이 된다 —
     오퍼레이터가 고른 개념이 조용히 빠지는 것이라 가장 비싼 실패다. 시작 줄만
     맞으면 블록 추정이 나머지를 채우므로 접두사로 충분하다.
 
-    길이 하한을 두는 이유: `worker` 같은 짧은 조각은 엉뚱한 줄에 먼저 걸린다.
+    합격 조건이 2단이다. `MIN_PREFIX_CHARS` 이상이면 그대로 인정하고(긴 접두사는
+    그 자체로 충분히 구별된다), 그 아래는 **needle의 80% 이상이 남았을 때만** 인정한다
+    — 꼬리 오타는 통과하고 조작된 인용은 걸러진다.
     """
+    if not needle:
+        return -1
     normalized = [_normalize(ln) for ln in lines]
-    for size in range(len(needle), MIN_PREFIX_CHARS - 1, -1):
+    floor = min(MIN_PREFIX_CHARS, MIN_SHORT_PREFIX_CHARS)
+    for size in range(len(needle), floor - 1, -1):
         prefix = needle[:size].rstrip()
-        if len(prefix) < MIN_PREFIX_CHARS:
+        if len(prefix) < floor:
             break
         idx = next((i for i, ln in enumerate(normalized) if prefix in ln), -1)
-        if idx != -1:
+        if idx == -1:
+            continue
+        if len(prefix) >= MIN_PREFIX_CHARS:
             return idx
+        # 짧은 접두사는 "꼬리만 틀렸다"일 때만 인정한다. 더 깎아도 비율은 떨어지기만
+        # 하므로 여기서 끊는다.
+        return idx if len(prefix) / len(needle) >= MIN_PREFIX_RATIO else -1
     return -1
 
 
