@@ -92,15 +92,19 @@ Swagger UI: **http://127.0.0.1:8000/docs** — 여기서 엔드포인트를 직�
 
 > **워커는 1개로 유지한다.** job·세션 저장소가 인메모리라 `--workers 2` 이상이면 만든 프로세스와 조회 프로세스가 달라져 404가 난다. 시연 규모(동시 10~20명)에서는 제약이 아니다 — 병목은 FastAPI가 아니라 NVIDIA 무료 티어의 분당 40회다.
 
-### 배포 — 자동이다. 신경 쓰지 않는다 (2026-08-03~)
+### 배포 — `main` push가 CI를 거쳐 자동 배포된다 (2026-08-11 갱신)
 
 ```
 주소가 둘이다. 용도가 다르다 (2026-08-11 확정)
 
-origin   https://cpiysizen3.ap-northeast-1.awsapprunner.com      실제 요청 전부
+origin   https://mmpzicmpr7.ap-northeast-1.awsapprunner.com      실제 요청 전부
 프록시    https://ggyyotinmytrpu2w4fbhakqqli0ygenq.lambda-url.ap-northeast-1.on.aws
                                                                  깨우는 용도만. GET /api/health
 ```
+
+⚠️ **원본 도메인이 바뀌었다.** 옛 주소(`cpiysizen3...awsapprunner.com`)는 더 이상 존재하지
+않는다 — 아래 컨테이너 이미지 전환으로 서비스가 재생성되면서 App Runner가 새로 발급한
+주소로 바뀌었다. 어딘가에 옛 주소가 하드코딩돼 있으면 지금부터는 그냥 죽은 주소다.
 
 🔴 **프록시는 게이트웨이가 아니라 "켜는 버튼"이다.** 모든 트래픽을 프록시로 보내면
 **Lambda 함수 URL의 6MB 페이로드 상한**에 걸린다(요청·응답 양쪽. 바이너리는 base64라 실효
@@ -133,9 +137,19 @@ origin으로 직접 보내면 상한이 없다(AI 업로드 상한 100MB가 그�
 
 폴링이 도는 동안(리포트 배치는 1분 주기)에는 인스턴스가 안 잠들어 ②가 거의 안 걸린다.
 
-**AWS App Runner가 `main` 브랜치를 물고 자동 배포한다.** 팀원이 그 계정과 설정을 소유하고
-있고, **우리는 `main`에 올리기만 하면 된다.** 배포 명령도, 서버 접속도, 주소 공유도 없다.
-설정 파일은 `main`의 `apprunner.yaml`(런타임 python3.11 · 포트 8080 · 헬스체크 `/api/health`).
+**★ 2026-08-11: App Runner 관리형 런타임(소스코드 직접 배포)에서 컨테이너 이미지(ECR) 배포로
+전환했다.** 관리형 런타임은 시스템 패키지를 못 깔아서 `git` 바이너리가 없었는데,
+`app/engines/analysis/fetch.py`가 `GITHUB_URL`·임베디드 `.git` 분석에 실제 git CLI를
+`subprocess`로 부르고 있어서 **그 두 경로가 전부 `FileNotFoundError: git`로 죽고 있었다**
+(실측 확인, `TEMPORARY_ERROR`로 분류됨 — 관련 회귀 테스트는 `5c1e9f8` 참조). `Dockerfile`에
+`apt-get install git`만 추가하면 되는 문제라 컨테이너로 옮겼다 — **아래 "GITHUB_URL은 아직
+동작 안 함, dulwich 후속" 문구는 이 전환으로 더 이상 유효하지 않다. git이 실제로 동작한다
+(재현 확인).**
+
+**`main`에 push하면 `.github/workflows/deploy-app-runner.yml`이 테스트→빌드→ECR push→
+배포확정까지 전부 수행한다.** App Runner가 더 이상 GitHub에서 직접 소스를 당겨가지 않으므로
+`apprunner.yaml`은 삭제했다 — 모델 코드 등 배포 env는 `deploy-env.json`으로 옮기고
+`tests/test_apprunner_config.py`가 여전히 코드 기본값과의 드리프트를 잡는다.
 
 ⚠️ **origin 도메인은 스스로 깨어나지 않는다.** 20분 무요청이면 서비스가 비용 절감을 위해
 자동 정지(pause)되는데, 정지 중 요청은 App Runner의 envoy가 **즉시 404로 되돌릴 뿐 깨우는
@@ -278,8 +292,9 @@ INDIVIDUAL_OWN_COMMIT    teaches를 보내면 422.  선정 엔진 미구현이�
 그 전에 6MB에서 막히니 origin으로 직접 보낼 것(위 "배포" 절).
 
 **`GITHUB_URL`은 AI가 서버에서 `git clone --depth 1`로 받는다** (2026-08-03).
-⚠️ **배포 환경에서는 아직 동작하지 않는다** — App Runner 관리형 런타임에 `git` 바이너리가
-없어 `TEMPORARY_ERROR`로 떨어진다. 로컬에서만 된다. dulwich로 대체하는 것이 후속 항목이다. GitHub API로 파일을 긁지 않는다 — 비인증 한도가 IP당 60회/시간이라 **같은 망의 다른 교육생까지 막히고**, 큰 repo는 tree API가 목록을 잘라 소스가 조용히 빠진다(팀 PoC 실사고). **공개 레포만** 되고, 얕은 클론이라 `.git`은 남지만 커밋이 tip 하나뿐이라 `OWN_COMMIT`은 못 한다. `commitSha`는 이 경로에서만 실제 값이 채워진다.
+✅ **2026-08-11부터 배포 환경에서도 동작한다** — 컨테이너 이미지(ECR) 배포로 전환하며
+`git` 바이너리를 직접 설치했다(관리형 런타임은 시스템 패키지를 못 깔아 `TEMPORARY_ERROR`로
+떨어졌었다, 위 "배포" 절 참조). dulwich 대체는 더 이상 필요하지 않다. GitHub API로 파일을 긁지 않는다 — 비인증 한도가 IP당 60회/시간이라 **같은 망의 다른 교육생까지 막히고**, 큰 repo는 tree API가 목록을 잘라 소스가 조용히 빠진다(팀 PoC 실사고). **공개 레포만** 되고, 얕은 클론이라 `.git`은 남지만 커밋이 tip 하나뿐이라 `OWN_COMMIT`은 못 한다. `commitSha`는 이 경로에서만 실제 값이 채워진다.
 
 🔴 **`PARTIAL`이 실제로 나온다.** 요구사항 판정만 실패하고 문제·질문·힌트는 정상으로 나가는 경우다(2026-08-03 신설). 그때 `requirementResults`는 개수를 맞춰 오되 `verdict: "F"` + `note: "판정 실패: …"`로 채워진다 — **`SUCCEEDED`로 저장하면 화면에 "요구사항 전부 미충족"이 사실처럼 뜬다.** 문답은 그대로 진행할 수 있다.
 

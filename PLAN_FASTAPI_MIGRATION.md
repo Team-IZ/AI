@@ -517,10 +517,13 @@ NVIDIA 무료 티어   (키, 모델) 쌍당 분당 40회      ← 키당이 아�
 API별 실제 연동 테스트는 여전히 미착수 — 주소·인증 배선만 끝난 상태.
 
 ```
-origin      https://cpiysizen3.ap-northeast-1.awsapprunner.com                        실제 요청 전부
+origin      https://mmpzicmpr7.ap-northeast-1.awsapprunner.com                        실제 요청 전부
 프록시       https://ggyyotinmytrpu2w4fbhakqqli0ygenq.lambda-url.ap-northeast-1.on.aws  웜업만 (GET /api/health)
 계약        openapi.json  ·  test_folder/ 에 실제 주고받을 데이터가 형식 그대로 있다
 ```
+
+⚠️ **origin 도메인이 바뀌었다** (2026-08-11). 옛 주소(`cpiysizen3...`)는 컨테이너 이미지
+전환으로 서비스가 재생성되며 사라졌다 — 아래 참조.
 
 🔴 **프록시로 전 트래픽을 보내면 안 된다** (2026-08-11, 실측으로 확정). Lambda 함수 URL은
 동기 호출 페이로드 상한이 **6MB**라(요청·응답 양쪽, 바이너리는 base64로 실효 ~4.5MB) 10MB
@@ -537,7 +540,9 @@ ZIP이 `413 RequestEntityTooLargeException`으로 AWS 계층에서 죽는다 —
 
 ```
 · analysis_block 축소   🔴 다음. 아래
-· dulwich로 GITHUB_URL   App Runner에 git 바이너리가 없어 프로덕션에서 죽어 있다
+· ~~dulwich로 GITHUB_URL~~   2026-08-11 해결 — 컨테이너 이미지 배포로 전환해 git 바이너리를
+                          직접 설치함(관리형 런타임은 시스템 패키지를 못 깔아 죽어 있었다).
+                          dulwich 대체 불필요, 이 항목 폐기
 · 개인 모드 선정 엔진     INDIVIDUAL_OWN_COMMIT. 지금 501
 · 리포트 동시성 게이트    세션 끝 일괄 요청이 스레드풀(40)을 넘길 때. 실측 먼저
 · 유료 전환            529의 근본 해결. 팀 논의 (../output_docs/미결_논의사항.md P-3)
