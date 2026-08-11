@@ -74,6 +74,10 @@ def _stub_result(body: CurriculumRequest, pdf_bytes: bytes | None) -> Curriculum
 
     모듈 2개 × 개념 2개. 개념 하나는 설명을 못 찾은 경우(null)로 둬서
     NULL 허용 컬럼을 백엔드가 실제로 마주보게 한다.
+
+    2026-08-12: `keywords`·`confidence`(섹션)와 `kind`·`evidence`·`siblingNames`
+    (개념)를 채운다. 전부 NOT NULL이거나 문제 선정의 재료인데 스텁이 기본값에
+    기대고 있어서, 백엔드가 값이 실제로 실린 모양을 한 번도 못 봤다.
     """
     return CurriculumResult.model_validate(
         {
@@ -90,18 +94,28 @@ def _stub_result(body: CurriculumRequest, pdf_bytes: bytes | None) -> Curriculum
                     "title": "[stub] 예외 처리",
                     "page_start": 1,
                     "page_end": 12,
+                    # 별도 LLM 호출이 아니라 teaches[].canonicalName을 모은 값이다.
+                    "keywords": ["try-except", "finally"],
+                    "confidence": 1.0,
                     "teaches": [
                         {
                             "canonical_name": "try-except",
                             "normalized_name": "try except",
+                            "confidence": 1.0,
                             "canonical_description": "[stub] 예외를 잡아 처리하는 구문",
                             "description_page_start": 3,
                             "description_page_end": 5,
+                            "kind": "CODE_EXAMPLE",
+                            "evidence": "[stub] try: ... except ValueError as e: ...",
+                            # 같은 unit의 다른 개념. 교안이 대안을 가르쳤다는 신호다.
+                            "sibling_names": ["finally"],
                         },
                         {
                             # 설명을 못 찾은 개념. 세 필드가 전부 null이다.
                             "canonical_name": "finally",
                             "normalized_name": "finally",
+                            "kind": "CAUTION",
+                            "sibling_names": ["try except"],
                         },
                     ],
                 },
@@ -110,13 +124,21 @@ def _stub_result(body: CurriculumRequest, pdf_bytes: bytes | None) -> Curriculum
                     "title": "[stub] 동시성",
                     "page_start": 13,
                     "page_end": 30,
+                    "keywords": ["race condition"],
+                    # 이 구간에 걸친 청크가 실패해 개념이 빠졌을 수 있다는 등급.
+                    # 확률이 아니라 두 등급뿐이다(1.0 / 0.5).
+                    "confidence": 0.5,
                     "teaches": [
                         {
                             "canonical_name": "race condition",
                             "normalized_name": "race condition",
+                            "confidence": 0.5,
                             "canonical_description": "[stub] 실행 순서에 따라 결과가 달라지는 상태",
                             "description_page_start": 14,
                             "description_page_end": 14,
+                            "kind": "CONCEPT",
+                            "evidence": None,
+                            "sibling_names": [],
                         }
                     ],
                 },

@@ -22,7 +22,7 @@ from app.schemas.report import (
     ReportRequest,
     ReportResult,
 )
-from app.usage import to_ai_usage
+from app.usage import stub_usage, to_ai_usage
 
 # job_id -> 보고서 job 상태·결과
 # M9 (redteam audit, 2026-08-05): jobs.py와 같은 문제 -- 무제한 dict라 장기가동 시
@@ -89,7 +89,7 @@ _STUB_SCRIPTS: dict[str, list[tuple[int, int]]] = {
 }
 
 
-def _stub_problem(problem_id: str) -> ProblemResult:
+def _stub_problem(problem_id: str, problem_no: int = 1) -> ProblemResult:
     """고정 매트릭스 하나. 백엔드가 파싱 코드를 짤 수 있도록 실제 모양을 준다.
 
     **DB `problem_stage` 한 행과 같은 모양이다** — 질문·힌트1·힌트2 슬롯에 점수가
@@ -126,7 +126,9 @@ def _stub_problem(problem_id: str) -> ProblemResult:
 
     return ProblemResult.model_validate(
         {
-            "problem_no": 1,
+            # 요청 problemNo를 그대로 돌려준다. 1로 고정하면 세션 하나에서 나오는
+            # 보고서 3건이 전부 problemNo=1이 되어 화면의 "문제 2 / 3"과 어긋난다.
+            "problem_no": problem_no,
             "problem_id": problem_id,
             "reached_stage": reached,
             "stages": stages,
@@ -134,16 +136,25 @@ def _stub_problem(problem_id: str) -> ProblemResult:
     )
 
 
-def _stub_result(problem_id: str) -> ReportResult:
-    problem = _stub_problem(problem_id)
+def _stub_result(problem_id: str, problem_no: int = 1) -> ReportResult:
+    problem = _stub_problem(problem_id, problem_no)
     passed = {s.axis_code: s.passed for s in problem.stages}
     return ReportResult(
         report_markdown="# [stub] 검증 보고서\n\n실제 보고서는 엔진 이식 후 생성됩니다.",
         narrative={
             "summary": "[stub] 실제 서술은 엔진이 만듭니다.",
-            "strengths": [],
-            "gaps": [],
-            "autonomy_note": None,
+            # 🔴 예전엔 둘 다 빈 배열이라 백엔드가 `ReportNote` 모양을 한 번도 못 봤다
+            # (teachId·studyPointer가 어디 붙는지). gaps에만 teachId가 있다는 규칙도
+            # 실제 값으로 보여준다.
+            "strengths": [
+                {"axis": "[stub] 예외 처리", "detail": "[stub] 답변에서 근거를 인용한 서술이 들어갑니다.",
+                 "teach_id": None, "study_pointer": None},
+            ],
+            "gaps": [
+                {"axis": "[stub] 동시성", "detail": "[stub] 부족했던 지점의 서술이 들어갑니다.",
+                 "teach_id": "teach-stub-1", "study_pointer": "unit-stub-1의 12~13쪽을 다시 보세요"},
+            ],
+            "autonomy_note": "[stub] 힌트 없이 답한 부분과 힌트 후 답한 부분의 차이가 들어갑니다.",
             "unreached_axes": [s.axis_code for s in problem.stages if s.status == "NOT_REACHED"],
         },
         problem=problem,
@@ -152,10 +163,16 @@ def _stub_result(problem_id: str) -> ReportResult:
         ],
         # 재시험 기준: L1·L2 둘 다 통과해야 재시험이 아니다(scoring.RETEST_TRIGGER_AXES).
         retest=not all(passed.get(axis) for axis in ("L1", "L2")),
+        # 서술이 실패했을 때만 true. 스텁은 항상 서술이 있으므로 false를 명시한다.
+        narrative_failed=False,
         versions={
-            "model_code": "stub-0",
-            "prompt_version": "stub-0",
-            "rubric_version": "stub-0",
+            # 🔴 `"stub-0"`은 **실제 값이 아니다**(2026-08-12 교체). `ReportVersions.
+            # modelCode`는 `aiUsage.modelCode`와 같은 값이고 백엔드가 그걸로
+            # `ai_model.model_code`를 조회한다 — 등록 안 된 문자열이면 조회가 빈다.
+            # 실경로와 같은 기본값(채점 모델)을 그대로 싣는다.
+            "model_code": get_settings().model_code_session,
+            "prompt_version": stages.manifest_version(),
+            "rubric_version": "scoring-2026-08-02",
         },
     )
 
@@ -231,7 +248,15 @@ def run_report(job_id: str, body: ReportRequest | None = None, *,
         if get_settings().engine_mode == "real" and body is not None:
             job.result = _real_result(body, job, idempotency_key, trace_id)
         else:
-            job.result = _stub_result(job.problem_id or "prob-stub-1")
+            job.result = _stub_result(job.problem_id or "prob-stub-1",
+                                      (body.problem_no if body else None) or 1)
+            # 실경로와 같은 자리에 같은 모양으로 원장을 남긴다. 빈 배열이면 백엔드가
+            # REPORT_SNAPSHOT 귀속(Spring이 jobId를 실제 PK로 교체하는 경로)을 못 밟는다.
+            job.ai_usage = to_ai_usage(
+                [stub_usage(job.result.versions.model_code,
+                            input_tokens=4800, output_tokens=1100, latency_ms=33)],
+                "REPORT_SNAPSHOT", job.job_id, feature_code="REPORT_GENERATION",
+                idempotency_key=idempotency_key, trace_id=trace_id)
         job.status = "SUCCEEDED"
     except Exception as exc:
         job.status = "FAILED"

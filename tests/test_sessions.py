@@ -49,7 +49,12 @@ PROBLEMS = [_problem(1), _problem(2)]
 
 @pytest.fixture
 def score(monkeypatch):
-    """채점 점수를 시나리오로 준다. 다 쓰면 마지막 값을 반복한다."""
+    """채점 점수를 시나리오로 준다. 다 쓰면 마지막 값을 반복한다.
+
+    🔴 `engine_mode`를 real로 고정한다(2026-08-12). 기본값(stub)이면 `submit_answer`가
+    `grading.grade`를 아예 안 부르고 자체 스텁 채점으로 떨어져서, 여기서 꽂은 시나리오가
+    조용히 무시된다 — 재는 대상은 **실경로의 진행 규칙**이다.
+    """
     class _Plan(list):
         """점수 시나리오 + 채점기에 실려 간 인자(`seen`)."""
         seen: dict = {}
@@ -68,6 +73,7 @@ def score(monkeypatch):
             matched_level="", evidence="", missing="", usages=[],
         )
 
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
     monkeypatch.setattr(sessions_mod.grading, "grade", _grade)
     return plan
 
@@ -327,6 +333,7 @@ def test_ai_usage_is_reported_for_grading(monkeypatch):
                      "occurred_at": datetime.now(timezone.utc)}],
         )
 
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")   # score 픽스처와 같은 이유
     monkeypatch.setattr(sessions_mod.grading, "grade", _grade)
 
     usage = Backend(session_id="usage-1").answer()["aiUsage"]
