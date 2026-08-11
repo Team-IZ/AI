@@ -3,8 +3,8 @@
 인메모리 dict — 재시작 시 유실. 스케일 필요 시 Redis/DB로 이전.
 스텁이라 고정 결과를 돌려준다. 실제 보고서 생성(p04-6)은 엔진 이식 때 붙인다.
 
-**보고서는 문제 단위다**(2026-08-02). 문제 하나가 끝날 때마다 job 하나가 생기고
-세션 1회에 job이 3개 만들어진다.
+**보고서는 문제 단위다**(2026-08-02). 문제 하나에 job 하나가 생기고 세션 1회에 job이
+3개 만들어진다. **세션이 끝난 뒤 한꺼번에 들어온다**(2026-08-11 백엔드 설계 변경).
 """
 
 import re
@@ -189,10 +189,9 @@ def _real_result(body: ReportRequest, job: ReportJobStatus,
     """
     from app.engines.analysis import report as report_engine
 
-    # 기본값은 **채점과 같은 모델**이다(`model_code_session`).
-    # 보고서는 문제가 끝날 때마다 세션 흐름 안에서 돌고(학생이 다음 문제를 푸는 동안
-    # 병렬), 분석 배치와 지연 요구가 다르다. 분석 기본값(nemotron-ultra)을 쓰면
-    # 세션이 끝나도 보고서가 안 나온다.
+    # 기본값은 **채점과 같은 모델**이다(`model_code_session`). 분석 기본값
+    # (nemotron-ultra)은 리포트에 너무 느리다 — 세션 끝에 문제 수만큼 한꺼번에
+    # 들어오는데(2026-08-11) 건당 지연이 그대로 배치 전체 지연이 된다.
     model_code = body.provider_model_code or get_settings().model_code_session
     built = report_engine.build(
         body.problem_id, body.problem_no or 1,

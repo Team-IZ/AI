@@ -57,8 +57,8 @@
                   ⑤ 질문마다 힌트 2개        = 힌트 24개
                   ②~⑤ 전부 미리 만들어 저장한다
 3. 코드 문답    저장된 문제·힌트를 꺼내 쓴다. AI는 답변 채점만 한다
-4. 보고서       문제 하나가 끝날 때마다 1개 생성. 세션 1회 = 보고서 3개
-                  학생이 다음 문제를 푸는 동안 병렬로 돌린다
+4. 보고서       문제 1개 = 보고서 1개. 세션 1회 = 보고서 3개
+                  세션이 끝난 뒤 문제 수만큼 한꺼번에 요청된다
 ```
 
 ### ① 전면 동결 — 세션 중 LLM 호출은 채점 하나뿐
@@ -80,11 +80,13 @@ L1~L4  질문 동결 · 힌트 동결   전부 분석 배치에서 만들어 DB�
 
 ### ② 보고서는 문제 단위다
 
-세션 1회 = **보고서 3개**. 문제 하나가 끝날 때마다 1개.
+세션 1회 = **보고서 3개**. 문제 1개당 1개.
 
-"병렬"의 뜻: 학생이 **다음 문제를 푸는 동안** 백그라운드로 돈다.
+🔴 **시점이 바뀌었다** (2026-08-11, 백엔드 설계). 예전엔 문제가 끝날 때마다 한 발씩 나갔고 학생이 다음 문제를 푸는 동안 백그라운드로 돌았다. 이제 **세션이 다 끝난 뒤 문제 수만큼 한꺼번에** 나간다 — 백엔드가 5분 주기 스케줄러로 마감된 세션을 모아 돌린다. **학생은 아무것도 안 기다린다**(리포트는 매니저·교육생이 나중에 조회하는 것이다).
 
-⚠️ **마지막 문제의 보고서만 학생이 기다린다.** 앞의 둘은 2분이 걸려도 체감 0이다. 보고서 지연 예산이 의미 있는 건 마지막 하나뿐이다.
+**계약은 안 바뀐다.** `/reports`는 문제 단위 무상태 202라 요청 모양이 그대로다. 바뀌는 것은 **동시성 하나**다.
+
+⚠️ **한 배치에 몰린다.** 세션 60개가 동시 마감되면 POST 180발이다. 백그라운드 워커가 anyio 스레드풀(40)이고 건당 실측 129초라 뒤쪽은 10분 가까이 밀린다 — 백엔드 `item-timeout`(PT10M) 경계다. **dispatch 1회당 세션 수 상한**(10개 = 30발 권장)이 필요하다. 백엔드 몫이지만 넘치면 우리 쪽에도 `MAX_PARALLEL` 게이트를 건다.
 
 ### ③ 시험지는 팀당 한 벌 — 학생은 복사해 쓴다
 
@@ -515,11 +517,18 @@ NVIDIA 무료 티어   (키, 모델) 쌍당 분당 40회      ← 키당이 아�
 API별 실제 연동 테스트는 여전히 미착수 — 주소·인증 배선만 끝난 상태.
 
 ```
-주소        https://ggyyotinmytrpu2w4fbhakqqli0ygenq.lambda-url.ap-northeast-1.on.aws  (Lambda 프록시, 고정)
-            ⚠️ App Runner 원본 도메인(cpiysizen3...awsapprunner.com)이 아니라 반드시 이 프록시
-            주소를 쓸 것 — 원본은 20분 유휴 후 pause되면 깨우는 기능 없이 즉시 404만 반환한다.
+origin      https://cpiysizen3.ap-northeast-1.awsapprunner.com                        실제 요청 전부
+프록시       https://ggyyotinmytrpu2w4fbhakqqli0ygenq.lambda-url.ap-northeast-1.on.aws  웜업만 (GET /api/health)
 계약        openapi.json  ·  test_folder/ 에 실제 주고받을 데이터가 형식 그대로 있다
 ```
+
+🔴 **프록시로 전 트래픽을 보내면 안 된다** (2026-08-11, 실측으로 확정). Lambda 함수 URL은
+동기 호출 페이로드 상한이 **6MB**라(요청·응답 양쪽, 바이너리는 base64로 실효 ~4.5MB) 10MB
+ZIP이 `413 RequestEntityTooLargeException`으로 AWS 계층에서 죽는다 — 프록시 코드로는 못
+피한다. origin 직접이면 상한이 없다. 호출 규칙은 README "배포" 절.
+
+⚠️ **404를 본문으로 갈라야 한다** — App Runner 정지(envoy 404)와 AI의 `JOB_NOT_FOUND`가
+같은 상태코드다. 안 가르면 없는 job을 계속 깨우려 든다.
 
 ⚠️ **채점 타임아웃을 30초 이상으로 잡아 달라고 해야 한다.** 무료 티어에서 턴 왕복 중앙값이
 21.3초, 최대 141.9초다. `retryable: true`면 같은 `clientRequestId`로 재전송해야 세션이 안 끊긴다.
@@ -527,6 +536,10 @@ API별 실제 연동 테스트는 여전히 미착수 — 주소·인증 배선�
 ### 후속 (순서 미정)
 
 ```
+· analysis_block 축소   🔴 다음. 아래
+· dulwich로 GITHUB_URL   App Runner에 git 바이너리가 없어 프로덕션에서 죽어 있다
+· 개인 모드 선정 엔진     INDIVIDUAL_OWN_COMMIT. 지금 501
+· 리포트 동시성 게이트    세션 끝 일괄 요청이 스레드풀(40)을 넘길 때. 실측 먼저
 · 유료 전환            529의 근본 해결. 팀 논의 (../output_docs/미결_논의사항.md P-3)
 · §7-8 선별 로직 교체   아래
 · RELATED_CONTEXT 참조  심볼 테이블이 없어 아직 못 만든다
@@ -534,6 +547,18 @@ API별 실제 연동 테스트는 여전히 미착수 — 주소·인증 배선�
 · 폴링 응답에 진행률     operator가 언제 끝나는지 모른다
 · 재시험용 별도 시험지   분석 때 병렬로 한 벌 더
 ```
+
+#### 🔴 다음 — `analysis_block` 구조적 축소
+
+`_truncate()`가 **문자 단순 절단**이다(`stages.py`). `analysisDocuments`를 `json.dumps`한
+문자열을 상한에서 그냥 끊어서 **JSON이 중간에서 깨진 채로** 모델에 들어간다. 백엔드에는
+"AI가 안전하게 자른다"고 안내했는데 사실이 아니다.
+
+그리고 리포트의 `analysis_block` 상한이 **6,000자**인데 실제 `analysisDocument`는 수만 자다.
+**대부분이 버려지고 있어** 지금까지 나온 리포트 품질이 실제보다 낮았을 수 있다.
+
+고칠 방향: 자르기 전에 **문서를 구조적으로 줄인다** — `overview`·`structure`는 보존하고
+`decision_points` 같은 배열만 상위 N개로 깎는다. 상한값도 함께 재검토한다.
 
 #### 🔴 미결 — §7-8 선별 로직 교체
 
@@ -699,6 +724,8 @@ main       배포 브랜치. EC2가 이 브랜치를 체크아웃해 둔다
 
 | 날짜 | 내용 |
 |---|---|
+| 2026-08-11 | **문서 동기화 + 팀원 PR#25 머지**(`docs/sync-2026-08-11`) — 프록시/origin **두 갈래 규칙** 확정(프록시는 웜업 전용. Lambda 함수 URL 6MB 상한이 실측 413으로 확인됐다) · 404 두 종류 구분(envoy vs `JOB_NOT_FOUND`) · **보고서 생성 시점 변경 반영**(문제마다 → 세션 종료 후 일괄) · `problemScope`·`teaches` 필수·413·`providerModelCode` 접두어·`GITHUB_URL` 프로덕션 미동작·`transcript` 새 모양·`LOG_LEVEL`. `.env.example`의 죽은 `MODEL_CODE_SESSION`(deepseek-v4-flash)도 교체 |
+| 2026-08-10 | **배포본 장애 대응 + 실패 오분류 정리**(`fix/git-binary-absent`) — 세 실패가 전부 `MODEL_ERROR` 하나로 뭉개져 진단이 불가능했다: **git 바이너리 부재**(App Runner에 없다) · **스캔 규모 상한** · **HTTP 503**(워커 포화인데 `PROVIDER_ERROR`로 들어갔다). 각각 제 `failure_code`로 간다. 추가로 **LLM 에러에 HTTP 상태·본문 실림**(키는 redact) · **영구 4xx 재시도 중단**(404를 6번 던져 12초를 버렸다) · **업로드 상한 100MB 신설**(상한이 아예 없었다) · **접두사 매칭 하한 수정**(16자 줄이 폴백을 못 타 개념 하나가 통째로 빠졌다) · **리포트 `transcript`를 `problem_stage` 행으로** · 리포트 실패 시 태운 토큰 보존 · **단계별 진행 로그**(`LOG_LEVEL`. uvicorn `--log-level`이 루트 로거를 안 건드려 `app.*` INFO가 전부 버려지고 있었다). **407 tests** |
 | 2026-08-09 | **면담 브리프 경로 개명**(`refactor/rename-interview-briefs`) — `POST /api/v0/interview-brief:generate` → **`POST /api/v0/interview-briefs`**. 나머지 8개 엔드포인트가 전부 복수 명사 리소스인데 이것만 단수 + AIP-136 커스텀 메서드(`:generate`) 스타일이라 혼자 다른 규약이었다. 계약의 나머지(헤더 3종·요청/응답 본문·409/503)는 무변경. 백엔드 미착수·프론트 미소비라 소비자 0인 시점에 정리했다. `tags=["interview-brief"]`와 파일명 `interview_brief.py`는 유지(경로가 아니다). **378 tests** |
 | 2026-08-07 | **`/analysis-inputs` 삭제**(`feature/remove-analysis-inputs`) — `POST /analyses` 3분할은 2026-08-06에 백엔드 착오로 폐기됐는데 PR#14가 같은 브랜치명으로 되살렸고 PR#17이 그대로 머지했다. 라우터·스키마 4종·`refetch_pinned()`·D2 무결성 검증·`prefetched_*` 죽은 파라미터까지 제거. **fetch.py 본체와 보안 방어 3종, `failureCode` 15종, `gitHistory` 14필드는 남긴다** — 분리와 무관하게 `/analyses`가 쓰는 것들이다. **373 tests** |
 | 2026-08-07 | **PR#18 — 8/7 백엔드 감사 회신 반영**(`feature/ib5-alignment`) — `conceptNameSource` 추측 3종 → 확정 4종·필수 · `visibility` `MANAGER_ONLY` Literal · `codeContext` 6필드 · **503 봉투에도 `aiUsage`**(§3 A-5) · `observationNotes`가 비면 근거 없는 항목 드롭(§3 D-1②) + 순서 재번호. 팀원 PR#12의 D-ib5와 같은 회신을 다뤘으나 그 브랜치는 PR#14 작업을 포함하지 않아 머지 대신 항목만 이식했다. **397 tests** |

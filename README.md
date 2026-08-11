@@ -95,20 +95,53 @@ Swagger UI: **http://127.0.0.1:8000/docs** — 여기서 엔드포인트를 직�
 ### 배포 — 자동이다. 신경 쓰지 않는다 (2026-08-03~)
 
 ```
-호출 주소(백엔드·Postman·curl 전부 이 주소를 쓸 것)
-https://ggyyotinmytrpu2w4fbhakqqli0ygenq.lambda-url.ap-northeast-1.on.aws     고정 HTTPS. 주소가 안 바뀐다
+주소가 둘이다. 용도가 다르다 (2026-08-11 확정)
+
+origin   https://cpiysizen3.ap-northeast-1.awsapprunner.com      실제 요청 전부
+프록시    https://ggyyotinmytrpu2w4fbhakqqli0ygenq.lambda-url.ap-northeast-1.on.aws
+                                                                 깨우는 용도만. GET /api/health
 ```
+
+🔴 **프록시는 게이트웨이가 아니라 "켜는 버튼"이다.** 모든 트래픽을 프록시로 보내면
+**Lambda 함수 URL의 6MB 페이로드 상한**에 걸린다(요청·응답 양쪽. 바이너리는 base64라 실효
+~4.5MB). 10MB ZIP으로 실측하면 AI에 닿지도 못하고 AWS 계층에서 죽는다.
+
+```
+HTTP/1.1 413 Request Entity Too Large
+X-Amzn-Errortype: RequestEntityTooLargeException
+{"Message":"Request must be smaller than 6291456 bytes for the InvokeFunction operation"}
+```
+
+Lambda 동기 호출(`RequestResponse`) 자체의 제약이라 **프록시 코드를 고쳐서는 못 피한다.**
+origin으로 직접 보내면 상한이 없다(AI 업로드 상한 100MB가 그대로 산다).
+
+**호출 규칙** — 매번 웜업하면 요청이 두 배가 되니, 실패했을 때만 깨운다.
+
+```
+① origin으로 바로 호출
+② 404면 프록시 GET /api/health 로 웜업 (유휴 후 첫 요청 최대 ~80초. 실측 54초)
+③ origin 재호출 1회
+```
+
+⚠️ **404가 두 종류다.** `GET /analyses/{jobId}`·`GET /reports/{jobId}`는 AI도 404를 낸다.
+본문으로 갈라야 한다 — 안 그러면 없는 job을 영원히 깨우려 든다.
+
+```
+{"error": "JOB_NOT_FOUND", ...}   AI가 낸 것.  재시도 무의미
+그 외 형식의 404                    App Runner 정지.  웜업 후 재시도
+```
+
+폴링이 도는 동안(리포트 배치는 1분 주기)에는 인스턴스가 안 잠들어 ②가 거의 안 걸린다.
 
 **AWS App Runner가 `main` 브랜치를 물고 자동 배포한다.** 팀원이 그 계정과 설정을 소유하고
 있고, **우리는 `main`에 올리기만 하면 된다.** 배포 명령도, 서버 접속도, 주소 공유도 없다.
 설정 파일은 `main`의 `apprunner.yaml`(런타임 python3.11 · 포트 8080 · 헬스체크 `/api/health`).
 
-⚠️ **`https://cpiysizen3.ap-northeast-1.awsapprunner.com`(App Runner 원본 도메인)을 직접 부르지
-말 것.** 20분 무요청이면 서비스가 비용 절감을 위해 자동 정지(pause)되는데, 원본 도메인은 정지
-중 요청을 App Runner의 envoy가 **즉시 404로 되돌릴 뿐 깨우는 기능이 전혀 없다**(재시도해도
-계속 404 — 콜드스타트가 아니라 라우팅 자체가 안 되는 것처럼 보여서, 실제로 Team-IZ/Backend
-쪽에서 이렇게 오진단하고 헬스체크 설정 문제로 잘못 짚은 사례가 있었다). 위 Lambda 프록시
-URL로 가야만 자동으로 깨어나서(유휴 후 첫 요청은 최대 ~80초 대기, 이후 정상 속도) 응답한다.
+⚠️ **origin 도메인은 스스로 깨어나지 않는다.** 20분 무요청이면 서비스가 비용 절감을 위해
+자동 정지(pause)되는데, 정지 중 요청은 App Runner의 envoy가 **즉시 404로 되돌릴 뿐 깨우는
+기능이 전혀 없다**(재시도해도 계속 404 — 콜드스타트가 아니라 라우팅 자체가 안 되는 것처럼
+보여서, 실제로 Team-IZ/Backend 쪽에서 이렇게 오진단하고 헬스체크 설정 문제로 잘못 짚은
+사례가 있었다). 그래서 위 ②의 프록시 웜업이 필요하다.
 
 ⚠️ **`main` 머지가 곧 재배포다.** 재배포는 프로세스를 갈아치우므로 **진행 중인 job과 세션
 멱등 캐시가 끊긴다.** 세션 자체는 무상태라 안 깨지지만(매 요청이 restore), 폴링 중인
@@ -178,6 +211,11 @@ URL로 가야만 자동으로 깨어나서(유휴 후 첫 요청은 최대 ~80�
 
 요청 필드는 네 곳 모두 같은 이름·같은 규칙이다(`/analyses` · `/curricula` · `/reports` · `/sessions/{id}/answers`). 생략하면 서버 기본값이고, 채점 모델은 operator가 고른다(GradingPolicy).
 
+🔴 **접두어를 빼면 조용히 실패한다** (2026-08-10 실측 장애). `"minimax-m3"`처럼 벤더 접두어
+없이 보내거나 Swagger 기본값 `"string"`을 그대로 보내면 공급자가 `404 page not found`를
+낸다. **AI가 아니라 provider가 내는 404라 원인이 안 드러난다.** `ai_model.provider_model_code`
+에 접두어가 반영돼 있는지 먼저 확인할 것.
+
 ### 엔드포인트
 
 | 그룹 | 메서드·경로 | 역할 | 방식 |
@@ -212,8 +250,8 @@ URL로 가야만 자동으로 깨어나서(유휴 후 첫 요청은 최대 ~80�
   "attemptId": "att-1", "submissionId": "sub-1",
   "method": "GITHUB_URL",                    // 또는 ZIP_WITH_GITLOG (multipart로 ZIP 첨부)
   "source": { "repoUrl": "https://github.com/owner/repo", "branch": "main" },
-  "source": { "repoUrl": "https://github.com/...", "branch": "main" },
   "extractionScope": "TOTAL",                // 또는 OWN_COMMIT (이때 commitEmail 필수)
+  "problemScope": "TEAM_SHARED_PROBLEM",     // 생략 시 이 값. INDIVIDUAL_OWN_COMMIT은 아직 501
   "questionBudget": 3,
   "providerModelCode": "nvidia/nemotron-3-ultra-550b-a55b",   // 생략 시 서버 기본값
   "focusItems": [                            // 강사가 체크포인트에 지정한 질문 초점 후보
@@ -227,7 +265,21 @@ URL로 가야만 자동으로 깨어나서(유휴 후 첫 요청은 최대 ~80�
 { "jobId": "1b40467e-…", "status": "QUEUED" }
 ```
 
-**`GITHUB_URL`은 AI가 서버에서 `git clone --depth 1`로 받는다** (2026-08-03). GitHub API로 파일을 긁지 않는다 — 비인증 한도가 IP당 60회/시간이라 **같은 망의 다른 교육생까지 막히고**, 큰 repo는 tree API가 목록을 잘라 소스가 조용히 빠진다(팀 PoC 실사고). **공개 레포만** 되고, 얕은 클론이라 `.git`은 남지만 커밋이 tip 하나뿐이라 `OWN_COMMIT`은 못 한다. `commitSha`는 이 경로에서만 실제 값이 채워진다.
+🔴 **`problemScope`가 `teaches`를 강제한다** (2026-08-10).
+
+```
+TEAM_SHARED_PROBLEM      기본값.  teaches 필수 — 비면 422
+                         오퍼레이터가 고른 개념을 팀 전원이 같이 시험 보는 근거다
+INDIVIDUAL_OWN_COMMIT    teaches를 보내면 422.  선정 엔진 미구현이라 지금은 501
+                         요청 형식은 확정이니 이 스펙대로 준비하면 된다
+```
+
+🔴 **ZIP 업로드 상한은 100MB.** 넘으면 `413` + `error: "FILE_TOO_LARGE"`. 프록시를 경유하면
+그 전에 6MB에서 막히니 origin으로 직접 보낼 것(위 "배포" 절).
+
+**`GITHUB_URL`은 AI가 서버에서 `git clone --depth 1`로 받는다** (2026-08-03).
+⚠️ **배포 환경에서는 아직 동작하지 않는다** — App Runner 관리형 런타임에 `git` 바이너리가
+없어 `TEMPORARY_ERROR`로 떨어진다. 로컬에서만 된다. dulwich로 대체하는 것이 후속 항목이다. GitHub API로 파일을 긁지 않는다 — 비인증 한도가 IP당 60회/시간이라 **같은 망의 다른 교육생까지 막히고**, 큰 repo는 tree API가 목록을 잘라 소스가 조용히 빠진다(팀 PoC 실사고). **공개 레포만** 되고, 얕은 클론이라 `.git`은 남지만 커밋이 tip 하나뿐이라 `OWN_COMMIT`은 못 한다. `commitSha`는 이 경로에서만 실제 값이 채워진다.
 
 🔴 **`PARTIAL`이 실제로 나온다.** 요구사항 판정만 실패하고 문제·질문·힌트는 정상으로 나가는 경우다(2026-08-03 신설). 그때 `requirementResults`는 개수를 맞춰 오되 `verdict: "F"` + `note: "판정 실패: …"`로 채워진다 — **`SUCCEEDED`로 저장하면 화면에 "요구사항 전부 미충족"이 사실처럼 뜬다.** 문답은 그대로 진행할 수 있다.
 
@@ -482,18 +534,32 @@ DB CHECK 제약 둘을 AI가 지켜서 보낸다 — `cachedTokenCount <= inputT
 
 ### 보고서
 
-**보고서는 문제 단위다.** 문제 하나가 끝날 때마다 한 번씩 부르므로 세션 1회에 보고서 3개다.
+**보고서는 문제 단위다.** 문제 1개당 한 번씩 부르므로 세션 1회에 보고서 3개다.
+**세션이 다 끝난 뒤 3발이 한꺼번에 들어온다**(2026-08-11 백엔드 설계 — 5분 주기 스케줄러가
+마감된 세션을 모아 돌린다). 계약은 그대로고 동시성만 바뀐다.
 
 ```jsonc
 // POST /api/v0/reports          → 202
 { "problemId": "prob-1", "problemNo": 2,                      // 🔴 안 보내면 3건 다 1이 찍힌다
   "sessionId": "sess-abc",
   "providerModelCode": "minimaxai/minimax-m3",                // 생략 시 서버 기본값
-  "transcript": [ /* 이 문제의 턴만 */ ],
+  "transcript": [ /* 이 문제의 problem_stage 행. 축당 1개, 최대 4개 */ ],
   "analysisDocuments": [ { "kind": "CODE_ANALYSIS", "content": { /* AnalysisDocument */ } } ],
   "teaches": [ … ] }
 { "jobId": "…", "status": "QUEUED" }
 ```
+
+🔴 **`transcript`는 턴 목록이 아니라 `problem_stage` 행이다** (2026-08-10 변경). 축당 1개,
+최대 4개. 한 항목이 슬롯 3개를 평평하게 담는다 — `axisCode` · `status` ·
+`questionText`/`questionAnswerText`/`questionScore`/`questionPassed` · `firstHint…` ·
+`secondHint…`. **응답 `problem.stages`와 같은 모양이라** Spring은 읽은 행을 그대로 보내고
+받은 행을 그대로 INSERT하면 된다. 옛 턴 모양(`hintsUsed`로 슬롯을 고르는 축당 최대 3개)은
+받지 않는다 — 보내면 슬롯 필드가 없어 그 축이 `NOT_REACHED`로 계산된다.
+
+`status`는 보내주면 그대로 쓴다. `NOT_ANSWERED`(물었는데 답이 없다)는 AI가 만들 수 없어서
+세션 진행을 아는 백엔드 값이 정확하다. 단 **`PREPARED`/`IN_PROGRESS`인데 점수가 이미 있으면**
+모순이라 계산값으로 덮는다. ⚠️ **같은 `axisCode`가 두 번 오면 나중 값이 앞을 덮는다** —
+에러 없이 점수만 바뀐다.
 
 ```jsonc
 // GET /api/v0/reports/{jobId}   → 200 (result 부분)
