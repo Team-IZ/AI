@@ -1596,7 +1596,7 @@
           "snapshotId": {
             "type": "string",
             "title": "Snapshotid",
-            "description": "Spring code_snapshot 행의 키"
+            "description": "분석 입력 스냅샷 식별자(AI 발급 uuid4). DB `code_analysis.external_snapshot_id` (UUID UNIQUE)"
           },
           "snapshotMeta": {
             "$ref": "#/components/schemas/SnapshotMeta"
@@ -3210,7 +3210,7 @@
             "type": "integer",
             "exclusiveMinimum": 0.0,
             "title": "Extractorversion",
-            "description": "이 문제를 뽑은 룰 버전. 재현성 근거. ⚠️ **테이블정의서 v06에는 assessment_problem.extractor_version이 없다**(옛 정의서에 있던 컬럼이 빠졌다). 재분석 결과가 달라졌을 때 룰이 바뀐 건지 코드가 바뀐 건지를 이 값 하나로 가른다 — 컬럼을 두시거나 버리시거나 백엔드 판단이다"
+            "description": "이 문제를 뽑은 룰 버전. 재현성 근거 — 재분석 결과가 달라졌을 때 룰이 바뀐 건지 코드가 바뀐 건지를 이 값 하나로 가른다. DB `assessment_problem.extractor_version` (CHECK > 0). 🔴 **필수인 이유는 왕복이기 때문이다** — 세션이 무상태라 이 `Problem`이 `POST /sessions/{id}/answers` 요청의 `problems[]`로 그대로 돌아온다. 백엔드가 저장했다가 다시 실어 보낸다(2026-08-11 구현 확인)"
           },
           "teachId": {
             "anyOf": [
@@ -4166,15 +4166,17 @@
           "contentHash": {
             "type": "string",
             "title": "Contenthash",
-            "description": "sha256 hex 64자"
+            "description": "sha256 hex 64자. DB `submission.analysis_input_hash`"
           },
           "fileCount": {
             "type": "integer",
-            "title": "Filecount"
+            "title": "Filecount",
+            "description": "DB `submission.analysis_input_file_count`"
           },
           "byteCount": {
             "type": "integer",
-            "title": "Bytecount"
+            "title": "Bytecount",
+            "description": "DB `submission.analysis_input_byte_count` (CHECK >= 0)"
           }
         },
         "type": "object",
@@ -4184,7 +4186,7 @@
           "byteCount"
         ],
         "title": "SnapshotMeta",
-        "description": "code_snapshot 테이블 대응. 코드 원문 저장하지 않고 메타만 주기 "
+        "description": "분석 입력의 메타. 코드 원문은 저장하지 않고 이것만 준다.\n\n귀속처는 `submission`이다 (2026-08-11 백엔드 확인, v07 DDL).\n옛 `code_snapshot` 테이블은 여기로 통합됐다."
       },
       "StageScore": {
         "properties": {
