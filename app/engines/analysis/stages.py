@@ -127,16 +127,48 @@ def _fill(template: str, values: dict[str, Any]) -> str:
     return re.sub(r"\{(\w+)\}", _sub, template)
 
 
+def _cap_lists(value: Any, limit: int) -> Any:
+    """중첩된 리스트를 전부 앞에서 limit개만 남긴다."""
+    if isinstance(value, dict):
+        return {k: _cap_lists(v, limit) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_cap_lists(v, limit) for v in value[:limit]]
+    return value
+
+
+def _shrink_json(text: str, budget: int) -> str | None:
+    """JSON 문자열을 **리스트 꼬리부터 깎아** 예산에 맞춘다. JSON이 아니면 None.
+
+    문자 절단은 JSON을 중간에서 끊어 모델이 통째로 못 읽게 만든다 — 그런데 에러가
+    안 나서 "모델이 분석 문서를 무시했다"로만 보인다. 항목 몇 개를 잃는 편이 낫다.
+
+    ponytail: 리스트 길이만 줄인다. 문자열 필드(overview 등)는 안 건드린다 —
+    실측 문서가 3.3k라 예산 6,000에 한참 못 미쳐서, 여기까지 오는 것 자체가 이례다.
+    """
+    try:
+        value = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    for limit in (12, 6, 3, 1, 0):
+        capped = json.dumps(_cap_lists(value, limit), ensure_ascii=False)
+        if len(capped) <= budget:
+            return capped
+    return None     # 리스트를 다 비워도 안 되면 호출부의 문자 절단으로 넘긴다
+
+
 def _truncate(values: dict[str, Any], limits: dict[str, int]) -> dict[str, Any]:
     """매니페스트가 정한 상한으로 자른다.
 
     상한은 컨텍스트 예산이다. 넘기면 모델이 조용히 잘라 읽는 게 아니라 400이 나거나
     뒷부분을 못 본 채 답한다 — 후자가 더 나쁘다(에러 없이 판정만 틀림).
+
+    값이 JSON이면(`analysis_block`) 구조를 지키며 줄인다. 호출부를 안 고쳐도 되도록
+    여기서 판별한다 — 지금 JSON을 싣는 자리가 세 곳이고 앞으로 더 늘 수 있다.
     """
     out = dict(values)
     for key, limit in (limits or {}).items():
         if key in out and isinstance(out[key], str) and len(out[key]) > limit:
-            out[key] = out[key][:limit]
+            out[key] = _shrink_json(out[key], limit) or out[key][:limit]
     return out
 
 

@@ -181,11 +181,15 @@ class AnalysisAccepted(BaseSchema):
     status: Literal["QUEUED"]
     
 class SnapshotMeta(BaseSchema):
-    """ code_snapshot 테이블 대응. 코드 원문 저장하지 않고 메타만 주기 """
-    
-    content_hash: str = Field(description="sha256 hex 64자")
-    file_count: int
-    byte_count: int
+    """분석 입력의 메타. 코드 원문은 저장하지 않고 이것만 준다.
+
+    귀속처는 `submission`이다 (2026-08-11 백엔드 확인, v07 DDL).
+    옛 `code_snapshot` 테이블은 여기로 통합됐다.
+    """
+
+    content_hash: str = Field(description="sha256 hex 64자. DB `submission.analysis_input_hash`")
+    file_count: int = Field(description="DB `submission.analysis_input_file_count`")
+    byte_count: int = Field(description="DB `submission.analysis_input_byte_count` (CHECK >= 0)")
 
 # 문제가 가리키는 근거의 성격. **DB assessment_problem_reference.reference_type CHECK와
 # 같은 집합이다** (새 MEAS, 2026-08-04에 정렬).
@@ -374,11 +378,12 @@ class Problem(BaseSchema):
     )
     extractor_version: int = Field(
         gt=0,
-        description="이 문제를 뽑은 룰 버전. 재현성 근거. "
-                    "⚠️ **테이블정의서 v06에는 assessment_problem.extractor_version이 "
-                    "없다**(옛 정의서에 있던 컬럼이 빠졌다). 재분석 결과가 달라졌을 때 "
-                    "룰이 바뀐 건지 코드가 바뀐 건지를 이 값 하나로 가른다 — "
-                    "컬럼을 두시거나 버리시거나 백엔드 판단이다",
+        description="이 문제를 뽑은 룰 버전. 재현성 근거 — 재분석 결과가 달라졌을 때 "
+                    "룰이 바뀐 건지 코드가 바뀐 건지를 이 값 하나로 가른다. "
+                    "DB `assessment_problem.extractor_version` (CHECK > 0). "
+                    "🔴 **필수인 이유는 왕복이기 때문이다** — 세션이 무상태라 이 `Problem`이 "
+                    "`POST /sessions/{id}/answers` 요청의 `problems[]`로 그대로 돌아온다. "
+                    "백엔드가 저장했다가 다시 실어 보낸다(2026-08-11 구현 확인)",
     )
     teach_id: UuidStr | None = Field(
         default=None,
@@ -491,7 +496,10 @@ class AnalysisResult(BaseSchema):
     세션 시작에는 AI 호출이 없다 — Spring이 이 응답을 저장해두고 꺼내 쓴다.
     """
 
-    snapshot_id: str = Field(description="Spring code_snapshot 행의 키")
+    snapshot_id: str = Field(
+        description="분석 입력 스냅샷 식별자(AI 발급 uuid4). "
+                    "DB `code_analysis.external_snapshot_id` (UUID UNIQUE)",
+    )
     snapshot_meta: SnapshotMeta
     applied_scope: Literal["TOTAL", "OWN_COMMIT"]
     scope_fallback: bool = Field(description="요청 범위를 못 지켜 TOTAL로 물러났는지")

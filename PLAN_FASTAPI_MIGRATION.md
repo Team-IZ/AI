@@ -536,7 +536,6 @@ ZIP이 `413 RequestEntityTooLargeException`으로 AWS 계층에서 죽는다 —
 ### 후속 (순서 미정)
 
 ```
-· analysis_block 축소   🔴 다음. 아래
 · dulwich로 GITHUB_URL   App Runner에 git 바이너리가 없어 프로덕션에서 죽어 있다
 · 개인 모드 선정 엔진     INDIVIDUAL_OWN_COMMIT. 지금 501
 · 리포트 동시성 게이트    세션 끝 일괄 요청이 스레드풀(40)을 넘길 때. 실측 먼저
@@ -548,17 +547,19 @@ ZIP이 `413 RequestEntityTooLargeException`으로 AWS 계층에서 죽는다 —
 · 재시험용 별도 시험지   분석 때 병렬로 한 벌 더
 ```
 
-#### 🔴 다음 — `analysis_block` 구조적 축소
+#### ✅ 해결됨 — `analysis_block` 구조 보존 절단 (2026-08-11)
 
-`_truncate()`가 **문자 단순 절단**이다(`stages.py`). `analysisDocuments`를 `json.dumps`한
-문자열을 상한에서 그냥 끊어서 **JSON이 중간에서 깨진 채로** 모델에 들어간다. 백엔드에는
-"AI가 안전하게 자른다"고 안내했는데 사실이 아니다.
+`_truncate()`가 **문자 단순 절단**이었다. `analysisDocuments`를 `json.dumps`한 문자열을
+상한에서 그냥 끊어서 **JSON이 중간에서 깨진 채로** 모델에 들어갔다. 에러가 안 나서
+"모델이 분석 문서를 무시했다"로만 보이는 종류다.
 
-그리고 리포트의 `analysis_block` 상한이 **6,000자**인데 실제 `analysisDocument`는 수만 자다.
-**대부분이 버려지고 있어** 지금까지 나온 리포트 품질이 실제보다 낮았을 수 있다.
+값이 JSON이면 **리스트 꼬리부터 깎아** 예산에 맞춘다(`_shrink_json`). 호출부 세 곳
+(`report.py` 1 · `topics.py` 2)을 안 고쳐도 되도록 `_truncate` 안에서 판별한다.
 
-고칠 방향: 자르기 전에 **문서를 구조적으로 줄인다** — `overview`·`structure`는 보존하고
-`decision_points` 같은 배열만 상위 N개로 깎는다. 상한값도 함께 재검토한다.
+⚠️ **이 경로가 발동한 기록은 없다.** 실측 `analysisDocument`가 3,302자·2,662자로 예산
+6,000의 절반이다 — 이 문서는 덤프가 아니라 요약이라(overview 3~5문장 + 영역별 한 줄 +
+decision point 몇 개) 레포가 6파일이든 49파일이든 크기가 거의 안 변한다. 다만
+`decisionPoints` 개수에 상한이 없어 넘길 수는 있다. **예산을 올릴 이유는 없다.**
 
 #### 🔴 미결 — §7-8 선별 로직 교체
 
