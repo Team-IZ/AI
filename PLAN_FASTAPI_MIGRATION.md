@@ -510,11 +510,14 @@ NVIDIA 무료 티어   (키, 모델) 쌍당 분당 40회      ← 키당이 아�
 
 ### T13 — 백엔드 연동 ← **다음**
 
-**백엔드가 AI 연동 도메인을 아직 안 만들었다.** 교안·제출·분석·세션·보고서 전부 미착수라
-연동 테스트는 그쪽 준비 뒤에 시작한다. 우리 쪽 준비는 끝났다.
+**2026-08-10 갱신: 백엔드 `AI_BASE_URL`/`AI_CURRICULUM_BASE_URL`이 아래 프록시 주소로 배선되고
+`X-Internal-Key`까지 엔드투엔드로 검증됨(401→404 확인, 인증 통과).** 교안·제출·분석·세션·보고서
+API별 실제 연동 테스트는 여전히 미착수 — 주소·인증 배선만 끝난 상태.
 
 ```
-주소        https://cpiysizen3.ap-northeast-1.awsapprunner.com  (고정)
+주소        https://ggyyotinmytrpu2w4fbhakqqli0ygenq.lambda-url.ap-northeast-1.on.aws  (Lambda 프록시, 고정)
+            ⚠️ App Runner 원본 도메인(cpiysizen3...awsapprunner.com)이 아니라 반드시 이 프록시
+            주소를 쓸 것 — 원본은 20분 유휴 후 pause되면 깨우는 기능 없이 즉시 404만 반환한다.
 계약        openapi.json  ·  test_folder/ 에 실제 주고받을 데이터가 형식 그대로 있다
 ```
 
