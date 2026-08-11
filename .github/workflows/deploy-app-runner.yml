@@ -4,41 +4,79 @@ on:
   push:
     branches: [main]
 
-# 배포 도중 새 push가 들어와도 진행 중인 배포는 끝까지.
+# 배포 도중 새 push가 들어와도 진행 중인 배포는 끝까지 -- 취소하면 ECR에 반쪽 이미지가 남을 수 있다.
 concurrency:
   group: deploy-app-runner
   cancel-in-progress: false
 
 jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest
+
   deploy:
-    name: Deploy to App Runner
+    name: Build & push to ECR
+    needs: test
     runs-on: ubuntu-latest
     permissions:
       id-token: write
       contents: read
-    env:
-      SERVICE_ARN: arn:aws:apprunner:ap-northeast-1:357457230521:service/teamiz-ai/aa5ccfcc2d894cb5a2c2ad7c63bcfe3c
     steps:
-      # 장기 자격증명 없이 OIDC로 짧은 수명 토큰만 발급받는다. 이 역할은
-      # repo:Team-IZ/AI:ref:refs/heads/main 에서만 assume 가능하도록 스코프가 걸려 있다.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 장기 자격증명(액세스키)을 저장하지 않고 OIDC로 짧은 수명 토큰만 발급받는다.
+      # 이 역할은 repo:Team-IZ/AI:ref:refs/heads/main 에서만 assume 가능하도록
+      # 신뢰정책에 스코프가 걸려 있다.
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::357457230521:role/github-actions-teamiz-ai-deploy
           aws-region: ap-northeast-1
 
-      # D1: 이 서비스는 App Runner의 GitHub 연동(CodeRepository/apprunner.yaml)으로 소스에서
-      # 직접 빌드되므로 여기서 별도로 체크아웃/빌드하지 않는다 -- App Runner 자신이 GitHub에서
-      # 코드를 가져온다. 이 워크플로의 역할은 오직 "배포를 확정짓는 것"뿐이다.
-      #   WHY: App Runner의 AutoDeploymentsEnabled는 서비스가 PAUSED인 동안 들어온 push를
-      #        resume 후에도 자동배포 안 함(AWS 공식문서, Team-IZ/Backend에서 실제 재현+확인
-      #        됨 -- PR Team-IZ/Backend#81 참조). 이 서비스도 동일한 request-based idle-pause를
-      #        쓰므로(20분 무요청 시 자동정지) 같은 갭이 구조적으로 존재함.
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # App Runner의 컨테이너 이미지 배포는 amd64만 지원한다(아키텍처 선택 옵션이 API에 없음).
+      # GitHub 러너는 기본이 amd64라 --platform 없이도 맞지만, 명시해서 사고를 원천 차단한다.
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.ecr-login.outputs.registry }}/teamiz-ai:latest
+
+      # D1: 배포를 App Runner의 AutoDeploymentsEnabled(암묵적 EventBridge 트리거)에 맡기지 않고
+      # 이 워크플로가 직접 확정짓는다.
+      #   WHY: App Runner는 서비스가 PAUSED인 동안 들어온 새 이미지를 resume 시점에도 자동배포
+      #        안 함(AWS 공식 문서, Team-IZ/Backend PR#81에서 실제 재현+확인됨). 이 서비스도
+      #        동일한 request-based idle-pause를 쓰므로(20분 무요청 시 자동정지) 같은 갭이
+      #        구조적으로 존재함.
       #   COST: GitHub Actions 역할에 apprunner:ResumeService/StartDeployment/ListOperations
-      #        권한 추가(이 서비스 ARN 한정). resume이 필요하면 배포에 최대 1분 내외 추가.
-      #   EXIT: pause 자동화를 완전히 없애면(24/7 상시) 이 스텝 없이 AutoDeploymentsEnabled만
-      #        으로 되돌려도 안전함 -- 그래도 이 스텝은 중복 확인일 뿐 해가 되지 않음.
+      #        권한 필요(이 서비스 ARN 한정). resume이 필요하면 배포에 최대 1분 내외 추가.
       - name: Deploy to App Runner
+        env:
+          SERVICE_ARN: arn:aws:apprunner:ap-northeast-1:357457230521:service/teamiz-ai-container/4f7a3601fbda4e09b2e9a8303f70b8f0
         run: |
           set -euo pipefail
 

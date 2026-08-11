@@ -517,10 +517,13 @@ NVIDIA 무료 티어   (키, 모델) 쌍당 분당 40회      ← 키당이 아�
 API별 실제 연동 테스트는 여전히 미착수 — 주소·인증 배선만 끝난 상태.
 
 ```
-origin      https://cpiysizen3.ap-northeast-1.awsapprunner.com                        실제 요청 전부
+origin      https://mmpzicmpr7.ap-northeast-1.awsapprunner.com                        실제 요청 전부
 프록시       https://ggyyotinmytrpu2w4fbhakqqli0ygenq.lambda-url.ap-northeast-1.on.aws  웜업만 (GET /api/health)
 계약        openapi.json  ·  test_folder/ 에 실제 주고받을 데이터가 형식 그대로 있다
 ```
+
+⚠️ **origin 도메인이 바뀌었다** (2026-08-11). 옛 주소(`cpiysizen3...`)는 컨테이너 이미지
+전환으로 서비스가 재생성되며 사라졌다 — 아래 참조.
 
 🔴 **프록시로 전 트래픽을 보내면 안 된다** (2026-08-11, 실측으로 확정). Lambda 함수 URL은
 동기 호출 페이로드 상한이 **6MB**라(요청·응답 양쪽, 바이너리는 base64로 실효 ~4.5MB) 10MB
@@ -536,7 +539,6 @@ ZIP이 `413 RequestEntityTooLargeException`으로 AWS 계층에서 죽는다 —
 ### 후속 (순서 미정)
 
 ```
-· dulwich로 GITHUB_URL   App Runner에 git 바이너리가 없어 프로덕션에서 죽어 있다
 · 개인 모드 선정 엔진     INDIVIDUAL_OWN_COMMIT. 지금 501
 · 리포트 동시성 게이트    세션 끝 일괄 요청이 스레드풀(40)을 넘길 때. 실측 먼저
 · 유료 전환            529의 근본 해결. 팀 논의 (../output_docs/미결_논의사항.md P-3)
@@ -706,14 +708,17 @@ feature/*  개발은 여기서만 한다
    ↓  동작·테스트 전부 통과하면
 develop    통합 브랜치. GitHub 기본 브랜치
    ↓  검증 끝난 것만
-main       배포 브랜치. EC2가 이 브랜치를 체크아웃해 둔다
+main       배포 브랜치. push하면 GitHub Actions가 배포한다
 ```
 
-**배포는 자동이 아니라 수동이다** — EC2에서 `git pull && systemctl restart iz-get-ai`. `main` 머지 자체는 안전하지만 **재시작은 진행 중 job을 끊으므로 시점을 백엔드와 맞춘다.** (세션은 무상태라 안 깨진다.)
+**`main` push가 곧 배포다** (2026-08-11 기준). `.github/workflows/deploy-app-runner.yml`이
+pytest → Docker 빌드 → ECR push → App Runner 배포 확정까지 전부 한다. **머지가 곧 재배포라
+진행 중인 `/analyses`·`/reports` job이 끊긴다** — 시점을 백엔드와 맞춘다. (세션은 무상태라
+안 깨진다.)
 
-⚠️ **정정 (2026-08-03): App Runner를 쓰고 있다.** 신규 고객 차단은 맞지만 **팀원 계정이 기존
-고객이라 열려 있었고**, 팀원이 배포해 줬다. 아래 T9 기록(못 쓴다는 결론)은 우리 계정 기준의
-경위로만 남긴다 — **결론은 뒤집혔다.** 현황은 §T14를 본다.
+⚠️ **옛 기록 2개는 뒤집혔다.** ⓐ "EC2 + `systemctl restart` 수동 배포" — App Runner를 쓴다.
+ⓑ "App Runner는 신규 고객 차단이라 못 쓴다"(§T9) — 팀원 계정이 기존 고객이라 열려 있었다.
+그 항목들은 경위 기록으로만 남긴다.
 
 **커밋**: `type: short description (#issue)` — `feat` `fix` `refactor` `style` `docs` `chore` `remove`. 동사원형 소문자, 마침표 없음, 50자 이내, 이슈 있으면 번호 필수. **T 하나당 1커밋**을 권장한다.
 
@@ -725,6 +730,8 @@ main       배포 브랜치. EC2가 이 브랜치를 체크아웃해 둔다
 
 | 날짜 | 내용 |
 |---|---|
+| 2026-08-11 | **컨테이너 이미지 배포로 전환**(팀원 PR#26, `fix/git-binary-container-migration`) — App Runner 관리형 런타임은 시스템 패키지를 못 깔아 `git` 바이너리가 없었고, `fetch.py`·`materialize.py`가 git CLI를 `subprocess`로 불러 **`GITHUB_URL`·임베디드 `.git` 분석이 전부 죽어 있었다.** `Dockerfile` + ECR + GitHub Actions(pytest → 빌드 → push → 배포 확정)로 옮기고 `apprunner.yaml`을 `deploy-env.json`으로 대체했다. **dulwich 대체는 불필요해져 폐기.** ⚠️ 서비스 재생성으로 **origin 도메인이 바뀌었다**(`cpiysizen3…` → `mmpzicmpr7…`) |
+| 2026-08-11 | **`analysis_block` 구조 보존 절단**(`fix/analysis-block-shrink`) — `_truncate`가 JSON 문자열을 문자로 끊어 모델이 통째로 못 읽는 구조였다(에러가 안 나서 "모델이 문서를 무시했다"로만 보인다). JSON이면 리스트 꼬리부터 깎는다. 실측 문서는 3.3k라 발동 기록은 없다. 함께 `snapshotId`·`byteCount`·`extractorVersion` **DB 컬럼 매핑을 스키마에 기록**(백엔드 확인: 셋 다 실재하고 실제로 쓰인다). **410 tests** |
 | 2026-08-11 | **문서 동기화 + 팀원 PR#25 머지**(`docs/sync-2026-08-11`) — 프록시/origin **두 갈래 규칙** 확정(프록시는 웜업 전용. Lambda 함수 URL 6MB 상한이 실측 413으로 확인됐다) · 404 두 종류 구분(envoy vs `JOB_NOT_FOUND`) · **보고서 생성 시점 변경 반영**(문제마다 → 세션 종료 후 일괄) · `problemScope`·`teaches` 필수·413·`providerModelCode` 접두어·`GITHUB_URL` 프로덕션 미동작·`transcript` 새 모양·`LOG_LEVEL`. `.env.example`의 죽은 `MODEL_CODE_SESSION`(deepseek-v4-flash)도 교체 |
 | 2026-08-10 | **배포본 장애 대응 + 실패 오분류 정리**(`fix/git-binary-absent`) — 세 실패가 전부 `MODEL_ERROR` 하나로 뭉개져 진단이 불가능했다: **git 바이너리 부재**(App Runner에 없다) · **스캔 규모 상한** · **HTTP 503**(워커 포화인데 `PROVIDER_ERROR`로 들어갔다). 각각 제 `failure_code`로 간다. 추가로 **LLM 에러에 HTTP 상태·본문 실림**(키는 redact) · **영구 4xx 재시도 중단**(404를 6번 던져 12초를 버렸다) · **업로드 상한 100MB 신설**(상한이 아예 없었다) · **접두사 매칭 하한 수정**(16자 줄이 폴백을 못 타 개념 하나가 통째로 빠졌다) · **리포트 `transcript`를 `problem_stage` 행으로** · 리포트 실패 시 태운 토큰 보존 · **단계별 진행 로그**(`LOG_LEVEL`. uvicorn `--log-level`이 루트 로거를 안 건드려 `app.*` INFO가 전부 버려지고 있었다). **407 tests** |
 | 2026-08-09 | **면담 브리프 경로 개명**(`refactor/rename-interview-briefs`) — `POST /api/v0/interview-brief:generate` → **`POST /api/v0/interview-briefs`**. 나머지 8개 엔드포인트가 전부 복수 명사 리소스인데 이것만 단수 + AIP-136 커스텀 메서드(`:generate`) 스타일이라 혼자 다른 규약이었다. 계약의 나머지(헤더 3종·요청/응답 본문·409/503)는 무변경. 백엔드 미착수·프론트 미소비라 소비자 0인 시점에 정리했다. `tags=["interview-brief"]`와 파일명 `interview_brief.py`는 유지(경로가 아니다). **378 tests** |

@@ -1,0 +1,16 @@
+.git
+.github
+__pycache__
+.pytest_cache
+tests
+benchmarks
+cognition
+judgment
+worker
+tools
+*.md
+*.json
+.env
+.env.example
+requirements-dev.txt
+pytest.ini

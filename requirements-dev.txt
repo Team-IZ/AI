@@ -1,10 +1,5 @@
-# 개발·테스트 전용. **배포 이미지에는 안 들어간다** —
-# apprunner.yaml은 requirements.txt만 설치한다.
+# 개발·테스트 전용. **배포 이미지에는 안 들어간다** — Dockerfile은 requirements.txt만 설치한다.
 -r requirements.txt
 
 pytest==8.4.2
 pytest-cov==7.1.0
-
-# apprunner.yaml 파싱용(tests/test_apprunner_config.py). 배포 설정이 코드 기본값과
-# 어긋나는지 대조한다 -- 배포 이미지엔 필요 없어서 dev 쪽에만 둔다.
-PyYAML==6.0.3
