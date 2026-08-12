@@ -21,6 +21,7 @@ from app.llm import client
 from app.schemas.interview_brief import (
     BriefContext,
     Comprehension,
+    ComprehensionStage,
     InterviewBriefRequest,
     ObservationNote,
     PriorInterview,
@@ -37,6 +38,7 @@ class InterviewBriefItemResult:
     question_rationale: str
     suggested_order: int
     interview_source_id: str | None
+    question_type: str  # 내부 검증용(구성 순서 강제) -- 라우터가 응답 조립 시 골라 담지 않아 API로는 안 나간다
 
 
 @dataclass
@@ -80,7 +82,7 @@ def _brief_context_block(ctx: BriefContext) -> str:
         if ctx.brief_type == "INVALID_ATTEMPT" else "일반 이해도 확인 면담"
     )
     first = (
-        "이 교육생과의 첫 면담이다 -- 라포 형성용 도입 질문을 최소 1개 포함하라."
+        "이 교육생과의 첫 면담이다."
         if ctx.is_first_interview
         else "재면담이다 -- 여는 말에서 이전 면담을 자연스럽게 언급하라."
     )
@@ -233,6 +235,126 @@ def _observation_notes_block(notes: list[ObservationNote]) -> str:
     )
 
 
+_QUESTION_TYPES = ("RAPPORT", "PRIOR_INTERVIEW", "RISK", "GENERAL", "QNA")
+
+
+@dataclass(frozen=True)
+class _Composition:
+    """질문 5-카테고리 구성. 순서는 항상 RAPPORT -> PRIOR_INTERVIEW -> RISK -> GENERAL -> QNA로
+    고정이다(2026-08-12 요구사항) -- 개수가 0인 카테고리는 그냥 건너뛴다."""
+
+    rapport: int
+    prior_interview: int
+    risk: int
+    general: int
+    qna: int
+
+    @property
+    def total(self) -> int:
+        return self.rapport + self.prior_interview + self.risk + self.general + self.qna
+
+    def sequence(self) -> list[str]:
+        return (
+            ["RAPPORT"] * self.rapport
+            + ["PRIOR_INTERVIEW"] * self.prior_interview
+            + ["RISK"] * self.risk
+            + ["GENERAL"] * self.general
+            + ["QNA"] * self.qna
+        )
+
+
+def _qna_targets(
+    comp: Comprehension, *, cap: int,
+) -> list[tuple[ProblemComprehension, ComprehensionStage]]:
+    """문답 관련 질문의 근거가 될 (문제, 단계) 쌍. axis_code=="L2" and status=="NOT_PASSED"인
+    단계만 센다 -- L1~L4 전체를 세면 문제당 최대 4개가 나와 8개 상한과 바로 충돌하는데(세션
+    종료 로직상 학생이 실제로 막히는 지점은 거의 항상 L2라 이렇게 좁혀도 문제당 최대 1개로
+    자연스럽게 묶인다). problem_no 오름차순으로 cap개까지만 쓴다 -- 그 이상은 8개 상한에
+    맞춰 이번 면담에서 다루지 않는다(2026-08-12 결정).
+    """
+    targets = sorted(
+        (
+            (problem, stage)
+            for problem in comp.problems
+            for stage in problem.stages
+            if not stage.is_flagged and stage.axis_code == "L2" and stage.status == "NOT_PASSED"
+        ),
+        key=lambda pair: pair[0].problem_no,
+    )
+    return targets[:cap]
+
+
+def _compose(
+    req: InterviewBriefRequest,
+) -> tuple[_Composition, list[tuple[ProblemComprehension, ComprehensionStage]]]:
+    """5-카테고리 개수를 데이터로부터 계산한다. 라포·일반은 항상 고정(1개·2개), 이전 면담
+    기반·위험 유형은 근거(prior_interviews/risk_reasons)가 있을 때만 1개, 문답 관련은 L2
+    미통과 개수만큼이되 전체 합이 8을 넘지 않게 자른다."""
+    prior_interview = 1 if req.prior_interviews else 0
+    risk = 1 if req.risk_reasons else 0
+    fixed = 1 + prior_interview + risk + 2  # 라포1 + 이전면담 + 위험 + 일반2
+    qna_targets = _qna_targets(req.comprehension, cap=max(0, 8 - fixed))
+    composition = _Composition(
+        rapport=1, prior_interview=prior_interview, risk=risk, general=2, qna=len(qna_targets),
+    )
+    return composition, qna_targets
+
+
+def _question_plan_block(
+    composition: _Composition,
+    qna_targets: list[tuple[ProblemComprehension, ComprehensionStage]],
+    *,
+    has_observation_notes: bool,
+) -> str:
+    """LLM에게 정확한 순서·개수를 계산 없이 그대로 따르게 하는 블록. 몇 문제가 L2에서
+    막혔는지 스스로 세거나 8개 상한을 스스로 지키게 맡기지 않는다 -- 이미 계산·정렬·절삭까지
+    끝낸 결과를 그대로 준다. 관찰 메모 유무처럼 요청만 보면 바로 아는 분기도 프롬프트 문구
+    선택으로 여기서 미리 해준다(2026-08-12 사용자 피드백 반영)."""
+    lines = ["질문은 반드시 아래 순서·개수로만 만든다(각 항목의 questionType을 정확히 표시한다):"]
+    step = 1
+    if composition.rapport:
+        rapport_hint = (
+            "관찰 메모(observation_notes_block)를 근거로 가볍게. 예: 메모가 \"팀원과 역할 "
+            "분담이 애매했다\"면 \"팀원하고 역할 나눈 거, 좀 헷갈렸어요?\""
+            if has_observation_notes
+            else "관찰 메모가 없으니 근거 없는 순수 스몰토크로. 예: \"요즘 어떻게 지내세요?\", "
+            "\"식사는 하셨어요?\""
+        )
+        lines.append(f"{step}. RAPPORT ×{composition.rapport} -- 라포 형성({rapport_hint})")
+        step += 1
+    if composition.prior_interview:
+        lines.append(
+            f"{step}. PRIOR_INTERVIEW ×{composition.prior_interview} -- 이전 면담 기반. "
+            "\"지난번에 우리가 면담했을 때 ~라고 하셨잖아요, 그거 어떻게 됐어요?\"처럼 저번 "
+            "면담 내용을 먼저 상기시키고 나서 묻는다(이전 상담 내역이 근거)"
+        )
+        step += 1
+    if composition.risk:
+        lines.append(
+            f"{step}. RISK ×{composition.risk} -- 위험 유형 관련(위 위험 사유 근거. 아래 "
+            "\"반드시 지킬 것\" 8번을 따른다)"
+        )
+        step += 1
+    if composition.general:
+        lines.append(
+            f"{step}. GENERAL ×{composition.general} -- 일반적 질문(이번 프로젝트에서 맡은 "
+            "역할·어려움 등, 특정 근거 없이 물어도 된다)"
+        )
+        step += 1
+    if composition.qna:
+        lines.append(
+            f"{step}. QNA ×{composition.qna} -- 문답 관련(아래 각 항목마다 정확히 1개씩. "
+            "아래 \"반드시 지킬 것\" 9번을 따른다):"
+        )
+        for problem, stage in qna_targets:
+            lines.append(
+                f"   - 문제 {problem.problem_no}({problem.concept_name}), "
+                f"interviewSourceId: {stage.interview_source_id}"
+            )
+    lines.append(f"총 {composition.total}개다. 이 개수·순서를 벗어나지 마라.")
+    return "\n".join(lines)
+
+
 def _collect_allowed_source_ids(req: InterviewBriefRequest) -> set[str]:
     """모델이 참조할 수 있는 interviewSourceId 전체 집합.
 
@@ -263,7 +385,7 @@ def _collect_allowed_source_ids(req: InterviewBriefRequest) -> set[str]:
 def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> InterviewBriefResult:
     """면담 브리프 1건 생성. 검증 실패는 전부 stages.StageError로 올린다(부분 성공 없음)."""
     allowed_ids = _collect_allowed_source_ids(req)
-    min_items, max_items = (6, 8) if req.brief_context.is_first_interview else (4, 8)
+    composition, qna_targets = _compose(req)
 
     result = stages.call("ib-1", {
         "target_block": _target_block(req.target),
@@ -273,6 +395,9 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         "comprehension_block": _comprehension_block(req.comprehension),
         "prior_interviews_block": _prior_interviews_block(req.prior_interviews),
         "observation_notes_block": _observation_notes_block(req.observation_notes),
+        "question_plan_block": _question_plan_block(
+            composition, qna_targets, has_observation_notes=bool(req.observation_notes),
+        ),
     }, model_code=get_settings().model_code_interview_brief,
        timeout_s=timeout_s or client.SESSION_TIMEOUT_S,
        max_attempts=client.SESSION_MAX_ATTEMPTS)
@@ -322,16 +447,24 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
                 result.usages,
             )
 
+        question_type = raw.get("questionType")
+        if question_type not in _QUESTION_TYPES:
+            raise stages.StageError(
+                f"ib-1: questionType이 허용된 값이 아닙니다: {question_type!r}", result.usages,
+            )
+
         items.append(InterviewBriefItemResult(
             question_text=str(raw.get("questionText") or "").strip(),
             question_rationale=str(raw.get("questionRationale") or "").strip(),
             suggested_order=order,
             interview_source_id=source_id,
+            question_type=question_type,
         ))
 
-    if not (min_items <= len(items) <= max_items):
+    if len(items) != composition.total:
         raise stages.StageError(
-            f"ib-1: items 개수가 {min_items}~{max_items}개를 벗어났습니다: {len(items)}개",
+            f"ib-1: items 개수가 기대한 구성과 다릅니다(기대 {composition.total}개, "
+            f"실제 {len(items)}개)",
             result.usages,
         )
 
@@ -339,6 +472,16 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
     if orders != list(range(1, len(items) + 1)):
         raise stages.StageError(
             f"ib-1: suggestedOrder가 1..N 연속 정수가 아닙니다: {orders}", result.usages,
+        )
+
+    # 개수가 맞아도 카테고리 순서가 틀리면(예: GENERAL이 RAPPORT보다 먼저) 여전히 §"질문
+    # 구성 순서 고정" 요구사항 위반이다 -- questionType을 suggestedOrder 순으로 펼쳐 비교한다.
+    ordered_types = [i.question_type for i in sorted(items, key=lambda i: i.suggested_order)]
+    expected_types = composition.sequence()
+    if ordered_types != expected_types:
+        raise stages.StageError(
+            f"ib-1: 질문 구성/순서가 기대와 다릅니다(기대 {expected_types}, 실제 {ordered_types})",
+            result.usages,
         )
 
     return InterviewBriefResult(opening_remark=opening_remark, items=items, usages=result.usages)

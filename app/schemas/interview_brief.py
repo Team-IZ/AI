@@ -89,8 +89,8 @@ class BriefContext(BaseSchema):
 
     brief_type: BriefType
     is_first_interview: bool = Field(
-        description="true면 라포 형성용 도입 질문을 반드시 1개 이상 포함해야 한다 "
-                    "(§6.2). priorInterviews/observationNotes가 비어 있다",
+        description="true면 priorInterviews/observationNotes가 비어 있다 -- 이전 면담 기반 "
+                    "질문 카테고리가 자연히 빠진다(라포 질문은 첫 면담 여부와 무관하게 항상 1개)",
     )
 
 
@@ -358,9 +358,10 @@ class InterviewBriefResponse(BaseSchema):
                     "직접 언급하지 않는다",
     )
     items: list[InterviewBriefItem] = Field(
-        min_length=4, max_length=8,
-        description="4~8개(첫 면담이면 6~8개 -- engine이 강제). suggestedOrder는 "
-                    "1부터 중복 없는 연속 정수여야 한다",
+        min_length=3, max_length=8,
+        description="5-카테고리 고정 구성(라포1 + 이전면담0~1 + 위험0~1 + 일반2 + 문답N, "
+                    "N은 8개 상한에 맞춰 절삭 -- engine이 강제)의 총합. 최소 3개(라포1+일반2), "
+                    "최대 8개. suggestedOrder는 1부터 중복 없는 연속 정수여야 한다",
     )
     usage_meta: UsageMeta | None = Field(
         default=None,
