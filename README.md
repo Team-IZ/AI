@@ -697,20 +697,35 @@ DB 3계층(`curriculum_analysis` → `curriculum_section` → `teaches`)을 그�
   "aiUsage": [ … ] }
 ```
 
-- **항목 4~8개, 첫 면담이면 6~8개.** `suggestedOrder`는 1부터 중복 없는 연속 정수다.
-- 🔴 **`interviewSourceId`는 필수다.** 모델이 지어낸 값은 요청에 실제로 있던 id 집합과
-  대조해 거부한다(6슬롯: 위험사유·시도·세션·문제·단계·관찰메모). `interview_brief_item.
-  interview_source_id`가 UUID NOT NULL이라 null이면 그 행이 통째로 저장 불가다.
-  근거 없는 항목은 두 갈래로 처리한다:
+- 🔴 **질문 구성은 5카테고리 고정이다**(2026-08-12). 순서·개수를 서버에서 먼저 계산해
+  프롬프트에 실어주고, 응답의 `questionType`으로 그대로 왔는지 대조한다 — 모델에게 세거나
+  자르라고 맡기지 않는다.
 
   ```
-  observationNotes 비어 있음  → 항목을 버린다      (백엔드 회신 §3 D-1② 지시)
-  observationNotes 있음       → 시도 단위 id로 폴백  (모델이 메모를 안 썼을 뿐)
+  RAPPORT 1  +  PRIOR_INTERVIEW 0~1  +  RISK 0~1  +  GENERAL 2  +  QNA N     총 3~8개
+             ↑ priorInterviews 있을 때  ↑ riskReasons 있을 때        ↑ 8 상한에 맞춰 절삭
   ```
 
-  어느 쪽이든 **모델에게 id를 강제하지 않는다** — 강제하면 정직한 공백 대신 그럴듯한
-  id를 지어낼 유인이 생긴다. 버리면 `suggestedOrder`에 구멍이 나므로 1..N으로 재번호하고,
-  하한(4개, 첫 면담 6개)을 못 채우면 503으로 실패시킨다.
+  QNA 근거는 `status=="NOT_PASSED"`인 단계다 — **축은 안 따진다.** `NOT_PASSED`가 "이 축에서
+  문제가 끝났다"는 뜻이라 문제당 최대 1개이고, L2로 좁히면 L1에서 끝난 학생(면담 1순위)의
+  문답 질문이 0개가 된다. ⚠️ 옛 "4~8개, 첫 면담이면 6~8개"는 폐기다.
+  `suggestedOrder`는 1부터 중복 없는 연속 정수다.
+- 🔴 **`interviewSourceId`는 null일 수 있다.** 라포("요즘 잘 지내세요?")·일반("이번에 뭐
+  담당했어요?") 질문은 설계상 근거가 없다. `interview_brief_item`이 그 자리를 갖고 있다:
+
+  ```
+  CHECK ( (source_type='MANUAL'           AND interview_source_id IS NULL)
+       OR (source_type='INTERVIEW_SOURCE' AND interview_source_id IS NOT NULL) )
+  ```
+
+  null이면 `MANUAL`, 값이 있으면 `INTERVIEW_SOURCE`로 백엔드가 파생하므로 응답에
+  `sourceType`을 싣지 않는다. 값을 **댔는데** 요청에 없으면 지어낸 것이라 거부한다
+  (6슬롯: 위험사유·시도·세션·문제·단계·관찰메모). **모델에게 id를 강제하지 않는다** —
+  강제하면 정직한 공백 대신 그럴듯한 id를 지어낼 유인이 생긴다.
+
+  ⚠️ 옛 기록("`interview_source_id`가 UUID NOT NULL이라 근거 없는 항목은 드롭",
+  백엔드 회신 §3 D-1②)은 **뒤집혔다** — 그 컬럼은 nullable이다(테이블정의서 2026-08-06).
+  백엔드 회신의 해당 문구도 정정 요청 대상이다.
 - **부분 성공이 없다.** 여는 말만 되고 항목 검증이 하나라도 걸리면 전체를 503으로 실패시킨다.
   실패 응답(`InterviewBriefFailure`)에도 `aiUsage[]`가 실린다 — 실패해도 토큰은 탔다(§3 A-5).
   절반을 반환하면 호출부가 성공으로 오인해 반쪽 브리프가 저장된다.
