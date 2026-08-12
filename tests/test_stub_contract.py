@@ -194,8 +194,9 @@ def test_session_stub_score_is_deterministic(stub_mode, no_llm):
 def test_brief_stub_only_uses_source_ids_from_the_request(stub_mode):
     """🔴 새 UUID를 지어내면 백엔드 INSERT가 깨진다.
 
-    `interview_brief_item.interview_source_id`가 UUID NOT NULL이고, 요청에 없는
-    값이면 저장할 대상이 없다(§5.1). 실엔진이 모델 출력을 검증하는 이유와 같다.
+    요청에 없는 값이면 저장할 대상이 없다(§5.1). 실엔진이 모델 출력을 검증하는
+    이유와 같다. null은 별개다 -- 라포·일반 질문은 설계상 근거가 없어 null로 나가고,
+    백엔드가 `source_type='MANUAL'`로 저장한다(테이블정의서 2026-08-06의 CHECK).
     """
     payload = _request()
     allowed = brief_engine._collect_allowed_source_ids(
@@ -207,11 +208,12 @@ def test_brief_stub_only_uses_source_ids_from_the_request(stub_mode):
 
     assert r.status_code == 200
     body = r.json()
-    assert [i["interviewSourceId"] for i in body["items"]]
-    assert all(i["interviewSourceId"] in allowed for i in body["items"])
+    ids = [i["interviewSourceId"] for i in body["items"]]
+    assert any(i is not None for i in ids)                 # 전부 null이면 근거 배선이 죽은 것
+    assert all(i is None or i in allowed for i in ids)     # 값을 댔으면 요청에 있던 값이어야
     # 1부터 중복 없는 연속 정수(백엔드가 display_order를 여기서 파생한다).
     assert [i["suggestedOrder"] for i in body["items"]] == list(range(1, len(body["items"]) + 1))
-    assert 4 <= len(body["items"]) <= 8
+    assert 3 <= len(body["items"]) <= 8
     assert len(body["aiUsage"]) == 1
     assert body["aiUsage"][0]["featureCode"] == "INTERVIEW_BRIEF_GENERATION"
     assert body["aiUsage"][0]["contextType"] == "INTERVIEW_BRIEF"
@@ -219,11 +221,43 @@ def test_brief_stub_only_uses_source_ids_from_the_request(stub_mode):
     assert body["aiUsage"][0]["contextId"] == payload["briefId"]
 
 
-def test_brief_stub_gives_at_least_six_items_for_a_first_interview(stub_mode):
-    """첫 면담이면 6~8개(§5). 실엔진이 강제하는 하한과 같은 규칙이다."""
+def test_brief_stub_follows_the_same_composition_as_the_real_engine(stub_mode):
+    """스텁 개수·순서는 `engine._compose()` 결과와 정확히 같아야 한다.
+
+    2026-08-12에 규칙이 "4~8개(첫 면담 6~8)"에서 5-카테고리 고정 구성으로 바뀌었는데,
+    스텁이 옛 규칙을 복제해 갖고 있어서 갈렸다 -- 규칙을 두 곳에 두지 않는다.
+    첫 면담(priorInterviews 없음)이라 PRIOR_INTERVIEW 카테고리가 빠지는 것도 여기서 본다.
+    """
     payload = _request()
     payload["briefContext"]["isFirstInterview"] = True
+    req = InterviewBriefRequest.model_validate(payload)
 
-    result = brief_service._stub_result(InterviewBriefRequest.model_validate(payload))
+    result = brief_service._stub_result(req)
+    composition, _ = brief_engine._compose(req)
 
-    assert 6 <= len(result.items) <= 8
+    assert [i.question_type for i in result.items] == composition.sequence()
+    assert "PRIOR_INTERVIEW" not in composition.sequence()
+    assert 3 <= len(result.items) <= 8
+
+
+def test_brief_stub_attaches_the_right_kind_of_source_id_per_category(stub_mode):
+    """스텁 id는 허용 집합에서 아무거나가 아니라 **카테고리에 맞는 종류**여야 한다.
+
+    허용 집합에서 위치로 골라 쓰면 검증은 통과하지만(전부 요청에 있는 값이니) 백엔드가
+    "위험 질문인데 근거가 문제 단위네?"를 보게 된다 -- 스텁의 존재 이유가 진짜 모양을
+    보여주는 거라 그러면 안 된다. 라포·일반은 근거가 없어 null(=source_type MANUAL)이다.
+    """
+    payload = _request()
+    payload["observationNotes"] = [{
+        "occurredAt": "2026-08-01T09:00:00Z", "content": "메모",
+        "interviewSourceId": "src-note-1", "visibility": "MANAGER_ONLY",
+    }]
+    req = InterviewBriefRequest.model_validate(payload)
+
+    result = brief_service._stub_result(req)
+    by_type = {i.question_type: i.interview_source_id for i in result.items}
+
+    assert by_type["RAPPORT"] == "src-note-1"                       # 관찰 메모 근거
+    assert by_type["RISK"] == payload["riskReasons"][0]["sourceInterviewSourceId"]
+    assert by_type["QNA"] == "src-stage-1"                          # 막힌 단계 근거
+    assert by_type["GENERAL"] is None                               # 근거 없음 -> MANUAL

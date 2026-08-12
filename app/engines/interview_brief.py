@@ -21,6 +21,7 @@ from app.llm import client
 from app.schemas.interview_brief import (
     BriefContext,
     Comprehension,
+    ComprehensionStage,
     InterviewBriefRequest,
     ObservationNote,
     PriorInterview,
@@ -36,7 +37,8 @@ class InterviewBriefItemResult:
     question_text: str
     question_rationale: str
     suggested_order: int
-    interview_source_id: str
+    interview_source_id: str | None
+    question_type: str  # 내부 검증용(구성 순서 강제) -- 라우터가 응답 조립 시 골라 담지 않아 API로는 안 나간다
 
 
 @dataclass
@@ -80,7 +82,7 @@ def _brief_context_block(ctx: BriefContext) -> str:
         if ctx.brief_type == "INVALID_ATTEMPT" else "일반 이해도 확인 면담"
     )
     first = (
-        "이 교육생과의 첫 면담이다 -- 라포 형성용 도입 질문을 최소 1개 포함하라."
+        "이 교육생과의 첫 면담이다."
         if ctx.is_first_interview
         else "재면담이다 -- 여는 말에서 이전 면담을 자연스럽게 언급하라."
     )
@@ -235,6 +237,133 @@ def _observation_notes_block(notes: list[ObservationNote]) -> str:
     )
 
 
+_QUESTION_TYPES = ("RAPPORT", "PRIOR_INTERVIEW", "RISK", "GENERAL", "QNA")
+
+
+@dataclass(frozen=True)
+class _Composition:
+    """질문 5-카테고리 구성. 순서는 항상 RAPPORT -> PRIOR_INTERVIEW -> RISK -> GENERAL -> QNA로
+    고정이다(2026-08-12 요구사항) -- 개수가 0인 카테고리는 그냥 건너뛴다."""
+
+    rapport: int
+    prior_interview: int
+    risk: int
+    general: int
+    qna: int
+
+    @property
+    def total(self) -> int:
+        return self.rapport + self.prior_interview + self.risk + self.general + self.qna
+
+    def sequence(self) -> list[str]:
+        return (
+            ["RAPPORT"] * self.rapport
+            + ["PRIOR_INTERVIEW"] * self.prior_interview
+            + ["RISK"] * self.risk
+            + ["GENERAL"] * self.general
+            + ["QNA"] * self.qna
+        )
+
+
+def _qna_targets(
+    comp: Comprehension, *, cap: int,
+) -> list[tuple[ProblemComprehension, ComprehensionStage]]:
+    """문답 관련 질문의 근거가 될 (문제, 단계) 쌍. `status=="NOT_PASSED"`인 단계를 센다.
+
+    🔴 축 필터(`axis_code=="L2"`)는 뺐다. `NOT_PASSED`는 "이 축에서 **문제가 끝났다**"는
+    뜻이라(schemas/report.py) 애초에 문제당 최대 1개고, 그 뒤 축은 전부 `NOT_REACHED`다 --
+    "L1~L4를 다 세면 문제당 4개가 나온다"는 걱정은 성립하지 않는다. 반대로 L2로 좁히면
+    **L1에서 끝난 학생의 문답 질문이 0개가 된다** -- 가장 못한 학생, 면담 1순위인데.
+
+    problem_no 오름차순으로 cap개까지만 쓴다 -- 그 이상은 8개 상한에 맞춰 이번 면담에서
+    다루지 않는다(2026-08-12 결정).
+    """
+    targets = sorted(
+        (
+            (problem, stage)
+            for problem in comp.problems
+            for stage in problem.stages
+            if not stage.is_flagged and stage.status == "NOT_PASSED"
+        ),
+        key=lambda pair: pair[0].problem_no,
+    )
+    return targets[:cap]
+
+
+def _compose(
+    req: InterviewBriefRequest,
+) -> tuple[_Composition, list[tuple[ProblemComprehension, ComprehensionStage]]]:
+    """5-카테고리 개수를 데이터로부터 계산한다. 라포·일반은 항상 고정(1개·2개), 이전 면담
+    기반·위험 유형은 근거(prior_interviews/risk_reasons)가 있을 때만 1개, 문답 관련은 L2
+    미통과 개수만큼이되 전체 합이 8을 넘지 않게 자른다."""
+    prior_interview = 1 if req.prior_interviews else 0
+    risk = 1 if req.risk_reasons else 0
+    fixed = 1 + prior_interview + risk + 2  # 라포1 + 이전면담 + 위험 + 일반2
+    qna_targets = _qna_targets(req.comprehension, cap=max(0, 8 - fixed))
+    composition = _Composition(
+        rapport=1, prior_interview=prior_interview, risk=risk, general=2, qna=len(qna_targets),
+    )
+    return composition, qna_targets
+
+
+def _question_plan_block(
+    composition: _Composition,
+    qna_targets: list[tuple[ProblemComprehension, ComprehensionStage]],
+    *,
+    has_observation_notes: bool,
+) -> str:
+    """LLM에게 정확한 순서·개수를 계산 없이 그대로 따르게 하는 블록. 몇 문제가 어디서
+    막혔는지 스스로 세거나 8개 상한을 스스로 지키게 맡기지 않는다 -- 이미 계산·정렬·절삭까지
+    끝낸 결과를 그대로 준다. 관찰 메모 유무처럼 요청만 보면 바로 아는 분기도 프롬프트 문구
+    선택으로 여기서 미리 해준다(2026-08-12 사용자 피드백 반영)."""
+    lines = ["질문은 반드시 아래 순서·개수로만 만든다(각 항목의 questionType을 정확히 표시한다):"]
+    step = 1
+    if composition.rapport:
+        rapport_hint = (
+            "관찰 메모(observation_notes_block)를 근거로 가볍게. 예: 메모가 \"팀원과 역할 "
+            "분담이 애매했다\"면 \"팀원하고 역할 나눈 거, 좀 헷갈렸어요?\""
+            if has_observation_notes
+            else "관찰 메모가 없으니 근거 없는 순수 스몰토크로. 예: \"요즘 어떻게 지내세요?\", "
+            "\"식사는 하셨어요?\""
+        )
+        lines.append(f"{step}. RAPPORT ×{composition.rapport} -- 라포 형성({rapport_hint})")
+        step += 1
+    if composition.prior_interview:
+        lines.append(
+            f"{step}. PRIOR_INTERVIEW ×{composition.prior_interview} -- 이전 면담 기반. "
+            "\"지난번에 우리가 면담했을 때 ~라고 하셨잖아요, 그거 어떻게 됐어요?\"처럼 저번 "
+            "면담 내용을 먼저 상기시키고 나서 묻는다(이전 상담 내역이 근거)"
+        )
+        step += 1
+    if composition.risk:
+        lines.append(
+            f"{step}. RISK ×{composition.risk} -- 위험 유형 관련(위 위험 사유 근거. 아래 "
+            "\"반드시 지킬 것\" 8번을 따른다)"
+        )
+        step += 1
+    if composition.general:
+        lines.append(
+            f"{step}. GENERAL ×{composition.general} -- 일반적 질문(이번 프로젝트에서 맡은 "
+            "역할·어려움 등, 특정 근거 없이 물어도 된다)"
+        )
+        step += 1
+    if composition.qna:
+        lines.append(
+            f"{step}. QNA ×{composition.qna} -- 문답 관련(아래 각 항목마다 정확히 1개씩. "
+            "아래 \"반드시 지킬 것\" 9번을 따른다):"
+        )
+        for problem, stage in qna_targets:
+            # concept_name은 null일 수 있다(conceptNameSource=UNAVAILABLE) -- 그대로 넣으면
+            # 계획 블록에 "None"이 박혀 모델이 그걸 개념 이름으로 읽는다(_problem_block과 같은 가드).
+            concept = problem.concept_name or "(개념명 없음)"
+            lines.append(
+                f"   - 문제 {problem.problem_no}({concept}), "
+                f"interviewSourceId: {stage.interview_source_id}"
+            )
+    lines.append(f"총 {composition.total}개다. 이 개수·순서를 벗어나지 마라.")
+    return "\n".join(lines)
+
+
 def _collect_allowed_source_ids(req: InterviewBriefRequest) -> set[str]:
     """모델이 참조할 수 있는 interviewSourceId 전체 집합.
 
@@ -265,7 +394,7 @@ def _collect_allowed_source_ids(req: InterviewBriefRequest) -> set[str]:
 def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> InterviewBriefResult:
     """면담 브리프 1건 생성. 검증 실패는 전부 stages.StageError로 올린다(부분 성공 없음)."""
     allowed_ids = _collect_allowed_source_ids(req)
-    min_items, max_items = (6, 8) if req.brief_context.is_first_interview else (4, 8)
+    composition, qna_targets = _compose(req)
 
     result = stages.call("ib-1", {
         "target_block": _target_block(req.target),
@@ -275,6 +404,9 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         "comprehension_block": _comprehension_block(req.comprehension),
         "prior_interviews_block": _prior_interviews_block(req.prior_interviews),
         "observation_notes_block": _observation_notes_block(req.observation_notes),
+        "question_plan_block": _question_plan_block(
+            composition, qna_targets, has_observation_notes=bool(req.observation_notes),
+        ),
     }, model_code=get_settings().model_code_interview_brief,
        timeout_s=timeout_s or client.SESSION_TIMEOUT_S,
        max_attempts=client.SESSION_MAX_ATTEMPTS)
@@ -288,7 +420,6 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         raise stages.StageError(f"ib-1: items가 배열이 아닙니다: {raw_items!r}", result.usages)
 
     items: list[InterviewBriefItemResult] = []
-    raw_orders: list[int] = []          # 아래 순서 검증용 -- 버린 항목까지 포함한다
     for raw in raw_items:
         if not isinstance(raw, dict):
             raise stages.StageError(f"ib-1: items 원소가 객체가 아닙니다: {raw!r}", result.usages)
@@ -300,32 +431,22 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
                 f"ib-1: suggestedOrder가 정수가 아닙니다: {raw.get('suggestedOrder')!r}",
                 result.usages,
             )
-        raw_orders.append(order)
-
-        # 🔴 D-ib3의 "null 허용"은 폐기됐다(2026-08-07). `interview_brief_item.
-        # interview_source_id`가 **UUID NOT NULL**이고, 백엔드 회신 §3 D-1②이
-        # *"근거 없는 항목은 저장 경로가 아예 없어 버려지거나 저장 실패합니다"*라고
-        # 확인했다 -- 테이블 COMMENT도 "매니저 수동 추가 항목을 지원하지 않는다"다.
+        # 🔴 "근거 없는 항목 드롭"(2026-08-07 e2121ae)은 되돌렸다(2026-08-12).
+        # 근거였던 *"`interview_brief_item.interview_source_id`가 UUID NOT NULL"*이
+        # 테이블정의서(2026-08-06)와 어긋난다 -- 그 컬럼은 nullable이고, CHECK가
+        # `(source_type='MANUAL' AND interview_source_id IS NULL) OR
+        #  (source_type='INTERVIEW_SOURCE' AND interview_source_id IS NOT NULL)`라
+        # 근거 없는 항목의 저장 자리(MANUAL)가 스키마에 명시적으로 있다.
         #
-        # 근거가 없는 항목을 두 갈래로 나눠 처리한다.
+        # 라포("요즘 잘 지내세요?")·일반("이번에 뭐 담당했어요?") 질문은 설계상 근거가
+        # 없다. 그 둘을 버리면 브리프가 취조가 된다 -- 백엔드가 null을 MANUAL로
+        # INSERT하면 되므로 응답에 sourceType을 따로 싣지 않는다.
         #
-        #   observationNotes 비어 있음 → **항목을 버린다.** §3 D-1②의 지시 그대로다
-        #     ("빈 배열이면 라포 질문 항목 자체를 응답에 넣지 마십시오"). 프롬프트에도
-        #     같은 지시를 넣었지만 모델이 어길 수 있어 코드가 최종 방어다.
-        #   observationNotes 있음      → **시도 단위 id로 떨어뜨린다.** 이때 id 없는
-        #     항목이 나오는 건 모델이 관찰 메모를 근거로 삼지 않았다는 뜻인데, 그 질문도
-        #     결국 "이번 회차 시도"에 딸린 것이라 attempt id를 대는 게 사실에 어긋나지
-        #     않는다(Comprehension.attempt_interview_source_id는 필수 필드라 항상 있다).
-        #
-        # 어느 쪽이든 **모델에게 id를 강제하지 않는다** -- 강제하면 정직한 공백 대신
-        # 그럴듯한 id를 지어낼 유인이 생긴다(§3 D-1②이 이 판단에 동의했다).
+        # **모델에게 id를 강제하지 않는다** -- 강제하면 정직한 공백 대신 그럴듯한
+        # id를 지어낼 유인이 생긴다.
         raw_source_id = raw.get("interviewSourceId")
         source_id = str(raw_source_id).strip() if raw_source_id else None
-        if source_id is None:
-            if not req.observation_notes:
-                continue
-            source_id = req.comprehension.attempt_interview_source_id
-        if source_id not in allowed_ids:
+        if source_id is not None and source_id not in allowed_ids:
             # H4-dev(develop app/engines/analysis/requirements.py)와 같은 원칙: 모델이
             # 만들어낸 참조를 그대로 믿지 않는다. 값을 댔는데 요청에 없으면 지어낸 것이다.
             raise stages.StageError(
@@ -333,34 +454,44 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
                 result.usages,
             )
 
+        question_type = raw.get("questionType")
+        if question_type not in _QUESTION_TYPES:
+            raise stages.StageError(
+                f"ib-1: questionType이 허용된 값이 아닙니다: {question_type!r}", result.usages,
+            )
+
         items.append(InterviewBriefItemResult(
             question_text=str(raw.get("questionText") or "").strip(),
             question_rationale=str(raw.get("questionRationale") or "").strip(),
             suggested_order=order,
             interview_source_id=source_id,
+            question_type=question_type,
         ))
 
-    # 순서 검증은 **버리기 전 원본 기준**이다. 근거 없는 항목을 위에서 버렸다면 남은
-    # 것만으로는 1..N이 성립하지 않는데(예: 2번을 버리면 1,3,4), 그건 모델 잘못이
-    # 아니라 우리가 뺀 결과다. 모델이 실제로 어긴 경우(중복·구멍·0 시작)만 잡으려면
-    # 버리기 전 목록을 봐야 한다.
+    if len(items) != composition.total:
+        raise stages.StageError(
+            f"ib-1: items 개수가 기대한 구성과 다릅니다(기대 {composition.total}개, "
+            f"실제 {len(items)}개)",
+            result.usages,
+        )
+
     # 정렬해서 비교한다 -- 배열에 실려 온 순서가 곧 suggestedOrder 순서일 필요는 없다.
-    orders = sorted(raw_orders)
-    if orders != list(range(1, len(orders) + 1)):
+    orders = sorted(i.suggested_order for i in items)
+    if orders != list(range(1, len(items) + 1)):
         raise stages.StageError(
             f"ib-1: suggestedOrder가 1..N 연속 정수가 아닙니다: {orders}", result.usages,
         )
 
-    # 버린 자리를 메워 1..N을 다시 만든다 -- 백엔드는 `display_order`를 여기서 파생하고,
-    # 구멍이 있으면 화면 번호가 튄다.
+    # 백엔드가 `display_order`를 여기서 파생한다 -- 순서대로 담아 보낸다.
     items.sort(key=lambda i: i.suggested_order)
-    for position, item in enumerate(items, start=1):
-        item.suggested_order = position
 
-    if not (min_items <= len(items) <= max_items):
+    # 개수가 맞아도 카테고리 순서가 틀리면(예: GENERAL이 RAPPORT보다 먼저) 여전히 §"질문
+    # 구성 순서 고정" 요구사항 위반이다 -- questionType을 suggestedOrder 순으로 펼쳐 비교한다.
+    ordered_types = [i.question_type for i in items]
+    expected_types = composition.sequence()
+    if ordered_types != expected_types:
         raise stages.StageError(
-            f"ib-1: items 개수가 {min_items}~{max_items}개를 벗어났습니다: {len(items)}개"
-            f"(근거 없는 항목 {len(raw_orders) - len(items)}개 제외 후)",
+            f"ib-1: 질문 구성/순서가 기대와 다릅니다(기대 {expected_types}, 실제 {ordered_types})",
             result.usages,
         )
 
