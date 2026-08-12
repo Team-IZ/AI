@@ -284,20 +284,41 @@ def test_status_uses_db_allowed_values():
     assert body["status"] in {"QUEUED", "RUNNING", "SUCCEEDED", "PARTIAL", "FAILED"}
 
 
-def test_ai_usage_is_empty_for_rule_based_analysis():
-    """P02는 LLM을 쓰지 않으므로 aiUsage는 항상 빈 배열이다."""
+def test_ai_usage_is_reported_for_analyses():
+    """🔴 옛 핀(`aiUsage == []`, "P02는 LLM을 쓰지 않는다")은 **낡은 근거였다**.
+
+    실엔진 P02는 LLM을 쓴다(실측 23행 = CODE_ANALYSIS 3 + CODE_SESSION 20). 스텁도
+    같은 스키마로 내야 백엔드가 원장 저장 경로와 featureCode별 집계 분기를 밟는다.
+    """
     job_id = _create_job()
 
     body = client.get(f"/api/v0/analyses/{job_id}", headers=HEADERS).json()
+    usage = body["aiUsage"]
 
-    assert body["aiUsage"] == []
+    assert usage
+    assert {u["featureCode"] for u in usage} == {"CODE_ANALYSIS", "CODE_SESSION"}
+    assert all(u["contextType"] == "ANALYSIS_JOB" for u in usage)
+    assert all(u["contextId"] == job_id for u in usage)          # contextId = jobId
+    # 멱등키는 app/usage.py의 `{키}:{contextType}:{순번}` 조립을 그대로 탄다.
+    assert [u["idempotencyKey"].rsplit(":", 2)[-2:] for u in usage] == [
+        ["ANALYSIS_JOB", str(i)] for i in range(1, len(usage) + 1)
+    ]
+    # 무료 티어 529 실패율이 64%라 실패 행이 실제로 흔하다. status/failureCode 짝
+    # CHECK를 백엔드가 받아봐야 한다.
+    failed = [u for u in usage if u["status"] == "FAILED"]
+    assert len(failed) == 1
+    assert failed[0]["failureCode"] == "PROVIDER_ERROR"
+    assert failed[0]["inputTokenCount"] == 0
 
 
 def test_git_history_fields_reach_the_response_json():
     """D-analysis-b1(2026-08-07) -- resolvedBranch/headCommit/gitHistory/gitHistorySource/
 
-    historyTruncated가 camelCase로 응답에 실제로 나오는지(엔진이 값을 안 채워도 스키마
-    기본값으로 나와야지 키 자체가 빠지면 안 된다 -- 백엔드가 이 필드에 배선했던 지점이다).
+    historyTruncated가 camelCase로 응답에 실제로 나오는지.
+
+    2026-08-12: 스텁이 이제 **값을 채운다**(예전엔 스키마 기본값인 빈 배열/NONE이라
+    프론트 "최근 커밋 이력" 화면이 스텁으로는 아무것도 못 그렸다). 프론트가 쓰는
+    네 필드(commitHash·commitMessage·branchName·committedAt)가 커밋마다 있는지도 잰다.
     """
     job_id = _create_job()
 
@@ -306,8 +327,13 @@ def test_git_history_fields_reach_the_response_json():
 
     for key in ("resolvedBranch", "headCommit", "gitHistory", "gitHistorySource", "historyTruncated"):
         assert key in result
-    assert result["gitHistory"] == []
-    assert result["gitHistorySource"] == "NONE"
+    assert len(result["gitHistory"]) >= 2
+    for commit in result["gitHistory"]:
+        assert all(commit[k] for k in ("commitHash", "commitMessage", "branchName", "committedAt"))
+    # 부모 없는 root 커밋은 null이다 -- 옛 "0"*40 sentinel이 폐기된 자리라 실제로
+    # null이 오는 모양을 백엔드가 한 번은 받아봐야 한다.
+    assert result["gitHistory"][-1]["parentSha"] is None
+    assert result["gitHistorySource"] == "EMBEDDED_GIT"
     assert result["historyTruncated"] is False
 
 
@@ -409,17 +435,25 @@ def test_extractor_version_must_be_a_positive_integer():
 
 
 def test_teach_id_is_echoed_on_problems():
-    """문제↔개념 연결이 응답에 있어야 '클래스는 L3까지' 화면을 만들 수 있다."""
+    """문제↔개념 연결이 응답에 있어야 '클래스는 L3까지' 화면을 만들 수 있다.
+
+    🔴 2026-08-12: 옛 기대값 `["tch-1", "tch-2", None]`은 **규칙 위반이었다** —
+    teach 앵커 없는 문제를 만들지 않는다(`isGeneral` 삭제, 2026-08-03 PM 결정).
+    팀 모드에서는 모든 문제에 teachId가 있고, 근거를 못 찾은 개념은 문제가 아니라
+    `unmatchedTeaches`로 나간다.
+    """
     payload = {**VALID_BODY,
                "teaches": [{"id": "tch-1", "label": "클래스"},
                            {"id": "tch-2", "label": "상속"}]}
     post = client.post("/api/v0/analyses", json=payload, headers=HEADERS)
 
-    problems = client.get(f"/api/v0/analyses/{post.json()['jobId']}",
-                          headers=HEADERS).json()["result"]["problems"]
+    result = client.get(f"/api/v0/analyses/{post.json()['jobId']}",
+                        headers=HEADERS).json()["result"]
 
-    assert [p["teachId"] for p in problems] == ["tch-1", "tch-2", None]
-    # teach 앵커가 없는 문제는 화면에 "일반 문제"로 표기된다. 둘은 짝이다.
+    assert all(p["teachId"] for p in result["problems"])
+    # 스텁은 개념 하나를 일부러 못 찾은 것으로 둔다 — 화면의 `―`(문항 없음) 분기.
+    assert [u["teachId"] for u in result["unmatchedTeaches"]] == ["tch-2"]
+    assert all(u["reason"] for u in result["unmatchedTeaches"])
 
 def test_job_status_failure_code_must_match_failed_status():
     """AiUsage._check_db_constraints와 같은 패턴 -- FAILED와 failureCode는 항상 같이 다닌다."""

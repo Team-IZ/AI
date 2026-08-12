@@ -67,6 +67,13 @@ def _four_items(*, source_id: str = "src-stage-1") -> list[dict]:
 
 
 def _stub_call(monkeypatch, data: dict, usages: list[dict] | None = None):
+    """가짜 LLM을 꽂는다.
+
+    🔴 `engine_mode`도 real로 고정한다(2026-08-12). 기본값(stub)이면 서비스 계층
+    (`app/interview_brief.py`)이 엔진을 아예 안 부르고 자체 스텁 응답으로 떨어져서,
+    여기서 꽂은 데이터가 조용히 무시된다 — 재는 대상은 **실경로**다.
+    """
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
     calls = []
 
     def _call(stage_id, values, *, model_code, timeout_s=None, max_attempts=None, extra_user=""):
@@ -494,6 +501,7 @@ def test_failure_envelope_has_an_empty_usage_list_when_nothing_was_burned(monkey
     def _call(stage_id, values, *, model_code, timeout_s=None, max_attempts=None, extra_user=""):
         raise stages.StageError("ib-1: 프롬프트 조립 실패", usages=[])
 
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")   # _stub_call과 같은 이유
     monkeypatch.setattr(engine.stages, "call", _call)
 
     r = client.post(BRIEF_PATH, json=_request(),
@@ -512,6 +520,7 @@ def test_router_maps_llm_transport_failure_code_through(monkeypatch):
             "latency_ms": 300,
         }])
 
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")   # _stub_call과 같은 이유
     monkeypatch.setattr(engine.stages, "call", _call)
 
     r = client.post(BRIEF_PATH, json=_request(),

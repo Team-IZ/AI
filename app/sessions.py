@@ -40,7 +40,7 @@ from app.schemas.session import (
     Question,
     TranscriptTurn,
 )
-from app.usage import to_ai_usage
+from app.usage import stub_usage, to_ai_usage
 
 _AXES = list(get_args(AxisCode))
 
@@ -126,6 +126,53 @@ def _grading_code(problem: dict[str, Any]) -> str:
     lo = max(0, start - 1 - _GRADING_CONTEXT_LINES)
     hi = min(len(lines), end + _GRADING_CONTEXT_LINES)
     return "\n".join(lines[lo:hi])
+
+
+# ── stub 모드 채점 ─────────────────────────────────────────────────────────────
+#
+# 🔴 `engine_mode="stub"`이면 **LLM을 부르지 않는다**(2026-08-12 신설). 그전까지 이
+# 경로만 engine_mode를 아예 안 봐서, 스텁 배포에서도 실제 채점을 불렀고 실측에서
+# `SESSION_TIMEOUT_S`(20초) 천장에 6/6이 걸려 503이 났다(모델이 20초보다 느리다).
+# 백엔드는 계약 왕복을 보려는 것이지 채점 품질을 보려는 게 아니다.
+#
+# **바뀌는 것은 "점수를 어디서 얻는가" 하나뿐이다.** 계단 규칙(_advance)·커서 계산·
+# 종료 판정은 그대로 쓴다 — 스텁이 규칙을 따로 구현하면 그게 곧 두 번째 진행 규칙이다.
+_STUB_PASS_TOKENS = ("pass", "통과")
+
+
+def _stub_score(answer_text: str) -> int:
+    """결정적 점수 0~5. **랜덤이 아니다** — 같은 답변이면 항상 같은 점수라
+    백엔드가 재전송 멱등을 시험할 수 있다.
+
+    백엔드가 세 갈래(통과 · 미달 후 힌트 · 힌트 소진 종료)를 전부 밟아볼 수 있게
+    값이 갈린다: `pass`/`통과`가 들어 있으면 만점, 10자 미만이면 1점(미달),
+    나머지는 해시로 흩어진다.
+    """
+    text = answer_text.strip()
+    if any(token in text.lower() for token in _STUB_PASS_TOKENS):
+        return 5
+    if len(text) < 10:
+        return 1
+    return int(hashlib.sha256(text.encode("utf-8")).hexdigest(), 16) % 6
+
+
+def _stub_grade(axis_code: str, answer_text: str, hints_used: int,
+                model_code: str) -> grading.Grade:
+    score = _stub_score(answer_text)
+    return grading.Grade(
+        axis_code=axis_code,
+        score=score,
+        hints_used=hints_used,
+        passed=score >= scoring.PASS_SCORE,
+        autonomy=scoring.autonomy_for(hints_used),
+        matched_level="[stub] 루브릭 판정 없음",
+        evidence="[stub] 근거 인용 없음",
+        missing="[stub] 부족한 점 없음",
+        # 원장 1행. 빈 배열로 두면 백엔드가 ai_usage 저장 경로를 한 번도 안 밟는다 --
+        # 비용은 Spring이 계산하는데 그 입력이 이 배열이다.
+        # featureCode는 안 찍는다 -- 호출부(`_to_result`)가 ANSWER_EVALUATION을 넘긴다.
+        usages=[stub_usage(model_code)],
+    )
 
 
 def _hint_text(stage: dict[str, Any], hints_used: int) -> str | None:
@@ -359,15 +406,20 @@ def submit_answer(session_id: str, req: AnswerSubmit,
     shown_hints = [h for h in (_hint_text(stage, i) for i in range(1, walk.hints_used + 1))
                    if h]
 
-    grade = grading.grade(
-        axis_code, question_text, req.answer_text,
-        # 요청이 이기고 없으면 서버 기본값. 채점 모델은 operator가 고른다(GradingPolicy).
-        model_code=req.provider_model_code or get_settings().model_code_session,
-        hints=shown_hints,
-        code_snippet=_grading_code(problem),
-        code_ref=problem.get("source_path") or "",
-        analysis_context=req.analysis_context,
-    )
+    settings = get_settings()
+    # 요청이 이기고 없으면 서버 기본값. 채점 모델은 operator가 고른다(GradingPolicy).
+    model_code = req.provider_model_code or settings.model_code_session
+    if settings.engine_mode == "stub":
+        grade = _stub_grade(axis_code, req.answer_text, walk.hints_used, model_code)
+    else:
+        grade = grading.grade(
+            axis_code, question_text, req.answer_text,
+            model_code=model_code,
+            hints=shown_hints,
+            code_snippet=_grading_code(problem),
+            code_ref=problem.get("source_path") or "",
+            analysis_context=req.analysis_context,
+        )
     walk.usages.extend(grade.usages)
 
     turn = TranscriptTurn(

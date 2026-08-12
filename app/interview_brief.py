@@ -7,9 +7,11 @@
 import hashlib
 from collections import OrderedDict
 
+from app.config import get_settings
 from app.engines import interview_brief as engine
-from app.engines.interview_brief import InterviewBriefResult
+from app.engines.interview_brief import InterviewBriefItemResult, InterviewBriefResult
 from app.schemas.interview_brief import InterviewBriefRequest
+from app.usage import stub_usage
 
 _RESULT_MAX = 500
 # 멱등키 -> (요청 지문, 결과). 지문을 같이 들고 있는 이유는 아래 _fingerprint 참고.
@@ -33,6 +35,41 @@ def _fingerprint(req: InterviewBriefRequest) -> str:
     ).hexdigest()
 
 
+def _stub_result(req: InterviewBriefRequest) -> InterviewBriefResult:
+    """LLM 없이 계약 모양만 만든다(`engine_mode="stub"`, 2026-08-12 신설).
+
+    그전까지 이 경로는 engine_mode를 아예 안 봐서 스텁 배포에서도 실제 LLM을 불렀다 --
+    백엔드가 계약을 왕복해 보려는데 무료 티어 529에 막혔다. 스텁 자리는 reports.py·
+    curricula.py와 같은 서비스 계층이다(엔진은 순수하게 둔다).
+
+    🔴 **`interviewSourceId`를 지어내지 않는다.** `interview_brief_item.
+    interview_source_id`가 UUID NOT NULL이고 요청에 없는 값이면 백엔드가 저장을
+    거부한다 -- 실엔진이 모델 출력을 검증하는 이유와 같다. 요청에 실제로 온 값만
+    쓴다(`_collect_allowed_source_ids`). 정렬은 결정성을 위해서다(집합엔 순서가 없다).
+    """
+    ids = sorted(engine._collect_allowed_source_ids(req))
+    # 첫 면담이면 6~8개, 아니면 4~8개(§5, engine이 강제하는 하한과 같은 규칙).
+    count = 6 if req.brief_context.is_first_interview else 4
+    return InterviewBriefResult(
+        opening_remark=f"[stub] {req.target.user_name}님, 오늘 잠깐 이야기 나누겠습니다. "
+                       f"편하게 답해 주시면 됩니다.",
+        items=[
+            InterviewBriefItemResult(
+                question_text=f"[stub] {order}번 확인 질문입니다. 어떻게 진행하셨나요?",
+                question_rationale="[stub] 실제 근거 서술은 엔진 이식 후 생성됩니다.",
+                # 1부터 중복 없는 연속 정수.
+                suggested_order=order,
+                interview_source_id=ids[(order - 1) % len(ids)],
+            )
+            for order in range(1, count + 1)
+        ],
+        # 원장 1행. 빈 배열이면 백엔드가 ai_usage 저장 경로를 한 번도 안 밟는다.
+        # featureCode는 라우터가 INTERVIEW_BRIEF_GENERATION으로 넘긴다.
+        usages=[stub_usage(get_settings().model_code_interview_brief,
+                           input_tokens=1200, output_tokens=260, latency_ms=18)],
+    )
+
+
 def generate(req: InterviewBriefRequest, *, idempotency_key: str | None = None) -> InterviewBriefResult:
     """멱등키 + 요청 지문이 모두 같은 재전송이면 재계산 없이 그대로 돌려준다."""
     fingerprint = _fingerprint(req)
@@ -46,7 +83,7 @@ def generate(req: InterviewBriefRequest, *, idempotency_key: str | None = None) 
                 )
             return result
 
-    result = engine.generate(req)
+    result = _stub_result(req) if get_settings().engine_mode == "stub" else engine.generate(req)
 
     if idempotency_key:
         _results[idempotency_key] = (fingerprint, result)
