@@ -380,12 +380,14 @@ class InterviewBriefItem(BaseSchema):
         description="매니저만 보는 근거. 어떤 데이터에서 나왔는지 명시",
     )
     suggested_order: int = Field(ge=1)
-    interview_source_id: str = Field(
+    interview_source_id: str | None = Field(
+        default=None,
         description="요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. "
-                    "🔴 null이 될 수 없다: interview_brief_item.interview_source_id가 "
-                    "UUID NOT NULL이라 null인 항목은 그 행 하나가 통째로 저장 불가다. "
-                    "id 없는 근거(priorInterviews·briefContext)만으로 만든 라포 질문은 "
-                    "시도 단위 id(comprehension.attemptInterviewSourceId)로 떨어진다",
+                    "🔴 **null일 수 있다**: 라포·일반 질문은 설계상 근거가 없다. "
+                    "`interview_brief_item`은 그 자리를 갖고 있다 -- CHECK가 "
+                    "`source_type='MANUAL' AND interview_source_id IS NULL`을 허용한다"
+                    "(테이블정의서 2026-08-06). null이면 MANUAL, 값이 있으면 "
+                    "INTERVIEW_SOURCE로 파생하면 되므로 sourceType은 싣지 않는다",
     )
 
 

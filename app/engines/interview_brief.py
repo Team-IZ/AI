@@ -36,7 +36,7 @@ class InterviewBriefItemResult:
     question_text: str
     question_rationale: str
     suggested_order: int
-    interview_source_id: str
+    interview_source_id: str | None
 
 
 @dataclass
@@ -288,7 +288,6 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         raise stages.StageError(f"ib-1: items가 배열이 아닙니다: {raw_items!r}", result.usages)
 
     items: list[InterviewBriefItemResult] = []
-    raw_orders: list[int] = []          # 아래 순서 검증용 -- 버린 항목까지 포함한다
     for raw in raw_items:
         if not isinstance(raw, dict):
             raise stages.StageError(f"ib-1: items 원소가 객체가 아닙니다: {raw!r}", result.usages)
@@ -300,32 +299,22 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
                 f"ib-1: suggestedOrder가 정수가 아닙니다: {raw.get('suggestedOrder')!r}",
                 result.usages,
             )
-        raw_orders.append(order)
-
-        # 🔴 D-ib3의 "null 허용"은 폐기됐다(2026-08-07). `interview_brief_item.
-        # interview_source_id`가 **UUID NOT NULL**이고, 백엔드 회신 §3 D-1②이
-        # *"근거 없는 항목은 저장 경로가 아예 없어 버려지거나 저장 실패합니다"*라고
-        # 확인했다 -- 테이블 COMMENT도 "매니저 수동 추가 항목을 지원하지 않는다"다.
+        # 🔴 "근거 없는 항목 드롭"(2026-08-07 e2121ae)은 되돌렸다(2026-08-12).
+        # 근거였던 *"`interview_brief_item.interview_source_id`가 UUID NOT NULL"*이
+        # 테이블정의서(2026-08-06)와 어긋난다 -- 그 컬럼은 nullable이고, CHECK가
+        # `(source_type='MANUAL' AND interview_source_id IS NULL) OR
+        #  (source_type='INTERVIEW_SOURCE' AND interview_source_id IS NOT NULL)`라
+        # 근거 없는 항목의 저장 자리(MANUAL)가 스키마에 명시적으로 있다.
         #
-        # 근거가 없는 항목을 두 갈래로 나눠 처리한다.
+        # 라포("요즘 잘 지내세요?")·일반("이번에 뭐 담당했어요?") 질문은 설계상 근거가
+        # 없다. 그 둘을 버리면 브리프가 취조가 된다 -- 백엔드가 null을 MANUAL로
+        # INSERT하면 되므로 응답에 sourceType을 따로 싣지 않는다.
         #
-        #   observationNotes 비어 있음 → **항목을 버린다.** §3 D-1②의 지시 그대로다
-        #     ("빈 배열이면 라포 질문 항목 자체를 응답에 넣지 마십시오"). 프롬프트에도
-        #     같은 지시를 넣었지만 모델이 어길 수 있어 코드가 최종 방어다.
-        #   observationNotes 있음      → **시도 단위 id로 떨어뜨린다.** 이때 id 없는
-        #     항목이 나오는 건 모델이 관찰 메모를 근거로 삼지 않았다는 뜻인데, 그 질문도
-        #     결국 "이번 회차 시도"에 딸린 것이라 attempt id를 대는 게 사실에 어긋나지
-        #     않는다(Comprehension.attempt_interview_source_id는 필수 필드라 항상 있다).
-        #
-        # 어느 쪽이든 **모델에게 id를 강제하지 않는다** -- 강제하면 정직한 공백 대신
-        # 그럴듯한 id를 지어낼 유인이 생긴다(§3 D-1②이 이 판단에 동의했다).
+        # **모델에게 id를 강제하지 않는다** -- 강제하면 정직한 공백 대신 그럴듯한
+        # id를 지어낼 유인이 생긴다.
         raw_source_id = raw.get("interviewSourceId")
         source_id = str(raw_source_id).strip() if raw_source_id else None
-        if source_id is None:
-            if not req.observation_notes:
-                continue
-            source_id = req.comprehension.attempt_interview_source_id
-        if source_id not in allowed_ids:
+        if source_id is not None and source_id not in allowed_ids:
             # H4-dev(develop app/engines/analysis/requirements.py)와 같은 원칙: 모델이
             # 만들어낸 참조를 그대로 믿지 않는다. 값을 댔는데 요청에 없으면 지어낸 것이다.
             raise stages.StageError(
@@ -340,27 +329,19 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
             interview_source_id=source_id,
         ))
 
-    # 순서 검증은 **버리기 전 원본 기준**이다. 근거 없는 항목을 위에서 버렸다면 남은
-    # 것만으로는 1..N이 성립하지 않는데(예: 2번을 버리면 1,3,4), 그건 모델 잘못이
-    # 아니라 우리가 뺀 결과다. 모델이 실제로 어긴 경우(중복·구멍·0 시작)만 잡으려면
-    # 버리기 전 목록을 봐야 한다.
     # 정렬해서 비교한다 -- 배열에 실려 온 순서가 곧 suggestedOrder 순서일 필요는 없다.
-    orders = sorted(raw_orders)
+    orders = sorted(i.suggested_order for i in items)
     if orders != list(range(1, len(orders) + 1)):
         raise stages.StageError(
             f"ib-1: suggestedOrder가 1..N 연속 정수가 아닙니다: {orders}", result.usages,
         )
 
-    # 버린 자리를 메워 1..N을 다시 만든다 -- 백엔드는 `display_order`를 여기서 파생하고,
-    # 구멍이 있으면 화면 번호가 튄다.
+    # 백엔드가 `display_order`를 여기서 파생한다 -- 순서대로 담아 보낸다.
     items.sort(key=lambda i: i.suggested_order)
-    for position, item in enumerate(items, start=1):
-        item.suggested_order = position
 
     if not (min_items <= len(items) <= max_items):
         raise stages.StageError(
-            f"ib-1: items 개수가 {min_items}~{max_items}개를 벗어났습니다: {len(items)}개"
-            f"(근거 없는 항목 {len(raw_orders) - len(items)}개 제외 후)",
+            f"ib-1: items 개수가 {min_items}~{max_items}개를 벗어났습니다: {len(items)}개",
             result.usages,
         )
 
