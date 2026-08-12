@@ -238,3 +238,26 @@ def test_brief_stub_follows_the_same_composition_as_the_real_engine(stub_mode):
     assert [i.question_type for i in result.items] == composition.sequence()
     assert "PRIOR_INTERVIEW" not in composition.sequence()
     assert 3 <= len(result.items) <= 8
+
+
+def test_brief_stub_attaches_the_right_kind_of_source_id_per_category(stub_mode):
+    """스텁 id는 허용 집합에서 아무거나가 아니라 **카테고리에 맞는 종류**여야 한다.
+
+    허용 집합에서 위치로 골라 쓰면 검증은 통과하지만(전부 요청에 있는 값이니) 백엔드가
+    "위험 질문인데 근거가 문제 단위네?"를 보게 된다 -- 스텁의 존재 이유가 진짜 모양을
+    보여주는 거라 그러면 안 된다. 라포·일반은 근거가 없어 null(=source_type MANUAL)이다.
+    """
+    payload = _request()
+    payload["observationNotes"] = [{
+        "occurredAt": "2026-08-01T09:00:00Z", "content": "메모",
+        "interviewSourceId": "src-note-1", "visibility": "MANAGER_ONLY",
+    }]
+    req = InterviewBriefRequest.model_validate(payload)
+
+    result = brief_service._stub_result(req)
+    by_type = {i.question_type: i.interview_source_id for i in result.items}
+
+    assert by_type["RAPPORT"] == "src-note-1"                       # 관찰 메모 근거
+    assert by_type["RISK"] == payload["riskReasons"][0]["sourceInterviewSourceId"]
+    assert by_type["QNA"] == "src-stage-1"                          # 막힌 단계 근거
+    assert by_type["GENERAL"] is None                               # 근거 없음 -> MANUAL
