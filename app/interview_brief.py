@@ -42,14 +42,19 @@ def _stub_result(req: InterviewBriefRequest) -> InterviewBriefResult:
     백엔드가 계약을 왕복해 보려는데 무료 티어 529에 막혔다. 스텁 자리는 reports.py·
     curricula.py와 같은 서비스 계층이다(엔진은 순수하게 둔다).
 
-    🔴 **`interviewSourceId`를 지어내지 않는다.** `interview_brief_item.
-    interview_source_id`가 UUID NOT NULL이고 요청에 없는 값이면 백엔드가 저장을
+    🔴 **`interviewSourceId`를 지어내지 않는다.** 요청에 없는 값이면 백엔드가 저장을
     거부한다 -- 실엔진이 모델 출력을 검증하는 이유와 같다. 요청에 실제로 온 값만
     쓴다(`_collect_allowed_source_ids`). 정렬은 결정성을 위해서다(집합엔 순서가 없다).
+    라포·일반 질문은 설계상 근거가 없어 null로 둔다(백엔드가 source_type='MANUAL'로
+    저장한다) -- 스텁도 그 경로를 실제로 태워야 백엔드가 null을 만나본다.
+
+    개수·순서는 `engine._compose()`를 그대로 쓴다. 규칙을 여기 복제하면 실경로와
+    스텁이 갈린다 -- 실제로 2026-08-12에 "4~8개(첫 면담 6~8)"가 5-카테고리 고정
+    구성으로 바뀌면서 한 번 갈렸다.
     """
     ids = sorted(engine._collect_allowed_source_ids(req))
-    # 첫 면담이면 6~8개, 아니면 4~8개(§5, engine이 강제하는 하한과 같은 규칙).
-    count = 6 if req.brief_context.is_first_interview else 4
+    composition, _ = engine._compose(req)
+    evidenceless = {"RAPPORT", "GENERAL"}
     return InterviewBriefResult(
         opening_remark=f"[stub] {req.target.user_name}님, 오늘 잠깐 이야기 나누겠습니다. "
                        f"편하게 답해 주시면 됩니다.",
@@ -59,9 +64,10 @@ def _stub_result(req: InterviewBriefRequest) -> InterviewBriefResult:
                 question_rationale="[stub] 실제 근거 서술은 엔진 이식 후 생성됩니다.",
                 # 1부터 중복 없는 연속 정수.
                 suggested_order=order,
-                interview_source_id=ids[(order - 1) % len(ids)],
+                interview_source_id=None if qtype in evidenceless else ids[(order - 1) % len(ids)],
+                question_type=qtype,
             )
-            for order in range(1, count + 1)
+            for order, qtype in enumerate(composition.sequence(), start=1)
         ],
         # 원장 1행. 빈 배열이면 백엔드가 ai_usage 저장 경로를 한 번도 안 밟는다.
         # featureCode는 라우터가 INTERVIEW_BRIEF_GENERATION으로 넘긴다.
