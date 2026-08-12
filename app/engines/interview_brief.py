@@ -268,18 +268,22 @@ class _Composition:
 def _qna_targets(
     comp: Comprehension, *, cap: int,
 ) -> list[tuple[ProblemComprehension, ComprehensionStage]]:
-    """문답 관련 질문의 근거가 될 (문제, 단계) 쌍. axis_code=="L2" and status=="NOT_PASSED"인
-    단계만 센다 -- L1~L4 전체를 세면 문제당 최대 4개가 나와 8개 상한과 바로 충돌하는데(세션
-    종료 로직상 학생이 실제로 막히는 지점은 거의 항상 L2라 이렇게 좁혀도 문제당 최대 1개로
-    자연스럽게 묶인다). problem_no 오름차순으로 cap개까지만 쓴다 -- 그 이상은 8개 상한에
-    맞춰 이번 면담에서 다루지 않는다(2026-08-12 결정).
+    """문답 관련 질문의 근거가 될 (문제, 단계) 쌍. `status=="NOT_PASSED"`인 단계를 센다.
+
+    🔴 축 필터(`axis_code=="L2"`)는 뺐다. `NOT_PASSED`는 "이 축에서 **문제가 끝났다**"는
+    뜻이라(schemas/report.py) 애초에 문제당 최대 1개고, 그 뒤 축은 전부 `NOT_REACHED`다 --
+    "L1~L4를 다 세면 문제당 4개가 나온다"는 걱정은 성립하지 않는다. 반대로 L2로 좁히면
+    **L1에서 끝난 학생의 문답 질문이 0개가 된다** -- 가장 못한 학생, 면담 1순위인데.
+
+    problem_no 오름차순으로 cap개까지만 쓴다 -- 그 이상은 8개 상한에 맞춰 이번 면담에서
+    다루지 않는다(2026-08-12 결정).
     """
     targets = sorted(
         (
             (problem, stage)
             for problem in comp.problems
             for stage in problem.stages
-            if not stage.is_flagged and stage.axis_code == "L2" and stage.status == "NOT_PASSED"
+            if not stage.is_flagged and stage.status == "NOT_PASSED"
         ),
         key=lambda pair: pair[0].problem_no,
     )
@@ -308,7 +312,7 @@ def _question_plan_block(
     *,
     has_observation_notes: bool,
 ) -> str:
-    """LLM에게 정확한 순서·개수를 계산 없이 그대로 따르게 하는 블록. 몇 문제가 L2에서
+    """LLM에게 정확한 순서·개수를 계산 없이 그대로 따르게 하는 블록. 몇 문제가 어디서
     막혔는지 스스로 세거나 8개 상한을 스스로 지키게 맡기지 않는다 -- 이미 계산·정렬·절삭까지
     끝낸 결과를 그대로 준다. 관찰 메모 유무처럼 요청만 보면 바로 아는 분기도 프롬프트 문구
     선택으로 여기서 미리 해준다(2026-08-12 사용자 피드백 반영)."""
@@ -349,8 +353,11 @@ def _question_plan_block(
             "아래 \"반드시 지킬 것\" 9번을 따른다):"
         )
         for problem, stage in qna_targets:
+            # concept_name은 null일 수 있다(conceptNameSource=UNAVAILABLE) -- 그대로 넣으면
+            # 계획 블록에 "None"이 박혀 모델이 그걸 개념 이름으로 읽는다(_problem_block과 같은 가드).
+            concept = problem.concept_name or "(개념명 없음)"
             lines.append(
-                f"   - 문제 {problem.problem_no}({problem.concept_name}), "
+                f"   - 문제 {problem.problem_no}({concept}), "
                 f"interviewSourceId: {stage.interview_source_id}"
             )
     lines.append(f"총 {composition.total}개다. 이 개수·순서를 벗어나지 마라.")

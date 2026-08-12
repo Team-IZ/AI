@@ -140,48 +140,64 @@ def test_response_items_length_is_schema_enforced():
 
 # ── 질문 구성(2026-08-12: 5-카테고리 고정 순서) ──────────────────────────────
 
-def test_qna_count_matches_l2_not_passed_stages():
-    """L2 NOT_PASSED만 문답 관련 질문 근거로 센다 -- L1/L3 NOT_PASSED나 L2 PASSED는 안 센다."""
+def test_qna_targets_are_the_terminal_stage_of_each_problem_whatever_the_axis():
+    """🔴 축과 무관하게 NOT_PASSED 단계를 센다(2026-08-12, L2 필터 제거).
+
+    `NOT_PASSED`는 "이 축에서 문제가 끝났다"라 문제당 최대 1개이고, 그 뒤 축은
+    `NOT_REACHED`다. L2로 좁히면 **L1에서 끝난 학생(문제 1)의 문답 질문이 0개**가
+    되는데 그 학생이야말로 면담 1순위다. 완주한 문제(전부 PASSED)는 안 센다.
+    """
+    def _problem(no, concept, stages):
+        return {
+            "problemNo": no, "conceptName": concept,
+            "conceptNameSource": "TEACHES_CANONICAL_NAME",
+            "problemScope": "TEAM_SHARED_PROBLEM", "generationStatus": "GENERATED",
+            "interviewSourceId": f"src-problem-{no}", "stages": stages,
+        }
+
+    def _stage(sid, axis, status):
+        return {"problemStageId": sid, "axisCode": axis, "status": status,
+                "questionText": f"q-{sid}", "interviewSourceId": f"src-stage-{sid}"}
+
     req_dict = _request()
     req_dict["comprehension"]["problems"] = [
-        {
-            "problemNo": 1, "conceptName": "상태 관리", "conceptNameSource": "TEACHES_CANONICAL_NAME",
-            "problemScope": "TEAM_SHARED_PROBLEM", "generationStatus": "GENERATED",
-            "interviewSourceId": "src-problem-1",
-            "stages": [
-                {"problemStageId": "ps-1a", "axisCode": "L1", "status": "NOT_PASSED",
-                 "questionText": "q1", "interviewSourceId": "src-stage-1a"},
-                {"problemStageId": "ps-1b", "axisCode": "L2", "status": "NOT_PASSED",
-                 "questionText": "q2", "interviewSourceId": "src-stage-1b"},
-            ],
-        },
-        {
-            "problemNo": 2, "conceptName": "동시성", "conceptNameSource": "TEACHES_CANONICAL_NAME",
-            "problemScope": "TEAM_SHARED_PROBLEM", "generationStatus": "GENERATED",
-            "interviewSourceId": "src-problem-2",
-            "stages": [
-                {"problemStageId": "ps-2a", "axisCode": "L2", "status": "PASSED",
-                 "questionText": "q3", "interviewSourceId": "src-stage-2a"},
-                {"problemStageId": "ps-2b", "axisCode": "L3", "status": "NOT_PASSED",
-                 "questionText": "q4", "interviewSourceId": "src-stage-2b"},
-            ],
-        },
-        {
-            "problemNo": 3, "conceptName": "예외 처리", "conceptNameSource": "TEACHES_CANONICAL_NAME",
-            "problemScope": "TEAM_SHARED_PROBLEM", "generationStatus": "GENERATED",
-            "interviewSourceId": "src-problem-3",
-            "stages": [
-                {"problemStageId": "ps-3a", "axisCode": "L2", "status": "NOT_PASSED",
-                 "questionText": "q5", "interviewSourceId": "src-stage-3a"},
-            ],
-        },
+        # L1에서 끝났다 -- 옛 L2 필터에서는 통째로 빠지던 자리
+        _problem(1, "상태 관리", [
+            _stage("1a", "L1", "NOT_PASSED"),
+            _stage("1b", "L2", "NOT_REACHED"),
+        ]),
+        # 완주 -- 셀 게 없다
+        _problem(2, "동시성", [
+            _stage("2a", "L1", "PASSED"),
+            _stage("2b", "L2", "PASSED"),
+        ]),
+        # L3까지 가서 끝났다
+        _problem(3, "예외 처리", [
+            _stage("3a", "L1", "PASSED"),
+            _stage("3b", "L2", "PASSED"),
+            _stage("3c", "L3", "NOT_PASSED"),
+            _stage("3d", "L4", "NOT_REACHED"),
+        ]),
     ]
     req = InterviewBriefRequest.model_validate(req_dict)
 
     composition, qna_targets = engine._compose(req)
 
-    assert composition.qna == 2  # 문제1의 L2(ps-1b), 문제3의 L2(ps-3a)만
-    assert [s.interview_source_id for _, s in qna_targets] == ["src-stage-1b", "src-stage-3a"]
+    assert composition.qna == 2
+    assert [s.interview_source_id for _, s in qna_targets] == ["src-stage-1a", "src-stage-3c"]
+
+
+def test_flagged_stage_is_not_a_qna_target():
+    """isFlagged 단계는 프롬프트에서 빠지므로 근거로도 쓸 수 없다 -- 세면 존재하지
+    않는 근거를 가리키는 QNA 질문이 계획에 들어간다."""
+    req_dict = _request()
+    req_dict["comprehension"]["problems"][0]["stages"][0]["isFlagged"] = True
+    req = InterviewBriefRequest.model_validate(req_dict)
+
+    composition, qna_targets = engine._compose(req)
+
+    assert composition.qna == 0
+    assert qna_targets == []
 
 
 def test_qna_count_is_capped_at_total_eight():
