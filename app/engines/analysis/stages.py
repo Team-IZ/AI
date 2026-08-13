@@ -246,6 +246,8 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
 
     usages: list[dict[str, Any]] = []
     budget = client.budget_for(model_code, params.get("max_tokens"))
+    # 예산 상향은 **한 번까지다.** 근거는 아래 CONTEXT_OVERFLOW 분기 주석.
+    budget_ceiling = budget * 2 if budget else None
 
     for attempt in range(1, max_attempts + 1):
         try:
@@ -265,8 +267,19 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
 
             # 예산이 모자라 잘린 것이면 늘려서 한 번 더. 모델마다 배수를 실측하지 않고도
             # 스스로 맞춰가게 하는 장치다(client.REASONING_TOKEN_MULTIPLIER 주석 참고).
+            #
+            # 🔴 **상향은 한 번까지다**(2026-08-13 실측). 무한 2배는 nemotron의 폭주
+            # 사고를 되레 키운다 -- 예산을 주는 만큼 사고에 다 쓰고 content는 그대로
+            # 비어서, 실패 한 번의 비용만 커진다(1500에서 63~186초 -> 6000에서 187초).
+            # 그렇게 커진 호출이 공급자 게이트웨이 상한(~300초)에 닿으면 그 다음은
+            # HTTP 504다(실측: p04-2·p04-7에서 302초 504). 답 자체는 250~1150토큰이면
+            # 끝나므로 그 위의 예산은 전부 사고에만 들어간다.
+            #
+            # 실패는 확률적이라 **같은 예산으로 다시 뽑는 편이 낫다** -- 같은 프롬프트가
+            # 1500 예산에서 10~15초에 성공하기도 한다. 그래서 2배까지만 올리고 그 뒤
+            # 재시도는 예산을 고정한 채 새로 샘플링한다.
             if failure == "CONTEXT_OVERFLOW" and attempt < max_attempts and budget:
-                budget *= 2
+                budget = min(budget * 2, budget_ceiling)
                 continue
 
             # 5xx·타임아웃은 일시적이다. 학생이 답을 냈는데 게이트웨이가 한 번 트림했다고
