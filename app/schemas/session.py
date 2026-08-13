@@ -8,9 +8,10 @@
 진행 규칙(통과선·힌트 상한·사다리)은 여전히 AI가 소유한다. 커서를 입력으로 받아
 다음 커서를 계산해 돌려주는 순수 함수다.
 """
+import hashlib
 from typing import Any, Literal
 
-from pydantic import Field
+from pydantic import ConfigDict, Field
 
 from app.schemas.analysis import Problem
 from app.schemas.common import BaseSchema, UuidStr
@@ -106,11 +107,179 @@ class TranscriptTurn(BaseSchema):
     )
 
 
+# ── Swagger 기본 body ────────────────────────────────────────────────────────
+#
+# 🔴 자동 생성 예시는 **그대로 쏘면 422가 나는 body**였다(2026-08-13). 생성기가 배열
+# 예시를 원소 1개로 만드는데 `ProblemStage.hints`는 hintLevel [1, 2] 2개를 강제한다.
+# 축도 넷 다 L1로 나오고, transcript·cursor·providerModelCode에는 "string" 쓰레기값이
+# 박혀서 첫 요청부터 기록 복원과 존재하지 않는 모델 호출을 태웠다. 백엔드가 계약을
+# 처음 왕복해 볼 때 보는 첫 화면이 이거라 여기서 막혔다.
+#
+# **그래서 예시는 `/analyses`가 실제로 내는 모양이다.** 값도 엔진 생성 규칙을 따른다
+# (engine.py `_snippet_key`·`_references`·`_sha256`) -- 백엔드는 분석 응답의
+# `problems[]`를 손대지 않고 그대로 여기 실으면 되는데, 예시가 그것과 다르면
+# "무엇을 잘라내고 무엇을 채워야 하나"를 되묻게 된다.
+
+_EXAMPLE_PROBLEM_ID = "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+_EXAMPLE_TEACH_ID = "9c1f0d2e-7b34-4a51-8e6d-1f2a3b4c5d6e"
+
+# 🔴 codeSnippet은 **파일 전체**다(engine.py `_display_source`). 파편만 주면 학생이
+# 판단할 재료가 없다. lineStart~lineEnd는 그 안에서 강조할 구간을 가리키는
+# **파일 기준 절대 줄 번호**다 -- 이 스니펫의 부분범위 색인이 아니다.
+_EXAMPLE_FILE = """from app.orders import Order
+from app.gateway import CardGateway, TransferGateway
+
+
+def pay(order: Order, method: str):
+    if order.status != "PENDING":
+        raise ValueError("이미 처리된 주문입니다")
+    gateway = CardGateway() if method == "CARD" else TransferGateway()
+    receipt = gateway.charge(order.total_amount)
+    order.mark_paid(receipt.id)
+    return receipt
+"""
+# 강조 구간 = 4~7번째 줄. 해시 대상이 파일 전체가 아니라 이 파편이다.
+_EXAMPLE_LINE_START, _EXAMPLE_LINE_END = 4, 7
+_EXAMPLE_FRAGMENT = "\n".join(
+    _EXAMPLE_FILE.splitlines()[_EXAMPLE_LINE_START - 1:_EXAMPLE_LINE_END]
+)
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# 해시가 둘인 이유: contentHash는 codeSnippet 전체(= submission 쪽), evidenceHash는
+# 파편(= assessment_problem.code_snippet_hash). 하나로 합치면 둘 중 하나가 틀린다.
+_EXAMPLE_CONTENT_HASH = _sha256(_EXAMPLE_FILE)
+_EXAMPLE_EVIDENCE_HASH = _sha256(_EXAMPLE_FRAGMENT)
+
+_EXAMPLE_QUESTIONS = {
+    "L1": "이 함수가 결제를 처리하는 과정을 순서대로 설명해 주세요.",
+    "L2": "결제 수단에 따라 gateway를 분기한 이유는 무엇인가요?",
+    "L3": "gateway 선택을 if 대신 다른 방식으로 했다면 무엇이 달라지나요?",
+    "L4": "이 코드가 잘못 동작하는 입력이나 상황을 하나 들어 주세요.",
+}
+_EXAMPLE_HINTS = {
+    "L1": ["질문을 나눠서 답해 보세요. 이 함수는 무엇을 받아 무엇을 돌려주나요?",
+           "먼저 order.status를 왜 보는지, 그다음 receipt가 어디서 오는지 순서대로 말해 주세요."],
+    "L2": ["method 값이 여러 개일 때 이 코드가 어떻게 갈라지는지 짚어 주세요.",
+           "분기를 넣기 전과 후를 나눠서, 각각 무엇이 달라지는지 말해 주세요."],
+    "L3": ["같은 결과를 내는 다른 작성 방식이 있는지 생각해 보세요.",
+           "지금 방식의 장점 하나, 다른 방식의 장점 하나를 각각 들어 주세요."],
+    "L4": ["이 함수에 들어올 수 있는 값 중 예상하지 못한 것이 있는지 보세요.",
+           "입력이 이상할 때와 gateway 호출이 실패할 때를 나눠서 답해 주세요."],
+}
+
+
+def _example_stage(axis: str) -> dict[str, Any]:
+    """축 하나. 질문 1개 + 힌트 **정확히 2개**다(전면 동결. ProblemStage가 검증한다)."""
+    return {
+        "axisCode": axis, "questionText": _EXAMPLE_QUESTIONS[axis], "flagged": False,
+        "hints": [{"hintLevel": n, "hintText": text}
+                  for n, text in enumerate(_EXAMPLE_HINTS[axis], start=1)],
+    }
+
+
+def _example_references() -> list[dict[str, Any]]:
+    """`engine._references()`가 실제로 만드는 구성.
+
+    PRIMARY_BLOCK 1 + QUESTION_HIGHLIGHT 4(축별) + CURRICULUM_EVIDENCE 0~1
+    + CALLER 0~3. **빈 배열이 아니다**(2026-08-04부터 채워진다).
+    """
+    block = {"path": "app/pay.py", "lineStart": _EXAMPLE_LINE_START,
+             "lineEnd": _EXAMPLE_LINE_END, "evidenceHash": _EXAMPLE_EVIDENCE_HASH}
+    refs: list[dict[str, Any]] = [
+        {"referenceType": "PRIMARY_BLOCK", "displayOrder": 1, **block},
+    ]
+    refs += [{"referenceType": "QUESTION_HIGHLIGHT", "displayOrder": order,
+              "axisCode": axis, **block}
+             for order, axis in enumerate(("L1", "L2", "L3", "L4"), start=2)]
+    # 교안 근거는 코드 라인이 없다 -- path·lineStart가 통째로 없는 유일한 종류다.
+    refs.append({"referenceType": "CURRICULUM_EVIDENCE", "displayOrder": 6,
+                 "teachId": _EXAMPLE_TEACH_ID,
+                 "evidenceHash": _sha256(f"teach:{_EXAMPLE_TEACH_ID}")})
+    # import 그래프에서 나온다. 이 파일을 import 하는 쪽이라 줄 번호는 1로 고정이다.
+    refs.append({"referenceType": "CALLER", "displayOrder": 7,
+                 "path": "app/checkout.py", "lineStart": 1, "lineEnd": 1,
+                 "evidenceHash": _sha256("caller:app/checkout.py->app/pay.py")})
+    return refs
+
+
+# 🔴 **두 번째 턴이다.** 첫 턴(transcript 빈 배열 + cursor null)으로 두면 왕복의 절반이
+# 안 보인다 -- 백엔드가 실제로 구현해야 하는 것은 "응답의 cursor·turn을 그대로 되싣는"
+# 쪽이고, 그게 이 예시에 담겨 있다. 첫 요청을 흉내내려면 transcript를 []로, cursor를
+# null로 지우면 된다(그래도 200이다 -- AI가 첫 문제 L1로 본다).
+_ANSWER_SUBMIT_EXAMPLE = {
+    "clientRequestId": "sess-42-turn-2",
+    "answerText": "카드면 CardGateway, 아니면 TransferGateway를 쓰도록 나눴습니다. "
+                  "결제 수단마다 호출 방식이 달라서 한 함수에 섞으면 분기가 계속 늘어납니다.",
+    "problems": [{
+        "problemId": _EXAMPLE_PROBLEM_ID,
+        "problemNo": 1,
+        "status": "READY",
+        "problemType": "DESIGN_CHOICE",
+        "priority": 0.82,
+        "questionFocusItemId": "5b7c8d9e-0a1b-4c2d-8e3f-4a5b6c7d8e9f",
+        "title": "결제 수단에 따른 게이트웨이 분기",
+        # f"p{problemNo}-{evidenceHash[:16]}" -- engine._snippet_key
+        "snippetKey": f"p1-{_EXAMPLE_EVIDENCE_HASH[:16]}",
+        "codeLanguage": "PYTHON",
+        "sourcePath": "app/pay.py",
+        "lineStart": _EXAMPLE_LINE_START,
+        "lineEnd": _EXAMPLE_LINE_END,
+        "codeSnippet": _EXAMPLE_FILE,
+        "contentHash": _EXAMPLE_CONTENT_HASH,
+        "evidenceHash": _EXAMPLE_EVIDENCE_HASH,
+        "extractorVersion": 1,
+        # 교안 개념이 안 붙은 문제면 null이다.
+        "teachId": _EXAMPLE_TEACH_ID,
+        "references": _example_references(),
+        "stages": [_example_stage(axis) for axis in ("L1", "L2", "L3", "L4")],
+    }],
+    # 지금까지 확정된 턴. 응답의 `turn`을 그대로 append 하면 된다.
+    "transcript": [{
+        "problemId": _EXAMPLE_PROBLEM_ID,
+        "axisCode": "L1",
+        "questionText": _EXAMPLE_QUESTIONS["L1"],
+        "answerText": "주문 상태를 확인하고 결제 수단에 맞는 게이트웨이로 결제한 뒤 "
+                      "주문을 결제 완료로 바꿉니다.",
+        "answeredAt": "2026-08-13T09:12:04Z",
+        "score": 4,
+        "passed": True,
+        "hintsUsed": 0,
+        "hintText": None,
+    }],
+    # 응답의 `cursor`를 그대로 되싣는 자리. 생략하면 AI가 transcript를 되짚어 복원한다.
+    "cursor": {
+        "problemId": _EXAMPLE_PROBLEM_ID,
+        "axisCode": "L2",
+        "hintsUsed": 0,
+        # 🔴 예시에서는 null이다. mac은 서버가 발급한 서명이라 **손으로 지어내면
+        # session_cursor_hmac_secret이 설정된 배포에서 400으로 거부된다.**
+        # 받은 값을 그대로 되돌려 보내는 것 외에 다른 사용법이 없다.
+        "mac": None,
+    },
+    # 생략하면 서버 기본값(minimaxai/minimax-m3). 값은 ai_model.provider_model_code다.
+    "providerModelCode": "minimaxai/minimax-m3",
+    # 🔴 분석 문서 전체가 아니라 두 필드만이다. decisionPoints는 부피의 대부분인데
+    # 채점에 쓸모가 없다(20KB -> 1~2KB).
+    "analysisContext": {
+        "overview": "주문 생성부터 결제·배송까지를 다루는 파이썬 백엔드입니다. "
+                    "결제는 외부 게이트웨이 두 곳을 감싸 사용합니다.",
+        "structure": "app/orders.py가 주문 상태를, app/pay.py가 결제 흐름을, "
+                     "app/gateway.py가 외부 연동을 담당합니다.",
+    },
+}
+
+
 class AnswerSubmit(BaseSchema):
     """POST /sessions/{id}/answers 요청. **세션 API는 이것 하나뿐이다.**
 
     AI가 상태를 안 들고 있으므로 채점에 필요한 것이 전부 여기 실려야 한다.
     """
+
+    model_config = ConfigDict(json_schema_extra={"example": _ANSWER_SUBMIT_EXAMPLE})
 
     client_request_id: str = Field(description="세션 내 유일 멱등키. 재전송하면 같은 응답이 온다")
     answer_text: str
