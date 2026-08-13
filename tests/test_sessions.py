@@ -49,7 +49,12 @@ PROBLEMS = [_problem(1), _problem(2)]
 
 @pytest.fixture
 def score(monkeypatch):
-    """채점 점수를 시나리오로 준다. 다 쓰면 마지막 값을 반복한다."""
+    """채점 점수를 시나리오로 준다. 다 쓰면 마지막 값을 반복한다.
+
+    🔴 `engine_mode`를 real로 고정한다(2026-08-12). 기본값(stub)이면 `submit_answer`가
+    `grading.grade`를 아예 안 부르고 자체 스텁 채점으로 떨어져서, 여기서 꽂은 시나리오가
+    조용히 무시된다 — 재는 대상은 **실경로의 진행 규칙**이다.
+    """
     class _Plan(list):
         """점수 시나리오 + 채점기에 실려 간 인자(`seen`)."""
         seen: dict = {}
@@ -68,6 +73,7 @@ def score(monkeypatch):
             matched_level="", evidence="", missing="", usages=[],
         )
 
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
     monkeypatch.setattr(sessions_mod.grading, "grade", _grade)
     return plan
 
@@ -327,6 +333,7 @@ def test_ai_usage_is_reported_for_grading(monkeypatch):
                      "occurred_at": datetime.now(timezone.utc)}],
         )
 
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")   # score 픽스처와 같은 이유
     monkeypatch.setattr(sessions_mod.grading, "grade", _grade)
 
     usage = Backend(session_id="usage-1").answer()["aiUsage"]
@@ -418,3 +425,51 @@ def test_grading_code_survives_a_fragment_only_snippet():
     assert sessions_mod._grading_code(
         {"code_snippet": "only one line", "line_start": 900, "line_end": 900}
     ) == "only one line"
+
+
+def test_swagger_example_body_is_actually_postable():
+    """Swagger UI의 기본 body를 그대로 쏘면 200이 나와야 한다.
+
+    자동 생성 예시는 `hints`를 1개만 만들어서 **첫 요청부터 422**였다(2026-08-13,
+    백엔드가 계약 왕복하다 여기서 막혔다). 예시를 손으로 박아 고쳤으므로, 스키마가
+    바뀌어 예시가 낡으면 여기서 잡는다 — 문서 예시는 조용히 썩는 자리다.
+    """
+    from app.schemas.session import _ANSWER_SUBMIT_EXAMPLE
+
+    r = client.post(f"/api/v0/sessions/sess-{uuid.uuid4()}/answers",
+                    json=_ANSWER_SUBMIT_EXAMPLE, headers=HEADERS)
+
+    assert r.status_code == 200, r.text
+    # 두 번째 턴이다 -- L1은 transcript에 있고 cursor가 L2를 가리킨다.
+    out = r.json()
+    assert out["turn"]["axisCode"] == "L2"
+    # 다음 자리는 점수에 달렸다 -- 통과면 L3, 미달이면 힌트를 열고 L2를 다시 묻는다.
+    # 여기서 재는 것은 예시가 **왕복 가능한 body**라는 것뿐이라 축을 못 박지 않는다.
+    assert out["current"]["axisCode"] in ("L2", "L3")
+    assert out["cursor"]["problemId"] == out["turn"]["problemId"]
+    # 첫 요청 흉내: 둘을 지우면 AI가 첫 문제 L1로 본다(이것도 200이어야 한다).
+    first = {**_ANSWER_SUBMIT_EXAMPLE, "transcript": [], "cursor": None}
+    r2 = client.post(f"/api/v0/sessions/sess-{uuid.uuid4()}/answers",
+                     json=first, headers=HEADERS)
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["turn"]["axisCode"] == "L1"
+
+
+def test_swagger_example_matches_what_the_analysis_engine_emits():
+    """예시 값이 `/analyses` 생성 규칙과 같은가. 백엔드가 분석 응답을 손대지 않고
+    그대로 이 요청에 싣는 것이 계약이라, 예시가 다른 모양이면 그 사실이 가려진다."""
+    from app.engines.analysis import engine as analysis_engine
+    from app.schemas.session import _ANSWER_SUBMIT_EXAMPLE as ex
+
+    problem = ex["problems"][0]
+    assert problem["snippetKey"] == analysis_engine._snippet_key(
+        problem["problemNo"], problem["evidenceHash"]
+    )
+    assert problem["contentHash"] == analysis_engine._sha256(problem["codeSnippet"])
+    # references는 빈 배열이 아니다 -- PRIMARY_BLOCK 1 + 축별 QUESTION_HIGHLIGHT 4.
+    kinds = [r["referenceType"] for r in problem["references"]]
+    assert kinds.count("PRIMARY_BLOCK") == 1
+    assert kinds.count("QUESTION_HIGHLIGHT") == 4
+    assert "RELATED_CONTEXT" not in kinds       # 근거가 없어 안 만든다
+    # codeSnippet은 파일 전체이고 lineStart~lineEnd가 그 안의 절대 줄 번호다.
+    assert problem["codeSnippet"].count("\n") > problem["lineEnd"] - 1

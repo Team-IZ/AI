@@ -9,11 +9,41 @@
 근거가 없다. 특히 채점은 학생 수 × 문제 3 × 축 4라 호출 건수가 가장 많다.
 """
 
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import ValidationError
 
 from app.schemas.usage import AiUsage, ContextType
+
+
+def stub_usage(model_code: str, *, feature_code: str | None = None,
+               status: str = "SUCCEEDED", failure_code: str | None = None,
+               input_tokens: int = 320, output_tokens: int = 48,
+               latency_ms: int = 12) -> dict[str, Any]:
+    """`engine_mode="stub"`에서 원장 한 줄. `llm/client.py`가 내는 모양과 같다.
+
+    스텁이 `aiUsage: []`를 내면 **백엔드가 원장 저장 경로를 한 번도 안 밟는다** —
+    비용은 Spring이 계산하는데 그 입력이 이 배열이다. 네 경로(분석·채점·보고서·
+    면담브리프)가 같은 dict를 각자 만들고 있어서 여기로 모았다(키 하나 빠지면
+    `to_ai_usage`가 그 행을 **조용히 버린다** — 그게 네 군데로 갈릴 이유가 없다).
+    """
+    row = {
+        "model_code": model_code,
+        "input_token_count": input_tokens,
+        "output_token_count": output_tokens,
+        "cached_token_count": 0,
+        "status": status,
+        "failure_code": failure_code,
+        "latency_ms": latency_ms,
+        "occurred_at": datetime.now(timezone.utc),
+    }
+    # 🔴 키를 넣되 None이면 안 된다. `to_ai_usage`가 `{기본값, **usage}`로 합쳐서,
+    # None이 실린 키는 호출부가 넘긴 기본 featureCode를 **덮어버린다** → 검증 실패 →
+    # 그 행이 조용히 버려진다. 엔진이 직접 찍는 경우(분석)만 실어 보낸다.
+    if feature_code:
+        row["feature_code"] = feature_code
+    return row
 
 
 def to_ai_usage(

@@ -58,7 +58,9 @@ def test_problems_use_db_columns():
     assert "problem_id" in problem
     assert "source_path" in problem
     assert problem["status"] == "READY"          # 4종. OPEN은 DB CHECK에 없다
-    assert problem["references"][0]["reference_type"] == "CALLER"   # PRIMARY 폐기
+    # 화면에 띄울 본문이 붙는 자리가 맨 앞이다(2026-08-12 -- 예전 스텁은 CALLER 하나뿐이라
+    # 백엔드가 유형별로 필수 필드가 다르다는 사실을 못 봤다).
+    assert problem["references"][0]["reference_type"] == "PRIMARY_BLOCK"
 
     # 전면 동결 — 4단계 전부 분석 때 질문 1개 + 힌트 2개가 채워진다.
     assert [s["axis_code"] for s in problem["stages"]] == ["L1", "L2", "L3", "L4"]

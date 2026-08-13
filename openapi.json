@@ -1904,7 +1904,176 @@
           "answerText"
         ],
         "title": "AnswerSubmit",
-        "description": "POST /sessions/{id}/answers 요청. **세션 API는 이것 하나뿐이다.**\n\nAI가 상태를 안 들고 있으므로 채점에 필요한 것이 전부 여기 실려야 한다."
+        "description": "POST /sessions/{id}/answers 요청. **세션 API는 이것 하나뿐이다.**\n\nAI가 상태를 안 들고 있으므로 채점에 필요한 것이 전부 여기 실려야 한다.",
+        "example": {
+          "analysisContext": {
+            "overview": "주문 생성부터 결제·배송까지를 다루는 파이썬 백엔드입니다. 결제는 외부 게이트웨이 두 곳을 감싸 사용합니다.",
+            "structure": "app/orders.py가 주문 상태를, app/pay.py가 결제 흐름을, app/gateway.py가 외부 연동을 담당합니다."
+          },
+          "answerText": "카드면 CardGateway, 아니면 TransferGateway를 쓰도록 나눴습니다. 결제 수단마다 호출 방식이 달라서 한 함수에 섞으면 분기가 계속 늘어납니다.",
+          "clientRequestId": "sess-42-turn-2",
+          "cursor": {
+            "axisCode": "L2",
+            "hintsUsed": 0,
+            "problemId": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+          },
+          "problems": [
+            {
+              "codeLanguage": "PYTHON",
+              "codeSnippet": "from app.orders import Order\nfrom app.gateway import CardGateway, TransferGateway\n\n\ndef pay(order: Order, method: str):\n    if order.status != \"PENDING\":\n        raise ValueError(\"이미 처리된 주문입니다\")\n    gateway = CardGateway() if method == \"CARD\" else TransferGateway()\n    receipt = gateway.charge(order.total_amount)\n    order.mark_paid(receipt.id)\n    return receipt\n",
+              "contentHash": "0ada2978e1cb2f0e24be9e1a2cac4545c8b4b34c7c9af1a64a34a2705b9f02ac",
+              "evidenceHash": "a0c3c740ec3ebc5a2a5ddcf5d37f7509265416113bbb855d455fd20df24e24c4",
+              "extractorVersion": 1,
+              "lineEnd": 7,
+              "lineStart": 4,
+              "priority": 0.82,
+              "problemId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              "problemNo": 1,
+              "problemType": "DESIGN_CHOICE",
+              "questionFocusItemId": "5b7c8d9e-0a1b-4c2d-8e3f-4a5b6c7d8e9f",
+              "references": [
+                {
+                  "displayOrder": 1,
+                  "evidenceHash": "a0c3c740ec3ebc5a2a5ddcf5d37f7509265416113bbb855d455fd20df24e24c4",
+                  "lineEnd": 7,
+                  "lineStart": 4,
+                  "path": "app/pay.py",
+                  "referenceType": "PRIMARY_BLOCK"
+                },
+                {
+                  "axisCode": "L1",
+                  "displayOrder": 2,
+                  "evidenceHash": "a0c3c740ec3ebc5a2a5ddcf5d37f7509265416113bbb855d455fd20df24e24c4",
+                  "lineEnd": 7,
+                  "lineStart": 4,
+                  "path": "app/pay.py",
+                  "referenceType": "QUESTION_HIGHLIGHT"
+                },
+                {
+                  "axisCode": "L2",
+                  "displayOrder": 3,
+                  "evidenceHash": "a0c3c740ec3ebc5a2a5ddcf5d37f7509265416113bbb855d455fd20df24e24c4",
+                  "lineEnd": 7,
+                  "lineStart": 4,
+                  "path": "app/pay.py",
+                  "referenceType": "QUESTION_HIGHLIGHT"
+                },
+                {
+                  "axisCode": "L3",
+                  "displayOrder": 4,
+                  "evidenceHash": "a0c3c740ec3ebc5a2a5ddcf5d37f7509265416113bbb855d455fd20df24e24c4",
+                  "lineEnd": 7,
+                  "lineStart": 4,
+                  "path": "app/pay.py",
+                  "referenceType": "QUESTION_HIGHLIGHT"
+                },
+                {
+                  "axisCode": "L4",
+                  "displayOrder": 5,
+                  "evidenceHash": "a0c3c740ec3ebc5a2a5ddcf5d37f7509265416113bbb855d455fd20df24e24c4",
+                  "lineEnd": 7,
+                  "lineStart": 4,
+                  "path": "app/pay.py",
+                  "referenceType": "QUESTION_HIGHLIGHT"
+                },
+                {
+                  "displayOrder": 6,
+                  "evidenceHash": "47aaac9c27f2019c877efe537eff785f221dece6c91f6d2e854895624df5f681",
+                  "referenceType": "CURRICULUM_EVIDENCE",
+                  "teachId": "9c1f0d2e-7b34-4a51-8e6d-1f2a3b4c5d6e"
+                },
+                {
+                  "displayOrder": 7,
+                  "evidenceHash": "fe51023161d70cce87787b81a4b960c51e9e778b696e9e98ee92474502338188",
+                  "lineEnd": 1,
+                  "lineStart": 1,
+                  "path": "app/checkout.py",
+                  "referenceType": "CALLER"
+                }
+              ],
+              "snippetKey": "p1-a0c3c740ec3ebc5a",
+              "sourcePath": "app/pay.py",
+              "stages": [
+                {
+                  "axisCode": "L1",
+                  "flagged": false,
+                  "hints": [
+                    {
+                      "hintLevel": 1,
+                      "hintText": "질문을 나눠서 답해 보세요. 이 함수는 무엇을 받아 무엇을 돌려주나요?"
+                    },
+                    {
+                      "hintLevel": 2,
+                      "hintText": "먼저 order.status를 왜 보는지, 그다음 receipt가 어디서 오는지 순서대로 말해 주세요."
+                    }
+                  ],
+                  "questionText": "이 함수가 결제를 처리하는 과정을 순서대로 설명해 주세요."
+                },
+                {
+                  "axisCode": "L2",
+                  "flagged": false,
+                  "hints": [
+                    {
+                      "hintLevel": 1,
+                      "hintText": "method 값이 여러 개일 때 이 코드가 어떻게 갈라지는지 짚어 주세요."
+                    },
+                    {
+                      "hintLevel": 2,
+                      "hintText": "분기를 넣기 전과 후를 나눠서, 각각 무엇이 달라지는지 말해 주세요."
+                    }
+                  ],
+                  "questionText": "결제 수단에 따라 gateway를 분기한 이유는 무엇인가요?"
+                },
+                {
+                  "axisCode": "L3",
+                  "flagged": false,
+                  "hints": [
+                    {
+                      "hintLevel": 1,
+                      "hintText": "같은 결과를 내는 다른 작성 방식이 있는지 생각해 보세요."
+                    },
+                    {
+                      "hintLevel": 2,
+                      "hintText": "지금 방식의 장점 하나, 다른 방식의 장점 하나를 각각 들어 주세요."
+                    }
+                  ],
+                  "questionText": "gateway 선택을 if 대신 다른 방식으로 했다면 무엇이 달라지나요?"
+                },
+                {
+                  "axisCode": "L4",
+                  "flagged": false,
+                  "hints": [
+                    {
+                      "hintLevel": 1,
+                      "hintText": "이 함수에 들어올 수 있는 값 중 예상하지 못한 것이 있는지 보세요."
+                    },
+                    {
+                      "hintLevel": 2,
+                      "hintText": "입력이 이상할 때와 gateway 호출이 실패할 때를 나눠서 답해 주세요."
+                    }
+                  ],
+                  "questionText": "이 코드가 잘못 동작하는 입력이나 상황을 하나 들어 주세요."
+                }
+              ],
+              "status": "READY",
+              "teachId": "9c1f0d2e-7b34-4a51-8e6d-1f2a3b4c5d6e",
+              "title": "결제 수단에 따른 게이트웨이 분기"
+            }
+          ],
+          "providerModelCode": "minimaxai/minimax-m3",
+          "transcript": [
+            {
+              "answerText": "주문 상태를 확인하고 결제 수단에 맞는 게이트웨이로 결제한 뒤 주문을 결제 완료로 바꿉니다.",
+              "answeredAt": "2026-08-13T09:12:04Z",
+              "axisCode": "L1",
+              "hintsUsed": 0,
+              "passed": true,
+              "problemId": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+              "questionText": "이 함수가 결제를 처리하는 과정을 순서대로 설명해 주세요.",
+              "score": 4
+            }
+          ]
+        }
       },
       "Body_create_curriculum_api_v0_curricula_post": {
         "properties": {
@@ -1940,7 +2109,7 @@
           "isFirstInterview": {
             "type": "boolean",
             "title": "Isfirstinterview",
-            "description": "true면 라포 형성용 도입 질문을 반드시 1개 이상 포함해야 한다 (§6.2). priorInterviews/observationNotes가 비어 있다"
+            "description": "true면 priorInterviews/observationNotes가 비어 있다 -- 이전 면담 기반 질문 카테고리가 자연히 빠진다(라포 질문은 첫 면담 여부와 무관하게 항상 1개)"
           }
         },
         "type": "object",
@@ -2907,17 +3076,23 @@
             "title": "Suggestedorder"
           },
           "interviewSourceId": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Interviewsourceid",
-            "description": "요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. 🔴 null이 될 수 없다: interview_brief_item.interview_source_id가 UUID NOT NULL이라 null인 항목은 그 행 하나가 통째로 저장 불가다. id 없는 근거(priorInterviews·briefContext)만으로 만든 라포 질문은 시도 단위 id(comprehension.attemptInterviewSourceId)로 떨어진다"
+            "description": "요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. 🔴 **null일 수 있다**: 라포·일반 질문은 설계상 근거가 없다. `interview_brief_item`은 그 자리를 갖고 있다 -- CHECK가 `source_type='MANUAL' AND interview_source_id IS NULL`을 허용한다(테이블정의서 2026-08-06). null이면 MANUAL, 값이 있으면 INTERVIEW_SOURCE로 파생하면 되므로 sourceType은 싣지 않는다"
           }
         },
         "type": "object",
         "required": [
           "questionText",
           "questionRationale",
-          "suggestedOrder",
-          "interviewSourceId"
+          "suggestedOrder"
         ],
         "title": "InterviewBriefItem",
         "description": "체크리스트 항목 하나. §5."
@@ -2988,9 +3163,9 @@
             },
             "type": "array",
             "maxItems": 8,
-            "minItems": 4,
+            "minItems": 3,
             "title": "Items",
-            "description": "4~8개(첫 면담이면 6~8개 -- engine이 강제). suggestedOrder는 1부터 중복 없는 연속 정수여야 한다"
+            "description": "5-카테고리 고정 구성(라포1 + 이전면담0~1 + 위험0~1 + 일반2 + 문답N, N은 8개 상한에 맞춰 절삭 -- engine이 강제)의 총합. 최소 3개(라포1+일반2), 최대 8개. suggestedOrder는 1부터 중복 없는 연속 정수여야 한다"
           },
           "aiUsage": {
             "items": {

@@ -63,6 +63,11 @@ SESSION_MAX_ATTEMPTS = 6
 # step-3.7-flash에 "low"가 필요한 이유: 기본값(medium)이면 답 전체를 reasoning_content에만
 # 쓰다가 content에 닿기 전에 max_tokens로 잘린다. "low"가 그 실패 모드를 없앤다.
 # 지연 자체는 안 줄어든다 — 그건 위 타임아웃이 흡수한다.
+#
+# 🔴 **nemotron에는 넣지 마라**(2026-08-13 실측). 같은 p04-7 프롬프트에 "low"를 주면
+# 잘림은 안 없어지는데 **힌트가 영어로 나온다**("Think about how the dictionary get
+# method behaves..."). 사고 예산을 줄이면서 언어 지시까지 같이 흘리는 것으로 보인다 --
+# 학생이 그대로 읽는 문장이라 잘린 것보다 나쁘다.
 REASONING_EFFORT_BY_MODEL = {
     "stepfun-ai/step-3.7-flash": "low",
 }

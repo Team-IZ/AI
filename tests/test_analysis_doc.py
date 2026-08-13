@@ -169,3 +169,27 @@ def test_caller_value_beats_the_manifest_default(monkeypatch):
                               "course_label": "SQL"}, model_code="m", max_attempts=1)
 
     assert "KT AIVLE School SQL curriculum" in seen["user"]
+
+
+def test_context_overflow_budget_rises_only_once(monkeypatch):
+    """CONTEXT_OVERFLOW 재시도의 예산 상향은 2배까지다.
+
+    무한 2배는 nemotron의 폭주 사고를 키운다 -- 예산을 주는 만큼 사고에 쓰고 content는
+    그대로 비어서 실패 한 번의 비용만 커지고(2026-08-13 실측: 1500에서 63~186초,
+    6000에서 187초), 커진 호출이 공급자 게이트웨이 상한에 닿으면 HTTP 504가 된다.
+    """
+    budgets = []
+
+    def _chat(model_code, messages, **kwargs):
+        budgets.append(kwargs["max_tokens"])
+        raise stages.client.LlmError(
+            "잘림", {"status": "FAILED", "failure_code": "CONTEXT_OVERFLOW"})
+
+    monkeypatch.setattr(stages.client, "chat", _chat)
+
+    with pytest.raises(stages.StageError):
+        stages.call("p01-2", {"chunk_range": "1-2", "chunk_text": "본문"},
+                    model_code="m", max_attempts=4)
+
+    first = budgets[0]
+    assert budgets == [first, first * 2, first * 2, first * 2], budgets
