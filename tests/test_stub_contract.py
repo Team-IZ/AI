@@ -245,7 +245,11 @@ def test_brief_stub_attaches_the_right_kind_of_source_id_per_category(stub_mode)
 
     허용 집합에서 위치로 골라 쓰면 검증은 통과하지만(전부 요청에 있는 값이니) 백엔드가
     "위험 질문인데 근거가 문제 단위네?"를 보게 된다 -- 스텁의 존재 이유가 진짜 모양을
-    보여주는 거라 그러면 안 된다. 라포·일반은 근거가 없어 null(=source_type MANUAL)이다.
+    보여주는 거라 그러면 안 된다.
+
+    ⚠️ 2026-08-15: 근거가 없는 카테고리(일반 등)도 null이 아니라 attempt 앵커다 --
+    실엔진과 같아야 한다(`engine._anchor_source_id`). null을 내보내면 백엔드가
+    그 항목을 조용히 저장 못 한다(`interview_source_id`가 `UUID NOT NULL`).
     """
     payload = _request()
     payload["observationNotes"] = [{
@@ -260,4 +264,4 @@ def test_brief_stub_attaches_the_right_kind_of_source_id_per_category(stub_mode)
     assert by_type["RAPPORT"] == "src-note-1"                       # 관찰 메모 근거
     assert by_type["RISK"] == payload["riskReasons"][0]["sourceInterviewSourceId"]
     assert by_type["QNA"] == "src-stage-1"                          # 막힌 단계 근거
-    assert by_type["GENERAL"] is None                               # 근거 없음 -> MANUAL
+    assert by_type["GENERAL"] == payload["comprehension"]["attemptInterviewSourceId"]

@@ -307,34 +307,65 @@ def test_fabricated_interview_source_id_is_rejected(monkeypatch):
         engine.generate(InterviewBriefRequest.model_validate(_request()))
 
 
-def test_evidenceless_item_is_kept_with_null_source_id(monkeypatch):
-    """🔴 근거 없는 항목을 버리지 않는다(2026-08-12, e2121ae의 드롭 로직 되돌림).
+def test_evidenceless_item_is_anchored_not_dropped(monkeypatch):
+    """🔴 근거 없는 항목을 버리지도, null로 내보내지도 않는다(2026-08-15 백엔드 합의).
 
-    되돌린 이유: 드롭의 근거였던 "interview_brief_item.interview_source_id가 UUID
-    NOT NULL"이 테이블정의서(2026-08-06)와 어긋난다. 그 컬럼은 nullable이고 CHECK가
-    `source_type='MANUAL' AND interview_source_id IS NULL`을 명시적으로 허용한다.
+    이력이 두 번 뒤집혔다:
 
-    라포("요즘 잘 지내세요?")·일반("이번에 뭐 담당했어요?") 질문은 설계상 근거가
-    없다 -- 버리면 브리프가 취조가 된다. D-ib3이 실LLM 호출로 처음 발견한 것과 같은
-    사실이다. 빈 문자열/None/필드 생략 전부 null로 통일한다.
+    1. e2121ae(8/7)  근거 없는 항목 **드롭** -- "interview_source_id가 UUID NOT NULL"
+    2. 69fd51e(8/12) 되돌림, **null 허용** -- 테이블정의서 2026-08-06의
+       `source_type='MANUAL' AND interview_source_id IS NULL` CHECK 근거
+    3. 지금(8/15)    **앵커로 메움** -- 실제 DDL(08-07)에 그 CHECK가 없고 컬럼이
+       `UUID NOT NULL`이었다. 2의 근거였던 정의서가 낡았다.
+
+    null을 보내면 백엔드 INSERT의 `WHERE s.interview_source_id = ?`가 0행이라
+    **예외 없이 조용히 누락된다**. 드롭도 안 되는 이유는 그대로다 -- 라포·일반
+    질문을 버리면 브리프가 취조가 된다. 그래서 서버가 앵커로 메운다.
+
+    빈 문자열/None/필드 생략 전부 같은 경로다.
     """
     items = _matching_items()
     items[0]["interviewSourceId"] = None
-    del items[2]["interviewSourceId"]  # 아예 필드 자체를 생략한 경우도 허용
+    del items[2]["interviewSourceId"]  # 아예 필드 자체를 생략한 경우도 같다
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
 
     result = engine.generate(InterviewBriefRequest.model_validate(_request()))
 
-    assert len(result.items) == 5          # 하나도 안 버린다
-    assert result.items[0].interview_source_id is None
-    assert result.items[2].interview_source_id is None
-    assert result.items[4].interview_source_id == "src-stage-1"  # 나머지는 정상 그대로
+    assert len(result.items) == 5                                   # 하나도 안 버린다
+    assert all(i.interview_source_id for i in result.items)         # null이 나가지 않는다
+    # 픽스처에 관찰 메모가 없어 RAPPORT도 attempt로 떨어진다.
+    assert result.items[0].interview_source_id == "src-attempt-1"
+    assert result.items[2].interview_source_id == "src-attempt-1"
+    assert result.items[4].interview_source_id == "src-stage-1"     # 모델이 댄 값은 그대로
 
 
-def test_fabricated_source_id_is_still_rejected_even_though_null_is_allowed(monkeypatch):
-    """null 허용이 "아무 값이나 허용"은 아니다 -- 값을 댔는데 요청에 없으면 위조다."""
+def test_rapport_anchors_to_the_only_observation_note(monkeypatch):
+    """관찰 메모가 정확히 1건이면 라포 질문의 앵커는 그 메모다.
+
+    프롬프트(`rapport_hint`)가 메모를 근거로 라포 질문을 만들게 하므로 실제 출처가
+    맞다. 2건 이상이면 어느 것을 썼는지 알 수 없어 attempt로 떨어진다 -- 위 테스트가
+    그 경우다.
+    """
+    req = _request(observationNotes=[{
+        "occurredAt": "2026-08-14T10:00:00Z",
+        "content": "팀원과 역할 분담이 애매하다고 했다",
+        "interviewSourceId": "src-note-1",
+        "visibility": "MANAGER_ONLY",
+    }])
     items = _matching_items()
-    items[0]["interviewSourceId"] = None            # 정직한 공백은 통과
+    items[0]["interviewSourceId"] = None
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
+
+    result = engine.generate(InterviewBriefRequest.model_validate(req))
+
+    assert result.items[0].question_type == "RAPPORT"
+    assert result.items[0].interview_source_id == req["observationNotes"][0]["interviewSourceId"]
+
+
+def test_fabricated_source_id_is_still_rejected_even_though_null_is_filled(monkeypatch):
+    """앵커로 메우는 것이 "아무 값이나 허용"은 아니다 -- 값을 댔는데 요청에 없으면 위조다."""
+    items = _matching_items()
+    items[0]["interviewSourceId"] = None            # 정직한 공백은 메워진다
     items[1]["interviewSourceId"] = "src-INVENTED"  # 지어낸 값은 여전히 거부
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
 
@@ -490,7 +521,10 @@ def test_attempt_and_session_interview_source_id_are_allowed(monkeypatch):
 
 def test_observation_note_interview_source_id_is_allowed_not_fabrication(monkeypatch):
     """관찰 메모가 이제 자기 interviewSourceId를 갖는다(D-ib4) -- 그 값으로 응답해도
-    '지어냄'으로 걸리면 안 된다. 관찰 메모가 있어도 근거 없는 항목은 null 그대로다."""
+    '지어냄'으로 걸리면 안 된다.
+
+    ⚠️ 2026-08-15: 근거 없는 항목은 이제 null이 아니라 앵커로 메워진다. 여기서 RISK
+    항목(items[1])은 RAPPORT가 아니므로 메모가 1건이어도 attempt로 떨어진다."""
     req_dict = _request()
     req_dict["observationNotes"] = [{
         "occurredAt": "2026-08-01T09:00:00Z",
@@ -499,13 +533,13 @@ def test_observation_note_interview_source_id_is_allowed_not_fabrication(monkeyp
     }]
     items = _matching_items()
     items[0]["interviewSourceId"] = "src-note-1"  # 관찰 메모 근거 -- 이제 실제 id로 인용 가능
-    items[1]["interviewSourceId"] = None           # priorInterviews만 근거면 null 그대로
+    items[1]["interviewSourceId"] = None           # 근거 없음 -- 앵커로 메워진다
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
 
     result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
 
     assert result.items[0].interview_source_id == "src-note-1"
-    assert result.items[1].interview_source_id is None
+    assert result.items[1].interview_source_id == "src-attempt-1"
 
 
 def test_new_session_end_reason_codes_are_accepted(monkeypatch):
