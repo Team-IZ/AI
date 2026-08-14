@@ -58,7 +58,8 @@ def _stub_result(req: InterviewBriefRequest) -> InterviewBriefResult:
     6~8)"가 5-카테고리 고정 구성으로 바뀌면서 한 번 갈렸다.
     """
     composition, qna_targets = engine._compose(req)
-    # 카테고리별로 "이 종류의 근거"를 순서대로 꺼내 쓴다. 모자라면 null(=MANUAL).
+    # 카테고리별로 "이 종류의 근거"를 순서대로 꺼내 쓴다. 모자라면 실엔진과 같은
+    # 앵커로 메운다(engine._anchor_source_id) -- stub이 null을 내면 계약이 갈린다.
     pools: dict[str, list[str]] = {
         "RAPPORT": [n.interview_source_id for n in req.observation_notes],
         "PRIOR_INTERVIEW": [],   # 이전 상담 내역엔 interviewSourceId가 없다
@@ -68,10 +69,10 @@ def _stub_result(req: InterviewBriefRequest) -> InterviewBriefResult:
     }
     used = dict.fromkeys(pools, 0)
 
-    def _next_id(qtype: str) -> str | None:
+    def _next_id(qtype: str) -> str:
         pool, i = pools[qtype], used[qtype]
         used[qtype] = i + 1
-        return pool[i] if i < len(pool) else None
+        return pool[i] if i < len(pool) else engine._anchor_source_id(req, qtype)
 
     return InterviewBriefResult(
         opening_remark=f"[stub] {req.target.user_name}님, 오늘 잠깐 이야기 나누겠습니다. "

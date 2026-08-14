@@ -111,6 +111,7 @@ def generate_interview_brief(
                 "question_rationale": item.question_rationale,
                 "suggested_order": item.suggested_order,
                 "interview_source_id": item.interview_source_id,
+                "question_type": item.question_type,
             }
             for item in result.items
         ],

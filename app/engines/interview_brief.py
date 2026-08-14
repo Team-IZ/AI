@@ -13,7 +13,7 @@ AI는 DB에 접근하지 않는다 -- 요청에 실려온 값을 텍스트 블�
 """
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, get_args
 
 from app.config import get_settings
 from app.engines.analysis import stages
@@ -26,6 +26,7 @@ from app.schemas.interview_brief import (
     ObservationNote,
     PriorInterview,
     ProblemComprehension,
+    QuestionType,
     RiskReason,
     Target,
     ValidityReview,
@@ -37,8 +38,9 @@ class InterviewBriefItemResult:
     question_text: str
     question_rationale: str
     suggested_order: int
-    interview_source_id: str | None
-    question_type: str  # 내부 검증용(구성 순서 강제) -- 라우터가 응답 조립 시 골라 담지 않아 API로는 안 나간다
+    # 파싱 직후엔 None일 수 있지만 append 시점에 _anchor_source_id로 메워져 항상 값이 있다.
+    interview_source_id: str
+    question_type: str  # 구성 순서 강제(내부) + 응답 노출(백엔드가 MANUAL 판정 근거로 보관)
 
 
 @dataclass
@@ -237,7 +239,9 @@ def _observation_notes_block(notes: list[ObservationNote]) -> str:
     )
 
 
-_QUESTION_TYPES = ("RAPPORT", "PRIOR_INTERVIEW", "RISK", "GENERAL", "QNA")
+# 응답 스키마의 Literal에서 뽑는다 -- questionType이 API로 나가게 된 뒤로(2026-08-15)
+# 두 곳에 따로 적으면 조용히 어긋난다. 순서도 그대로 구성 순서다.
+_QUESTION_TYPES = get_args(QuestionType)
 
 
 @dataclass(frozen=True)
@@ -391,6 +395,40 @@ def _collect_allowed_source_ids(req: InterviewBriefRequest) -> set[str]:
     return ids
 
 
+def _anchor_source_id(req: InterviewBriefRequest, question_type: str) -> str:
+    """모델이 근거를 안 댄 항목에 붙일 대체 앵커.
+
+    🔴 왜 필요한가(2026-08-15, 백엔드 합의): `interview_brief_item.interview_source_id`가
+    실제 DDL(`PostgreSQL_v07_Table_DDL_2026_08_07_09_06.sql`)에서 **`UUID NOT NULL` +
+    `interview_source` FK**다. 테이블정의서 2026-08-06이 적어둔
+    `source_type='MANUAL' AND interview_source_id IS NULL` 자리는 08-07 재설계에서
+    사라졌다 -- null을 실어 보내면 백엔드가 그 항목을 **조용히 못 저장한다**(INSERT의
+    `WHERE s.interview_source_id = ?`가 0행이라 예외도 안 난다).
+
+    라포·일반·이전면담 질문은 설계상 근거가 없으므로(`_question_plan_block` 참고)
+    그대로 두면 브리프의 절반이 증발한다. 그래서 **서버가 결정적으로 메운다** --
+    모델에게 id를 대라고 시키지 않는다(강제하면 정직한 공백 대신 그럴듯한 id를
+    지어낼 유인이 생긴다는 원칙은 그대로다).
+
+    앵커 선택:
+
+    - `RAPPORT` + 관찰 메모 **정확히 1건**: 그 메모. 프롬프트가 메모를 근거로 라포
+      질문을 만들게 하므로(`rapport_hint`) 실제 출처가 맞다. 2건 이상이면 어느 것을
+      썼는지 알 수 없어 attempt로 떨어뜨린다 -- 엉뚱한 메모를 근거로 박는 것이
+      뭉뚱그리는 것보다 나쁘다.
+    - 그 밖: `attempt_interview_source_id`. 요청 필수 필드라 항상 있고, 백엔드도
+      2026-08-15에 attempt 부재를 `NO_ASSESSMENT_ATTEMPT`(409)로 막아 앵커가 비는
+      경로를 없앴다.
+
+    ⚠️ 임시 다리다. `interview_source_id`만 보면 라포 질문이 "시도를 근거로 한 질문"처럼
+    보인다 -- 구분은 `questionType`으로만 남는다. DB에 MANUAL 자리가 생기면 이 폴백을
+    끄고 null을 그대로 실어 보내면 된다.
+    """
+    if question_type == "RAPPORT" and len(req.observation_notes) == 1:
+        return req.observation_notes[0].interview_source_id
+    return req.comprehension.attempt_interview_source_id
+
+
 def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> InterviewBriefResult:
     """면담 브리프 1건 생성. 검증 실패는 전부 stages.StageError로 올린다(부분 성공 없음)."""
     allowed_ids = _collect_allowed_source_ids(req)
@@ -464,7 +502,8 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
             question_text=str(raw.get("questionText") or "").strip(),
             question_rationale=str(raw.get("questionRationale") or "").strip(),
             suggested_order=order,
-            interview_source_id=source_id,
+            # 모델이 공백을 냈으면 서버가 앵커로 메운다 -- 근거는 _anchor_source_id.
+            interview_source_id=source_id or _anchor_source_id(req, question_type),
             question_type=question_type,
         ))
 
