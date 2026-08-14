@@ -23,6 +23,8 @@ from app.schemas.usage import AiUsage
 # "그런 값도 있나보다" 하고 조용히 넘기는 것보다 안전하다.
 ProjectCategory = Literal["MINI_PROJECT", "BIG_PROJECT"]
 BriefType = Literal["STANDARD", "INVALID_ATTEMPT"]
+# 질문 5-카테고리. 순서도 이대로 고정이다(engine의 _QUESTION_TYPES와 같은 값·같은 순서).
+QuestionType = Literal["RAPPORT", "PRIOR_INTERVIEW", "RISK", "GENERAL", "QNA"]
 RiskReasonCode = Literal[
     "STAGE_DECLINE", "PERSISTENT_LOW", "INVALID_ATTEMPT",
     "CONTRIBUTION_UNDERSTANDING_GAP", "LOW_PARTICIPATION",
@@ -380,14 +382,23 @@ class InterviewBriefItem(BaseSchema):
         description="매니저만 보는 근거. 어떤 데이터에서 나왔는지 명시",
     )
     suggested_order: int = Field(ge=1)
-    interview_source_id: str | None = Field(
-        default=None,
-        description="요청에서 받은 값 중 하나여야 한다 -- 새 UUID면 백엔드가 저장을 거부한다. "
-                    "🔴 **null일 수 있다**: 라포·일반 질문은 설계상 근거가 없다. "
-                    "`interview_brief_item`은 그 자리를 갖고 있다 -- CHECK가 "
-                    "`source_type='MANUAL' AND interview_source_id IS NULL`을 허용한다"
-                    "(테이블정의서 2026-08-06). null이면 MANUAL, 값이 있으면 "
-                    "INTERVIEW_SOURCE로 파생하면 되므로 sourceType은 싣지 않는다",
+    interview_source_id: str = Field(
+        description="요청에서 받은 값 중 하나다 -- 새 UUID는 나가지 않는다. "
+                    "🔴 **never null** (2026-08-15 백엔드 합의). 실제 DDL에서 "
+                    "`interview_brief_item.interview_source_id`가 `UUID NOT NULL` + "
+                    "`interview_source` FK라 null이면 그 항목이 저장되지 않는다. "
+                    "라포·일반·이전면담처럼 설계상 근거가 없는 질문은 AI가 앵커로 "
+                    "메워 보낸다(관찰 메모 1건이면 그 메모, 그 밖은 "
+                    "`comprehension.attemptInterviewSourceId`). "
+                    "⚠️ 그래서 이 값만으로는 '진짜 근거'와 '앵커'를 구분할 수 없다 -- "
+                    "구분은 `questionType`으로 한다",
+    )
+    question_type: QuestionType = Field(
+        description="질문 카테고리. 5-카테고리 고정 구성의 어느 자리인지 알린다. "
+                    "🔴 `RAPPORT`·`GENERAL`·`PRIOR_INTERVIEW`는 설계상 근거가 없어 "
+                    "`interviewSourceId`가 앵커로 채워진 값이다 -- `interview_brief_item`에 "
+                    "MANUAL 자리가 생기면 그때 MANUAL 판정 근거로 쓰면 된다"
+                    "(2026-08-15 백엔드 요청으로 노출)",
     )
 
 

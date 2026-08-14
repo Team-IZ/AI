@@ -693,7 +693,8 @@ DB 3계층(`curriculum_analysis` → `curriculum_section` → `teaches`)을 그�
 // 200
 { "openingRemark": "1~3문장, 구어체",
   "items": [ { "questionText": "…?", "questionRationale": "…",
-               "suggestedOrder": 1, "interviewSourceId": "…" } ],
+               "suggestedOrder": 1, "interviewSourceId": "…",
+               "questionType": "RAPPORT|PRIOR_INTERVIEW|RISK|GENERAL|QNA" } ],
   "aiUsage": [ … ] }
 ```
 
@@ -710,22 +711,33 @@ DB 3계층(`curriculum_analysis` → `curriculum_section` → `teaches`)을 그�
   문제가 끝났다"는 뜻이라 문제당 최대 1개이고, L2로 좁히면 L1에서 끝난 학생(면담 1순위)의
   문답 질문이 0개가 된다. ⚠️ 옛 "4~8개, 첫 면담이면 6~8개"는 폐기다.
   `suggestedOrder`는 1부터 중복 없는 연속 정수다.
-- 🔴 **`interviewSourceId`는 null일 수 있다.** 라포("요즘 잘 지내세요?")·일반("이번에 뭐
-  담당했어요?") 질문은 설계상 근거가 없다. `interview_brief_item`이 그 자리를 갖고 있다:
+- 🔴 **`interviewSourceId`는 절대 null이 아니다** (2026-08-15 백엔드 합의). 라포("요즘 잘
+  지내세요?")·일반("이번에 뭐 담당했어요?")·이전면담 질문은 설계상 근거가 없는데,
+  `interview_brief_item.interview_source_id`가 실제 DDL에서 `UUID NOT NULL` +
+  `interview_source` FK다. null을 실어 보내면 백엔드 INSERT가 0행이라 **예외 없이 조용히
+  누락된다.** 그래서 **서버가 앵커로 메운다**(`engine._anchor_source_id`):
 
   ```
-  CHECK ( (source_type='MANUAL'           AND interview_source_id IS NULL)
-       OR (source_type='INTERVIEW_SOURCE' AND interview_source_id IS NOT NULL) )
+  RAPPORT + 관찰 메모 1건   그 메모          프롬프트가 메모 기반 라포를 시킨다
+  RAPPORT + 메모 0 또는 2+  attempt          어느 메모인지 알 수 없다
+  GENERAL · PRIOR_INTERVIEW attempt          comprehension.attemptInterviewSourceId
+  RISK · QNA                모델이 댄 값      검증 통과분 그대로
   ```
 
-  null이면 `MANUAL`, 값이 있으면 `INTERVIEW_SOURCE`로 백엔드가 파생하므로 응답에
-  `sourceType`을 싣지 않는다. 값을 **댔는데** 요청에 없으면 지어낸 것이라 거부한다
-  (6슬롯: 위험사유·시도·세션·문제·단계·관찰메모). **모델에게 id를 강제하지 않는다** —
-  강제하면 정직한 공백 대신 그럴듯한 id를 지어낼 유인이 생긴다.
+  **모델에게 id를 강제하지 않는다** — 강제하면 정직한 공백 대신 그럴듯한 id를 지어낼
+  유인이 생긴다. 모델이 낸 공백을 코드가 결정적으로 메우는 것이다. 값을 **댔는데** 요청에
+  없으면 지어낸 것이라 여전히 거부한다(6슬롯: 위험사유·시도·세션·문제·단계·관찰메모).
 
-  ⚠️ 옛 기록("`interview_source_id`가 UUID NOT NULL이라 근거 없는 항목은 드롭",
-  백엔드 회신 §3 D-1②)은 **뒤집혔다** — 그 컬럼은 nullable이다(테이블정의서 2026-08-06).
-  백엔드 회신의 해당 문구도 정정 요청 대상이다.
+  앵커 값 자체는 항상 있다 — `attemptInterviewSourceId`가 요청 필수 필드이고, 백엔드도
+  2026-08-15에 attempt 부재를 `NO_ASSESSMENT_ATTEMPT`(409)로 막았다.
+
+  구분은 **`questionType`으로 한다** — 그래서 응답에 노출한다(백엔드 요청). `interviewSourceId`만
+  보면 라포 질문이 "시도를 근거로 한 질문"처럼 보인다.
+
+  ⚠️ **임시 다리다.** 08-06 정의서엔 있던 `source_type='MANUAL' AND interview_source_id IS NULL`
+  CHECK가 08-07 재설계에서 사라졌다. DB에 그 자리가 다시 생기면 폴백을 끄고 null을 그대로
+  실어 보내면 된다. 옛 기록 두 개가 다 뒤집혔다 — "드롭한다"(8/7)도, "null 허용"(8/12)도
+  아니다.
 - **부분 성공이 없다.** 여는 말만 되고 항목 검증이 하나라도 걸리면 전체를 503으로 실패시킨다.
   실패 응답(`InterviewBriefFailure`)에도 `aiUsage[]`가 실린다 — 실패해도 토큰은 탔다(§3 A-5).
   절반을 반환하면 호출부가 성공으로 오인해 반쪽 브리프가 저장된다.
