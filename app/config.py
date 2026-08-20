@@ -97,9 +97,24 @@ class Settings(BaseSettings):
     #
     # ⚠️ 이름의 `analysis_input`은 폐기된 `/analysis-inputs` 분리 API의 흔적이다.
     # 키를 바꾸면 배포된 .env(팀원 App Runner)가 조용히 기본값으로 떨어지므로 그대로 둔다.
-    # 🔴 기존 GIT_CLONE_TIMEOUT_S(materialize.py, 300초)와 별개다 -- 이건 fetch 경로용이라
-    # 훨씬 짧다.
-    analysis_input_clone_timeout_s: int = 10
+    #
+    # D-clone-timeout(2026-08-21): 10초는 실제로 너무 짧았다. 운영 DB 직접 대조
+    # (`analysis_job.failure_reason = '클론이 10초를 넘겼습니다'`)로 확인 -- 최근 7일
+    # GITHUB_URL 분석 31건 중 5건(16%)이 이 정확한 사유로 실패했고, 그중 4건이 같은 날
+    # 90분 안에 몰렸다. LLM은 한 번도 안 불렸으니(aiUsage: []) 학생 코드 문제가 아니라
+    # 순수히 타임아웃이 타이트했던 것이다.
+    #   WHY: `materialize.py`의 GIT_CLONE_TIMEOUT_S(같은 종류의 학생 레포 `--depth 1`
+    #        클론, "학생 레포는 작지만 상한이 없으면 job 하나가 워커를 무한정 잡는다"는
+    #        같은 근거)가 이미 300초로 서 있다. 이 값이 10초로 훨씬 짧아야 할 이유는
+    #        주석에도, 커밋 이력에도 없다 -- 의도된 설계 차이가 아니라 그냥 어긋난
+    #        값으로 보여서, 같은 작업을 이미 검증된 값에 맞춘다.
+    #   COST: 진짜로 죽은(응답 없는) 호스트를 상대할 때 실패 판정까지 더 오래 걸린다.
+    #        백엔드는 job을 비동기 폴링하므로(agentAsync 워커 블로킹 없음, 실측: 정상
+    #        성공 job도 712초 걸림) 이 정도 지연은 이미 감내되는 범위다.
+    #   EXIT: 이 값이 다시 문제가 되면(예: 진짜 응답 없는 호스트가 워커를 오래 잡는
+    #        사례가 쌓이면) fetch.py 쪽만 별도로 낮추거나, git clone과 ZIP 다운로드
+    #        (`_download()`)가 지금 이 설정 하나를 같이 쓰는 것부터 갈라야 한다.
+    analysis_input_clone_timeout_s: int = 300
     # Phase B(히스토리 수집)는 별도의 더 짧은 예산 -- 넘겨도 Phase A(코드 자체) 결과는
     # 절대 안 버린다. 커밋 개수가 아니라 시간으로 상한을 둔다는 D1 결정 그대로.
     git_history_budget_s: int = 3
