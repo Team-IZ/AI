@@ -1,7 +1,13 @@
 """ p04-4 질문 동결(T7b). 생성물을 믿지 않는 지점이다.
 
 **동결 대상은 L1~L4 전부다** (2026-08-02 전면 동결). 세션 중 질문 생성은 없다.
+
+freeze_many()는 두 가지를 잰다(hints.freeze_many()와 같은 이유):
+  ① 병렬 배치에서 **순서가 안 섞이는가** — 섞이면 문제1의 질문이 문제2 자리에 들어간다
+  ② 문제 하나가 flagged로 남아도 **배치 전체가 안 죽는가**
 """
+import time
+
 from app.engines.analysis import questions, stages
 
 TOPIC = {
@@ -102,3 +108,59 @@ def test_regeneration_recovers(monkeypatch):
 
     assert qs.flagged is False
     assert len(calls) == 2
+
+
+def test_freeze_many_keeps_order_and_levels(monkeypatch):
+    """병렬이라 완료 순서가 뒤섞인다. 결과는 **topics 순서**로 돌아와야 한다."""
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+        marker = values["topic_block"].splitlines()[0]  # "제목: 토픽{i}"
+        return stages.StageResult(
+            data={"levels": _levels(L1_코드기술=f"{marker} 질문")},
+            usages=[{"status": "SUCCEEDED"}],
+        )
+
+    monkeypatch.setattr(questions.stages, "call", _call)
+
+    topics = [{**TOPIC, "title": f"토픽{i}"} for i in range(5)]
+    result = questions.freeze_many(topics, {}, {}, model_code="m")
+
+    assert len(result) == 5
+    for i, qs in enumerate(result):
+        assert qs.flagged is False
+        assert qs.levels[0]["question"] == f"제목: 토픽{i} 질문"
+
+
+def test_freeze_many_actually_runs_in_parallel(monkeypatch):
+    """순차면 4콜 × 0.1초 = 0.4초. 병렬이면 그보다 훨씬 짧아야 한다."""
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+        time.sleep(0.1)
+        return stages.StageResult(data={"levels": _levels()}, usages=[])
+
+    monkeypatch.setattr(questions.stages, "call", _call)
+
+    topics = [{**TOPIC, "title": f"토픽{i}"} for i in range(4)]
+    started = time.monotonic()
+    questions.freeze_many(topics, {}, {}, model_code="m")
+    took = time.monotonic() - started
+
+    assert took < 0.5, f"병렬이 안 돌고 있다: {took:.2f}s"
+
+
+def test_one_flagged_topic_does_not_stop_the_batch(monkeypatch):
+    """토픽 하나가 끝까지 형태 불일치여도 나머지 배치는 정상 완료돼야 한다."""
+    without_l2 = [lv for lv in _levels() if lv["axis"] != "L2_설계논리"]
+
+    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+        marker = values["topic_block"].splitlines()[0]
+        if marker == "제목: 깨진토픽":
+            return stages.StageResult(data={"levels": without_l2}, usages=[{"status": "SUCCEEDED"}])
+        return stages.StageResult(data={"levels": _levels()}, usages=[{"status": "SUCCEEDED"}])
+
+    monkeypatch.setattr(questions.stages, "call", _call)
+
+    topics = [{**TOPIC, "title": "정상토픽1"}, {**TOPIC, "title": "깨진토픽"},
+              {**TOPIC, "title": "정상토픽2"}]
+    result = questions.freeze_many(topics, {}, {}, model_code="m")
+
+    assert [qs.flagged for qs in result] == [False, True, False]
+    assert "형태 불일치" in result[1].reason

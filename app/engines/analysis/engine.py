@@ -383,15 +383,18 @@ class RealAnalysisEngine:
         focus_ids = [item["id"] for item in (request.get("focus_items") or [])]
         problems: list[dict[str, Any]] = []
 
-        # 질문을 먼저 다 만들고, 힌트는 **한 배치로 몰아 병렬 호출한다.**
-        # 실측(2026-08-02): 힌트 8콜이 616초로 전체 902초의 68%였고 서로 완전히
+        # 질문도 힌트도 각각 한 배치로 몰아 병렬 호출한다.
+        # 힌트 실측(2026-08-02): 힌트 8콜이 616초로 전체 902초의 68%였고 서로 완전히
         # 독립이다. 문제 3개면 24콜인데 순차로 돌면 그것만 30분이 넘는다.
+        # 질문도 같은 이유로 병렬화(D-parallel-questions, questions.freeze_many() 참고)
+        # — 문제끼리 서로 독립인데 순차 호출 시 NVIDIA 큐 혼잡으로 최악 15분을 넘었다
+        # (실측 2026-08-21, 최근 성공 job 20건 중 최대 1289초/문제3개).
         planned: list[dict[str, Any]] = []
         hint_specs: list[dict[str, Any]] = []
 
-        for no, topic in enumerate(selection.topics, start=1):
-            teach = teach_map.get(topic.get("teach_id"))
-            qset = questions.freeze(topic, files, teach, model_code=model_code)
+        qsets = questions.freeze_many(selection.topics, files, teach_map, model_code=model_code)
+
+        for no, (topic, qset) in enumerate(zip(selection.topics, qsets), start=1):
             usages.extend(_stamp(qset.usages, "CODE_SESSION"))
 
             ref = topic.get("code_ref") or {}
@@ -414,7 +417,7 @@ class RealAnalysisEngine:
                 "hint_offset": len(hint_specs),
             })
             hint_specs += [
-                {"question": q, "teach": teach,
+                {"question": q, "teach": teach_map.get(topic.get("teach_id")),
                  "code_snippet": snippet, "code_ref": code_ref_str}
                 for q in axis_questions
             ]
