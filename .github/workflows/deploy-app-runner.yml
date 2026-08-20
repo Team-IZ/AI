@@ -111,6 +111,34 @@ jobs:
         run: |
           set -euo pipefail
 
+          # D-wait-timeout(2026-08-21): 8초 간격으로 40회(320초)만 기다리고 포기했는데,
+          # 실측 배포 소요시간은 618초였다(오늘 이 서비스, update-service 뒤 RUNNING까지).
+          # CI는 "실패"로 찍었지만 AWS 쪽 UPDATE_SERVICE 오퍼레이션은 그 뒤에도 계속
+          # 진행돼 결국 SUCCEEDED로 끝났다 — 배포가 죽은 게 아니라 지켜보는 쪽이 먼저
+          # 포기한 것이었다. 8/14 배포도 같은 지점에서 같은 방식으로 실패한 기록이 있어
+          # 이번이 우연이 아니라 이 타임아웃이 구조적으로 짧다는 뜻이다.
+          #   WHY: 900초(=618초 실측치의 약 1.5배 여유)로 올린다. 반복 횟수가 아니라
+          #        간격(8초)으로 나눈 값을 쓰는 이유는 다음에 간격을 조정해도 "몇 분
+          #        기다리는가"가 숫자만 봐도 바로 드러나게 하려는 것이다.
+          #   COST: 정말로 죽은 배포(응답 없는 컨테이너 등)를 판정하는 데 최대 15분이
+          #        걸린다 — 실패를 더 늦게 안다는 뜻이다.
+          #   EXIT: 실측 소요시간이 더 늘어나면(이미지가 커지거나 헬스체크가 느려지면)
+          #        WAIT_TIMEOUT_S만 다시 올린다. 반대로 배포가 꾸준히 훨씬 빨리 끝나면
+          #        낮춰서 진짜 실패를 더 빨리 알 수 있게 한다.
+          WAIT_TIMEOUT_S=900
+          WAIT_INTERVAL_S=8
+
+          wait_for_running() {
+            local waited=0
+            while [ "$waited" -lt "$WAIT_TIMEOUT_S" ]; do
+              STATUS=$(aws apprunner describe-service --service-arn "$SERVICE_ARN" --query 'Service.Status' --output text)
+              [ "$STATUS" = "RUNNING" ] && return 0
+              sleep "$WAIT_INTERVAL_S"
+              waited=$((waited + WAIT_INTERVAL_S))
+            done
+            return 1
+          }
+
           STATUS=$(aws apprunner describe-service --service-arn "$SERVICE_ARN" --query 'Service.Status' --output text)
           echo "Current service status: $STATUS"
 
@@ -119,12 +147,7 @@ jobs:
             aws apprunner resume-service --service-arn "$SERVICE_ARN" >/dev/null
           fi
 
-          for i in $(seq 1 40); do
-            STATUS=$(aws apprunner describe-service --service-arn "$SERVICE_ARN" --query 'Service.Status' --output text)
-            [ "$STATUS" = "RUNNING" ] && break
-            sleep 8
-          done
-          if [ "$STATUS" != "RUNNING" ]; then
+          if ! wait_for_running; then
             echo "Service did not reach RUNNING in time (status: $STATUS)"
             exit 1
           fi
@@ -164,12 +187,8 @@ jobs:
             --cli-input-json file:///tmp/update-service-input.json \
             --query 'Service.Status' --output text
 
-          for i in $(seq 1 40); do
-            STATUS=$(aws apprunner describe-service --service-arn "$SERVICE_ARN" --query 'Service.Status' --output text)
-            [ "$STATUS" = "RUNNING" ] && break
-            sleep 8
-          done
-          if [ "$STATUS" != "RUNNING" ]; then
+          # 2026-08-21 실측: 바로 이 대기가 618초 걸렸다(위 D-wait-timeout 참고).
+          if ! wait_for_running; then
             echo "Service did not reach RUNNING after update-service (status: $STATUS)"
             exit 1
           fi
@@ -177,7 +196,8 @@ jobs:
           OP_ID=$(aws apprunner start-deployment --service-arn "$SERVICE_ARN" --query 'OperationId' --output text)
           echo "Started deployment operation: $OP_ID"
 
-          for i in $(seq 1 60); do
+          op_waited=0
+          while [ "$op_waited" -lt "$WAIT_TIMEOUT_S" ]; do
             OP_STATUS=$(aws apprunner list-operations --service-arn "$SERVICE_ARN" --max-results 5 \
               --query "OperationSummaryList[?Id=='$OP_ID'].Status" --output text)
             case "$OP_STATUS" in
@@ -190,7 +210,8 @@ jobs:
                 exit 1
                 ;;
             esac
-            sleep 8
+            sleep "$WAIT_INTERVAL_S"
+            op_waited=$((op_waited + WAIT_INTERVAL_S))
           done
           echo "Timed out waiting for deployment $OP_ID to finish"
           exit 1
