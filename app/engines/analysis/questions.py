@@ -12,6 +12,7 @@ hint-ladder.js의 freezeQuestionSet() 포팅 (질문 부분만 — 힌트는 p04
 질문 하나가 그 문제의 자력 측정을 통째로 무효화하기 때문이다.
 """
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -135,3 +136,47 @@ def freeze(topic: dict[str, Any], files: dict[str, str], teach: dict[str, Any] |
     # 상한을 넘었다. 조용히 통과시키지 않는다 — 사람이 봐야 한다.
     return QuestionSet(topic=topic, levels=[], code_ref=ref, usages=usages,
                        flagged=True, reason=reason)
+
+
+# 동시 호출 상한. hints.py의 MAX_PARALLEL과 같은 값·같은 이유(키 8개 여유는 크지만
+# 무한정 던지면 공급자 큐 혼잡에 우리가 기여한다).
+MAX_PARALLEL = 8
+
+
+def freeze_many(topics: list[dict[str, Any]], files: dict[str, str],
+                teach_map: dict[str, Any], *, model_code: str,
+                max_workers: int = MAX_PARALLEL) -> list[QuestionSet]:
+    """여러 문제의 질문 L1~L4를 **동시에** 동결한다. 반환 순서는 `topics` 순서와 같다.
+
+    # D-parallel-questions(2026-08-21): engine.py의 p04-4 루프를 순차 호출에서
+    #   병렬 호출로 바꾼다(hints.freeze_many()와 같은 패턴).
+    #   WHY: 문제(topic)끼리는 서로의 결과를 참조하지 않는 완전한 독립 호출인데
+    #        engine.py가 문제 수만큼 순차로 freeze()를 돌렸다. NVIDIA 대형 모델은
+    #        공급자 쪽 큐 혼잡 시 단일 호출이 300초+ 걸린 전례가 있어(nvidia_client.py
+    #        의 D98 — llama-3.3-70b-instruct 워커큐 과부하 실측) 순차 3콜이면 최악의
+    #        경우 15분을 넘는다. 실측(2026-08-21, teamiz-prod 최근 성공 job 20건,
+    #        question_budget 전부 3으로 동일)에서 처리시간이 44초~1289초까지 30배
+    #        벌어졌다 — hints.py가 2026-08-02에 정확히 같은 근거(힌트 8콜=전체
+    #        902초의 68%)로 이미 병렬화된 전례를 그대로 따른다.
+    #   COST: 문제 수만큼 스레드가 동시에 NVIDIA 키 풀에 접근한다. MAX_PARALLEL=8은
+    #        hints.py와 동일 상한이라 두 배치가 겹쳐도(질문 배치 다음에 힌트 배치가
+    #        순차로 이어지므로 실제로는 안 겹침) 새로 늘어나는 동시 접속은 없다.
+    #   EXIT: freeze()가 내부에서 예외를 흡수하지 않고 밖으로 던지도록 바뀌면,
+    #        future.result()가 그 예외를 그대로 재던지므로 이 함수에 try/except를
+    #        추가해야 한다(현재는 hints.generate()와 마찬가지로 freeze()가 항상
+    #        QuestionSet을 반환하므로 불필요).
+    """
+    if not topics:
+        return []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(freeze, topic, files, teach_map.get(topic.get("teach_id")),
+                       model_code=model_code): i
+            for i, topic in enumerate(topics)
+        }
+        out: list[QuestionSet | None] = [None] * len(topics)
+        for future in as_completed(futures):
+            out[futures[future]] = future.result()
+
+    return out  # type: ignore[return-value]
