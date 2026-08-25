@@ -1,6 +1,9 @@
 """ 6단계 job 수명주기 테스트. HTTP 없이 jobs.py 함수를 직접 검증한다. """
+import threading
+import time
 from typing import Any
 
+from app import jobs as jobs_module
 from app.engines.analysis import fetch as fetch_engine
 from app.engines.stub import StubAnalysisEngine
 from app.jobs import create_job, get_job, run_analysis
@@ -38,6 +41,46 @@ def test_run_analysis_reaches_succeeded():
     assert job.result is not None
     assert job.started_at is not None
     assert job.completed_at is not None
+
+
+def test_analysis_concurrency_is_capped(monkeypatch):
+    """동시 job이 `_ANALYSIS_CONCURRENCY` 상한을 넘지 않는다.
+
+    2026-08-25 실제 인시던트(jobs.py의 D4 주석 참고) 회귀 테스트 -- job 12개가
+    거의 동시에 시작되며 단일 인스턴스 CPU를 100%로 포화시켜 헬스체크조차
+    응답을 못 만드는 상태(curl 15초 타임아웃 실측)까지 갔다. 상한을 넘는 job은
+    QUEUED로 대기해야 한다.
+    """
+    monkeypatch.setattr(jobs_module, "_ANALYSIS_CONCURRENCY", threading.Semaphore(2))
+
+    lock = threading.Lock()
+    current = 0
+    max_seen = 0
+
+    class _SlowEngine:
+        def analyze(self, request: dict[str, Any], zip_bytes: bytes | None = None) -> dict[str, Any]:
+            nonlocal current, max_seen
+            with lock:
+                current += 1
+                max_seen = max(max_seen, current)
+            time.sleep(0.05)
+            raw = StubAnalysisEngine().analyze(request, zip_bytes)
+            with lock:
+                current -= 1
+            return raw
+
+    jobs = [create_job(BODY, idempotency_key=None) for _ in range(5)]
+    threads = [
+        threading.Thread(target=run_analysis, args=(j.job_id, BODY, _SlowEngine(), None))
+        for j in jobs
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert max_seen == 2   # 상한(2)을 실제로 채웠고 넘지는 않았다
+    assert all(j.status == "SUCCEEDED" for j in jobs)
 
 
 def test_run_analysis_failed_on_engine_error():

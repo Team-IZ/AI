@@ -127,6 +127,26 @@ class Settings(BaseSettings):
     #        사례가 쌓이면) fetch.py 쪽만 별도로 낮추거나, git clone과 ZIP 다운로드
     #        (`_download()`)가 지금 이 설정 하나를 같이 쓰는 것부터 갈라야 한다.
     analysis_input_clone_timeout_s: int = 300
+
+    # D4(2026-08-25): 동시에 실제로 돌아가는 분석 job 수의 전역 상한.
+    #   WHY: 실측 인시던트 -- KST 22:08~22:10에 job 12개가 거의 동시에 시작되자
+    #        단일 인스턴스(당시 1vCPU)가 22:11부터 CPU 100%로 고정, 헬스체크조차
+    #        15초간 응답 0바이트(curl 재현), 5xx 발생. job 하나가 내부에서
+    #        ThreadPoolExecutor(max_workers=8)를 두 번(questions.py 힌트 전
+    #        문제 선정용, hints.py 힌트 생성용) 새로 띄우는데, job 개수에 대한
+    #        전역 상한이 없어 12개 job이면 이론상 최대 96스레드가 동시에
+    #        CPU를 다퉜다. App Runner 오토스케일링은 MaxConcurrency(동시
+    #        HTTP 요청 수) 기준이라 이 상황(요청 수는 12로 낮음)에서 전혀
+    #        발동하지 않는다는 것도 같은 조사로 확인함(ActiveInstances가
+    #        인시던트 내내 1로 고정).
+    #   COST: 상한을 넘는 job은 큐(QUEUED)에서 대기 -- 처리량이 아니라
+    #        지연으로 부하를 흡수한다(서버 다운 대신 대기시간 증가).
+    #        값 6은 정밀 계산이 아니라 "인시던트를 낸 값(12)의 절반, 인스턴스를
+    #        2vCPU로 올린 뒤에도 보수적으로 시작"이라는 안전마진 판단이다 --
+    #        실측 기반 최적값이 아니므로 재조정이 전제된 잠정치다.
+    #   EXIT: 배포 후 CloudWatch CPUUtilization을 이 값과 함께 관찰해
+    #        여유가 있으면 올리고, 다시 포화되면 낮춘다.
+    analysis_max_concurrent_jobs: int = 6
     # Phase B(히스토리 수집)는 별도의 더 짧은 예산 -- 넘겨도 Phase A(코드 자체) 결과는
     # 절대 안 버린다. 커밋 개수가 아니라 시간으로 상한을 둔다는 D1 결정 그대로.
     git_history_budget_s: int = 3
