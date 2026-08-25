@@ -70,6 +70,7 @@ def fallback(hint_level: int) -> str:
 
 
 def generate(hint_level: int, question: str, *, model_code: str,
+             fallback_model_code: str | None = None,
              attempts: list[dict[str, Any]] | None = None,
              teach: dict[str, Any] | None = None,
              code_snippet: str = "", code_ref: str = "",
@@ -102,6 +103,7 @@ def generate(hint_level: int, question: str, *, model_code: str,
     for attempt in range(max_regenerations + 1):
         try:
             result = stages.call("p04-7", values, model_code=model_code,
+                                 fallback_model_code=fallback_model_code,
                                  timeout_s=timeout_s or client.SESSION_TIMEOUT_S,
                                  max_attempts=client.SESSION_MAX_ATTEMPTS)
         except stages.StageError as exc:
@@ -122,13 +124,15 @@ def generate(hint_level: int, question: str, *, model_code: str,
                 generated=False, usages=usages)
 
 
-def freeze_for_stage(question: str, *, model_code: str, teach: dict[str, Any] | None = None,
+def freeze_for_stage(question: str, *, model_code: str,
+                     fallback_model_code: str | None = None,
+                     teach: dict[str, Any] | None = None,
                      code_snippet: str = "", code_ref: str = "") -> list[Hint]:
     """질문 하나의 힌트 2개를 답변 없이 미리 만든다."""
     return freeze_many(
         [{"question": question, "teach": teach,
           "code_snippet": code_snippet, "code_ref": code_ref}],
-        model_code=model_code,
+        model_code=model_code, fallback_model_code=fallback_model_code,
     )[0]
 
 
@@ -138,6 +142,7 @@ MAX_PARALLEL = 8
 
 
 def freeze_many(specs: list[dict[str, Any]], *, model_code: str,
+                fallback_model_code: str | None = None,
                 max_workers: int = MAX_PARALLEL) -> list[list[Hint]]:
     """여러 질문의 힌트를 **동시에** 만든다. 반환 순서는 `specs` 순서와 같다.
 
@@ -160,6 +165,7 @@ def freeze_many(specs: list[dict[str, Any]], *, model_code: str,
         futures = {
             pool.submit(
                 generate, level, specs[i]["question"], model_code=model_code,
+                fallback_model_code=fallback_model_code,
                 attempts=[], teach=specs[i].get("teach"),
                 code_snippet=specs[i].get("code_snippet", ""),
                 code_ref=specs[i].get("code_ref", ""),

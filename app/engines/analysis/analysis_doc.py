@@ -103,6 +103,7 @@ def _clean_points(raw: Any, teach_ids: set[str], dropped: list[str]) -> list[dic
 
 def build(files: dict[str, str], teaches: list[dict[str, Any]],
           candidates: list[dict[str, Any]], *, model_code: str,
+          fallback_model_code: str | None = None,
           timeout_s: float | None = None) -> Document:
     """분석 문서를 만든다. 반환값의 `document`는 LLM 원본 모양이다."""
     stage = stages.get_stage("p04-1")
@@ -114,7 +115,8 @@ def build(files: dict[str, str], teaches: list[dict[str, Any]],
         "code_block": fragments.build_code_block(files, max_chars=code_budget),
     }
 
-    result = stages.call("p04-1", values, model_code=model_code, timeout_s=timeout_s)
+    result = stages.call("p04-1", values, model_code=model_code,
+                         fallback_model_code=fallback_model_code, timeout_s=timeout_s)
 
     data = result.data
     overview = str(data.get("overview") or "").strip()

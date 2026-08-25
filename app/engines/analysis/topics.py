@@ -96,7 +96,8 @@ _resolve_teach_id = stages.resolve_choice
 
 def select(files: dict[str, str], teaches: list[dict[str, Any]],
            analysis_document: dict[str, Any], candidates: list[dict[str, Any]],
-           *, model_code: str, question_budget: int = 3) -> Selection:
+           *, model_code: str, fallback_model_code: str | None = None,
+           question_budget: int = 3) -> Selection:
     """문제 후보를 골라 검증까지 마친 목록을 돌려준다.
 
     한 topic이 한 teach를 독점하므로 **teaches가 question_budget보다 적으면 문제도
@@ -126,7 +127,8 @@ def select(files: dict[str, str], teaches: list[dict[str, Any]],
         # 물어볼 수 있는 teach 수를 넘겨준다 — 사전 제외분까지 세면 또 채우려 든다.
         "question_count": min(question_budget, len(teaches)),
     }
-    result = stages.call("p04-3", values, model_code=model_code, extra_user=_NO_PADDING)
+    result = stages.call("p04-3", values, model_code=model_code,
+                         fallback_model_code=fallback_model_code, extra_user=_NO_PADDING)
 
     raw = result.data.get("topics")
     topics = raw if isinstance(raw, list) else []
@@ -160,7 +162,7 @@ def select(files: dict[str, str], teaches: list[dict[str, Any]],
     # 실패한 teach만 모아 다시 묻는다. 전부 성공하면 이 호출은 아예 없다.
     if failed:
         retried = _relocate(files, teaches, analysis_document, candidates, failed,
-                            model_code=model_code)
+                            model_code=model_code, fallback_model_code=fallback_model_code)
         if retried is not None:
             result.usages.extend(retried.usages)
             more, _ = _locate_all(files, retried.topics, dropped)
@@ -251,7 +253,8 @@ def _locate_all(files: dict[str, str], topics: list[dict[str, Any]],
 
 def _relocate(files: dict[str, str], teaches: list[dict[str, Any]],
               analysis_document: dict[str, Any], candidates: list[dict[str, Any]],
-              failed: list[dict[str, Any]], *, model_code: str):
+              failed: list[dict[str, Any]], *, model_code: str,
+              fallback_model_code: str | None = None):
     """위치를 못 잡은 teach만 모아 p04-3을 한 번 더 부른다.
 
     **개념이 코드에 있는데 LLM이 엉뚱한 symbol을 지목한 경우를 구제한다.**
@@ -287,7 +290,8 @@ def _relocate(files: dict[str, str], teaches: list[dict[str, Any]],
         "지어내지 마라 — 없는 것은 없다고 두는 편이 낫다."
     )
     try:
-        result = stages.call("p04-3", values, model_code=model_code, extra_user=hint)
+        result = stages.call("p04-3", values, model_code=model_code,
+                             fallback_model_code=fallback_model_code, extra_user=hint)
     except stages.StageError as exc:
         # 재시도가 깨져도 콜은 나갔다. **원장을 버리면 "왜 이 토큰을 썼나"가 사라지고,
         # 콜 수만 보고 "재시도가 안 돌았다"고 오독하게 된다.**

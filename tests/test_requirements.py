@@ -16,7 +16,7 @@ REQS = [
 
 
 def _fake(monkeypatch, data):
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None):
         _call.values = values
         return stages.StageResult(data=data, usages=[{"status": "SUCCEEDED"}])
 
