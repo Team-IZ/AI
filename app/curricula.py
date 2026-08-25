@@ -11,6 +11,7 @@ import uuid
 from collections import OrderedDict
 from datetime import datetime, timezone
 
+from app.concurrency import HEAVY_JOB_CONCURRENCY
 from app.config import get_settings
 from app.schemas.curriculum import (
     CurriculumJobStatus,
@@ -183,6 +184,20 @@ def _real_result(body: CurriculumRequest, pdf_bytes: bytes, job: CurriculumJobSt
 
 def run_curriculum(job_id: str, body: CurriculumRequest, pdf_bytes: bytes | None, *,
                    idempotency_key: str | None = None, trace_id: str | None = None) -> None:
+    """`HEAVY_JOB_CONCURRENCY` 상한 안에서만 `_run_curriculum_locked`를 실제로 돌린다.
+
+    jobs.py의 코드분석 job과 이 상한을 공유한다(app/concurrency.py 주석 참고) --
+    교안분석도 job 하나당 ThreadPoolExecutor(max_workers=8)를 쓰는 같은 구조라
+    (analyse()가 hints.MAX_PARALLEL을 재사용), 별도 세마포어를 들면 "코드분석
+    6개 + 교안분석 6개 동시"로 2026-08-25 CPU 100% 인시던트가 재현된다.
+    """
+    with HEAVY_JOB_CONCURRENCY:
+        _run_curriculum_locked(job_id, body, pdf_bytes,
+                               idempotency_key=idempotency_key, trace_id=trace_id)
+
+
+def _run_curriculum_locked(job_id: str, body: CurriculumRequest, pdf_bytes: bytes | None, *,
+                           idempotency_key: str | None = None, trace_id: str | None = None) -> None:
     """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED."""
     job = _jobs[job_id]
     job.status = "RUNNING"

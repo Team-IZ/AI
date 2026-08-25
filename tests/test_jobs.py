@@ -51,7 +51,7 @@ def test_analysis_concurrency_is_capped(monkeypatch):
     응답을 못 만드는 상태(curl 15초 타임아웃 실측)까지 갔다. 상한을 넘는 job은
     QUEUED로 대기해야 한다.
     """
-    monkeypatch.setattr(jobs_module, "_ANALYSIS_CONCURRENCY", threading.Semaphore(2))
+    monkeypatch.setattr(jobs_module, "HEAVY_JOB_CONCURRENCY", threading.Semaphore(2))
 
     lock = threading.Lock()
     current = 0
