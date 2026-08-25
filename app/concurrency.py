@@ -114,8 +114,13 @@ def _set_task_protection(enabled: bool) -> None:
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
-            log.info("task-protection(enabled=%s) 요청 성공 status=%s", enabled, resp.status)
-            resp.read()
+            # D-diag2(2026-08-26): status=200이면서도 describe-tasks의
+            # protectionInfo가 null로 남는 사례를 실측했다 -- ECS 태스크 보호
+            # API는 200을 줘도 본문에 failure가 실릴 수 있어(문서화된 응답
+            # 구조) 본문을 확인해야 진짜 성공인지 알 수 있다.
+            raw = resp.read()
+            log.info("task-protection(enabled=%s) 요청 성공 status=%s body=%s",
+                      enabled, resp.status, raw.decode(errors="replace")[:500])
     except (urllib.error.URLError, OSError) as exc:
         detail = ""
         if isinstance(exc, urllib.error.HTTPError):
