@@ -8,6 +8,7 @@
 """
 
 import json
+import logging
 import os
 import re
 import sys
@@ -19,6 +20,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 _VENDOR = Path(__file__).parent / "vendor"
 
@@ -34,12 +37,37 @@ _VENDOR = Path(__file__).parent / "vendor"
 #        (본문 형식이 달라지면 _classify가 오분류할 수 있음).
 #   EXIT: nemotron 등 다른 모델도 같은 문제가 생기면 이 집합에 추가. NVIDIA 쪽
 #        rate limit이 해소되면(포럼 증량 승인·유료 전환) 집합을 비워 되돌린다.
-GMI_ROUTED_MODELS = {"minimaxai/minimax-m3"}
+# D9(2026-08-25, D7 배포 직후): 코드분석 1차 모델을 minimax-m3에서
+#   minimax-m2.7로 낮춘다.
+#   WHY: D7로 minimax-m3(GMI)를 코드분석 1차로 옮긴 뒤에도 job이 fetch 완료
+#        이후(코드로는 stages.call 지점으로 추정, CPU 사용률이 5~8%로 낮아
+#        무한루프가 아니라 I/O 대기로 보임) 15분 넘게 정체하는 사례가 재현됨
+#        (원인 미확정, 진단 로그를 stages.py/client.py에 추가하는 건 별도
+#        PR로 진행). 이 job은 원래 nemotron-3-ultra-550b(대형)가 맡던 일이라
+#        m3보다 가벼운 모델로 낮추면 그 정체 자체가 해소될 수 있다는 판단.
+#        GET /v1/models로 확인한 실측 근거: m2.7은 m3의 정확히 절반 가격
+#        ($0.3/$1.2 대 $0.6/$2.4, 백만 토큰당)이고 context window도 훨씬
+#        작다(196,608 대 1,048,576) — 가격이 모델 크기의 대리 지표라는 점에서
+#        "더 가벼운 모델"이라는 판단의 근거는 있지만, 실제 지연시간(latency)
+#        차이는 아직 실측 전이다(간접 추정임을 명시).
+#   COST: 코드 분석 품질이 m3 대비 더 낮아질 수 있다(D7이 nemotron 대비
+#        낮아질 수 있다고 이미 인지한 트레이드오프 위에 한 단계 더). context
+#        window가 192K로 줄어 매우 큰 레포(코드블록 예산을 넘는 경우)에서
+#        더 쉽게 잘릴 수 있다 — 다만 stages.py의 truncation 예산(code_block
+#        12,000자 등)이 이미 192K 토큰보다 훨씬 작아 실질 영향은 없을 것.
+#   EXIT: 진단 로그(별도 PR)로 정체 원인이 m3 자체와 무관하다고 밝혀지면
+#        다시 m3로 되돌린다. m2.7에서도 같은 정체가 재현되면 모델 크기가
+#        원인이 아니라는 뜻이므로 다른 가설(GMI 커넥션 자체의 타임아웃 부재
+#        등)로 넘어간다.
+GMI_ROUTED_MODELS = {"minimaxai/minimax-m3", "minimaxai/minimax-m2.7"}
 GMI_API_URL = "https://api.gmi-serving.com/v1/chat/completions"
 # NVIDIA 카탈로그 표기(소문자, model_code — 원장·로그에 쓰는 우리 값)와 GMI 카탈로그
 # 표기(대소문자 그대로, `GET /v1/models`로 확인함)가 다르다. model_code 자체는 안
 # 바꾸고 GMI에 보낼 때만 변환한다.
-GMI_MODEL_IDS = {"minimaxai/minimax-m3": "MiniMaxAI/MiniMax-M3"}
+GMI_MODEL_IDS = {
+    "minimaxai/minimax-m3": "MiniMaxAI/MiniMax-M3",
+    "minimaxai/minimax-m2.7": "MiniMaxAI/MiniMax-M2.7",
+}
 
 # 배치용 상한. 팀원 실측(shared/llm.js:143~147): step-3.7-flash는 reasoning_effort=low
 # 로도 실제 프롬프트에서 39초가 걸렸고 재시도가 120초에서 통째로 타임아웃했다.
@@ -185,6 +213,14 @@ def _gmi_chat(model_code: str, messages: list[dict], *, timeout_s: float, **kwar
 
     GMI는 OpenAI 호환이라 요청·응답 스키마가 NVIDIA와 같다 — `chat()`의 `_extract_content`/
     `_extract_tokens`/`_classify`를 그대로 재사용할 수 있는 이유다.
+
+    D10 continued(2026-08-25): `urllib.request.urlopen(timeout=)`은 **개별 소켓
+    연산(connect·recv) 사이의 최대 대기시간**이지 요청 전체의 총 소요시간 상한이
+    아니다 — 서버가 연결은 유지한 채 청크 간격을 timeout_s보다 짧게만 유지하며
+    아주 느리게 응답하면, 전체적으로는 timeout_s(기본 600초)를 몇 배 넘겨도
+    소켓 타임아웃이 안 걸릴 수 있다. 2026-08-25 인시던트(job이 15분+ 정체,
+    CPU는 낮아 블로킹 대기로 추정)의 유력한 원인 후보 — 아직 확정은 아니고
+    이 로그로 재현 시 정확히 확인한다.
     """
     api_key = os.environ.get("GMI_API_KEY", "")
     if not api_key:
@@ -204,8 +240,12 @@ def _gmi_chat(model_code: str, messages: list[dict], *, timeout_s: float, **kwar
             "User-Agent": "curl/8.0",
         },
     )
+    log.info("_gmi_chat: 요청 전송 model=%s timeout=%ss", gmi_model, timeout_s)
     with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-        return json.loads(resp.read())
+        log.info("_gmi_chat: 응답 헤더 수신 status=%s", resp.status)
+        raw = resp.read()
+        log.info("_gmi_chat: 응답 바디 수신 완료 %d bytes", len(raw))
+        return json.loads(raw)
 
 
 def get_pool():
