@@ -5,12 +5,14 @@
 """
 
 import logging
+import threading
 import uuid
 
 from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
+from app.config import get_settings
 from app.engines.analysis import fetch as fetch_engine
 from app.engines.analysis import rules
 
@@ -18,6 +20,12 @@ log = logging.getLogger(__name__)
 from app.engines.base import AnalysisEngine
 from app.schemas.analysis import AnalysisJobStatus, AnalysisRequest, AnalysisResult
 from app.usage import to_ai_usage
+
+# D4(2026-08-25, 근거는 config.py의 analysis_max_concurrent_jobs 주석 참고):
+# 동시에 실제로 CPU를 쓰는 job 수를 이 세마포어로 제한한다. 상한을 넘는 job은
+# QUEUED 상태로 대기한다(run_analysis 래퍼가 acquire를 job.status="RUNNING"
+# 설정보다 먼저 하므로, 대기 중엔 아직 RUNNING으로 안 바뀐다).
+_ANALYSIS_CONCURRENCY = threading.Semaphore(get_settings().analysis_max_concurrent_jobs)
 
 # job_id
 # M9 (redteam audit, 2026-08-05): 무제한 dict였다 -- 업로드 상한(H13)과 별개로 job
@@ -95,6 +103,20 @@ def create_job(body: AnalysisRequest, idempotency_key: str | None) -> AnalysisJo
     return job
 
 def run_analysis(
+    job_id: str, body: AnalysisRequest, engine: AnalysisEngine, zip_bytes: bytes | None,
+    *, idempotency_key: str | None = None, trace_id: str | None = None,
+) -> None:
+    """`_ANALYSIS_CONCURRENCY` 상한 안에서만 `_run_analysis_locked`를 실제로 돌린다.
+
+    상한을 넘는 job은 여기서 대기한다 -- 그동안 job.status는 create_job이 세팅한
+    QUEUED 그대로다(_run_analysis_locked가 그 안에서 RUNNING으로 바꾼다).
+    """
+    with _ANALYSIS_CONCURRENCY:
+        _run_analysis_locked(job_id, body, engine, zip_bytes,
+                              idempotency_key=idempotency_key, trace_id=trace_id)
+
+
+def _run_analysis_locked(
     job_id: str, body: AnalysisRequest, engine: AnalysisEngine, zip_bytes: bytes | None,
     *, idempotency_key: str | None = None, trace_id: str | None = None,
 ) -> None:
