@@ -14,6 +14,7 @@ from app.api import (
 )
 from app.api.deps import require_internal_key
 from app.api.errors import register_error_handlers
+from app.concurrency import start_emf_reporter
 from app.config import API_V0_PREFIX, get_settings
 from app.schemas.common import ErrorResponse
 
@@ -21,6 +22,11 @@ from app.schemas.common import ErrorResponse
 # 지연 호출(요청 때 첫 호출)로 두면 기동은 성공하고 /api/health도 200이라
 # App Runner가 배포를 정상으로 판정한 뒤 업무 요청만 전부 500이 된다.
 _settings = get_settings()
+
+# ECS Fargate 오토스케일링용 커스텀 지표(app/concurrency.py의 D-heavy-pool 주석
+# 참고). App Runner에서도 그냥 돈다 -- 30초마다 로그 한 줄일 뿐이라 해가 없고,
+# 플랫폼별로 분기할 이유가 없다.
+start_emf_reporter()
 
 # 앱 로거를 켠다. uvicorn --log-level은 uvicorn 자기 로거만 건드려서 app.* 로그는
 # 그대로 버려진다(기본 root 레벨이 WARNING이라 INFO가 사라진다). 여기서 root를

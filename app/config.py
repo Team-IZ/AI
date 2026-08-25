@@ -189,7 +189,20 @@ class Settings(BaseSettings):
     #        RPM 상한 없는 프로바이더로 옮기는 것(현재 GMI 잔액 부족으로 보류 중,
     #        model_code_analysis_fallback 주석 참고) -- 그게 되면 이 세마포어는
     #        CPU 보호용으로만 남고 값을 다시 올릴 수 있다.
-    analysis_max_concurrent_jobs: int = 3
+    #
+    # D-heavy-pool-capacity(2026-08-26): 3 -> 4로 재조정.
+    #   WHY: D5의 EXIT 조건이 이미 충족됐다 -- model_code_analysis가 D7/D9로
+    #        nemotron(NVIDIA, 40RPM/키 상한)에서 GMI 경유 minimax-m2.7로
+    #        완전히 옮겨갔다. 즉 D5가 낮췄던 진짜 이유(NVIDIA RPM 경합)가
+    #        더는 이 경로에 없다 -- 세마포어는 이제 다시 순수 CPU 보호용이고,
+    #        인스턴스 사양(2vCPU/4GB, App Runner·ECS 태스크 둘 다 동일)에서
+    #        D4 실측(동시 6개에서도 CPU 최대 48.8%)이 여유를 보였던 구간
+    #        안에서 보수적으로 한 칸만 올린다.
+    #   COST: 정밀 재실측 없이 올리는 값이라 여전히 잠정치다.
+    #   EXIT: ECS Fargate 마이그레이션 Phase 3의 EMF 지표
+    #        (HeavyJobsWaiting/InFlight, app/concurrency.py)와 CloudWatch
+    #        CPUUtilization을 같이 관찰해 재조정한다.
+    analysis_max_concurrent_jobs: int = 4
     # Phase B(히스토리 수집)는 별도의 더 짧은 예산 -- 넘겨도 Phase A(코드 자체) 결과는
     # 절대 안 버린다. 커밋 개수가 아니라 시간으로 상한을 둔다는 D1 결정 그대로.
     git_history_budget_s: int = 3
