@@ -3,3 +3,4 @@
 
 pytest==8.4.2
 pytest-cov==7.1.0
+moto[dynamodb]==5.2.3   # tests/test_job_store.py -- 실제 AWS 없이 DynamoDbJobStore 검증

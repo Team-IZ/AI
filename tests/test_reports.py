@@ -285,12 +285,10 @@ def test_failed_report_still_records_burned_tokens(monkeypatch):
 def test_old_jobs_are_evicted_past_the_cap(monkeypatch):
     """상한을 넘기면 가장 먼저 만든 job부터 밀려난다."""
     from app import reports as reports_module
+    from app.job_store import InMemoryJobStore
     from app.schemas.report import ReportRequest
 
-    monkeypatch.setattr(reports_module, "_jobs", type(reports_module._jobs)())
-    monkeypatch.setattr(reports_module, "_job_id_by_idempotency_key",
-                        type(reports_module._job_id_by_idempotency_key)())
-    monkeypatch.setattr(reports_module, "_JOBS_MAX", 3)
+    monkeypatch.setattr(reports_module, "_store", InMemoryJobStore(max_items=3))
 
     body = ReportRequest.model_validate({"problemId": "prob-stub-1"})
     first = reports_module.create_job(body, idempotency_key=None)
@@ -298,19 +296,17 @@ def test_old_jobs_are_evicted_past_the_cap(monkeypatch):
         reports_module.create_job(body, idempotency_key=None)
 
     assert reports_module.get_job(first.job_id) is None
-    assert len(reports_module._jobs) == 3
+    assert len(reports_module._store._jobs) == 3
 
 
 def test_evicted_jobs_idempotency_key_is_treated_as_fresh(monkeypatch):
     """멱등키가 가리키던 job이 상한으로 밀려났으면 신원불일치(409)가 아니라
     '처음 보는 키'로 취급해야 한다."""
     from app import reports as reports_module
+    from app.job_store import InMemoryJobStore
     from app.schemas.report import ReportRequest
 
-    monkeypatch.setattr(reports_module, "_jobs", type(reports_module._jobs)())
-    monkeypatch.setattr(reports_module, "_job_id_by_idempotency_key",
-                        type(reports_module._job_id_by_idempotency_key)())
-    monkeypatch.setattr(reports_module, "_JOBS_MAX", 3)
+    monkeypatch.setattr(reports_module, "_store", InMemoryJobStore(max_items=3))
 
     body = ReportRequest.model_validate({"problemId": "prob-stub-1"})
     reports_module.create_job(body, idempotency_key="evict-me")

@@ -128,7 +128,13 @@ def test_zip_without_download_url_is_rejected():
 
 
 def test_zip_s3_uri_fails_fast_not_silently():
-    """이 서비스엔 boto3/AWS 자격증명이 전혀 없다(requirements.txt 확인 완료) --
+    """이 fetch 경로엔 boto3/AWS 자격증명이 없다 -- s3://를 실제로 읽을 방법이 없다는
+    뜻이고 그게 SSRF 방어의 핵심이다(사용자가 준 URL로 우리 AWS 자원을 못 건드림).
+
+    ⚠️ 2026-08-26부터 서비스 전체로는 더는 참이 아니다 -- app/job_store.py의
+    DynamoDbJobStore가 boto3를 쓴다(JOB_STORE_BACKEND=dynamodb일 때만, job_id/
+    idempotencyKey로만 DynamoDB를 건드리고 사용자가 준 URL은 절대 안 씀 -- 이
+    SSRF 방어와는 무관). 이 fetch 경로 자체에는 여전히 boto3 import가 없다.
 
     s3://를 조용히 500내는 대신 즉시, 명확한 사유로 거부한다."""
     with pytest.raises(fetch.FetchError) as exc:

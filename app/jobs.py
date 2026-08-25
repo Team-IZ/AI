@@ -1,36 +1,27 @@
-""" 분석 job의 인메모리 저장소와 수명주기. 
+""" 분석 job의 저장소와 수명주기.
 
-프로세스 재시작 시 유실, 워커 1개에서만 동작
-영속/스케일 필요시 Redis 나 DB로 이전, 지금은 단일 프로세스 개발용
+저장소는 app/job_store.py로 뺐다 -- 기본은 프로세스 인메모리(App Runner·로컬·
+테스트), `JOB_STORE_BACKEND=dynamodb`면 ECS 다중 태스크에서도 안전한 DynamoDB
+(app/config.py의 D-job-store 주석 참고).
 """
 
 import logging
 import uuid
 
-from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any
 
 from app.concurrency import HEAVY_JOB_CONCURRENCY
 from app.engines.analysis import fetch as fetch_engine
 from app.engines.analysis import rules
+from app.job_store import get_job_store
 
 log = logging.getLogger(__name__)
 from app.engines.base import AnalysisEngine
 from app.schemas.analysis import AnalysisJobStatus, AnalysisRequest, AnalysisResult
 from app.usage import to_ai_usage
 
-# job_id
-# M9 (redteam audit, 2026-08-05): 무제한 dict였다 -- 업로드 상한(H13)과 별개로 job
-# 자체가 영원히 안 지워져 장기가동 시 메모리가 계속 는다. sessions.py의 _answered와
-# 같은 OrderedDict+상한 패턴. COST: 상한을 넘긴 시점에 아직 QUEUED/RUNNING인 job이
-# 있으면(동시 in-flight job이 상한 개수만큼 쌓여야 함) 밀려날 수 있다 -- run_analysis는
-# 지역 참조로 계속 도니 실행 자체는 안 끊기지만, 그 job의 GET 조회는 404가 된다.
-_JOBS_MAX = 2000
-_jobs: "OrderedDict[str, AnalysisJobStatus]" = OrderedDict()
-
-# 멱등성 키 -> job_id. 같은 키 재요청 시 새 job 안 만들고 처음 id 반환
-_job_id_by_idempotency_key: "OrderedDict[str, str]" = OrderedDict()
+_store = get_job_store("analysis", AnalysisJobStatus)
 
 def _translate_failure_code(code: str) -> str:
     """fetch.py 내부 코드 -> analysis_job.failure_code DB 15종.
@@ -49,7 +40,7 @@ def _translate_failure_code(code: str) -> str:
     return code if code in fetch_engine.VERIFICATION_FAILURE_CODES else "SOURCE_UNREACHABLE"
 
 def get_job(job_id: str) -> AnalysisJobStatus | None:
-    return _jobs.get(job_id)
+    return _store.get(job_id)
 
 # D-fix (redteam audit H12, 2026-08-04): job_id_for_key()가 idempotency_key만 보고 신원
 # 대조 없이 기존 job_id를 그대로 돌려줬다 -- 저엔트로피 멱등키(submissionId:attemptNo)를
@@ -62,14 +53,15 @@ def get_job(job_id: str) -> AnalysisJobStatus | None:
 #   방어가 무력화된다.
 def job_id_for_key(idempotency_key: str, submission_id: str | None, attempt_id: str | None) -> str | None:
     """재사용 시 신원이 최초 요청과 일치해야 기존 job_id를 돌려준다. 불일치/신원부재는 예외."""
-    existing_job_id = _job_id_by_idempotency_key.get(idempotency_key)
+    existing_job_id = _store.get_id_by_idempotency_key(idempotency_key)
     if existing_job_id is None:
         return None
-    existing_job = _jobs.get(existing_job_id)
+    existing_job = _store.get(existing_job_id)
     if existing_job is None:
-        # M9: 신원 불일치가 아니라 원본 job이 상한을 넘겨 밀려난 것 -- "처음 보는 키"와
-        # 동일하게 취급해 새 job을 만들게 한다(안 그러면 정상 재시도가 409로 막힌다).
-        del _job_id_by_idempotency_key[idempotency_key]
+        # M9: 신원 불일치가 아니라 원본 job이 상한(인메모리)을 넘겨 밀려났거나
+        # TTL(DynamoDB)로 정리된 것 -- "처음 보는 키"와 동일하게 취급해 새 job을
+        # 만들게 한다(안 그러면 정상 재시도가 409로 막힌다).
+        _store.delete_idempotency_key(idempotency_key)
         return None
     if not submission_id and not attempt_id:
         raise ValueError("idempotencyKey 재사용에는 submissionId/attemptId 중 최소 하나가 필요합니다")
@@ -86,13 +78,9 @@ def create_job(body: AnalysisRequest, idempotency_key: str | None) -> AnalysisJo
         status="QUEUED",
     )
 
-    _jobs[job.job_id] = job
-    while len(_jobs) > _JOBS_MAX:
-        _jobs.popitem(last=False)
+    _store.create(job)
     if idempotency_key:
-        _job_id_by_idempotency_key[idempotency_key] = job.job_id
-        while len(_job_id_by_idempotency_key) > _JOBS_MAX:
-            _job_id_by_idempotency_key.popitem(last=False)
+        _store.set_idempotency_key(idempotency_key, job.job_id)
     return job
 
 def run_analysis(
@@ -120,11 +108,16 @@ def _run_analysis_locked(
     QUEUED -> RUNNING -> SUCCEEDED (엔진 터지면 FAILED)
     202 응답 나간 뒤 실행, 호출자는 폴링(GET)으로 이 전이 관측.
 
-    _jobs에 담긴 객체를 그 자리에서 수정 -> GET이 같은 객체 돌려주므로 변경 그대로 보임
+    인메모리 백엔드에선 객체를 그 자리에서 수정하는 것만으로 GET에 그대로
+    보인다(참조 공유). DynamoDB 백엔드에선 프로세스 경계를 넘어야 하므로
+    `_store.save(job)`를 명시적으로 불러야 다른 태스크의 GET에도 보인다 --
+    그래서 상태가 바뀌는 지점(RUNNING 진입, 그리고 종료 시점 finally)마다
+    저장한다.
     """
-    job = _jobs[job_id]
+    job = _store.get(job_id)
     job.status = "RUNNING"
     job.started_at = datetime.now(timezone.utc)
+    _store.save(job)
     log.info("분석 시작 job=%s method=%s scope=%s teaches=%d requirements=%d",
              job_id, body.method, body.problem_scope,
              len(body.teaches), len(body.requirements))
@@ -199,6 +192,7 @@ def _run_analysis_locked(
                                        idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)
+        _store.save(job)
         elapsed = (job.completed_at - job.started_at).total_seconds()
         problems = len(job.result.problems) if job.result else 0
         log.info("분석 종료 job=%s status=%s %.1fs problems=%d llm=%d %s",
