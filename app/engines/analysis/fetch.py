@@ -497,7 +497,14 @@ def _fetch_zip(spec: Mapping[str, Any], tmp: str, zip_bytes: bytes | None = None
         storage_uri = (spec.get("storage_uri") or "").strip()
 
         if not download_url and storage_uri.startswith("s3://"):
-            # 지금 이 서비스엔 boto3/AWS 자격증명이 전혀 없다(requirements.txt 확인) --
+            # 이 fetch 경로엔 boto3/AWS 자격증명이 없다 -- s3://를 실제로 읽을 방법이
+            # 없다는 뜻이고, 그게 이 방어의 핵심이다(사용자가 준 URL로 우리 AWS 자원을
+            # 못 건드린다). ⚠️ 2026-08-26부터 서비스 전체로는 더는 참이 아니다 --
+            # app/job_store.py의 DynamoDbJobStore가 boto3를 쓴다(JOB_STORE_BACKEND=
+            # dynamodb일 때만). 그건 job_id/idempotencyKey로만 DynamoDB를 건드리고
+            # 사용자가 준 URL을 절대 안 쓰므로 *이 SSRF 방어*와는 무관하다 -- 여기
+            # fetch 경로 자체에는 여전히 boto3 import가 없다(requirements.txt에는
+            # 있지만 이 함수가 그걸 쓰지 않는다).
             # 조용히 500 내는 대신 명확한 사유로 즉시 실패시킨다.
             raise FetchError(
                 "ARCHIVE_INVALID",

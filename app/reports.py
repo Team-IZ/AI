@@ -1,6 +1,7 @@
-""" 보고서 job의 인메모리 저장소 + 스텁 (jobs.py와 형제).
+""" 보고서 job의 저장소 + 스텁 (jobs.py와 형제).
 
-인메모리 dict — 재시작 시 유실. 스케일 필요 시 Redis/DB로 이전.
+저장소는 app/job_store.py로 뺐다 -- 기본은 프로세스 인메모리, `JOB_STORE_BACKEND=
+dynamodb`면 ECS 다중 태스크에서도 안전한 DynamoDB(app/config.py 참고).
 스텁이라 고정 결과를 돌려준다. 실제 보고서 생성(p04-6)은 엔진 이식 때 붙인다.
 
 **보고서는 문제 단위다**(2026-08-02). 문제 하나에 job 하나가 생기고 세션 1회에 job이
@@ -9,12 +10,12 @@
 
 import re
 import uuid
-from collections import OrderedDict
 from datetime import datetime, timezone
 from typing import Any, get_args
 
 from app.config import get_settings
 from app.engines.analysis import stages
+from app.job_store import get_job_store
 from app.schemas.report import (
     AxisCode,
     ProblemResult,
@@ -24,22 +25,14 @@ from app.schemas.report import (
 )
 from app.usage import stub_usage, to_ai_usage
 
-# job_id -> 보고서 job 상태·결과
-# M9 (redteam audit, 2026-08-05): jobs.py와 같은 문제 -- 무제한 dict라 장기가동 시
-# 메모리가 계속 는다. sessions.py의 _answered와 같은 OrderedDict+상한 패턴.
-_JOBS_MAX = 2000
-_jobs: "OrderedDict[str, ReportJobStatus]" = OrderedDict()
-
-# 멱등키({problemId}:{scoreRunId}) -> job_id. 재전송해도 LLM을 다시 부르지 않는다.
-# 보고서는 문제마다 1건이라 중복이 곧 비용이다.
-_job_id_by_idempotency_key: "OrderedDict[str, str]" = OrderedDict()
+_store = get_job_store("report", ReportJobStatus)
 
 # 통과선. 미달이면 힌트 후 재질의. 총점은 만들지 않는다(ProblemResult 주석 참고).
 _PASS_SCORE = 3
 
 
 def get_job(job_id: str) -> ReportJobStatus | None:
-    return _jobs.get(job_id)
+    return _store.get(job_id)
 
 
 # D-fix (redteam audit H12 companion, 2026-08-04): jobs.py(analyses.py)의 같은 패턴을
@@ -47,14 +40,14 @@ def get_job(job_id: str) -> ReportJobStatus | None:
 # 구멍은 원천적으로 없다.
 def job_id_for_key(idempotency_key: str, problem_id: str) -> str | None:
     """재사용 시 problem_id가 최초 요청과 일치해야 기존 job_id를 돌려준다."""
-    existing_job_id = _job_id_by_idempotency_key.get(idempotency_key)
+    existing_job_id = _store.get_id_by_idempotency_key(idempotency_key)
     if existing_job_id is None:
         return None
-    existing_job = _jobs.get(existing_job_id)
+    existing_job = _store.get(existing_job_id)
     if existing_job is None:
-        # M9: 신원 불일치가 아니라 원본 job이 상한을 넘겨 밀려난 것 -- "처음 보는 키"와
-        # 동일하게 취급한다.
-        del _job_id_by_idempotency_key[idempotency_key]
+        # M9: 신원 불일치가 아니라 원본 job이 상한(인메모리)을 넘겨 밀려났거나
+        # TTL(DynamoDB)로 정리된 것 -- "처음 보는 키"와 동일하게 취급한다.
+        _store.delete_idempotency_key(idempotency_key)
         return None
     if existing_job.problem_id != problem_id:
         raise ValueError("idempotencyKey가 이전 요청의 problemId와 일치하지 않습니다")
@@ -69,13 +62,9 @@ def create_job(body: ReportRequest, idempotency_key: str | None = None) -> Repor
         session_id=body.session_id,
         status="QUEUED",
     )
-    _jobs[job.job_id] = job
-    while len(_jobs) > _JOBS_MAX:
-        _jobs.popitem(last=False)
+    _store.create(job)
     if idempotency_key:
-        _job_id_by_idempotency_key[idempotency_key] = job.job_id
-        while len(_job_id_by_idempotency_key) > _JOBS_MAX:
-            _job_id_by_idempotency_key.popitem(last=False)
+        _store.set_idempotency_key(idempotency_key, job.job_id)
     return job
 
 
@@ -239,10 +228,16 @@ def _real_result(body: ReportRequest, job: ReportJobStatus,
 
 def run_report(job_id: str, body: ReportRequest | None = None, *,
                idempotency_key: str | None = None, trace_id: str | None = None) -> None:
-    """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED."""
-    job = _jobs[job_id]
+    """백그라운드 워커. QUEUED → RUNNING → SUCCEEDED.
+
+    RUNNING 진입과 종료(finally) 시점에 `_store.save(job)`를 명시적으로
+    부른다 -- DynamoDB 백엔드(ECS 다중 태스크)에서 다른 태스크의 GET에도
+    상태 변화가 보이게 하는 지점(jobs.py의 같은 패턴 참고).
+    """
+    job = _store.get(job_id)
     job.status = "RUNNING"
     job.started_at = datetime.now(timezone.utc)
+    _store.save(job)
 
     try:
         if get_settings().engine_mode == "real" and body is not None:
@@ -272,3 +267,4 @@ def run_report(job_id: str, body: ReportRequest | None = None, *,
                                        idempotency_key=idempotency_key, trace_id=trace_id)
     finally:
         job.completed_at = datetime.now(timezone.utc)
+        _store.save(job)

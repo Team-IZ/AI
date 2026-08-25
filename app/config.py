@@ -205,6 +205,26 @@ class Settings(BaseSettings):
     # 설정값으로 백엔드에 맡긴다.
     zip_require_git_log: bool = False
 
+    # D-job-store(2026-08-26, ECS Fargate 마이그레이션 Phase 2): job 상태 저장소
+    # 백엔드 선택. app/job_store.py 참고.
+    #   WHY: App Runner는 인스턴스 1개 고정이라 프로세스 인메모리 dict로도
+    #        문제가 없었다. ECS Fargate로 옮기며 태스크를 2개 이상 늘리려면
+    #        (오토스케일링의 전제조건) job 상태를 태스크 프로세스 밖으로
+    #        빼야 한다 -- 안 그러면 폴링이 job을 만든 태스크가 아닌 다른
+    #        태스크에 도착할 때마다 404가 나고, 백엔드가 그걸 job 유실로
+    #        오판해 정상 진행 중인 분석을 재시작시킨다(오탐률은 태스크 수에
+    #        비례, 계획 문서 §0.1 계산 참고).
+    #   COST: dynamodb로 켜면 boto3가 실제로 import된다 -- fetch.py의 SSRF
+    #        방어 논거("이 서비스엔 AWS 자격증명이 없다")가 "fetch 다운로드
+    #        경로에는 없다"로 좁혀진다(job_store.py의 DynamoDbJobStore
+    #        docstring 참고). 이 저장소는 job_id/idempotencyKey로만 접근하고
+    #        사용자가 준 URL을 절대 쓰지 않으므로 SSRF 표면 자체는 안 늘어난다.
+    #   EXIT: 해당 없음 -- memory가 기본값이라 App Runner·로컬·테스트는 지금
+    #        그대로 동작한다. ECS 배포에서만 명시적으로 dynamodb로 올린다.
+    job_store_backend: Literal["memory", "dynamodb"] = "memory"
+    job_store_dynamodb_table: str = "teamiz-ai-jobs"
+    job_store_idempotency_table: str = "teamiz-ai-idem"
+
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 # NVIDIA 키는 개수가 가변이라(NVIDIA_API_KEY_1..N) Settings 필드로 못 만든다.
