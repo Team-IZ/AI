@@ -78,19 +78,25 @@ class Settings(BaseSettings):
     #     통과선이 3점이라 아무도 통과 못 하는 채점기가 된다 — 속도로 고르면 안 된다
     #   · 대형(llama-3.3-70b, glm-5.2, mistral-medium-3.5)  무료 티어에서 30초 무응답
     # 이전 값 mistralai/mistral-medium-3.5-128b는 **최소 프롬프트도 응답하지 않는다.**
-    model_code_analysis: str = "nvidia/nemotron-3-ultra-550b-a55b"
-    # D3(2026-08-25): nemotron이 NVIDIA 무료 티어 40RPM 상한으로 재시도를 소진하면
-    #   이 모델로 폴백한다(stages.call의 fallback_model_code, _FALLBACK_TRIGGER_FAILURES).
-    #   WHY: nemotron을 GMI Cloud로도 옮기려 했으나 GMI 쪽 nemotron-3-ultra는
-    #        유료 전용이고 계정에 충전된 크레딧이 없어(`Insufficient balance`,
-    #        API로 잔액 조회 불가 — 사람이 console.gmicloud.ai에서 결제해야 해소)
-    #        당장은 막혀 있다. minimax-m3는 이미 GMI 경유로 안정 확인됐으므로
-    #        (2026-08-25 GMI 이관 이후 503/RATE_LIMITED 0건 지속) 임시 우회로 재사용한다.
-    #   COST: 코드 분석 품질이 nemotron 대비 minimax-m3 기준으로 낮아질 수 있다 —
-    #        전량이 아니라 nemotron 소진 시에만 개입되므로 영향은 부분적이다.
-    #   EXIT: GMI 계정에 결제수단이 등록되면 nemotron을 GMI_ROUTED_MODELS에 추가해
-    #        1차 경로 자체의 RPM 상한을 없애고, 이 필드는 순수 안전망으로만 남긴다.
-    model_code_analysis_fallback: str = "minimaxai/minimax-m3"
+    # D7(2026-08-25, D3~D5 배포 수 시간 뒤): 1차/폴백을 통째로 맞바꾼다 --
+    #   nemotron이 1차였을 때의 완화책(D3 폴백, D5 세마포어 축소)이 전부
+    #   "nemotron이 느리다"는 증상만 다뤘지 원인(NVIDIA 40RPM 상한)을 못
+    #   없앴다. 같은 날 실측으로 이미 확인됨: 동시 job 6개 구간 CPU는
+    #   여유(최대 48.8%)로운데 RATE_LIMITED 51건/27분, job 하나가 5분→24~26분.
+    #   WHY: minimax-m3는 이미 오전부터 GMI Cloud 경유로 전환돼(PR#33)
+    #        RPM 상한 자체가 없고 실측 503/RATE_LIMITED 0건이 하루 종일
+    #        유지됐다 -- "가끔 실패하면 폴백"이 아니라 "처음부터 이걸 쓴다"가
+    #        같은 근거의 자연스러운 결론이다. nemotron을 폴백으로만 남기는
+    #        이유는 GMI 전체 장애 같은 극단적 상황의 안전망 -- 다만 nemotron
+    #        폴백도 결국 같은 NVIDIA 40RPM 상한을 타므로 "무의미한 안전망"에
+    #        가깝다는 걸 인지한다(그래도 완전히 없애는 것보다는 낫다).
+    #   COST: 코드 분석 품질이 nemotron 대비 minimax-m3 기준으로 낮아질 수
+    #        있다(D3에서 이미 인지했던 것과 동일 트레이드오프, 이제 전량 적용).
+    #   EXIT: GMI 계정에 결제수단이 등록돼 nemotron 자체를 GMI_ROUTED_MODELS에
+    #        추가할 수 있게 되면, 그때 다시 nemotron을 1차로 되돌리거나(품질
+    #        우선) 또는 minimax-m3를 그대로 유지할지(속도 우선) 재논의한다.
+    model_code_analysis: str = "minimaxai/minimax-m3"
+    model_code_analysis_fallback: str = "nvidia/nemotron-3-ultra-550b-a55b"
     model_code_session: str = "minimaxai/minimax-m3"
     model_code_curriculum: str = "minimaxai/minimax-m3"
     # 면담 브리프: 요청에 providerModelCode 필드 자체가 없다(명세 §4.1 -- 다른 4개
@@ -159,7 +165,26 @@ class Settings(BaseSettings):
     #   EXIT: 배포 후 CloudWatch CPUUtilization을 이 값과 함께 관찰해
     #        여유가 있으면 올리고, 다시 포화되면 낮춘다. reports.py도 실제로
     #        CPU 포화에 기여하는 게 확인되면 같은 세마포어에 합류시킨다.
-    analysis_max_concurrent_jobs: int = 6
+    #
+    # D5(2026-08-25, 배포 수 시간 뒤): 6 -> 3으로 재조정.
+    #   WHY: D4의 전제("CPU가 병목")가 실측으로 틀렸다고 확인됨 -- 6개 동시
+    #        job으로 실제 운영 중이던 27분 구간(job 2건이 각각 24~26분 걸려
+    #        SUCCEEDED) CloudWatch CPU는 최대 48.8%/평균 14.5%로 전혀 포화가
+    #        아니었고, 같은 구간 RATE_LIMITED가 51건(성공 178건) 찍혔다.
+    #        즉 진짜 병목은 CPU가 아니라 **동시 6개 job이 겹쳐 부르는 nemotron
+    #        호출량이 NVIDIA 40RPM/키 상한에 부딪히는 것** -- 세마포어는 CPU
+    #        경합은 막았지만 API 호출량 경합은 전혀 막지 못했고, 그 결과 job
+    #        하나가 5분에서 24~26분으로 늘어나 30분 안전망(closeStuckJob)에
+    #        더 쉽게 걸리는 새 문제를 만들었다(같은 날 15팀 ANALYSIS_TIMEOUT
+    #        실제 인시던트로 확인).
+    #   COST: 동시 처리량이 더 줄어 대기(QUEUED) 시간이 늘어난다 -- 다만 job당
+    #        완료 시간이 짧아지면 전체 처리량은 오히려 개선될 수 있다(검증 필요).
+    #   EXIT: 이 값도 정밀 계산이 아니다. 배포 후 job당 소요시간과 RATE_LIMITED
+    #        빈도를 함께 관찰해 재조정. 근본 해결은 nemotron 자체를 GMI 등
+    #        RPM 상한 없는 프로바이더로 옮기는 것(현재 GMI 잔액 부족으로 보류 중,
+    #        model_code_analysis_fallback 주석 참고) -- 그게 되면 이 세마포어는
+    #        CPU 보호용으로만 남고 값을 다시 올릴 수 있다.
+    analysis_max_concurrent_jobs: int = 3
     # Phase B(히스토리 수집)는 별도의 더 짧은 예산 -- 넘겨도 Phase A(코드 자체) 결과는
     # 절대 안 버린다. 커밋 개수가 아니라 시간으로 상한을 둔다는 D1 결정 그대로.
     git_history_budget_s: int = 3

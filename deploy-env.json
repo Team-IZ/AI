@@ -1,8 +1,8 @@
 {
   "APP_ENV": "production",
   "ENGINE_MODE": "real",
-  "MODEL_CODE_ANALYSIS": "nvidia/nemotron-3-ultra-550b-a55b",
-  "MODEL_CODE_ANALYSIS_FALLBACK": "minimaxai/minimax-m3",
+  "MODEL_CODE_ANALYSIS": "minimaxai/minimax-m3",
+  "MODEL_CODE_ANALYSIS_FALLBACK": "nvidia/nemotron-3-ultra-550b-a55b",
   "MODEL_CODE_SESSION": "minimaxai/minimax-m3",
   "MODEL_CODE_CURRICULUM": "minimaxai/minimax-m3",
   "MODEL_CODE_INTERVIEW_BRIEF": "openai/gpt-oss-120b"
