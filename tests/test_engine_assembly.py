@@ -77,7 +77,7 @@ def fake_llm(monkeypatch):
     """모든 스테이지 호출을 가로챈다. 호출된 스테이지 순서를 기록해 돌려준다."""
     called: list[str] = []
 
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None,
               extra_user=""):
         called.append(stage_id)
         # deepcopy가 아니면 앞 테스트가 이 dict을 고쳐놓는다 — topics.select가
@@ -161,7 +161,7 @@ def test_usage_is_stamped_with_feature_code(fake_llm):
 
 def test_requirement_failure_does_not_kill_the_analysis(monkeypatch, fake_llm):
     """요구사항 판정은 문답과 독립이다(PM 설계 v2 §8-3). 깨져도 분석은 나가야 한다."""
-    def _boom(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+    def _boom(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None,
               extra_user=""):
         if stage_id == "p04-2":
             raise stages.StageError("p04-2: 터짐", [])

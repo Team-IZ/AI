@@ -97,7 +97,8 @@ def _verdict(item: dict[str, Any] | None) -> str:
 
 
 def judge(requirements: list[dict[str, Any]], files: dict[str, str], *,
-          model_code: str, timeout_s: float | None = None) -> Judgement:
+          model_code: str, fallback_model_code: str | None = None,
+          timeout_s: float | None = None) -> Judgement:
     """요구사항 전체를 한 번의 호출로 판정한다.
 
     요구사항이 없으면 호출하지 않는다 — 빈 목록에 토큰을 태울 이유가 없다.
@@ -111,7 +112,7 @@ def judge(requirements: list[dict[str, Any]], files: dict[str, str], *,
     result = stages.call("p04-2", {
         "requirements_block": _requirements_block(requirements),
         "code_block": fragments.build_code_block(files, max_chars=code_budget),
-    }, model_code=model_code, timeout_s=timeout_s)
+    }, model_code=model_code, fallback_model_code=fallback_model_code, timeout_s=timeout_s)
 
     by_text, ordered = _index_results(result.data.get("results"))
 

@@ -21,7 +21,7 @@ def fake_stage(monkeypatch):
         """`retry_list`를 주면 두 번째 호출(재시도)이 그것을 돌려준다."""
         calls = []
 
-        def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None,
+        def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None,
                   extra_user=""):
             calls.append(extra_user)
             payload = retry_list if (len(calls) > 1 and retry_list is not None) else topic_list
@@ -214,7 +214,7 @@ def test_unmatched_reason_is_safe_to_show_a_trainee(monkeypatch):
     내부 진단(`dropped`)을 흘리면 모델이 잘못 인용한 코드 원문이나
     "문자열·주석을 가리킵니다" 같은 모델 얘기가 학생에게 보인다.
     """
-    def _call(stage_id, values, *, model_code, max_attempts=None, timeout_s=None,
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=None, timeout_s=None,
               extra_user=""):
         return stages.StageResult(
             data={"topics": [_topic("t1", "제목", "없는_심볼(")]},

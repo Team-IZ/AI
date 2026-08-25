@@ -307,6 +307,10 @@ class RealAnalysisEngine:
         # wire 필드는 providerModelCode다 — 공급자에게 그대로 넘길 문자열이라
         # 화면 선택값(model_code)이 아니라 ai_model.provider_model_code 값이다.
         model_code = request.get("provider_model_code") or settings.model_code_analysis
+        # D3(2026-08-25): 1차 모델이 재시도까지 소진하면 이 모델로 폴백한다
+        #   (settings.model_code_analysis_fallback 주석 참고). model_code와 같으면
+        #   stages.call()이 스스로 무시하므로 여기서 따로 조건 분기하지 않는다.
+        fallback_model_code = settings.model_code_analysis_fallback
 
         teaches = request.get("teaches") or []
         reqs = request.get("requirements") or []
@@ -348,7 +352,8 @@ class RealAnalysisEngine:
 
         # ── p04-1 분석 문서 ────────────────────────────────────────────────────
         # 실패하면 전체 실패다. 뒤 단계가 전부 이 문서를 입력으로 받는다.
-        doc = analysis_doc.build(files, teaches, candidates, model_code=model_code)
+        doc = analysis_doc.build(files, teaches, candidates, model_code=model_code,
+                                 fallback_model_code=fallback_model_code)
         usages.extend(_stamp(doc.usages, "CODE_ANALYSIS"))
 
         # ── p04-2 요구사항 P/F ────────────────────────────────────────────────
@@ -357,7 +362,8 @@ class RealAnalysisEngine:
         requirement_results: list[dict[str, Any]] = []
         if reqs:
             try:
-                judged = requirements.judge(reqs, files, model_code=model_code)
+                judged = requirements.judge(reqs, files, model_code=model_code,
+                                            fallback_model_code=fallback_model_code)
                 requirement_results = judged.results
                 usages.extend(_stamp(judged.usages, "CODE_ANALYSIS"))
             except stages.StageError as exc:
@@ -372,7 +378,8 @@ class RealAnalysisEngine:
 
         # ── p04-3 문제 선정 ───────────────────────────────────────────────────
         selection = topics.select(files, teaches, doc.document, candidates,
-                                  model_code=model_code, question_budget=budget)
+                                  model_code=model_code, fallback_model_code=fallback_model_code,
+                                  question_budget=budget)
         usages.extend(_stamp(selection.usages, "CODE_SESSION"))
 
         # ── p04-4 질문 + p04-7 힌트 ───────────────────────────────────────────
@@ -392,7 +399,8 @@ class RealAnalysisEngine:
         planned: list[dict[str, Any]] = []
         hint_specs: list[dict[str, Any]] = []
 
-        qsets = questions.freeze_many(selection.topics, files, teach_map, model_code=model_code)
+        qsets = questions.freeze_many(selection.topics, files, teach_map, model_code=model_code,
+                                      fallback_model_code=fallback_model_code)
 
         for no, (topic, qset) in enumerate(zip(selection.topics, qsets), start=1):
             usages.extend(_stamp(qset.usages, "CODE_SESSION"))
@@ -422,7 +430,8 @@ class RealAnalysisEngine:
                 for q in axis_questions
             ]
 
-        hint_sets = hints.freeze_many(hint_specs, model_code=model_code)
+        hint_sets = hints.freeze_many(hint_specs, model_code=model_code,
+                                      fallback_model_code=fallback_model_code)
         for hint_list in hint_sets:
             for h in hint_list:
                 usages.extend(_stamp(h.usages, "CODE_SESSION"))

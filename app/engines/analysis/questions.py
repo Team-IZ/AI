@@ -77,7 +77,8 @@ def _normalize(raw_levels: Any, wanted: tuple[str, ...]) -> list[dict[str, str]]
 
 
 def freeze(topic: dict[str, Any], files: dict[str, str], teach: dict[str, Any] | None,
-           *, model_code: str, axes: tuple[str, ...] = scoring.FROZEN_AXES,
+           *, model_code: str, fallback_model_code: str | None = None,
+           axes: tuple[str, ...] = scoring.FROZEN_AXES,
            timeout_s: float | None = None, max_attempts: int | None = None) -> QuestionSet:
     """문제 하나의 질문 L1~L4를 답변 보기 전에 동결한다 (2026-08-02 전면 동결).
 
@@ -106,6 +107,7 @@ def freeze(topic: dict[str, Any], files: dict[str, str], teach: dict[str, Any] |
     for attempt in range(max_regenerations + 1):
         try:
             result = stages.call("p04-4", values, model_code=model_code,
+                                 fallback_model_code=fallback_model_code,
                                  timeout_s=timeout_s,
                                  **({"max_attempts": max_attempts} if max_attempts else {}))
         except stages.StageError as exc:
@@ -145,6 +147,7 @@ MAX_PARALLEL = 8
 
 def freeze_many(topics: list[dict[str, Any]], files: dict[str, str],
                 teach_map: dict[str, Any], *, model_code: str,
+                fallback_model_code: str | None = None,
                 max_workers: int = MAX_PARALLEL) -> list[QuestionSet]:
     """여러 문제의 질문 L1~L4를 **동시에** 동결한다. 반환 순서는 `topics` 순서와 같다.
 
@@ -172,7 +175,7 @@ def freeze_many(topics: list[dict[str, Any]], files: dict[str, str],
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
             pool.submit(freeze, topic, files, teach_map.get(topic.get("teach_id")),
-                       model_code=model_code): i
+                       model_code=model_code, fallback_model_code=fallback_model_code): i
             for i, topic in enumerate(topics)
         }
         out: list[QuestionSet | None] = [None] * len(topics)

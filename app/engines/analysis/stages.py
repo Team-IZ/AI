@@ -210,10 +210,58 @@ def parse_json(text: str) -> dict[str, Any]:
 # client.SESSION_MAX_ATTEMPTS를 넘긴다.
 BATCH_MAX_ATTEMPTS = 4
 
+# D2(2026-08-25): call()의 fallback_model_code가 개입하는 실패 종류.
+#   WHY: 이 세 코드는 이미 293행에서 "재시도해 볼 여지가 있는 실패"로 같이 묶여
+#        있다 — nemotron이 NVIDIA 무료 티어 40RPM 상한에 걸려 RATE_LIMITED를
+#        max_attempts까지 반복해도 못 뚫는 경우가 실제 인시던트다(2026-08-25,
+#        1시간 RATE_LIMITED 46건, closeStuckJob 30분 타임아웃 34건+). PROVIDER_ERROR·
+#        TIMEOUT도 같은 "공급자 쪽 일시 장애" 계열이라 함께 폴백 대상으로 둔다.
+#   COST: INVALID_JSON·CONTEXT_OVERFLOW는 대상이 아니다 — 프롬프트/파싱 문제라
+#        모델을 바꿔도 같은 자리에서 또 깨질 수 있고, 원인 진단이 흐려진다.
+#   EXIT: 폴백 모델에서도 같은 실패가 반복되면(관측 필요) 이 집합 자체보다
+#        폴백 모델 선택(GMI 잔액·다른 프로바이더)을 먼저 의심할 것.
+_FALLBACK_TRIGGER_FAILURES = {"PROVIDER_ERROR", "TIMEOUT", "RATE_LIMITED"}
+
 
 def call(stage_id: str, values: dict[str, Any], *, model_code: str,
+         fallback_model_code: str | None = None,
          max_attempts: int = BATCH_MAX_ATTEMPTS, timeout_s: float | None = None,
          extra_user: str = "") -> StageResult:
+    """`_call_once`를 model_code로 실행하고, 소진 실패 시 fallback_model_code로 한 번 더 돈다.
+
+    D2 continued: `fallback_model_code`가 없거나 model_code와 같으면 기존과 완전히
+    동일하게 동작한다(래핑 이전 호출부는 전부 영향 없음). 있어도 `_FALLBACK_TRIGGER_FAILURES`에
+    없는 실패(INVALID_JSON 등)는 그대로 올린다 — 폴백은 "다른 모델이면 나을 수도 있는"
+    실패에만 쓴다. 두 시도의 usages는 순서대로 합쳐 원장에 남긴다(1차 실패분도 비용이
+    실제로 나갔으므로 버리지 않는다).
+    """
+    try:
+        return _call_once(stage_id, values, model_code=model_code,
+                          max_attempts=max_attempts, timeout_s=timeout_s,
+                          extra_user=extra_user)
+    except StageError as primary_exc:
+        last_failure = primary_exc.usages[-1].get("failure_code") if primary_exc.usages else None
+        if (not fallback_model_code or fallback_model_code == model_code
+                or last_failure not in _FALLBACK_TRIGGER_FAILURES):
+            raise
+        log.warning("%s: %s 소진(%s) — %s로 폴백", stage_id, model_code, last_failure,
+                    fallback_model_code)
+        try:
+            fallback_result = _call_once(stage_id, values, model_code=fallback_model_code,
+                                         max_attempts=max_attempts, timeout_s=timeout_s,
+                                         extra_user=extra_user)
+        except StageError as fallback_exc:
+            raise StageError(
+                f"{stage_id}: {model_code} 및 폴백 {fallback_model_code} 모두 실패 — {fallback_exc}",
+                primary_exc.usages + fallback_exc.usages,
+            ) from fallback_exc
+        return StageResult(data=fallback_result.data,
+                           usages=primary_exc.usages + fallback_result.usages)
+
+
+def _call_once(stage_id: str, values: dict[str, Any], *, model_code: str,
+               max_attempts: int = BATCH_MAX_ATTEMPTS, timeout_s: float | None = None,
+               extra_user: str = "") -> StageResult:
     """스테이지 하나 실행. 파싱 실패하면 한 번 더 시도한다.
 
     재시도하는 이유: temperature 0이어도 JSON이 깨져 나오는 경우가 실재한다

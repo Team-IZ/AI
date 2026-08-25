@@ -33,7 +33,7 @@ def _fake(monkeypatch, *responses):
     """호출마다 다음 응답을 돌려준다. 재생성 경로를 보기 위함."""
     calls = []
 
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None):
         calls.append(values)
         data = responses[min(len(calls) - 1, len(responses) - 1)]
         return stages.StageResult(data=data, usages=[{"status": "SUCCEEDED"}])
@@ -112,7 +112,7 @@ def test_regeneration_recovers(monkeypatch):
 
 def test_freeze_many_keeps_order_and_levels(monkeypatch):
     """병렬이라 완료 순서가 뒤섞인다. 결과는 **topics 순서**로 돌아와야 한다."""
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None):
         marker = values["topic_block"].splitlines()[0]  # "제목: 토픽{i}"
         return stages.StageResult(
             data={"levels": _levels(L1_코드기술=f"{marker} 질문")},
@@ -132,7 +132,7 @@ def test_freeze_many_keeps_order_and_levels(monkeypatch):
 
 def test_freeze_many_actually_runs_in_parallel(monkeypatch):
     """순차면 4콜 × 0.1초 = 0.4초. 병렬이면 그보다 훨씬 짧아야 한다."""
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None):
         time.sleep(0.1)
         return stages.StageResult(data={"levels": _levels()}, usages=[])
 
@@ -150,7 +150,7 @@ def test_one_flagged_topic_does_not_stop_the_batch(monkeypatch):
     """토픽 하나가 끝까지 형태 불일치여도 나머지 배치는 정상 완료돼야 한다."""
     without_l2 = [lv for lv in _levels() if lv["axis"] != "L2_설계논리"]
 
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None):
         marker = values["topic_block"].splitlines()[0]
         if marker == "제목: 깨진토픽":
             return stages.StageResult(data={"levels": without_l2}, usages=[{"status": "SUCCEEDED"}])

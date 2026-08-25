@@ -17,7 +17,7 @@ def _level(values) -> int:
 
 def _fake(monkeypatch, text_for=lambda level, question: f"[{level}] {question}"):
     """호출 인자를 그대로 되비추는 가짜. 어느 질문의 몇 번 힌트인지 추적한다."""
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None):
         return stages.StageResult(
             data={"hint": text_for(_level(values), values["question"])},
             usages=[{"status": "SUCCEEDED"}],
@@ -30,7 +30,7 @@ def test_ladder_spec_reaches_the_prompt(monkeypatch):
     """사다리 강도가 프롬프트에 들어가야 재진술 규칙이 모델에 전달된다."""
     seen = {}
 
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None):
         seen[_level(values)] = values["hint_strength_spec"]
         return stages.StageResult(data={"hint": "재진술"}, usages=[])
 
@@ -79,7 +79,7 @@ def test_freeze_many_keeps_order_and_levels(monkeypatch):
 
 def test_freeze_many_actually_runs_in_parallel(monkeypatch):
     """순차면 8콜 × 0.1초 = 0.8초. 병렬이면 그보다 훨씬 짧아야 한다."""
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None):
         time.sleep(0.1)
         return stages.StageResult(data={"hint": "재진술"}, usages=[])
 
@@ -94,7 +94,7 @@ def test_freeze_many_actually_runs_in_parallel(monkeypatch):
 
 def test_one_broken_hint_does_not_stop_the_batch(monkeypatch):
     """한 힌트가 깨졌다고 배치 전체를 잃으면 나머지 콜의 토큰이 헛돈다."""
-    def _call(stage_id, values, *, model_code, max_attempts=2, timeout_s=None):
+    def _call(stage_id, values, *, model_code, fallback_model_code=None, max_attempts=2, timeout_s=None):
         if values["question"] == "q1":
             raise stages.StageError("p04-7: 터짐", [{"status": "FAILED"}])
         return stages.StageResult(data={"hint": "재진술"}, usages=[{"status": "SUCCEEDED"}])
