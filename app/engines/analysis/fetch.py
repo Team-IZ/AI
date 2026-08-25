@@ -24,10 +24,12 @@ from __future__ import annotations
 
 import datetime
 import hashlib
+import logging
 import re
 import shutil
 import subprocess
 import tempfile
+import time
 import zipfile
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -38,6 +40,18 @@ from urllib.parse import urlparse
 import httpx
 
 from app.config import get_settings
+
+# D2(2026-08-25): 이 모듈은 원래 로그가 전혀 없었다 -- 2026-08-25 인시던트에서
+#   job이 "분석 시작"(jobs.py) 이후 fetch 단계 어딘가에서 클론 타임아웃(300초)의
+#   3배 넘게(16분+) 멈췄는데, 어느 줄에서 멈췄는지 로그로 전혀 구분이 안 됐다.
+#   WHY: subprocess.run(timeout=...)이 코드상으로는 견고한데도 왜 안 풀렸는지
+#        재현 전까지는 추측만 가능하다 -- 다음 발생 시 최소한 "어느 단계"인지는
+#        로그로 바로 좁혀야 한다.
+#   COST: 학생 코드 자체(경로·브랜치명 정도)가 로그에 남는다 -- 프롬프트 본문·
+#        코드 내용은 원래도 stages.py 원칙대로 안 남긴다.
+#   EXIT: 원인이 확정되면(예: subprocess 자체의 알려진 문제) 이 로그들은 정상
+#        경로에서 소음만 되므로 DEBUG로 낮추거나 지운다.
+log = logging.getLogger(__name__)
 from app.engines.analysis import materialize, rules
 
 # git log 파싱용 구분자. ASCII 제어문자라 커밋 메시지·작성자명에 우연히 섞일 가능성이
@@ -131,12 +145,17 @@ def fetch(spec: Mapping[str, Any], zip_bytes: bytes | None = None) -> Iterator[F
     downloadUrl 없이 바이트를 직접 들고 있다. 있으면 `_download()`를 건너뛴다.
     """
     method = spec.get("method")
+    log.info("fetch 시작 method=%s", method)
+    t0 = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="analysis-input-") as tmp:
+        log.info("fetch: 임시디렉터리 생성 완료 %.1fs", time.monotonic() - t0)
         if method == "GITHUB_URL":
             yield _fetch_github(spec, tmp)
+            log.info("fetch 종료 method=GITHUB_URL 총 %.1fs", time.monotonic() - t0)
             return
         if method == "ZIP_WITH_GITLOG":
             yield _fetch_zip(spec, tmp, zip_bytes)
+            log.info("fetch 종료 method=ZIP_WITH_GITLOG 총 %.1fs", time.monotonic() - t0)
             return
         raise FetchError("INVALID_REPOSITORY_URL", f"알 수 없는 method입니다: {method!r}")
 
@@ -359,10 +378,12 @@ def _try_deepen_history(repo_dir: str) -> tuple[list[dict[str, Any]], bool, str]
 
 
 def _fetch_github(spec: Mapping[str, Any], tmp: str) -> FetchedInput:
+    t0 = time.monotonic()
     repo_url = (spec.get("repository_url") or "").strip()
     if not repo_url:
         raise FetchError("INVALID_REPOSITORY_URL", "repositoryUrl이 없습니다")
     _validate_host(repo_url)
+    log.info("fetch_github: 호스트 검증 통과 %.1fs", time.monotonic() - t0)
 
     branch = (spec.get("requested_branch") or "").strip()
     if branch:
@@ -377,12 +398,16 @@ def _fetch_github(spec: Mapping[str, Any], tmp: str) -> FetchedInput:
         cmd += ["--branch", branch]
     cmd += ["--", repo_url, tmp]
 
+    log.info("fetch_github: git clone 시작 timeout=%ss %.1fs",
+             settings.analysis_input_clone_timeout_s, time.monotonic() - t0)
     try:
         subprocess.run(cmd, check=True, capture_output=True,
                        timeout=settings.analysis_input_clone_timeout_s, env=materialize.git_env())
     except subprocess.CalledProcessError as exc:
+        log.warning("fetch_github: git clone 실패(CalledProcessError) %.1fs", time.monotonic() - t0)
         raise _classify_github_error(exc.stderr or b"") from exc
     except subprocess.TimeoutExpired as exc:
+        log.warning("fetch_github: git clone 타임아웃 %.1fs", time.monotonic() - t0)
         raise FetchError(
             "TEMPORARY_ERROR",
             f"클론이 {settings.analysis_input_clone_timeout_s}초를 넘겼습니다",
@@ -400,11 +425,15 @@ def _fetch_github(spec: Mapping[str, Any], tmp: str) -> FetchedInput:
             "TEMPORARY_ERROR", f"저장소를 가져오지 못했습니다: {exc}",
         ) from exc
 
+    log.info("fetch_github: git clone 완료 %.1fs", time.monotonic() - t0)
     resolved_branch = _current_branch(tmp) or branch or None
     head_commit = _head_commit(tmp)
+    log.info("fetch_github: head_commit 조회 완료 %.1fs", time.monotonic() - t0)
     git_history, truncated, source = _try_deepen_history(tmp)
+    log.info("fetch_github: git_history 수집 완료 %.1fs", time.monotonic() - t0)
     git_history = _tag_branch_name(git_history, resolved_branch)
     meta = _hash_tree(tmp)
+    log.info("fetch_github: hash_tree 완료 %.1fs file_count=%d", time.monotonic() - t0, meta.file_count)
     # ZIP 경로(_fetch_zip)와 같은 검사. 없으면 빈 레포·코드 없는 레포가 검증을 통과하고,
     # 실패가 한참 뒤 분석 단계에서 다른 사유로 나온다 -- 백엔드가 EMPTY_CODE를 15종에
     # 넣어준 게 정확히 이 사유를 구분하려던 것이다.
