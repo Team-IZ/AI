@@ -156,6 +156,21 @@ REASONING_TOKEN_MULTIPLIER = {
     # 재시도 배수 상승(finish_reason=length)은 잘린 뒤에야 도는 사후 장치라,
     # 매번 1콜을 버리고 시작하는 것과 같다.
     "nvidia/nemotron-3-ultra-550b-a55b": 3.0,
+    # D-m2.7-budget(2026-08-26): 이것도 추론형이고, MiniMax M2.x 계열은 사고를 끌 수
+    # 없다(thinking.type=disabled를 보내도 무시됨 -- MiniMax-M2 GitHub #121). 예산을
+    # 늘리는 것 말고는 대응 수단이 없다.
+    #
+    # 인시던트 로그 실측(p04-7, 매니페스트 500) -- 최초 시도 다수가 CONTEXT_OVERFLOW
+    # (빈 content, finishReason=length)로 실패하고, stages.call()의 사후 2배 상향
+    # (1000) 이후에도 out=949까지 나와 여유가 빠듯했다(원래 500 예산에서도 66건이
+    # 정확히 out=500 경계에서 성공 -- 이 모델은 주어진 예산을 거의 다 채워 쓴다).
+    # 한 job은 6회 재시도를 다 쓰고도 못 넘겨 MODEL_ERROR로 완전 실패했다
+    # (job=5fd51626, 2026-08-25 20:36:39Z).
+    #
+    # 500 -> 2048(관측 최댓값 949의 2배 이상 여유, 사용자 지시 2026-08-26)이 되도록
+    # 4.096. 클린 벤치마크가 아니라 인시던트 로그 기반 추정치라 실서비스 트래픽으로
+    # 재검증 필요.
+    "minimaxai/minimax-m2.7": 4.096,
 }
 
 
