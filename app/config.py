@@ -79,6 +79,18 @@ class Settings(BaseSettings):
     #   · 대형(llama-3.3-70b, glm-5.2, mistral-medium-3.5)  무료 티어에서 30초 무응답
     # 이전 값 mistralai/mistral-medium-3.5-128b는 **최소 프롬프트도 응답하지 않는다.**
     model_code_analysis: str = "nvidia/nemotron-3-ultra-550b-a55b"
+    # D3(2026-08-25): nemotron이 NVIDIA 무료 티어 40RPM 상한으로 재시도를 소진하면
+    #   이 모델로 폴백한다(stages.call의 fallback_model_code, _FALLBACK_TRIGGER_FAILURES).
+    #   WHY: nemotron을 GMI Cloud로도 옮기려 했으나 GMI 쪽 nemotron-3-ultra는
+    #        유료 전용이고 계정에 충전된 크레딧이 없어(`Insufficient balance`,
+    #        API로 잔액 조회 불가 — 사람이 console.gmicloud.ai에서 결제해야 해소)
+    #        당장은 막혀 있다. minimax-m3는 이미 GMI 경유로 안정 확인됐으므로
+    #        (2026-08-25 GMI 이관 이후 503/RATE_LIMITED 0건 지속) 임시 우회로 재사용한다.
+    #   COST: 코드 분석 품질이 nemotron 대비 minimax-m3 기준으로 낮아질 수 있다 —
+    #        전량이 아니라 nemotron 소진 시에만 개입되므로 영향은 부분적이다.
+    #   EXIT: GMI 계정에 결제수단이 등록되면 nemotron을 GMI_ROUTED_MODELS에 추가해
+    #        1차 경로 자체의 RPM 상한을 없애고, 이 필드는 순수 안전망으로만 남긴다.
+    model_code_analysis_fallback: str = "minimaxai/minimax-m3"
     model_code_session: str = "minimaxai/minimax-m3"
     model_code_curriculum: str = "minimaxai/minimax-m3"
     # 면담 브리프: 요청에 providerModelCode 필드 자체가 없다(명세 §4.1 -- 다른 4개
