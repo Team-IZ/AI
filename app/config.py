@@ -224,6 +224,11 @@ class Settings(BaseSettings):
     job_store_backend: Literal["memory", "dynamodb"] = "memory"
     job_store_dynamodb_table: str = "teamiz-ai-jobs"
     job_store_idempotency_table: str = "teamiz-ai-idem"
+    # boto3의 환경변수 자동추론에 기대지 않고 명시한다 -- ECS가 컨테이너에
+    # AWS_REGION을 항상 주입하는지 확신할 수 없었고, 로컬 `aws configure` 기본
+    # 리전이 이 클래스를 우연히 통과시켜서 GitHub Actions CI(리전 설정 없음)에서야
+    # NoRegionError로 드러났다(2026-08-26, job_store.py의 DynamoDbJobStore 참고).
+    job_store_aws_region: str = "ap-northeast-1"
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
