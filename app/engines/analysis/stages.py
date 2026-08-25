@@ -299,6 +299,20 @@ def _call_once(stage_id: str, values: dict[str, Any], *, model_code: str,
     budget_ceiling = budget * 2 if budget else None
 
     for attempt in range(1, max_attempts + 1):
+        # D10(2026-08-25): call() 진입/완료 로그.
+        #   WHY: 2026-08-25 인시던트 — job이 fetch 완료 이후 15분+ 진행 로그 없이
+        #        정체됐는데, 실패했을 때만 남는 아래 log.warning으로는 "client.chat이
+        #        아예 안 끝나고 있다"와 "실패했는데 로그가 어디선가 씹혔다"를
+        #        구분할 수 없었다. 이 로그가 찍히고 그 다음 줄(성공/실패 로그)이
+        #        안 찍히면 client.chat() 자체가 timeout_s(기본 600초)를 넘겨도
+        #        안 풀리고 있다는 뜻 -- vendor 클라이언트나 _gmi_chat의 타임아웃이
+        #        실제로 안 걸리는 버그를 의심할 근거가 된다.
+        #   COST: 시도마다 한 줄씩 추가 로그(스테이지당 최대 max_attempts줄) — 소음
+        #        수준은 아니다.
+        #   EXIT: 원인이 확정되면 이 로그는 DEBUG로 낮추거나 지운다.
+        log.info("%s: client.chat 호출 시작 (시도 %d/%d) · %s · timeout=%ss",
+                 stage_id, attempt, max_attempts, model_code,
+                 timeout_s or client.DEFAULT_TIMEOUT_S)
         try:
             result = client.chat(
                 model_code, messages,
@@ -307,6 +321,8 @@ def _call_once(stage_id: str, values: dict[str, Any], *, model_code: str,
                 response_format={"type": "json_object"},
                 timeout_s=timeout_s or client.DEFAULT_TIMEOUT_S,
             )
+            log.info("%s: client.chat 응답 수신 (시도 %d/%d) · %s",
+                     stage_id, attempt, max_attempts, model_code)
         except client.LlmError as exc:
             usages.append(exc.usage)
             failure = exc.usage.get("failure_code")
