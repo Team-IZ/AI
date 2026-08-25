@@ -99,6 +99,12 @@ def _set_task_protection(enabled: bool) -> None:
     """
     agent_uri = os.environ.get("ECS_AGENT_URI", "")
     if not agent_uri:
+        # D-diag(2026-08-26): ECS_AGENT_URI라는 이름을 계획서 조사 단계에서 문서를
+        # 보고 가정했는데, 실제 배포에서 protectionInfo가 계속 null이라 확정이
+        # 아니었음이 드러났다 -- 추측 대신 실제 컨테이너에 뭐가 있는지 로그로 남긴다.
+        ecs_env = sorted(k for k in os.environ if "ECS" in k.upper())
+        log.warning("task-protection 스킵: ECS_AGENT_URI 없음. 실제 ECS 관련 환경변수: %s",
+                    ecs_env)
         return
     body = json.dumps({"ProtectionEnabled": enabled, "ExpiresInMinutes": 60}).encode()
     req = urllib.request.Request(
@@ -108,9 +114,16 @@ def _set_task_protection(enabled: bool) -> None:
     )
     try:
         with urllib.request.urlopen(req, timeout=5) as resp:
+            log.info("task-protection(enabled=%s) 요청 성공 status=%s", enabled, resp.status)
             resp.read()
     except (urllib.error.URLError, OSError) as exc:
-        log.warning("task-protection(enabled=%s) 요청 실패, 무시하고 진행: %s", enabled, exc)
+        detail = ""
+        if isinstance(exc, urllib.error.HTTPError):
+            try:
+                detail = f" body={exc.read().decode(errors='replace')[:300]}"
+            except Exception:
+                pass
+        log.warning("task-protection(enabled=%s) 요청 실패, 무시하고 진행: %s%s", enabled, exc, detail)
 
 
 def _emf_loop(pool: HeavyJobPool, interval_s: float) -> None:

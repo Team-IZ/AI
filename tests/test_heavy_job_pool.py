@@ -110,6 +110,7 @@ def test_set_task_protection_sends_put_to_ecs_agent_uri(monkeypatch):
     requests = []
 
     class _FakeResp:
+        status = 200
         def __enter__(self):
             return self
         def __exit__(self, *a):
