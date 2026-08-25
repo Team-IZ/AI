@@ -7,17 +7,39 @@
 그래서 예외에 usage를 붙여 던진다(LlmError.usage).
 """
 
+import json
+import os
 import re
 import sys
 import threading
 import time
 import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 _VENDOR = Path(__file__).parent / "vendor"
+
+# D1: minimax-m3만 GMI Cloud로 라우팅한다(2026-08-25).
+#   WHY: NVIDIA 무료 티어는 (키,모델) 쌍당 40 RPM(vendor/SOURCE.md) 고정 상한이고,
+#        키 8개를 풀링해도 320 RPM인데 minimax-m3(세션 채점 경로)의 실제 동시 트래픽이
+#        이를 지속적으로 초과해 학생 답변 제출이 503으로 계속 실패했다(2026-08-25
+#        인시던트). GMI Cloud는 동일 모델을 사용량 기반 과금(트래픽에 따라 확장)으로
+#        제공하고 OpenAI 호환이라 응답 스키마가 NVIDIA와 같다 — 스모크 테스트로 확인
+#        (8회 연속 즉시 200, response_format=json_object 정상).
+#   COST: 프로바이더가 하나 더 늘어(GMI_API_KEY 관리 포인트 추가), 두 벤더의 에러
+#        분류·재시도 의미가 실제로 같은지는 지금은 HTTP 상태코드 수준까지만 확인했다
+#        (본문 형식이 달라지면 _classify가 오분류할 수 있음).
+#   EXIT: nemotron 등 다른 모델도 같은 문제가 생기면 이 집합에 추가. NVIDIA 쪽
+#        rate limit이 해소되면(포럼 증량 승인·유료 전환) 집합을 비워 되돌린다.
+GMI_ROUTED_MODELS = {"minimaxai/minimax-m3"}
+GMI_API_URL = "https://api.gmi-serving.com/v1/chat/completions"
+# NVIDIA 카탈로그 표기(소문자, model_code — 원장·로그에 쓰는 우리 값)와 GMI 카탈로그
+# 표기(대소문자 그대로, `GET /v1/models`로 확인함)가 다르다. model_code 자체는 안
+# 바꾸고 GMI에 보낼 때만 변환한다.
+GMI_MODEL_IDS = {"minimaxai/minimax-m3": "MiniMaxAI/MiniMax-M3"}
 
 # 배치용 상한. 팀원 실측(shared/llm.js:143~147): step-3.7-flash는 reasoning_effort=low
 # 로도 실제 프롬프트에서 39초가 걸렸고 재시도가 120초에서 통째로 타임아웃했다.
@@ -157,6 +179,35 @@ def _load_vendor():
     return NvidiaRotatingClient, NvidiaKeyPool, KeyPoolExhausted
 
 
+def _gmi_chat(model_code: str, messages: list[dict], *, timeout_s: float, **kwargs) -> dict:
+    """POST /chat/completions to GMI Cloud. 단일 키라 NVIDIA처럼 풀링·로테이션이 없다
+    (GMI_ROUTED_MODELS 주석 EXIT 참고 — 키가 여러 개 필요해지면 그때 분리한다).
+
+    GMI는 OpenAI 호환이라 요청·응답 스키마가 NVIDIA와 같다 — `chat()`의 `_extract_content`/
+    `_extract_tokens`/`_classify`를 그대로 재사용할 수 있는 이유다.
+    """
+    api_key = os.environ.get("GMI_API_KEY", "")
+    if not api_key:
+        raise RuntimeError("GMI_API_KEY가 설정되지 않았습니다")
+
+    gmi_model = GMI_MODEL_IDS.get(model_code, model_code)
+    body = json.dumps({"model": gmi_model, "messages": messages, **kwargs}).encode()
+    req = urllib.request.Request(
+        GMI_API_URL,
+        data=body,
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            # GMI는 Cloudflare 뒤에 있다. urllib 기본 UA("Python-urllib/x.x")는
+            # 봇으로 분류돼 403(error code 1010)으로 막힌다(2026-08-25 실측) --
+            # curl은 통과하는데 urllib 기본값만 막혀서 UA 문제였음을 확정했다.
+            "User-Agent": "curl/8.0",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+        return json.loads(resp.read())
+
+
 def get_pool():
     """키 풀 싱글턴. 풀이 예산을 기억하므로 호출마다 새로 만들면 안 된다.
 
@@ -231,6 +282,8 @@ def _classify(exc: Exception, detail: str) -> str:
 
 
 _NVAPI_KEY_RE = re.compile(r"nvapi-[A-Za-z0-9_-]+")
+# GMI 키는 JWT라 nvapi- 패턴과 다르다. 같은 방어를 GMI 응답 본문에도 적용한다.
+_JWT_RE = re.compile(r"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+")
 
 
 def _http_detail(exc: Exception) -> str:
@@ -248,7 +301,8 @@ def _http_detail(exc: Exception) -> str:
         body = exc.read().decode(errors="replace")[:200]
     except Exception:  # 본문을 이미 읽었거나 스트림이 닫힌 경우 -- 상태코드만으로도 충분하다
         body = ""
-    body = _NVAPI_KEY_RE.sub("nvapi-[REDACTED]", body).strip()
+    body = _NVAPI_KEY_RE.sub("nvapi-[REDACTED]", body)
+    body = _JWT_RE.sub("jwt-[REDACTED]", body).strip()
     head = f" (HTTP {exc.code} {exc.reason}"
     return f"{head}: {body})" if body else f"{head})"
 
@@ -260,8 +314,7 @@ def chat(model_code: str, messages: list[dict], *, timeout_s: float = DEFAULT_TI
     CPU가 아니라 네트워크 대기지만, 동기 호출이라 이벤트 루프에서 직접 부르면 안 된다.
     지금은 run_analysis가 동기 함수(`def`)라 Starlette이 threadpool로 돌려준다.
     """
-    NvidiaRotatingClient, _, KeyPoolExhausted = _load_vendor()
-    client = NvidiaRotatingClient(pool=get_pool(), timeout_s=timeout_s)
+    _, _, KeyPoolExhausted = _load_vendor()
     effort = REASONING_EFFORT_BY_MODEL.get(model_code)
     if effort and "reasoning_effort" not in kwargs:
         kwargs = {**kwargs, "reasoning_effort": effort}
@@ -276,7 +329,12 @@ def chat(model_code: str, messages: list[dict], *, timeout_s: float = DEFAULT_TI
     started = time.monotonic()
 
     try:
-        body = client.chat(model_code, messages, **kwargs)
+        if model_code in GMI_ROUTED_MODELS:
+            body = _gmi_chat(model_code, messages, timeout_s=timeout_s, **kwargs)
+        else:
+            NvidiaRotatingClient, _, _ = _load_vendor()
+            client = NvidiaRotatingClient(pool=get_pool(), timeout_s=timeout_s)
+            body = client.chat(model_code, messages, **kwargs)
     except Exception as exc:
         latency_ms = int((time.monotonic() - started) * 1000)
         # 키 풀 포화는 우리가 던진 것이라 별도로 분류한다(429와 같은 뜻).
