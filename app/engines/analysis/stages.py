@@ -8,6 +8,7 @@
 
 import json
 import logging
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -295,8 +296,22 @@ def call(stage_id: str, values: dict[str, Any], *, model_code: str,
                 # 529 Overloaded는 0.3초에 즉답이라 쉬지 않고 재시도하면 6회가 2초 만에
                 # 소진된다 — 공급자가 회복할 틈을 안 주고 실패만 앞당긴다. 타임아웃으로
                 # 실패한 경우엔 이미 오래 기다렸으니 더 쉬지 않는다.
+                #
+                # D1: 백오프에 full jitter를 준다(2026-08-25).
+                #   WHY: 이 함수는 여러 요구사항·힌트가 병렬로 호출한다(p04-2·p04-7 등).
+                #        고정 지수 백오프(0.5·1·2·4초)는 완전히 결정론적이라, 같은 순간
+                #        429를 받은 여러 호출이 매 시도마다 같은 타이밍에 재시도를 다시
+                #        겹쳐 보낸다 — 실측(2026-08-25): minimax-m3에 같은 초 안에서
+                #        여러 "시도 N/6" 로그가 동시에 찍힘. 재시도가 부하를 다시
+                #        뭉쳐서 쏴 RATE_LIMITED를 스스로 연장하는 쪽으로 작동했다.
+                #   COST: 대기시간이 비결정론적이 되어 "몇 초 뒤 재시도"를 재현하기
+                #        어려워진다. 평균 대기시간은 그대로지만 최대 대기시간까지는
+                #        늘 수 있다(0~base 사이 균등분포이므로 base 자체는 안 늘어남).
+                #   EXIT: 효과 없으면 jitter 폭을 줄이거나(0~base/2) decorrelated
+                #        jitter(AWS 권장 대안)로 교체.
                 if failure != "TIMEOUT":
-                    time.sleep(min(0.5 * 2 ** (attempt - 1), 4.0))
+                    base = min(0.5 * 2 ** (attempt - 1), 4.0)
+                    time.sleep(random.uniform(0, base))
                 continue
 
             raise StageError(f"{stage_id}: {exc}", usages) from exc
