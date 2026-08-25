@@ -95,7 +95,12 @@ class Settings(BaseSettings):
     #   EXIT: GMI 계정에 결제수단이 등록돼 nemotron 자체를 GMI_ROUTED_MODELS에
     #        추가할 수 있게 되면, 그때 다시 nemotron을 1차로 되돌리거나(품질
     #        우선) 또는 minimax-m3를 그대로 유지할지(속도 우선) 재논의한다.
-    model_code_analysis: str = "minimaxai/minimax-m3"
+    #
+    # D9(2026-08-25, D7 배포 직후 — 근거는 client.py의 GMI_ROUTED_MODELS 주석 참고):
+    #   m3에서도 fetch 완료 이후 정체가 재현돼 m2.7(가격 기준 더 가벼운 모델)로
+    #   낮춘다. 세션채점(model_code_session)은 그대로 m3 유지 -- 거기서는 이
+    #   정체가 관측된 적이 없어(오늘 하루 종일 안정) 굳이 바꿀 근거가 없다.
+    model_code_analysis: str = "minimaxai/minimax-m2.7"
     model_code_analysis_fallback: str = "nvidia/nemotron-3-ultra-550b-a55b"
     model_code_session: str = "minimaxai/minimax-m3"
     model_code_curriculum: str = "minimaxai/minimax-m3"
