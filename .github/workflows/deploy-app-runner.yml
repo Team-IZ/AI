@@ -152,14 +152,17 @@ jobs:
             exit 1
           fi
 
-          # deploy-env.json(평문 env) + Secrets Manager의 시크릿 9종을 실제로 적용.
+          # deploy-env.json(평문 env) + Secrets Manager의 시크릿 10종을 실제로 적용.
           # ARN은 이름으로 매번 조회한다 -- 시크릿이 재생성돼 접미어가 바뀌어도 하드코딩된
           # ARN이 조용히 stale해지는 사고를 피한다.
+          #
+          # GMI_API_KEY(2026-08-25): minimax-m3를 GMI Cloud로 라우팅하기 시작하면서
+          # 추가(app/llm/client.py의 GMI_ROUTED_MODELS 주석 참고).
           SECRET_ARN=$(aws secretsmanager describe-secret --secret-id "$SECRET_ID" --query ARN --output text)
           SECRETS_JSON=$(jq -n --arg arn "$SECRET_ARN" '
             ["INTERNAL_API_KEY","NVIDIA_API_KEY_1","NVIDIA_API_KEY_2","NVIDIA_API_KEY_3",
              "NVIDIA_API_KEY_4","NVIDIA_API_KEY_5","NVIDIA_API_KEY_6","NVIDIA_API_KEY_7",
-             "NVIDIA_API_KEY_8"]
+             "NVIDIA_API_KEY_8","GMI_API_KEY"]
             | map({(.): ($arn + ":" + . + "::")}) | add')
 
           jq -n \
