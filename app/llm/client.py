@@ -59,14 +59,33 @@ _VENDOR = Path(__file__).parent / "vendor"
 #        다시 m3로 되돌린다. m2.7에서도 같은 정체가 재현되면 모델 크기가
 #        원인이 아니라는 뜻이므로 다른 가설(GMI 커넥션 자체의 타임아웃 부재
 #        등)로 넘어간다.
-GMI_ROUTED_MODELS = {"minimaxai/minimax-m3", "minimaxai/minimax-m2.7"}
+GMI_ROUTED_MODELS = {"minimaxai/minimax-m3", "minimaxai/minimax-m2.7", "openai/gpt-oss-120b"}
 GMI_API_URL = "https://api.gmi-serving.com/v1/chat/completions"
 # NVIDIA 카탈로그 표기(소문자, model_code — 원장·로그에 쓰는 우리 값)와 GMI 카탈로그
 # 표기(대소문자 그대로, `GET /v1/models`로 확인함)가 다르다. model_code 자체는 안
 # 바꾸고 GMI에 보낼 때만 변환한다.
+#
+# D11(2026-08-26): gpt-oss-120b는 GMI로 라우팅한다(활성). nemotron-3-ultra-550b는
+#   GMI_MODEL_IDS 매핑만 넣고 GMI_ROUTED_MODELS엔 아직 넣지 않는다(대기).
+#   WHY: GET /v1/models로 두 모델 다 GMI 카탈로그에 실존함을 확인했고(표기가
+#        우리 model_code와 완전히 동일 — MiniMax와 달리 대소문자 변환 불필요),
+#        gpt-oss-120b는 실제 chat completion 호출로 200 확인됨(2026-08-26).
+#        nemotron-3-ultra-550b는 같은 방식으로 찔러보니 매번
+#        {"code":"rate_limit_exceeded","message":"All endpoints are currently
+#        overloaded"} — GMI 쪽 이 모델 전용 공급 부족이고 우리 요청 빈도와는
+#        무관하다. nemotron은 지금 model_code_analysis_fallback으로 NVIDIA
+#        경유가 이미 정상 동작 중이다(호출 빈도가 낮아 RPM에 잘 안 걸림) —
+#        여기서 GMI_ROUTED_MODELS에 넣으면 지금 되는 fallback을 지금 안 되는
+#        것으로 바꾸는 퇴행이 된다.
+#   COST: nemotron의 GMI_MODEL_IDS 매핑은 지금은 죽은 코드다 — 아무도 안
+#        쓰므로 GMI 쪽 표기가 바뀌어도 아무도 알아채지 못한다.
+#   EXIT: GMI `/v1/models` 재조회 또는 실제 호출로 nemotron이 더 이상
+#        rate_limit_exceeded를 안 낸다고 확인되면 GMI_ROUTED_MODELS에 추가한다.
 GMI_MODEL_IDS = {
     "minimaxai/minimax-m3": "MiniMaxAI/MiniMax-M3",
     "minimaxai/minimax-m2.7": "MiniMaxAI/MiniMax-M2.7",
+    "openai/gpt-oss-120b": "openai/gpt-oss-120b",
+    "nvidia/nemotron-3-ultra-550b-a55b": "nvidia/nemotron-3-ultra-550b-a55b",
 }
 
 # 배치용 상한. 팀원 실측(shared/llm.js:143~147): step-3.7-flash는 reasoning_effort=low
