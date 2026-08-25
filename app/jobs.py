@@ -177,6 +177,11 @@ def _run_analysis_locked(
         # 엔진 터지거나 계약 어기면 job FAILED로. 예외 삼키지 말고 사유 기록
         job.status = "FAILED"
         job.failure_reason = str(exc)
+        # D-model-error-trace(2026-08-26): str(exc)만 남기면 어느 줄인지 못 찾는다
+        # -- 실측(job=5fd51626, minimax-m2.7): failure_reason="'str' object has no
+        # attribute 'get'"만 DB에 남고, 어느 .get() 호출인지는 알 수 없었다.
+        # log.exception이 트레이스백까지 CloudWatch에 남겨 다음 재현 때 바로 특정한다.
+        log.exception("분석 job 실패 job=%s", job_id)
         # 🔴 잠정(계획 §0.3) -- 엔진 내부 실패를 ANALYSIS_TIMEOUT/UNSUPPORTED_LANGUAGE/...로
         # 세분화할 신호가 없다(LlmError/StageError는 failure_code를 안 들고 있다, usage만
         # 있다). MODEL_ERROR를 catch-all로 쓴다 -- 근거 없이 더 구체적인 값을 추측하는
