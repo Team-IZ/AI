@@ -15,3 +15,10 @@ httpx==0.28.1                   # NVIDIA API 호출 및 테스트 클라이언�
 # 교안 PDF 텍스트 추출. 순수 파이썬이라 poppler 같은 시스템 바이너리를 안 쓴다 —
 # 관리형 런타임(App Runner)에서는 시스템 패키지를 깔 수 없다.
 pypdf==6.14.2
+
+# app/job_store.py의 DynamoDbJobStore 전용(JOB_STORE_BACKEND=dynamodb, ECS Fargate
+# 마이그레이션 Phase 2). App Runner는 기본값(memory)으로 계속 돌아 이 코드를 아예
+# import하지 않는다 -- fetch.py의 "이 서비스엔 boto3가 없다"(SSRF 방어 논거)는
+# 이제 "fetch 다운로드 경로에는 없다"로 좁혀졌다(app/config.py의 D-job-store 주석,
+# app/engines/analysis/fetch.py:500 참고).
+boto3==1.42.60
