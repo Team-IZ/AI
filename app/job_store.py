@@ -119,12 +119,19 @@ class DynamoDbJobStore(Generic[T]):
     D-job-store 주석 참고).
     """
 
-    def __init__(self, model_cls: type[T], jobs_table: str, idem_table: str, ttl_days: int = 7):
+    def __init__(self, model_cls: type[T], jobs_table: str, idem_table: str, region: str,
+                 ttl_days: int = 7):
+        """`region`을 명시적으로 받는다(환경변수 자동추론에 기대지 않음) -- ECS
+        Fargate가 컨테이너에 `AWS_REGION`을 항상 주입하는지가 불확실했고(실제로
+        로컬 개발 환경에만 있던 `aws configure`의 기본 리전이 이 클래스를 우연히
+        통과시켜서, GitHub Actions CI(리전 설정이 아예 없음)에서야
+        `NoRegionError`로 드러났다 -- 2026-08-26). app/config.py의
+        `job_store_aws_region`이 유일한 출처다."""
         import boto3  # 지연 import, 클래스 docstring 참고
 
         self._model_cls = model_cls
         self._ttl_seconds = ttl_days * 86400
-        resource = boto3.resource("dynamodb")
+        resource = boto3.resource("dynamodb", region_name=region)
         self._jobs_table = resource.Table(jobs_table)
         self._idem_table = resource.Table(idem_table)
 
@@ -190,6 +197,7 @@ def get_job_store(kind: str, model_cls: type[T]) -> "JobStore[T]":
                     model_cls,
                     settings.job_store_dynamodb_table,
                     settings.job_store_idempotency_table,
+                    settings.job_store_aws_region,
                 )
                 log.info("job_store: kind=%s backend=dynamodb table=%s",
                          kind, settings.job_store_dynamodb_table)
