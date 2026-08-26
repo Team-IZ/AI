@@ -451,6 +451,40 @@ def _resolve_source_id(req: InterviewBriefRequest, question_type: str, qna_iter)
     return _anchor_source_id(req, question_type)
 
 
+def _safe_shape_summary(raw: dict[str, Any]) -> dict[str, Any]:
+    """진단 로그용 응답 모양 요약. **값이 아니라 모양만** 담는다.
+
+    # D-ib8(2026-08-26, 보안 리뷰 반영): 처음엔 `result.data`를 통째로 `%r`로 남겼다.
+    #   WHY: 그 안엔 openingRemark(교육생 이름을 부른다, `_question_plan_block` 참고)와
+    #        questionText/questionRationale(위험 사유·이해도 검증 결과 등 실제 학생
+    #        데이터에서 파생)가 그대로 들어 있다 -- stages.py가 이미 "프롬프트 본문은
+    #        절대 남기지 않는다"고 못박은 것과 같은 데이터 등급이다. 로그로 새면
+    #        CloudWatch 보존기간만큼 남고, API 503 응답 본문에도 실려 나간다.
+    #   COST: 실패 원인을 값이 아니라 길이·타입·키 이름만으로 재구성해야 한다 --
+    #        "왜 틀렸는지"는 여전히 보이지만 "무슨 텍스트였는지"는 안 보인다.
+    #   EXIT: 값 자체가 꼭 필요해지면(예: 반복되는 특정 패턴을 사람이 눈으로 봐야
+    #        할 때) 별도의 접근 제어된 저장소로 보내고 로그에는 그 참조 키만 남길 것.
+    """
+    items = raw.get("items")
+    item_shapes: list[Any] = []
+    if isinstance(items, list):
+        for item in items:
+            if isinstance(item, dict):
+                item_shapes.append({
+                    "keys": sorted(item.keys()),
+                    "question_text_len": len(str(item.get("questionText") or "")),
+                    "question_rationale_len": len(str(item.get("questionRationale") or "")),
+                })
+            else:
+                item_shapes.append({"type": type(item).__name__})
+    return {
+        "opening_remark_len": len(str(raw.get("openingRemark") or "")),
+        "items_type": type(items).__name__,
+        "items_count": len(items) if isinstance(items, list) else None,
+        "item_shapes": item_shapes,
+    }
+
+
 def _retry_feedback_block(error_message: str) -> str:
     """직전 응답이 왜 거부됐는지 모델에게 알려주고 통째로 다시 만들게 한다."""
     return (
@@ -474,7 +508,12 @@ def _build_result(
 
     raw_items = raw.get("items")
     if not isinstance(raw_items, list):
-        raise stages.StageError(f"ib-1: items가 배열이 아닙니다: {raw_items!r}", usages)
+        # D-ib8(2026-08-26, 보안 리뷰 반영): 값 자체(!r)를 실어 나르지 않는다 -- 이
+        # 메시지는 log.warning과 API 503 응답 본문(app/api/interview_brief.py)까지
+        # 그대로 흘러간다. 타입만으로도 "배열이 아니다"는 진단에 충분하다.
+        raise stages.StageError(
+            f"ib-1: items가 배열이 아닙니다(실제 타입: {type(raw_items).__name__})", usages,
+        )
 
     if len(raw_items) != composition.total:
         raise stages.StageError(
@@ -490,7 +529,11 @@ def _build_result(
     items: list[InterviewBriefItemResult] = []
     for position, item in enumerate(raw_items):
         if not isinstance(item, dict):
-            raise stages.StageError(f"ib-1: items 원소가 객체가 아닙니다: {item!r}", usages)
+            # D-ib8: 위와 같은 이유로 값이 아니라 타입·위치만 남긴다.
+            raise stages.StageError(
+                f"ib-1: items 원소가 객체가 아닙니다(위치 {position}, 타입 {type(item).__name__})",
+                usages,
+            )
 
         question_type = expected_types[position]
         items.append(InterviewBriefItemResult(
@@ -549,9 +592,11 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
             return _build_result(result.data, req, composition, qna_targets, all_usages)
         except stages.StageError as exc:
             if attempt == 2:
-                # D-ib5(진단 로깅, 2026-08-26): 원본 응답을 남긴다 -- 실패 사유
-                # 문자열만으로는 다음 사고 때도 어느 조건인지 재구성할 수 없었다.
-                log.warning("ib-1 검증 최종 실패: %s · 원본 응답=%r", exc, result.data)
+                # D-ib5(진단 로깅, 2026-08-26): 실패 사유 문자열만으로는 다음 사고 때
+                # 어느 조건인지 재구성할 수 없었다 -- 응답 모양을 같이 남긴다.
+                # 값 자체가 아니라 모양만 남기는 이유는 _safe_shape_summary 참고(D-ib8).
+                log.warning("ib-1 검증 최종 실패: %s · 응답 모양=%s",
+                            exc, _safe_shape_summary(result.data))
                 raise
             log.warning("ib-1 검증 실패, 오류를 알려주고 1회 재생성한다: %s", exc)
             extra_user = _retry_feedback_block(str(exc))
