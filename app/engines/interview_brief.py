@@ -500,6 +500,33 @@ def _retry_feedback_block(error_message: str) -> str:
     )
 
 
+def _unwrap_stray_wrapper(raw: dict[str, Any]) -> dict[str, Any]:
+    """예상 밖의 단일 키 하나가 실제 응답을 한 겹 더 감싼 경우 벗긴다.
+
+    D-ib10(2026-08-26): 실서비스 재현(codex-live-timeoutfix-20260826t043907z)에서
+    CloudWatch 로그로 직접 확인됨 -- openai/gpt-oss-120b가 두 번의 시도(원본 +
+    재시도) 모두 `{"final{": {실제 openingRemark/items 페이로드}}` 모양으로
+    응답했다(top_level_keys=['final{']). gpt-oss 계열은 내부적으로 analysis/final
+    채널을 구분하는 Harmony 포맷을 쓰는데, 그 채널 마커가 어떤 경로로 content에
+    새어 들어온 것으로 추정된다 -- 다만 D-ib8로 원문 로깅을 끊었기 때문에 정확한
+    글자 단위 원인은 확정하지 못했다(추정일 뿐, 확인된 사실 아님).
+
+    벗기는 조건을 "이 특정 문자열"이 아니라 "정상 스키마와 안 맞는 단일 키 +
+    그 값이 dict"로 일반화한 이유: ib-1의 정상 응답은 항상 openingRemark·items
+    두 키를 갖는다 -- 키가 정확히 하나뿐이면서 그게 openingRemark가 아닌 경우는
+    이미 그 자체로 이상 신호라, 어떤 철자로 새어 들어오든 안전하게 시도해볼 수
+    있다. 벗긴 뒤에도 openingRemark가 없으면 기존 검증이 그대로 StageError를
+    올리므로, 잘못된 데이터가 검증을 우회할 위험은 없다.
+    """
+    if "openingRemark" in raw:
+        return raw
+    if len(raw) == 1:
+        (only_value,) = raw.values()
+        if isinstance(only_value, dict):
+            return only_value
+    return raw
+
+
 def _build_result(
     raw: dict[str, Any], req: InterviewBriefRequest, composition: _Composition,
     qna_targets: list[tuple[ProblemComprehension, ComprehensionStage]],
@@ -593,15 +620,17 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         # 재시도 1회를 포함해 두 시도 모두의 토큰을 원장에 남긴다 -- 실패한 시도도
         # 실제로 비용이 나갔다(jobs.py의 "실패해도 원장은 남긴다"와 같은 원칙).
         all_usages = all_usages + result.usages
+        data = _unwrap_stray_wrapper(result.data)
         try:
-            return _build_result(result.data, req, composition, qna_targets, all_usages)
+            return _build_result(data, req, composition, qna_targets, all_usages)
         except stages.StageError as exc:
             if attempt == 2:
                 # D-ib5(진단 로깅, 2026-08-26): 실패 사유 문자열만으로는 다음 사고 때
                 # 어느 조건인지 재구성할 수 없었다 -- 응답 모양을 같이 남긴다.
                 # 값 자체가 아니라 모양만 남기는 이유는 _safe_shape_summary 참고(D-ib8).
+                # unwrap 이후 모양을 남긴다 -- 벗기기가 실제로 동작했는지도 이 로그로 보인다.
                 log.warning("ib-1 검증 최종 실패: %s · 응답 모양=%s",
-                            exc, _safe_shape_summary(result.data))
+                            exc, _safe_shape_summary(data))
                 raise
             log.warning("ib-1 검증 실패, 오류를 알려주고 1회 재생성한다: %s", exc)
             extra_user = _retry_feedback_block(str(exc))
