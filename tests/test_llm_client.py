@@ -199,3 +199,23 @@ def test_real_env_wins_over_the_env_file(tmp_path, monkeypatch):
     assert os.environ["NVIDIA_API_KEY_1"] == "from-deployment"
 
     config.load_api_keys_into_env.cache_clear()
+
+
+# ── D-ib9(2026-08-26): gpt-oss-120b 타임아웃 ────────────────────────────────
+#
+# 예산 배수는 일부러 안 건드린다 -- 벤치마크(Aug-7, deepseek_v4_flash_replacement)
+# 3/3 시행이 7~11초·구조 100% 정상이었고, 실패 재현의 유일한 200 응답도
+# out=616이 매니페스트 예산(1800) 안쪽이라 finish_reason=length로 안 잘렸다.
+# "예산 부족" 가설을 뒷받침할 증거가 없다 -- 배수만 지어내면 근거 없는 숫자다.
+
+def test_unlisted_model_keeps_the_default_budget_multiplier():
+    assert client.budget_for("some/other-model", 1800) == 1800
+
+
+def test_gpt_oss_120b_gets_a_longer_session_timeout():
+    """같은 재현에서 5회 중 4회가 SESSION_TIMEOUT_S(20초)를 정확히 채우고 TIMEOUT났다."""
+    assert client.session_timeout_for("openai/gpt-oss-120b") == 45.0
+
+
+def test_unlisted_model_keeps_the_default_session_timeout():
+    assert client.session_timeout_for("some/other-model") == client.SESSION_TIMEOUT_S
