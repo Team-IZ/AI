@@ -23,7 +23,8 @@ from app.schemas.usage import AiUsage
 # "그런 값도 있나보다" 하고 조용히 넘기는 것보다 안전하다.
 ProjectCategory = Literal["MINI_PROJECT", "BIG_PROJECT"]
 BriefType = Literal["STANDARD", "INVALID_ATTEMPT"]
-# 질문 5-카테고리. 순서도 이대로 고정이다(engine의 _QUESTION_TYPES와 같은 값·같은 순서).
+# 질문 5-카테고리. 순서도 이대로 고정이다(engine의 `_Composition.sequence()`가 이
+# 순서로 생성한다. D-ib6(2026-08-26) 이후 이 값은 모델이 아니라 서버가 채운다).
 QuestionType = Literal["RAPPORT", "PRIOR_INTERVIEW", "RISK", "GENERAL", "QNA"]
 RiskReasonCode = Literal[
     "STAGE_DECLINE", "PERSISTENT_LOW", "INVALID_ATTEMPT",

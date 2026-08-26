@@ -12,8 +12,9 @@ AI는 DB에 접근하지 않는다 -- 요청에 실려온 값을 텍스트 블�
 오인해 백엔드가 반쪽 브리프를 저장하게 된다.
 """
 
+import logging
 from dataclasses import dataclass, field
-from typing import Any, get_args
+from typing import Any
 
 from app.config import get_settings
 from app.engines.analysis import stages
@@ -26,11 +27,12 @@ from app.schemas.interview_brief import (
     ObservationNote,
     PriorInterview,
     ProblemComprehension,
-    QuestionType,
     RiskReason,
     Target,
     ValidityReview,
 )
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -239,11 +241,6 @@ def _observation_notes_block(notes: list[ObservationNote]) -> str:
     )
 
 
-# 응답 스키마의 Literal에서 뽑는다 -- questionType이 API로 나가게 된 뒤로(2026-08-15)
-# 두 곳에 따로 적으면 조용히 어긋난다. 순서도 그대로 구성 순서다.
-_QUESTION_TYPES = get_args(QuestionType)
-
-
 @dataclass(frozen=True)
 class _Composition:
     """질문 5-카테고리 구성. 순서는 항상 RAPPORT -> PRIOR_INTERVIEW -> RISK -> GENERAL -> QNA로
@@ -429,12 +426,99 @@ def _anchor_source_id(req: InterviewBriefRequest, question_type: str) -> str:
     return req.comprehension.attempt_interview_source_id
 
 
-def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> InterviewBriefResult:
-    """면담 브리프 1건 생성. 검증 실패는 전부 stages.StageError로 올린다(부분 성공 없음)."""
-    allowed_ids = _collect_allowed_source_ids(req)
-    composition, qna_targets = _compose(req)
+def _resolve_source_id(req: InterviewBriefRequest, question_type: str, qna_iter) -> str:
+    """항목 하나의 interviewSourceId를 서버가 결정적으로 정한다.
 
-    result = stages.call("ib-1", {
+    # D-ib6(2026-08-26): 모델(과거엔 이 값도 모델 출력에서 읽었다)에게 다시 묻지 않는다.
+    #   WHY: 실서비스 503 인시던트(2026-08-26, `/api/v0/interview-briefs` 반복 실패)를
+    #        추적한 결과, LLM 호출 자체는 성공(200)하는데 이 필드에서 "요청에 없는
+    #        interviewSourceId를 지어냈다"로 매번 StageError가 났다. RISK는 최대
+    #        1건(_compose 참고), QNA는 qna_targets와 순서가 1:1이라 서버가 이미
+    #        정답을 알고 있다 -- 모델이 그걸 다시 맞혀야 할 이유가 없었다.
+    #   COST: 카테고리당 근거가 여러 개로 늘어나는 설계 변경이 생기면(예: RISK 복수화)
+    #        이 1:1 대응이 깨진다 -- 그때는 모델에게 "어느 근거를 썼는지"를 다시
+    #        물어야 한다(대신 이번 사고처럼 "새 id를 지어내지 마라"가 아니라 "이
+    #        목록 중 골라라"는 훨씬 좁은 질문이라 실패 표면이 작다).
+    #   EXIT: RISK/QNA 외 카테고리도 근거가 여러 개가 되면 이 함수에 그 카테고리
+    #        분기를 추가한다. `_anchor_source_id`(RAPPORT·PRIOR_INTERVIEW·GENERAL)는
+    #        그대로 둔다.
+    """
+    if question_type == "RISK" and req.risk_reasons:
+        return req.risk_reasons[0].source_interview_source_id
+    if question_type == "QNA":
+        _, stage = next(qna_iter)
+        return stage.interview_source_id
+    return _anchor_source_id(req, question_type)
+
+
+def _retry_feedback_block(error_message: str) -> str:
+    """직전 응답이 왜 거부됐는지 모델에게 알려주고 통째로 다시 만들게 한다."""
+    return (
+        "\n\n## 방금 응답이 거부됨\n"
+        f"사유: {error_message}\n"
+        "이 문제를 피해서 JSON 전체를 처음부터 다시 생성하라. 위에서 지시한 질문 "
+        "구성·개수·형식을 다시 정확히 따르라."
+    )
+
+
+def _build_result(
+    raw: dict[str, Any], req: InterviewBriefRequest, composition: _Composition,
+    qna_targets: list[tuple[ProblemComprehension, ComprehensionStage]],
+    usages: list[dict[str, Any]],
+) -> InterviewBriefResult:
+    """모델 응답 하나를 검증하고 결과로 조립한다. 개수·형식만 모델을 신뢰하고,
+    순서·분류·근거ID는 서버가 이미 아는 값으로 채운다(D-ib6, `_resolve_source_id` 참고)."""
+    opening_remark = str(raw.get("openingRemark") or "").strip()
+    if not opening_remark:
+        raise stages.StageError("ib-1: openingRemark가 비었습니다", usages)
+
+    raw_items = raw.get("items")
+    if not isinstance(raw_items, list):
+        raise stages.StageError(f"ib-1: items가 배열이 아닙니다: {raw_items!r}", usages)
+
+    if len(raw_items) != composition.total:
+        raise stages.StageError(
+            f"ib-1: items 개수가 기대한 구성과 다릅니다(기대 {composition.total}개, "
+            f"실제 {len(raw_items)}개)",
+            usages,
+        )
+
+    # 배열 순서가 곧 질문 구성 순서다(질문 계획이 이미 그 순서로 지시했다) --
+    # suggestedOrder·questionType을 모델에게 다시 묻지 않고 위치로 정한다.
+    expected_types = composition.sequence()
+    qna_iter = iter(qna_targets)
+    items: list[InterviewBriefItemResult] = []
+    for position, item in enumerate(raw_items):
+        if not isinstance(item, dict):
+            raise stages.StageError(f"ib-1: items 원소가 객체가 아닙니다: {item!r}", usages)
+
+        question_type = expected_types[position]
+        items.append(InterviewBriefItemResult(
+            question_text=str(item.get("questionText") or "").strip(),
+            question_rationale=str(item.get("questionRationale") or "").strip(),
+            suggested_order=position + 1,
+            interview_source_id=_resolve_source_id(req, question_type, qna_iter),
+            question_type=question_type,
+        ))
+
+    return InterviewBriefResult(opening_remark=opening_remark, items=items, usages=usages)
+
+
+def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> InterviewBriefResult:
+    """면담 브리프 1건 생성. 검증 실패는 전부 stages.StageError로 올린다(부분 성공 없음).
+
+    # D-ib7(2026-08-26): 의미 검증(개수 불일치 등) 실패는 1회만 피드백과 함께 재생성한다.
+    #   WHY: LLM 전송 자체는 성공(200)했는데 응답 모양만 계약을 어긴 경우, 같은 실패를
+    #        오류 없이 다시 시도해도 재현되는 확률이 낮지 않았다(실측: 503 인시던트
+    #        추적 중 동일 프롬프트가 재시도 없이 매번 즉시 실패로 끝남). 오류를 알려주고
+    #        한 번 더 시도하면 사용자가 보는 503을 상당수 줄일 수 있다.
+    #   COST: 최악의 경우 stages.call() 예산(SESSION_MAX_ATTEMPTS)을 두 번 소진한다 --
+    #        동기 경로(매니저가 화면 앞에서 기다림)라 지연이 늘 수 있다.
+    #   EXIT: 재시도 후에도 실패율이 안 줄면(관측 필요) 원인은 여기가 아니라 프롬프트
+    #        자체(예: 질문 개수 상한)를 의심할 것.
+    """
+    composition, qna_targets = _compose(req)
+    values = {
         "target_block": _target_block(req.target),
         "brief_context_block": _brief_context_block(req.brief_context),
         "validity_review_block": _validity_review_block(req.validity_review),
@@ -445,93 +529,30 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         "question_plan_block": _question_plan_block(
             composition, qna_targets, has_observation_notes=bool(req.observation_notes),
         ),
-    }, model_code=get_settings().model_code_interview_brief,
-       timeout_s=timeout_s or client.SESSION_TIMEOUT_S,
-       max_attempts=client.SESSION_MAX_ATTEMPTS)
+    }
+    model_code = get_settings().model_code_interview_brief
+    call_timeout = timeout_s or client.SESSION_TIMEOUT_S
 
-    opening_remark = str(result.data.get("openingRemark") or "").strip()
-    if not opening_remark:
-        raise stages.StageError("ib-1: openingRemark가 비었습니다", result.usages)
-
-    raw_items = result.data.get("items")
-    if not isinstance(raw_items, list):
-        raise stages.StageError(f"ib-1: items가 배열이 아닙니다: {raw_items!r}", result.usages)
-
-    items: list[InterviewBriefItemResult] = []
-    for raw in raw_items:
-        if not isinstance(raw, dict):
-            raise stages.StageError(f"ib-1: items 원소가 객체가 아닙니다: {raw!r}", result.usages)
-
+    extra_user = ""
+    all_usages: list[dict[str, Any]] = []
+    for attempt in (1, 2):
+        # stages.call() 자체가 여기서 StageError를 올리면(전송 계층 소진) 그대로
+        # 전파한다 -- 재시도 예산은 이미 그 안에서 다 썼으므로 우리가 또 돌리지 않는다.
+        result = stages.call(
+            "ib-1", values, model_code=model_code, timeout_s=call_timeout,
+            max_attempts=client.SESSION_MAX_ATTEMPTS, extra_user=extra_user,
+        )
+        # 재시도 1회를 포함해 두 시도 모두의 토큰을 원장에 남긴다 -- 실패한 시도도
+        # 실제로 비용이 나갔다(jobs.py의 "실패해도 원장은 남긴다"와 같은 원칙).
+        all_usages = all_usages + result.usages
         try:
-            order = int(raw.get("suggestedOrder"))
-        except (TypeError, ValueError):
-            raise stages.StageError(
-                f"ib-1: suggestedOrder가 정수가 아닙니다: {raw.get('suggestedOrder')!r}",
-                result.usages,
-            )
-        # 🔴 "근거 없는 항목 드롭"(2026-08-07 e2121ae)은 되돌렸다(2026-08-12).
-        # 근거였던 *"`interview_brief_item.interview_source_id`가 UUID NOT NULL"*이
-        # 테이블정의서(2026-08-06)와 어긋난다 -- 그 컬럼은 nullable이고, CHECK가
-        # `(source_type='MANUAL' AND interview_source_id IS NULL) OR
-        #  (source_type='INTERVIEW_SOURCE' AND interview_source_id IS NOT NULL)`라
-        # 근거 없는 항목의 저장 자리(MANUAL)가 스키마에 명시적으로 있다.
-        #
-        # 라포("요즘 잘 지내세요?")·일반("이번에 뭐 담당했어요?") 질문은 설계상 근거가
-        # 없다. 그 둘을 버리면 브리프가 취조가 된다 -- 백엔드가 null을 MANUAL로
-        # INSERT하면 되므로 응답에 sourceType을 따로 싣지 않는다.
-        #
-        # **모델에게 id를 강제하지 않는다** -- 강제하면 정직한 공백 대신 그럴듯한
-        # id를 지어낼 유인이 생긴다.
-        raw_source_id = raw.get("interviewSourceId")
-        source_id = str(raw_source_id).strip() if raw_source_id else None
-        if source_id is not None and source_id not in allowed_ids:
-            # H4-dev(develop app/engines/analysis/requirements.py)와 같은 원칙: 모델이
-            # 만들어낸 참조를 그대로 믿지 않는다. 값을 댔는데 요청에 없으면 지어낸 것이다.
-            raise stages.StageError(
-                f"ib-1: 모델이 요청에 없는 interviewSourceId를 지어냈습니다: {source_id!r}",
-                result.usages,
-            )
-
-        question_type = raw.get("questionType")
-        if question_type not in _QUESTION_TYPES:
-            raise stages.StageError(
-                f"ib-1: questionType이 허용된 값이 아닙니다: {question_type!r}", result.usages,
-            )
-
-        items.append(InterviewBriefItemResult(
-            question_text=str(raw.get("questionText") or "").strip(),
-            question_rationale=str(raw.get("questionRationale") or "").strip(),
-            suggested_order=order,
-            # 모델이 공백을 냈으면 서버가 앵커로 메운다 -- 근거는 _anchor_source_id.
-            interview_source_id=source_id or _anchor_source_id(req, question_type),
-            question_type=question_type,
-        ))
-
-    if len(items) != composition.total:
-        raise stages.StageError(
-            f"ib-1: items 개수가 기대한 구성과 다릅니다(기대 {composition.total}개, "
-            f"실제 {len(items)}개)",
-            result.usages,
-        )
-
-    # 정렬해서 비교한다 -- 배열에 실려 온 순서가 곧 suggestedOrder 순서일 필요는 없다.
-    orders = sorted(i.suggested_order for i in items)
-    if orders != list(range(1, len(items) + 1)):
-        raise stages.StageError(
-            f"ib-1: suggestedOrder가 1..N 연속 정수가 아닙니다: {orders}", result.usages,
-        )
-
-    # 백엔드가 `display_order`를 여기서 파생한다 -- 순서대로 담아 보낸다.
-    items.sort(key=lambda i: i.suggested_order)
-
-    # 개수가 맞아도 카테고리 순서가 틀리면(예: GENERAL이 RAPPORT보다 먼저) 여전히 §"질문
-    # 구성 순서 고정" 요구사항 위반이다 -- questionType을 suggestedOrder 순으로 펼쳐 비교한다.
-    ordered_types = [i.question_type for i in items]
-    expected_types = composition.sequence()
-    if ordered_types != expected_types:
-        raise stages.StageError(
-            f"ib-1: 질문 구성/순서가 기대와 다릅니다(기대 {expected_types}, 실제 {ordered_types})",
-            result.usages,
-        )
-
-    return InterviewBriefResult(opening_remark=opening_remark, items=items, usages=result.usages)
+            return _build_result(result.data, req, composition, qna_targets, all_usages)
+        except stages.StageError as exc:
+            if attempt == 2:
+                # D-ib5(진단 로깅, 2026-08-26): 원본 응답을 남긴다 -- 실패 사유
+                # 문자열만으로는 다음 사고 때도 어느 조건인지 재구성할 수 없었다.
+                log.warning("ib-1 검증 최종 실패: %s · 원본 응답=%r", exc, result.data)
+                raise
+            log.warning("ib-1 검증 실패, 오류를 알려주고 1회 재생성한다: %s", exc)
+            extra_user = _retry_feedback_block(str(exc))
+    raise AssertionError("unreachable")  # pragma: no cover -- 루프는 항상 return/raise로 끝난다
