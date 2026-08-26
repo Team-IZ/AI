@@ -8,6 +8,14 @@
 기본 픽스처(위험 사유 1개, priorInterviews=[], L2/NOT_PASSED 단계 1개)의 기대 구성은
 RAPPORT, RISK, GENERAL, GENERAL, QNA 5개 -- `_matching_items()`가 그 구성에 맞는 items를
 만들어준다.
+
+2026-08-26(D-ib6/D-ib7): 실서비스 503 인시던트(모델이 suggestedOrder·questionType·
+interviewSourceId를 스스로 채우다 반복적으로 계약을 어김) 이후, 이 세 필드는 더 이상
+모델 출력에서 읽지 않는다 -- 서버가 질문 구성(`_Composition.sequence()`)과 요청 데이터로
+결정론적으로 채운다. 모델은 이제 `questionText`/`questionRationale`만 낸다. 그래서 옛
+"모델이 questionType/suggestedOrder/interviewSourceId를 어겼다" 계열 테스트는 대상
+코드 자체가 없어져 삭제하고, 그 자리는 "서버가 카테고리별로 정확한 근거ID를 배정하는지"를
+검증하는 테스트로 바뀌었다.
 """
 import pytest
 from fastapi.testclient import TestClient
@@ -65,28 +73,19 @@ def _request(**overrides) -> dict:
 
 
 def _matching_items(
-    *, source_id: str | None = "src-stage-1", prior_interview: bool = False,
-    risk: bool = True, qna_count: int = 1,
+    *, prior_interview: bool = False, risk: bool = True, qna_count: int = 1,
 ) -> list[dict]:
     """요청 픽스처의 실제 구성(라포1 + 이전면담0/1 + 위험0/1 + 일반2 + 문답N)과 정확히
-    맞아떨어지는 items를 만든다. 기본값(prior_interview=False, risk=True, qna_count=1)은
-    `_request()`의 기본 구성(RAPPORT, RISK, GENERAL, GENERAL, QNA 1개)과 같다 -- 다른 구성의
-    픽스처를 쓰는 테스트는 그 구성에 맞게 인자를 바꾼다. interviewSourceId는 (원래
-    `_matching_items()`가 그랬듯) 전 항목에 같은 값을 싣는다 -- engine은 카테고리와 id의 의미적
-    일치를 검증하지 않고 허용 집합 소속 여부만 본다."""
-    types = ["RAPPORT"]
-    if prior_interview:
-        types.append("PRIOR_INTERVIEW")
-    if risk:
-        types.append("RISK")
-    types += ["GENERAL", "GENERAL"]
-    types += ["QNA"] * qna_count
+    맞아떨어지는 개수의 items를 만든다. 기본값(prior_interview=False, risk=True, qna_count=1)은
+    `_request()`의 기본 구성(RAPPORT, RISK, GENERAL, GENERAL, QNA 1개)과 같다.
+
+    D-ib6(2026-08-26) 이후 모델은 questionText/questionRationale만 낸다 -- suggestedOrder·
+    questionType·interviewSourceId는 서버가 배열 위치와 `_Composition.sequence()`로 채우므로
+    여기서 만들 필요가 없다."""
+    count = 1 + (1 if prior_interview else 0) + (1 if risk else 0) + 2 + qna_count
     return [
-        {
-            "questionText": f"질문 {i}?", "questionRationale": f"근거{i}",
-            "suggestedOrder": i, "questionType": t, "interviewSourceId": source_id,
-        }
-        for i, t in enumerate(types, start=1)
+        {"questionText": f"질문 {i}?", "questionRationale": f"근거{i}"}
+        for i in range(1, count + 1)
     ]
 
 
@@ -101,7 +100,7 @@ def _stub_call(monkeypatch, data: dict, usages: list[dict] | None = None):
     calls = []
 
     def _call(stage_id, values, *, model_code, timeout_s=None, max_attempts=None, extra_user=""):
-        calls.append({"stage_id": stage_id, "values": values})
+        calls.append({"stage_id": stage_id, "values": values, "extra_user": extra_user})
         return stages.StageResult(
             data=data,
             usages=usages if usages is not None else [{
@@ -134,7 +133,12 @@ def test_response_items_length_is_schema_enforced():
     with pytest.raises(ValidationError):
         InterviewBriefResponse.model_validate({
             "openingRemark": "안녕하세요",
-            "items": _matching_items()[:2],  # 2개, 스키마 하한(3) 위반
+            "items": [
+                {"questionText": "q1?", "questionRationale": "r1",
+                 "suggestedOrder": 1, "questionType": "RAPPORT", "interviewSourceId": None},
+                {"questionText": "q2?", "questionRationale": "r2",
+                 "suggestedOrder": 2, "questionType": "GENERAL", "interviewSourceId": None},
+            ],  # 2개, 스키마 하한(3) 위반
         })
 
 
@@ -249,25 +253,6 @@ def test_risk_category_present_only_when_risk_reasons_exist():
     assert composition.total == 4  # 라포1 + 일반2 + 문답1(기본 L2 미통과 1개)
 
 
-def test_unknown_question_type_is_rejected(monkeypatch):
-    items = _matching_items()
-    items[0]["questionType"] = "SMALL_TALK"  # 허용되지 않는 값
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
-
-    with pytest.raises(stages.StageError, match="questionType"):
-        engine.generate(InterviewBriefRequest.model_validate(_request()))
-
-
-def test_question_type_sequence_mismatch_is_rejected(monkeypatch):
-    """개수·전체 종류 구성은 맞아도 순서(RAPPORT->...->QNA)가 뒤바뀌면 걸려야 한다."""
-    items = _matching_items()
-    items[0]["questionType"], items[2]["questionType"] = items[2]["questionType"], items[0]["questionType"]
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
-
-    with pytest.raises(stages.StageError, match="질문 구성/순서가 기대와 다릅니다"):
-        engine.generate(InterviewBriefRequest.model_validate(_request()))
-
-
 # ── 엔진 ──────────────────────────────────────────────────────────────────
 
 def test_generate_happy_path(monkeypatch):
@@ -297,54 +282,75 @@ def test_flagged_stage_excluded_from_prompt_and_allowed_ids(monkeypatch):
     assert "flagged 질문" not in comprehension_block
 
 
-def test_fabricated_interview_source_id_is_rejected(monkeypatch):
+# ── D-ib6(2026-08-26): 서버가 순서·분류·근거ID를 결정한다 ─────────────────────
+#
+# 모델이 더 이상 suggestedOrder/questionType/interviewSourceId를 내지 않는다(실서비스
+# 503 인시던트 이후). 배열 위치가 곧 순서·분류이고(`test_generate_happy_path`가 이미
+# 확인한다), 근거ID는 카테고리별로 서버가 안다: RAPPORT/PRIOR_INTERVIEW/GENERAL은
+# `_anchor_source_id`, RISK는 유일한 위험 사유, QNA는 `qna_targets`와 순서대로 1:1
+# 대응(`_resolve_source_id`).
+
+def test_risk_item_is_anchored_to_the_only_risk_reason(monkeypatch):
+    """RISK 카테고리는 최대 1건(`_compose` 참고)이라 서버가 그 위험 사유의
+    interviewSourceId를 그대로 배정한다 -- 모델은 이제 이 값을 내지 않는다."""
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _matching_items()})
+
+    result = engine.generate(InterviewBriefRequest.model_validate(_request()))
+
+    risk_item = result.items[[i.question_type for i in result.items].index("RISK")]
+    assert risk_item.interview_source_id == "src-risk-1"
+
+
+def test_qna_items_are_anchored_in_order_to_qna_targets(monkeypatch):
+    """QNA 카테고리는 `qna_targets`와 순서대로 1:1 대응한다."""
+    req_dict = _request()
+    req_dict["comprehension"]["problems"] = [
+        {
+            "problemNo": n, "conceptName": f"개념{n}", "conceptNameSource": "TEACHES_CANONICAL_NAME",
+            "problemScope": "TEAM_SHARED_PROBLEM", "generationStatus": "GENERATED",
+            "interviewSourceId": f"src-problem-{n}",
+            "stages": [{
+                "problemStageId": f"ps-{n}", "axisCode": "L2", "status": "NOT_PASSED",
+                "questionText": f"q{n}", "interviewSourceId": f"src-stage-{n}",
+            }],
+        }
+        for n in (1, 2)
+    ]
     _stub_call(monkeypatch, {
-        "openingRemark": "여는 말",
-        "items": _matching_items(source_id="src-INVENTED"),
+        "openingRemark": "여는 말", "items": _matching_items(qna_count=2),
     })
 
-    with pytest.raises(stages.StageError, match="지어냈습니다"):
-        engine.generate(InterviewBriefRequest.model_validate(_request()))
+    result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
+
+    qna_items = [i for i in result.items if i.question_type == "QNA"]
+    assert [i.interview_source_id for i in qna_items] == ["src-stage-1", "src-stage-2"]
 
 
 def test_evidenceless_item_is_anchored_not_dropped(monkeypatch):
-    """🔴 근거 없는 항목을 버리지도, null로 내보내지도 않는다(2026-08-15 백엔드 합의).
+    """🔴 근거 없는 항목을 버리지도, null로 내보내지도 않는다(2026-08-15 백엔드 합의,
+    D-ib6 이후로도 그대로 유지 -- 이제 애초에 모델에게 근거를 묻지 않으니 "근거 없음"은
+    RAPPORT/PRIOR_INTERVIEW/GENERAL 카테고리 자체의 속성이다).
 
-    이력이 두 번 뒤집혔다:
-
-    1. e2121ae(8/7)  근거 없는 항목 **드롭** -- "interview_source_id가 UUID NOT NULL"
-    2. 69fd51e(8/12) 되돌림, **null 허용** -- 테이블정의서 2026-08-06의
-       `source_type='MANUAL' AND interview_source_id IS NULL` CHECK 근거
-    3. 지금(8/15)    **앵커로 메움** -- 실제 DDL(08-07)에 그 CHECK가 없고 컬럼이
-       `UUID NOT NULL`이었다. 2의 근거였던 정의서가 낡았다.
-
-    null을 보내면 백엔드 INSERT의 `WHERE s.interview_source_id = ?`가 0행이라
-    **예외 없이 조용히 누락된다**. 드롭도 안 되는 이유는 그대로다 -- 라포·일반
-    질문을 버리면 브리프가 취조가 된다. 그래서 서버가 앵커로 메운다.
-
-    빈 문자열/None/필드 생략 전부 같은 경로다.
+    라포·일반 질문은 설계상 근거가 없다 -- 그래도 interviewSourceId는 항상 채워진다
+    (`_anchor_source_id`가 attempt 단위로 앵커링).
     """
-    items = _matching_items()
-    items[0]["interviewSourceId"] = None
-    del items[2]["interviewSourceId"]  # 아예 필드 자체를 생략한 경우도 같다
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _matching_items()})
 
     result = engine.generate(InterviewBriefRequest.model_validate(_request()))
 
     assert len(result.items) == 5                                   # 하나도 안 버린다
     assert all(i.interview_source_id for i in result.items)         # null이 나가지 않는다
     # 픽스처에 관찰 메모가 없어 RAPPORT도 attempt로 떨어진다.
-    assert result.items[0].interview_source_id == "src-attempt-1"
-    assert result.items[2].interview_source_id == "src-attempt-1"
-    assert result.items[4].interview_source_id == "src-stage-1"     # 모델이 댄 값은 그대로
+    general_items = [i for i in result.items if i.question_type == "GENERAL"]
+    assert all(i.interview_source_id == "src-attempt-1" for i in general_items)
+    assert result.items[0].interview_source_id == "src-attempt-1"   # RAPPORT
 
 
 def test_rapport_anchors_to_the_only_observation_note(monkeypatch):
     """관찰 메모가 정확히 1건이면 라포 질문의 앵커는 그 메모다.
 
     프롬프트(`rapport_hint`)가 메모를 근거로 라포 질문을 만들게 하므로 실제 출처가
-    맞다. 2건 이상이면 어느 것을 썼는지 알 수 없어 attempt로 떨어진다 -- 위 테스트가
-    그 경우다.
+    맞다. 2건 이상이면 어느 것을 썼는지 알 수 없어 attempt로 떨어진다.
     """
     req = _request(observationNotes=[{
         "occurredAt": "2026-08-14T10:00:00Z",
@@ -352,9 +358,7 @@ def test_rapport_anchors_to_the_only_observation_note(monkeypatch):
         "interviewSourceId": "src-note-1",
         "visibility": "MANAGER_ONLY",
     }])
-    items = _matching_items()
-    items[0]["interviewSourceId"] = None
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
+    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _matching_items()})
 
     result = engine.generate(InterviewBriefRequest.model_validate(req))
 
@@ -362,32 +366,15 @@ def test_rapport_anchors_to_the_only_observation_note(monkeypatch):
     assert result.items[0].interview_source_id == req["observationNotes"][0]["interviewSourceId"]
 
 
-def test_fabricated_source_id_is_still_rejected_even_though_null_is_filled(monkeypatch):
-    """앵커로 메우는 것이 "아무 값이나 허용"은 아니다 -- 값을 댔는데 요청에 없으면 위조다."""
-    items = _matching_items()
-    items[0]["interviewSourceId"] = None            # 정직한 공백은 메워진다
-    items[1]["interviewSourceId"] = "src-INVENTED"  # 지어낸 값은 여전히 거부
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
-
-    with pytest.raises(stages.StageError, match="지어냈습니다"):
-        engine.generate(InterviewBriefRequest.model_validate(_request()))
-
-
 def test_too_few_items_is_rejected(monkeypatch):
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _matching_items()[:1]})
+    calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _matching_items()[:1]})
 
     with pytest.raises(stages.StageError, match=r"개수가 기대한 구성과 다릅니다"):
         engine.generate(InterviewBriefRequest.model_validate(_request()))
 
-
-def test_non_contiguous_suggested_order_is_rejected(monkeypatch):
-    items = _matching_items()
-    for i, item in enumerate(items):
-        item["suggestedOrder"] = (i + 1) * 2  # 2, 4, 6, 8, 10
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
-
-    with pytest.raises(stages.StageError, match="연속 정수가 아닙니다"):
-        engine.generate(InterviewBriefRequest.model_validate(_request()))
+    # D-ib7: 검증 실패는 피드백과 함께 1회 재생성한다 -- 재시도까지 포함해 2회 호출된다.
+    assert len(calls) == 2
+    assert calls[1]["extra_user"] != ""
 
 
 def test_not_generated_problem_has_no_stages_and_is_not_treated_as_failure(monkeypatch):
@@ -402,7 +389,7 @@ def test_not_generated_problem_has_no_stages_and_is_not_treated_as_failure(monke
     }
     calls = _stub_call(monkeypatch, {
         "openingRemark": "여는 말",
-        "items": _matching_items(source_id="src-risk-1", qna_count=0),  # L2 미통과 단계가 없음
+        "items": _matching_items(qna_count=0),  # L2 미통과 단계가 없음
     })
 
     engine.generate(InterviewBriefRequest.model_validate(req_dict))
@@ -410,6 +397,67 @@ def test_not_generated_problem_has_no_stages_and_is_not_treated_as_failure(monke
     comprehension_block = calls[0]["values"]["comprehension_block"]
     assert "출제되지 않았다" in comprehension_block
     assert "미달로 해석하지" in comprehension_block
+
+
+# ── D-ib7(2026-08-26): 의미 검증 실패는 1회 피드백 재생성 ─────────────────────
+
+def test_validation_failure_retries_once_with_feedback_and_can_succeed(monkeypatch):
+    """첫 응답이 개수를 어겨도, 오류를 알려주고 다시 부른 두 번째 응답이 맞으면 성공한다."""
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
+    calls = []
+
+    def _call(stage_id, values, *, model_code, timeout_s=None, max_attempts=None, extra_user=""):
+        calls.append(extra_user)
+        items = _matching_items()[:1] if len(calls) == 1 else _matching_items()
+        return stages.StageResult(
+            data={"openingRemark": "여는 말", "items": items},
+            usages=[{"model_code": model_code, "input_token_count": 10, "output_token_count": 10,
+                     "cached_token_count": 0, "status": "SUCCEEDED", "failure_code": None,
+                     "latency_ms": 100, "occurred_at": "2026-08-07T09:00:00Z"}],
+        )
+
+    monkeypatch.setattr(engine.stages, "call", _call)
+
+    result = engine.generate(InterviewBriefRequest.model_validate(_request()))
+
+    assert len(result.items) == 5
+    assert len(calls) == 2
+    assert calls[0] == ""            # 첫 시도는 피드백 없이
+    assert "거부됨" in calls[1]       # 두 번째 시도는 실패 사유를 담고 있다
+    # 실패한 첫 시도의 토큰도 원장에서 사라지면 안 된다.
+    assert len(result.usages) == 2
+
+
+def test_validation_failure_exhausts_after_one_retry(monkeypatch):
+    """두 번째도 틀리면 그때는 진짜로 실패한다 -- 무한 재시도가 아니다."""
+    calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _matching_items()[:1]})
+
+    with pytest.raises(stages.StageError, match=r"개수가 기대한 구성과 다릅니다"):
+        engine.generate(InterviewBriefRequest.model_validate(_request()))
+
+    assert len(calls) == 2  # 1회 재시도까지만
+
+
+def test_transport_failure_is_not_retried_by_the_validation_loop(monkeypatch):
+    """stages.call() 자체가 이미 소진한 전송 실패(예: RATE_LIMITED)는 검증 재시도
+    루프가 또 부르지 않는다 -- 예산이 이미 그 안에서 다 쓰였다."""
+    calls = []
+
+    def _call(stage_id, values, *, model_code, timeout_s=None, max_attempts=None, extra_user=""):
+        calls.append(extra_user)
+        raise stages.StageError("ib-1: 실패", usages=[{
+            "model_code": model_code, "input_token_count": 10, "output_token_count": 0,
+            "cached_token_count": 0, "status": "FAILED", "failure_code": "RATE_LIMITED",
+            "latency_ms": 300, "occurred_at": "2026-08-07T09:00:00Z",
+        }])
+
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
+    monkeypatch.setattr(engine.stages, "call", _call)
+
+    with pytest.raises(stages.StageError):
+        engine.generate(InterviewBriefRequest.model_validate(_request()))
+
+    assert len(calls) == 1
 
 
 # ── D-ib4 (백엔드 감사 반영: 미사용 필드 배선 + 신규 interviewSourceId 슬롯) ──────
@@ -455,30 +503,26 @@ def test_validity_trigger_and_decision_reason_code_reach_prompt(monkeypatch):
 
 
 def test_code_context_and_problem_interview_source_id_reach_prompt(monkeypatch):
-    """codeContext(기존 미사용)와 문제 단위 interviewSourceId(신규)가 프롬프트에
-    실리고, 후자가 허용 집합에도 들어가는지."""
+    """codeContext(기존 미사용)가 프롬프트에 실리고, 문제 단위 interviewSourceId가
+    QNA 앵커로 정확히 쓰이는지."""
     req_dict = _request()
     req_dict["comprehension"]["problems"][0]["codeContext"] = {
         "language": "python", "path": "app/handlers.py", "lineStart": 10, "lineEnd": 20,
         # A-2의 6필드. 원문 대신 좌표+키+해시만 온다.
         "snippetKey": "snip-1", "snippetHash": "sha256:abc",
     }
-    calls = _stub_call(monkeypatch, {
-        "openingRemark": "여는 말",
-        "items": _matching_items(source_id="src-problem-1"),  # 문제 단위 id로 응답
-    })
+    calls = _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _matching_items()})
 
     result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
 
     block = calls[0]["values"]["comprehension_block"]
     assert "app/handlers.py:10-20" in block
-    assert "src-problem-1" in block
-    assert result.items[0].interview_source_id == "src-problem-1"  # 지어냄으로 안 걸림
+    qna_item = result.items[[i.question_type for i in result.items].index("QNA")]
+    assert qna_item.interview_source_id == "src-stage-1"  # qna_targets가 가리키는 단계 id
 
 
-def test_not_generated_problem_interview_source_id_is_allowed_even_with_empty_stages(monkeypatch):
-    """NOT_GENERATED 문제(stages=[])도 problem 단위 id는 허용 집합에 들어가야 한다
-    -- _collect_allowed_source_ids()가 stages 루프 밖에서 넣는지 확인(누락하기 쉬운 지점)."""
+def test_not_generated_problem_interview_source_id_reaches_prompt_with_empty_stages(monkeypatch):
+    """NOT_GENERATED 문제(stages=[])도 problem 단위 id는 프롬프트에 실려야 한다."""
     req_dict = _request()
     req_dict["comprehension"]["problems"][0] = {
         "problemNo": 2, "conceptName": "동시성", "problemScope": "TEAM_SHARED_PROBLEM",
@@ -487,19 +531,19 @@ def test_not_generated_problem_interview_source_id_is_allowed_even_with_empty_st
         "generationStatus": "NOT_GENERATED", "notGeneratedReasonCode": "NO_MATCHING_CODE_EVIDENCE",
         "interviewSourceId": "src-problem-2", "stages": [],
     }
-    _stub_call(monkeypatch, {
-        "openingRemark": "여는 말",
-        "items": _matching_items(source_id="src-problem-2", qna_count=0),
+    calls = _stub_call(monkeypatch, {
+        "openingRemark": "여는 말", "items": _matching_items(qna_count=0),
     })
 
-    result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
+    engine.generate(InterviewBriefRequest.model_validate(req_dict))
 
-    assert result.items[0].interview_source_id == "src-problem-2"
+    assert "src-problem-2" in calls[0]["values"]["comprehension_block"]
 
 
-def test_attempt_and_session_interview_source_id_are_allowed(monkeypatch):
-    """시도/세션 단위 interviewSourceId(신규, NOT_ATTENDED 등 problems=[] 케이스의
-    유일한 근거)가 프롬프트에 실리고 허용 집합에도 들어가는지."""
+def test_attempt_and_session_interview_source_id_reach_prompt(monkeypatch):
+    """시도/세션 단위 interviewSourceId(NOT_ATTENDED 등 problems=[] 케이스의 유일한
+    근거)가 프롬프트에 실리고, 근거 없는 카테고리(RAPPORT/GENERAL)가 그 attempt id로
+    앵커링되는지."""
     req_dict = _request()
     req_dict["comprehension"] = {
         "attemptType": "INITIAL", "attemptStatus": "FAILED",
@@ -508,8 +552,7 @@ def test_attempt_and_session_interview_source_id_are_allowed(monkeypatch):
         "problems": [],
     }
     calls = _stub_call(monkeypatch, {
-        "openingRemark": "여는 말",
-        "items": _matching_items(source_id="src-attempt-9", qna_count=0),
+        "openingRemark": "여는 말", "items": _matching_items(qna_count=0),
     })
 
     result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
@@ -517,29 +560,6 @@ def test_attempt_and_session_interview_source_id_are_allowed(monkeypatch):
     block = calls[0]["values"]["comprehension_block"]
     assert "src-attempt-9" in block
     assert result.items[0].interview_source_id == "src-attempt-9"
-
-
-def test_observation_note_interview_source_id_is_allowed_not_fabrication(monkeypatch):
-    """관찰 메모가 이제 자기 interviewSourceId를 갖는다(D-ib4) -- 그 값으로 응답해도
-    '지어냄'으로 걸리면 안 된다.
-
-    ⚠️ 2026-08-15: 근거 없는 항목은 이제 null이 아니라 앵커로 메워진다. 여기서 RISK
-    항목(items[1])은 RAPPORT가 아니므로 메모가 1건이어도 attempt로 떨어진다."""
-    req_dict = _request()
-    req_dict["observationNotes"] = [{
-        "occurredAt": "2026-08-01T09:00:00Z",
-        "content": "쉬는 시간에 페어 프로그래밍이 힘들다고 얘기함",
-        "interviewSourceId": "src-note-1", "visibility": "MANAGER_ONLY",
-    }]
-    items = _matching_items()
-    items[0]["interviewSourceId"] = "src-note-1"  # 관찰 메모 근거 -- 이제 실제 id로 인용 가능
-    items[1]["interviewSourceId"] = None           # 근거 없음 -- 앵커로 메워진다
-    _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": items})
-
-    result = engine.generate(InterviewBriefRequest.model_validate(req_dict))
-
-    assert result.items[0].interview_source_id == "src-note-1"
-    assert result.items[1].interview_source_id == "src-attempt-1"
 
 
 def test_new_session_end_reason_codes_are_accepted(monkeypatch):
@@ -707,6 +727,9 @@ def test_failure_envelope_carries_the_burned_usage(monkeypatch):
     `ai_usage.latency_ms`가 NOT NULL이고 status에 FAILED가 있어서 실패 호출도 원장에
     남아야 한다. 실패 응답에 자리가 없으면 태운 토큰이 통째로 사라진다 -- 무료 티어
     529 실패율이 64%라 사라지는 양이 적지 않다.
+
+    D-ib7(2026-08-26): 검증 실패는 1회 재시도하므로, 계속 실패하면 두 시도 모두의
+    토큰이 남아야 한다(2건) -- 재시도로 태운 비용이 조용히 사라지면 안 된다.
     """
     # LLM 호출은 성공했고(토큰을 태웠고) 그 뒤 계약 검증에서 걸린 경우
     _stub_call(monkeypatch, {"openingRemark": "여는 말", "items": _matching_items()[:1]})
@@ -716,10 +739,11 @@ def test_failure_envelope_carries_the_burned_usage(monkeypatch):
 
     assert r.status_code == 503
     usage = r.json()["aiUsage"]
-    assert len(usage) == 1
-    assert usage[0]["featureCode"] == "INTERVIEW_BRIEF_GENERATION"
-    assert usage[0]["inputTokenCount"] == 500
-    assert usage[0]["idempotencyKey"] == "interview-1:usage-on-fail:INTERVIEW_BRIEF:1"
+    assert len(usage) == 2
+    for entry, seq in zip(usage, (1, 2)):
+        assert entry["featureCode"] == "INTERVIEW_BRIEF_GENERATION"
+        assert entry["inputTokenCount"] == 500
+        assert entry["idempotencyKey"] == f"interview-1:usage-on-fail:INTERVIEW_BRIEF:{seq}"
 
 
 def test_failure_envelope_has_an_empty_usage_list_when_nothing_was_burned(monkeypatch):
