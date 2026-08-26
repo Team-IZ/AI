@@ -478,6 +478,11 @@ def _safe_shape_summary(raw: dict[str, Any]) -> dict[str, Any]:
             else:
                 item_shapes.append({"type": type(item).__name__})
     return {
+        # D-ib9(2026-08-26): 최상위 키 이름도 남긴다 -- 실서비스 재현에서 opening_remark_len=0,
+        # items_type=NoneType로 나온 사례가 있었는데, 모델이 다른 키 이름(예: 스네이크
+        # 케이스)이나 한 겹 더 감싼 구조로 냈는지조차 구분이 안 됐다. 키 "이름"은
+        # 값이 아니라 계약(스키마) 정보라 D-ib8의 우려(학생 데이터 노출)에 해당하지 않는다.
+        "top_level_keys": sorted(raw.keys()) if isinstance(raw, dict) else None,
         "opening_remark_len": len(str(raw.get("openingRemark") or "")),
         "items_type": type(items).__name__,
         "items_count": len(items) if isinstance(items, list) else None,
@@ -574,7 +579,7 @@ def generate(req: InterviewBriefRequest, *, timeout_s: float | None = None) -> I
         ),
     }
     model_code = get_settings().model_code_interview_brief
-    call_timeout = timeout_s or client.SESSION_TIMEOUT_S
+    call_timeout = timeout_s or client.session_timeout_for(model_code)
 
     extra_user = ""
     all_usages: list[dict[str, Any]] = []
