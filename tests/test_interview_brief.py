@@ -502,6 +502,47 @@ def test_generate_uses_the_model_specific_session_timeout(monkeypatch):
     assert calls == [expected]
 
 
+# ── D-ib10(2026-08-26): gpt-oss-120b가 응답을 엉뚱한 단일 키로 한 겹 더 감싼 재현 ──
+
+def test_a_single_stray_wrapper_key_around_the_real_payload_is_unwrapped():
+    """실서비스 재현(codex-live-timeoutfix-20260826t043907z), CloudWatch 로그 실측:
+    top_level_keys=['final{']로 응답이 왔다 -- 실제 openingRemark/items는 그 안에
+    한 겹 더 감싸져 있었다. 정확한 글자는 재현마다 다를 수 있어(원인 미확정,
+    engine._unwrap_stray_wrapper 참고) 특정 철자가 아니라 "단일 키 + dict 값"
+    모양 자체를 벗기는지 확인한다."""
+    payload = {"openingRemark": "여는 말", "items": _matching_items()}
+
+    unwrapped = engine._unwrap_stray_wrapper({"final{": payload})
+
+    assert unwrapped == payload
+
+
+def test_unwrap_is_a_no_op_when_openingRemark_is_already_top_level():
+    payload = {"openingRemark": "여는 말", "items": _matching_items()}
+
+    assert engine._unwrap_stray_wrapper(payload) == payload
+
+
+def test_unwrap_leaves_multi_key_garbage_alone():
+    """openingRemark가 없고 키가 둘 이상이면 벗길 대상이 뭔지 알 수 없다 -- 그대로
+    두고 기존 검증(StageError)이 정상적으로 실패하게 한다."""
+    garbage = {"a": {"openingRemark": "x"}, "b": {"items": []}}
+
+    assert engine._unwrap_stray_wrapper(garbage) == garbage
+
+
+def test_generate_recovers_when_the_response_has_a_stray_wrapper_key(monkeypatch):
+    """단일 시도만으로(재시도 없이) 성공해야 한다 -- unwrap이 _build_result 이전에
+    일어나야 검증이 애초에 실패하지 않는다."""
+    payload = {"openingRemark": "여는 말", "items": _matching_items()}
+    calls = _stub_call(monkeypatch, {"final{": payload})
+
+    result = engine.generate(InterviewBriefRequest.model_validate(_request()))
+
+    assert result.opening_remark == "여는 말"
+    assert len(calls) == 1
+
+
 # ── D-ib4 (백엔드 감사 반영: 미사용 필드 배선 + 신규 interviewSourceId 슬롯) ──────
 
 def test_risk_reason_stage_link_and_not_applicable_code_reach_prompt(monkeypatch):
