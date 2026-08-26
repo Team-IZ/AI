@@ -460,6 +460,48 @@ def test_transport_failure_is_not_retried_by_the_validation_loop(monkeypatch):
     assert len(calls) == 1
 
 
+# ── D-ib9(2026-08-26): gpt-oss-120b 예산 부족 재현 — 모양만 남는 것 확인 ─────────
+
+def test_empty_response_shape_is_logged_without_content(monkeypatch, caplog):
+    """실서비스 재현(codex-live-ib48-20260826t0340z): 200으로 성공했지만 openingRemark/
+    items가 빈 채인 응답. 로그엔 모양(최상위 키 이름·길이·타입)만 남아야 한다."""
+    _stub_call(monkeypatch, {})  # openingRemark/items 자체가 없는 응답
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(stages.StageError, match="openingRemark가 비었습니다"):
+            engine.generate(InterviewBriefRequest.model_validate(_request()))
+
+    final_log = caplog.records[-1].message
+    assert "top_level_keys" in final_log
+    assert "'opening_remark_len': 0" in final_log
+    assert "'items_type': 'NoneType'" in final_log
+    # 실제 학생 데이터(질문 텍스트 등)는 로그에 없어야 한다.
+    assert "질문 1" not in final_log
+
+
+def test_generate_uses_the_model_specific_session_timeout(monkeypatch):
+    """gpt-oss-120b는 20초가 아니라 client.session_timeout_for()가 정한 값을 써야 한다."""
+    calls = []
+
+    def _call(stage_id, values, *, model_code, timeout_s=None, max_attempts=None, extra_user=""):
+        calls.append(timeout_s)
+        return stages.StageResult(
+            data={"openingRemark": "여는 말", "items": _matching_items()},
+            usages=[{"model_code": model_code, "input_token_count": 1, "output_token_count": 1,
+                     "cached_token_count": 0, "status": "SUCCEEDED", "failure_code": None,
+                     "latency_ms": 1, "occurred_at": "2026-08-07T09:00:00Z"}],
+        )
+
+    monkeypatch.setattr(get_settings(), "engine_mode", "real")
+    monkeypatch.setattr(engine.stages, "call", _call)
+
+    engine.generate(InterviewBriefRequest.model_validate(_request()))
+
+    from app.llm import client as llm_client
+    expected = llm_client.session_timeout_for(get_settings().model_code_interview_brief)
+    assert calls == [expected]
+
+
 # ── D-ib4 (백엔드 감사 반영: 미사용 필드 배선 + 신규 interviewSourceId 슬롯) ──────
 
 def test_risk_reason_stage_link_and_not_applicable_code_reach_prompt(monkeypatch):

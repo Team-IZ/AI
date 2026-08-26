@@ -126,6 +126,32 @@ SESSION_TIMEOUT_S = 20.0
 # ⚠️ 타임아웃과 함께 줄이지 마라. 예산(시간 × 횟수)이 실패율을 정한다.
 SESSION_MAX_ATTEMPTS = 6
 
+# D-ib9(2026-08-26): interview-brief 실서비스 재현(codex-live-ib48-20260826t0340z)
+# 에서 openai/gpt-oss-120b가 SESSION_TIMEOUT_S(20초)를 5회 중 4회 정확히 채우고
+# TIMEOUT났다(20035/20034/20033/20028ms) -- 이건 재현 로그의 직접 측정값이라
+# 확실하다. 원인은 아직 모른다: 같은 모델의 Aug-7 벤치마크(deepseek_v4_flash_
+# replacement, interview_brief 역할)는 3/3이 7~11초에 깨끗이 성공했다(raw 기록상
+# out 토큰도 매니페스트 예산 안쪽, finish_reason=length 없음) -- "추론형이라
+# 원래 느리다"는 예산 부족 가설은 이 벤치마크와 모순돼 REASONING_TOKEN_MULTIPLIER에는
+# 반영하지 않았다. 벤치마크가 쓴 요청은 최소 픽스처(위험사유 1건·QNA 1건)라,
+# 재현이 쓴 "운영 형식" 프롬프트가 훨씬 크고 무거워서(interview_brief는 세 역할
+# 중 가장 큰 프롬프트) 그 차이가 지연을 설명할 가능성이 유력하지만 아직 직접
+# 확인 못 했다.
+#
+# 45초는 관측된 20초 상한을 넘겼을 때 실제로 얼마나 필요한지 상한을 모르는 채로
+# 잡은 잠정치다(성공한 유일한 호출도 17.4초였지만 그건 내용이 부실한 실패 사례라
+# 기준으로 못 쓴다) -- 전용 벤치마크로 재검증 필요. 원인 규명 전이라도 타임아웃
+# 상향 자체는 안전한 조치다(실패를 더 빨리 성공시키거나, 못 하더라도 최소
+# SESSION_TIMEOUT_S보다 오래 기다렸다는 사실만 남긴다).
+SESSION_TIMEOUT_OVERRIDE_S: dict[str, float] = {
+    "openai/gpt-oss-120b": 45.0,
+}
+
+
+def session_timeout_for(model_code: str) -> float:
+    """세션 경로 타임아웃. 모델별 재정의가 있으면 그 값, 없으면 SESSION_TIMEOUT_S."""
+    return SESSION_TIMEOUT_OVERRIDE_S.get(model_code, SESSION_TIMEOUT_S)
+
 # reasoning_effort는 모델마다 지원 여부가 다르다. Mistral에 "low"를 보내면 무시가 아니라
 # 하드 HTTP 400이다(팀원 실측). 그래서 전역 파라미터가 아니라 모델별 맵이어야 한다.
 #
